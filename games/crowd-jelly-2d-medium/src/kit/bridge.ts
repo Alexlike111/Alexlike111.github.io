@@ -51,7 +51,8 @@ async function detectAdBlock(): Promise<boolean> {
 const ready: Promise<boolean> = (async () => {
   try {
     if (!b()) return false;
-    await b().initialize();
+    // off-platform (file://, plain local server) Bridge may never answer: give up after 2 s and run in mock mode
+    await Promise.race([b().initialize(), new Promise((_, no) => setTimeout(() => no(new Error('bridge init timeout')), 2000))]);
     try {
       adBlocked = await detectAdBlock();
     } catch {
