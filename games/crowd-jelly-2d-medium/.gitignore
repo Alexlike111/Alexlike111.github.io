@@ -1,0 +1,4 @@
+node_modules
+dist
+qa/*.png
+!qa/thumb-*.png

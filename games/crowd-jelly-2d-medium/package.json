@@ -1,0 +1,28 @@
+{
+  "name": "crowd-jelly-2d-medium",
+  "version": "1.0.0",
+  "description": "Ragdoll Lab game kit: TypeScript + Vite + Canvas 2D",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "check": "node scripts/check.mjs",
+    "check:fast": "node scripts/check.mjs --no-build",
+    "check:template": "node scripts/check.mjs --allow-placeholder",
+    "zip": "node scripts/zip.mjs",
+    "covers": "node scripts/covers.mjs",
+    "release": "npm run check && npm run zip && npm run covers"
+  },
+  "dependencies": {
+    "@playgama/bridge": "^2.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "fflate": "^0.8.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}

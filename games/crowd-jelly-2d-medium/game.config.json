@@ -1,0 +1,10 @@
+{
+  "slug": "crowd-jelly-2d-medium",
+  "title": "Crowd Jelly 2D",
+  "tagline": "Pick a lane, grow the jelly crowd to a million",
+  "saveKey": "crowd_jelly_2d_medium_save",
+  "accent": "#ff5fa2",
+  "accentDark": "#c92d74",
+  "bgFrom": "#7be0ff",
+  "bgTo": "#c39bff"
+}
