@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Тест новых игр</title>
+<style>
+  :root { --bg: #f6f3ee; --card: #fff; --ink: #1d1a24; --mute: #6b6577; --line: #e4dfd6; --acc: #ff6a3d; --sel: #1d1a24; --selink: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #16141b; --card: #221f29; --ink: #f1eef6; --mute: #a39dae; --line: #34303d; --acc: #ff7a50; --sel: #f1eef6; --selink: #16141b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 120px; }
+  h1 { font-size: 22px; margin: 4px 0 4px; }
+  .sub { color: var(--mute); font-size: 14px; margin: 0 0 16px; }
+  .g { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 0 0 12px; }
+  .top { display: flex; align-items: center; gap: 10px; }
+  .top h2 { font-size: 18px; margin: 0; flex: 1; }
+  .play { background: var(--acc); color: #fff; text-decoration: none; font-weight: 700; padding: 10px 16px; border-radius: 10px; white-space: nowrap; }
+  .how { color: var(--mute); font-size: 14px; margin: 8px 0 10px; }
+  .sc { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+  .sc button { border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 8px; padding: 8px 0; font: 600 14px system-ui; }
+  .sc button.on { background: var(--sel); color: var(--selink); border-color: var(--sel); }
+  textarea { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: 15px system-ui; background: transparent; color: var(--ink); min-height: 40px; resize: vertical; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .bar div { max-width: 560px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+  .bar button { flex: 1; background: var(--sel); color: var(--selink); border: 0; border-radius: 10px; padding: 12px; font: 700 16px system-ui; }
+  .bar span { font-size: 13px; color: var(--mute); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Новые игры: тест с телефона</h1>
+  <p class="sub">Нажми «Играть», вернись кнопкой «Назад». Поставь оценку 1–10 и пару слов, потом «Скопировать оценки» внизу и вставь в чат. Реклама здесь ненастоящая (заглушка).</p>
+  <div id="list"></div>
+</main>
+<div class="bar"><div><button id="copy">Скопировать оценки</button><span id="st"></span></div></div>
+<script>
+const G = [
+  ['hoops', 'Bounce Hoops', 'Баскетбол. Потяни пальцем назад и отпусти: мяч летит в кольцо. 45 секунд, чистый бросок даёт бонус. Удобнее держать телефон горизонтально.'],
+  ['kick', 'Curve Kick', 'Футбол, штрафные. Коснись ворот, чтобы прицелиться, держи для силы (зелёная зона), отпусти. Стрелки внизу закручивают мяч вокруг стенки.'],
+  ['shop', 'Corner Shop Rush', 'Свой магазинчик. Тапай покупателей у кассы, чтобы взять оплату, и пустые полки, чтобы пополнить. На выручку покупай улучшения.'],
+  ['wash', 'Car Wash Rush', 'Автомойка. Води пальцем по грязным пятнам: губка для коричневой грязи, шланг для зелёной слизи. Успей до конца терпения клиента.'],
+  ['popit', 'Pop-It Pocket', 'Антистресс поп-ит. Тапай или проводи пальцем по пузырькам. Есть 4 режима и коллекция игрушек.'],
+  ['burglar', 'Sneaky Burglar', 'Стелс. Веди вора пальцем, бери сумку и уходи в окно. Не попадайся в свет фонарей охраны и камер.']
+];
+let S = {};
+try { S = JSON.parse(localStorage.getItem('pt-scores') || '{}'); } catch (e) {}
+const save = () => { try { localStorage.setItem('pt-scores', JSON.stringify(S)); } catch (e) {} };
+const list = document.getElementById('list');
+for (const [id, name, how] of G) {
+  const s = S[id] || (S[id] = { r: 0, c: '' });
+  const el = document.createElement('section');
+  el.className = 'g';
+  el.innerHTML = `<div class="top"><h2>${name}</h2><a class="play" href="./${id}/">Играть</a></div>
+    <p class="how">${how}</p><div class="sc"></div>
+    <textarea placeholder="Что понравилось, что мешает"></textarea>`;
+  const sc = el.querySelector('.sc');
+  for (let i = 1; i <= 10; i++) {
+    const b = document.createElement('button');
+    b.textContent = i; if (s.r === i) b.className = 'on';
+    b.onclick = () => { s.r = s.r === i ? 0 : i; sc.querySelectorAll('button').forEach((x, k) => x.className = s.r === k + 1 ? 'on' : ''); save(); };
+    sc.appendChild(b);
+  }
+  const ta = el.querySelector('textarea');
+  ta.value = s.c; ta.oninput = () => { s.c = ta.value; save(); };
+  list.appendChild(el);
+}
+document.getElementById('copy').onclick = async () => {
+  const lines = G.filter(([id]) => S[id].r || S[id].c.trim()).map(([id, name]) => `${name}: ${S[id].r || '?'}/10${S[id].c.trim() ? ' — ' + S[id].c.trim() : ''}`);
+  const txt = lines.length ? 'Оценки новых игр:\n' + lines.join('\n') : '';
+  const st = document.getElementById('st');
+  if (!txt) { st.textContent = 'Пока нет оценок'; return; }
+  try { await navigator.clipboard.writeText(txt); st.textContent = 'Скопировано'; }
+  catch (e) { prompt('Скопируй текст:', txt); }
+};
+</script>
+</body>
+</html>
