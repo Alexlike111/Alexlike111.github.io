@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="robots" content="noindex, nofollow" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Тест новых игр</title>
+<title>Тест игр</title>
 <style>
   :root { --bg: #f6f3ee; --card: #fff; --ink: #1d1a24; --mute: #6b6577; --line: #e4dfd6; --acc: #ff6a3d; --sel: #1d1a24; --selink: #fff; }
   @media (prefers-color-scheme: dark) { :root { --bg: #16141b; --card: #221f29; --ink: #f1eef6; --mute: #a39dae; --line: #34303d; --acc: #ff7a50; --sel: #f1eef6; --selink: #16141b; } }
@@ -17,6 +17,10 @@
   .top { display: flex; align-items: center; gap: 10px; }
   .top h2 { font-size: 18px; margin: 0; flex: 1; }
   .play { background: var(--acc); color: #fff; text-decoration: none; font-weight: 700; padding: 10px 16px; border-radius: 10px; white-space: nowrap; }
+  h3 { font-size: 15px; color: var(--mute); text-transform: uppercase; letter-spacing: .04em; margin: 22px 0 10px; }
+  .top h2 small { display: block; font-size: 13px; font-weight: 500; color: var(--mute); margin-top: 2px; }
+  .min { display: block; margin-top: 8px; font-size: 14px; color: var(--mute); }
+  .min input { width: 64px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; font: 15px system-ui; background: transparent; color: var(--ink); margin: 0 4px; }
   .how { color: var(--mute); font-size: 14px; margin: 8px 0 10px; }
   .sc { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
   .sc button { border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 8px; padding: 8px 0; font: 600 14px system-ui; }
@@ -30,30 +34,53 @@
 </head>
 <body>
 <main>
-  <h1>Новые игры: тест с телефона</h1>
-  <p class="sub">Нажми «Играть», вернись кнопкой «Назад». Поставь оценку 1–10 и пару слов, потом «Скопировать оценки» внизу и вставь в чат. Реклама здесь ненастоящая (заглушка).</p>
+  <h1>Наши игры: тест с телефона</h1>
+  <p class="sub">Нажми «Играть», вернись кнопкой «Назад». Поставь оценку 1–10, сколько минут играл и пару слов, потом «Скопировать оценки» внизу и вставь в чат. В новых играх реклама ненастоящая (заглушка).</p>
   <div id="list"></div>
 </main>
 <div class="bar"><div><button id="copy">Скопировать оценки</button><span id="st"></span></div></div>
 <script>
+const P = 'https://playgama.ai/play/';
 const G = [
-  ['hoops', 'Bounce Hoops', 'Баскетбол. Потяни пальцем назад и отпусти: мяч летит в кольцо. 45 секунд, чистый бросок даёт бонус. Удобнее держать телефон горизонтально.'],
-  ['kick', 'Curve Kick', 'Футбол, штрафные. Коснись ворот, чтобы прицелиться, держи для силы (зелёная зона), отпусти. Стрелки внизу закручивают мяч вокруг стенки.'],
-  ['shop', 'Corner Shop Rush', 'Свой магазинчик. Тапай покупателей у кассы, чтобы взять оплату, и пустые полки, чтобы пополнить. На выручку покупай улучшения.'],
-  ['wash', 'Car Wash Rush', 'Автомойка. Води пальцем по грязным пятнам: губка для коричневой грязи, шланг для зелёной слизи. Успей до конца терпения клиента.'],
-  ['popit', 'Pop-It Pocket', 'Антистресс поп-ит. Тапай или проводи пальцем по пузырькам. Есть 4 режима и коллекция игрушек.'],
-  ['burglar', 'Sneaky Burglar', 'Стелс. Веди вора пальцем, бери сумку и уходи в окно. Не попадайся в свет фонарей охраны и камер.']
+  // [id, name, genre, how, url(optional), new]
+  ['hoops', 'Bounce Hoops', 'Спорт', 'Баскетбол. Потяни пальцем назад и отпусти: мяч летит в кольцо. 45 секунд. Удобнее держать телефон горизонтально.', '', 1],
+  ['kick', 'Curve Kick', 'Спорт', 'Футбол, штрафные. Коснись ворот, чтобы прицелиться, держи для силы (зелёная зона), отпусти. Стрелки внизу закручивают мяч.', '', 1],
+  ['shop', 'Corner Shop Rush', 'Тайкун', 'Свой магазинчик. Тапай покупателей у кассы и пустые полки. На выручку покупай улучшения.', '', 1],
+  ['wash', 'Car Wash Rush', 'DIY и антистресс', 'Автомойка. Води пальцем по пятнам: губка для грязи, шланг для слизи. Успей, пока клиент ждёт.', '', 1],
+  ['popit', 'Pop-It Pocket', 'DIY и антистресс', 'Поп-ит. Тапай или проводи пальцем по пузырькам. 4 режима и коллекция игрушек.', '', 1],
+  ['burglar', 'Sneaky Burglar', 'Стелс', 'Веди вора пальцем, бери сумку и уходи в окно. Не попадайся в свет фонарей и камер.', '', 1],
+  ['squishy', 'Squishy Heads', 'Мерж', 'Бросай головы сверху, одинаковые сливаются в большие. Не переполни банку. (Уже в каталоге.)', ''],
+  ['juicy', 'Juicy Drop', 'Мерж', 'Бросай фрукты, одинаковые сливаются в больший фрукт.', P + 'oh5wynoihjhghd'],
+  ['animal', 'Animal Drop', 'Мерж', 'Бросай зверей, одинаковые сливаются: от мышки до слона.', P + 'n6fpky4j5n4ito'],
+  ['gem', '2048 Gem Forge', 'Мерж', 'Свайпай, одинаковые камни соединяются в 2048.', P + 'ixnrno5zpv'],
+  ['office', 'Office Smash', 'Физика и разрушение', 'Лупи босса-манекена всем, что под рукой, копи на новое оружие.', P + 'c5tqlwvkwv'],
+  ['stunt', 'Stuntman Crash', 'Физика и разрушение', 'Запускай каскадёра и набирай очки за кувырки и удары.', P + 'rgvrmwyrfh'],
+  ['wreck', 'Wreck City', 'Физика и разрушение', 'Разрушай здания и смотри, как они складываются.', P + '63etqufxhz'],
+  ['crush', 'Crush City 3D', 'Физика и разрушение', 'Сноси 3D-город физикой.', P + 'w4rzsin334exun'],
+  ['jelly', 'Crowd Jelly Run', 'Раннер', 'Веди толпу через ворота-множители, побеждай в конце.', P + 'bggfuw7j3jhtds'],
+  ['snow', 'Snowball Rush', 'Раннер', 'Катай снежный ком, он растёт, сноси препятствия.', P + 'xkmfmoo5r7g7qf'],
+  ['hole', 'Black Hole', 'Раннер', 'Води дыру пальцем, глотай всё вокруг и расти.', P + 'a6kla2zp7yqlre'],
+  ['webhero', 'Web Hero', 'Экшен', 'Держи палец, чтобы зацепиться паутиной, отпусти в нужный момент. L/R внизу. (На модерации.)', ''],
+  ['doodle', 'Doodle Guard', 'Пазл', 'Нарисуй линию пальцем, чтобы защитить героя.', P + '6ekzvfb4wv'],
+  ['chef', 'Messy Chef', 'Готовка', 'Собирай блюдо по заказу и подавай.', P + 'lcskq7v7od'],
+  ['wobbly', 'Wobbly Kitchen', 'Готовка', 'Складывай еду в шаткую башню и подавай.', P + 'gpl4eq4emw'],
+  ['glow', 'Glow Up Salon', 'Салон и уют', 'Преображай клиентов в салоне красоты.', P + 'ttptvj22w5'],
+  ['cozy', 'Cozy Room', 'Салон и уют', 'Убирай и украшай комнату.', P + 'bxu3jxbtefu2k4']
 ];
 let S = {};
 try { S = JSON.parse(localStorage.getItem('pt-scores') || '{}'); } catch (e) {}
 const save = () => { try { localStorage.setItem('pt-scores', JSON.stringify(S)); } catch (e) {} };
 const list = document.getElementById('list');
-for (const [id, name, how] of G) {
-  const s = S[id] || (S[id] = { r: 0, c: '' });
+let lastSec = '';
+for (const [id, name, genre, how, url, isNew] of G) {
+  const sec = isNew ? 'Новые (6)' : 'Остальные игры';
+  if (sec !== lastSec) { const h = document.createElement('h3'); h.textContent = sec; list.appendChild(h); lastSec = sec; }
+  const s = S[id] || (S[id] = { r: 0, c: '', m: '' });
   const el = document.createElement('section');
   el.className = 'g';
-  el.innerHTML = `<div class="top"><h2>${name}</h2><a class="play" href="./${id}/">Играть</a></div>
+  el.innerHTML = `<div class="top"><h2>${name}<small>${genre}</small></h2><a class="play" href="${url || './' + id + '/'}">Играть</a></div>
     <p class="how">${how}</p><div class="sc"></div>
+    <label class="min">Играл <input type="number" inputmode="numeric" min="0" max="999"> мин</label>
     <textarea placeholder="Что понравилось, что мешает"></textarea>`;
   const sc = el.querySelector('.sc');
   for (let i = 1; i <= 10; i++) {
@@ -64,11 +91,16 @@ for (const [id, name, how] of G) {
   }
   const ta = el.querySelector('textarea');
   ta.value = s.c; ta.oninput = () => { s.c = ta.value; save(); };
+  const mi = el.querySelector('input'); mi.value = s.m || ''; mi.oninput = () => { s.m = mi.value; save(); };
   list.appendChild(el);
 }
 document.getElementById('copy').onclick = async () => {
-  const lines = G.filter(([id]) => S[id].r || S[id].c.trim()).map(([id, name]) => `${name}: ${S[id].r || '?'}/10${S[id].c.trim() ? ' — ' + S[id].c.trim() : ''}`);
-  const txt = lines.length ? 'Оценки новых игр:\n' + lines.join('\n') : '';
+  const done = G.filter(([id]) => S[id] && (S[id].r || S[id].c.trim() || S[id].m));
+  const lines = done.map(([id, name, genre]) => { const s = S[id]; return `${name} [${genre}]: ${s.r || '?'}/10${s.m ? ', ' + s.m + ' мин' : ''}${s.c.trim() ? ' — ' + s.c.trim() : ''}`; });
+  const byG = {};
+  for (const [id, , genre] of done) if (S[id].r) (byG[genre] = byG[genre] || []).push(S[id].r);
+  const sum = Object.entries(byG).map(([g, a]) => [g, a.reduce((x, y) => x + y, 0) / a.length]).sort((a, b) => b[1] - a[1]).map(([g, v]) => `${g}: ${v.toFixed(1)}`);
+  const txt = lines.length ? 'Оценки игр:\n' + lines.join('\n') + (sum.length ? '\n\nПо жанрам:\n' + sum.join('\n') : '') : '';
   const st = document.getElementById('st');
   if (!txt) { st.textContent = 'Пока нет оценок'; return; }
   try { await navigator.clipboard.writeText(txt); st.textContent = 'Скопировано'; }
