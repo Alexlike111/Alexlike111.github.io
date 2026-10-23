@@ -1,0 +1,21 @@
+{
+  "advertisement": {
+    "minimumDelayBetweenInterstitial": 60,
+    "initialInterstitialDelay": 0
+  },
+  "leaderboards": [
+    {
+      "id": "top_score",
+      "isMain": true
+    }
+  ],
+  "saas": {
+    "publicToken": "cmv8f2hwg10olnh0h7f23rvsg",
+    "leaderboards": {
+      "platforms": [
+        "playgama",
+        "qa_tool"
+      ]
+    }
+  }
+}
