@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script src="./playgama-bridge.js"></script>
+
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <link rel="icon" href="data:," />
+    <title>Thirsty Cup</title>
+    <!-- Playgama Bridge is injected above by the Vite plugin (bundled locally).
+         On YouTube Playables the YouTube SDK must load before any game code;
+         elsewhere it is skipped so the build makes no external requests. -->
+    <script>
+      if (location.hostname.indexOf('usercontent.goog') !== -1) {
+        document.write('<script src="https://www.youtube.com/game_api/v1"><\/script>');
+      }
+    </script>
+    <style>
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2233; overscroll-behavior: none; }
+      body { font-family: "GK Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2a1f3d; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+      /* very wide screens: field at most 2:1, margins on the sides */
+      #app { position: absolute; inset: 0; margin: 0 auto; max-width: 200vh; overflow: hidden; }
+      #c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+      #ui > * { pointer-events: auto; }
+      #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(#fff3dd, #ffd6b0); z-index: 90; transition: opacity .3s; }
+      #loading i { width: 140px; height: 10px; border-radius: 5px; background: #3a8df033; overflow: hidden; position: relative; }
+      #loading i::after { content: ""; position: absolute; inset: 0 60% 0 0; background: #3a8df0; border-radius: 5px; animation: load 1s ease-in-out infinite; }
+      @keyframes load { 0% { transform: translateX(-100%); } 100% { transform: translateX(260%); } }
+      #inkBar.shake { animation: wfshake .4s; }
+      @media (max-width: 480px) { #hud .gk-pill { display: none; } #hudStars > span { width: 18px !important; height: 18px !important; } #inkTrack { width: 64px !important; } }
+      .wf-banner { position: absolute; left: 50%; top: 24%; transform: translate(-50%, -50%) scale(.6); opacity: 0; font: 900 clamp(34px, 7vh, 64px) var(--gk-font); color: #fff; -webkit-text-stroke: 7px var(--gk-ink); paint-order: stroke fill; text-shadow: 0 5px 0 var(--gk-ink); pointer-events: none; transition: transform .35s cubic-bezier(.3,1.8,.5,1), opacity .3s; white-space: nowrap; }
+      @media (max-aspect-ratio: 5/6) { #app { --wf-hint-w: 80%; } }
+      @media (min-aspect-ratio: 13/10) { #menu { right: 42% !important; } }
+      .wf-star .gk-ic, #hudStars .gk-ic { width: 100%; height: 100%; }
+      @keyframes wfshake { 25% { transform: translateX(-6px); } 50% { transform: translateX(6px); } 75% { transform: translateX(-3px); } }
+      .mock-ad { position: fixed; inset: 0; display: grid; place-items: center; background: #000c; color: #fff; font: 900 28px system-ui; z-index: 999; }
+    </style>
+    <script defer src="./assets/index-CMPtY_Ad.js"></script>
+    <link rel="stylesheet" href="./assets/style-CDK6rQqz.css">
+  </head>
+  <body class="gk">
+    <div id="app">
+      <canvas id="c"></canvas>
+      <div id="ui"></div>
+      <div id="loading"><i></i></div>
+    </div>
+  </body>
+</html>
