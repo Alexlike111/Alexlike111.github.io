@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "[ -f /mnt/project-files/tools/gate/session-rules.sh ] && sh /mnt/project-files/tools/gate/session-rules.sh || true" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "mcp__.*", "hooks": [ { "type": "command", "command": "[ -f /mnt/project-files/tools/gate/hook-guard.mjs ] && node /mnt/project-files/tools/gate/hook-guard.mjs || true", "timeout": 20 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "mcp__playgama__start_archive_upload", "hooks": [ { "type": "command", "command": "[ -f /mnt/project-files/tools/gate/hook-guard.mjs ] && node /mnt/project-files/tools/gate/hook-guard.mjs || true", "timeout": 20 } ] }
+    ]
+  }
+}
