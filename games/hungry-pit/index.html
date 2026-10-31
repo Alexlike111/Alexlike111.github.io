@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Hungry Pit</title>
+<style>
+:root{--ink:#1d1630;--accent:#ff5fa2;--accent-d:#c92d74;--blue:#5aa9ff;--blue-d:#2e6fc2;--font:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#0c0a14}}
+:root[data-theme="dark"]{--ink:#0c0a14}
+html,body{margin:0;height:100%;background:#2a1f3d;overflow:hidden;font-family:var(--font);touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+.chip{background:rgba(20,12,35,.62);color:#fff;border-radius:12px;padding:6px 10px;font:800 15px/1.2 var(--font);text-shadow:0 2px 0 var(--ink);white-space:nowrap;width:max-content}
+#hud{position:fixed;left:8px;top:8px;display:none;flex-direction:column;gap:6px;pointer-events:none}
+#hud.on{display:flex}
+#board{position:fixed;right:8px;top:8px;background:rgba(20,12,35,.55);color:#fff;border-radius:12px;padding:6px 10px;font:700 13px/1.5 var(--font);min-width:120px;pointer-events:none;display:none}
+#board.on{display:block}
+#board .me{color:#ffd166}
+#pause{position:fixed;left:8px;bottom:8px;width:52px;height:52px;border-radius:14px;border:0;background:rgba(20,12,35,.62);color:#fff;font:900 20px var(--font);cursor:pointer;display:none}
+#pause.on{display:block}
+#dead{position:fixed;left:50%;top:22%;transform:translateX(-50%);color:#fff;font:900 22px var(--font);text-shadow:0 3px 0 var(--ink);pointer-events:none;display:none;text-align:center}
+#dead.on{display:block}
+.ov{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,12,35,.6);color:#fff;text-align:center;padding:16px;box-sizing:border-box}
+.ov.on{display:flex}
+h1{margin:0;font-size:clamp(38px,8vw,68px);font-weight:900;letter-spacing:1px;text-shadow:0 5px 0 var(--ink)}
+h2{margin:0;font-size:clamp(26px,5vw,40px);font-weight:900;text-shadow:0 4px 0 var(--ink)}
+p{margin:0;font-weight:700;font-size:clamp(14px,2.4vw,18px);max-width:520px;line-height:1.35}
+.big{font:800 18px var(--font);border:0;border-radius:14px;padding:12px 26px;min-height:48px;background:var(--accent);color:#fff;box-shadow:0 5px 0 var(--accent-d);cursor:pointer;margin-top:4px}
+.big.b{background:var(--blue);box-shadow:0 5px 0 var(--blue-d)}
+.row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.stat{font:800 18px var(--font)}
+.sub{font-size:14px;opacity:.85}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div class="chip" id="tm">60</div><div class="chip" id="pl">1/6</div></div>
+<div id="board"></div>
+<button id="pause" aria-label="Pause">II</button>
+<div id="dead"></div>
+<div class="ov on" id="menu">
+  <h1>Hungry Pit</h1>
+  <p id="tag"></p>
+  <button class="big" id="play">Play</button>
+  <p class="sub" id="how"></p>
+  <p class="stat" id="menuBest"></p>
+</div>
+<div class="ov" id="pausePanel">
+  <h2 id="pTitle">Paused</h2>
+  <div class="row"><button class="big" id="resume">Resume</button><button class="big b" id="toMenu1">Menu</button></div>
+</div>
+<div class="ov" id="result">
+  <h2 id="rTitle">Round over</h2>
+  <p class="stat" id="rPlace"></p>
+  <p class="stat" id="rSize"></p>
+  <p class="stat" id="rScore"></p>
+  <p class="stat" id="rBest"></p>
+  <div class="row"><button class="big" id="again">Play again</button><button class="big b" id="toMenu2">Menu</button></div>
+</div>
+
+<script>
+// ---------- i18n (en default, ru if the browser is Russian) ----------
+const LANG = /^ru/i.test(navigator.language || '') ? 'ru' : 'en';
+const T = {
+  en: { tag: 'Swallow everything smaller than your pit. Undermine the towers, beat the other pits. 60 seconds.', how: 'Move with the mouse or finger. Arrows / WASD also work. P or Esc pauses, M mutes.', play: 'Play', resume: 'Resume', menu: 'Menu', paused: 'Paused', over: 'Round over', again: 'Play again', place: 'Place', size: 'Size', score: 'Score', best: 'Best', dead: 'Swallowed! Back in a moment…', kill: 'SWALLOWED!', tower: 'TOWER DOWN!' },
+  ru: { tag: 'Глотай всё, что меньше твоей ямы. Подрывай башни и обгоняй остальные ямы. 60 секунд.', how: 'Двигай мышью или пальцем. Стрелки и WASD тоже работают. P или Esc: пауза, M: звук.', play: 'Играть', resume: 'Продолжить', menu: 'Меню', paused: 'Пауза', over: 'Раунд окончен', again: 'Ещё раз', place: 'Место', size: 'Размер', score: 'Счёт', best: 'Лучший счёт', dead: 'Тебя съели! Возврат через секунду…', kill: 'СЪЕДЕНО!', tower: 'БАШНЯ РУХНУЛА!' },
+};
+const L = T[LANG];
+const $ = (id) => document.getElementById(id);
+$('tag').textContent = L.tag; $('how').textContent = L.how; $('play').textContent = L.play;
+$('resume').textContent = L.resume; $('toMenu1').textContent = L.menu; $('toMenu2').textContent = L.menu;
+$('pTitle').textContent = L.paused; $('rTitle').textContent = L.over; $('again').textContent = L.again;
+$('pause').textContent = 'II';
+
+// ---------- save (per-viewer convenience only) ----------
+const SAVE_KEY = 'hungry_pit_v1';
+let save = { best: 0, muted: false };
+try { save = Object.assign(save, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) {}
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} }
+
+// ---------- canvas ----------
+const cv = $('c'), ctx = cv.getContext('2d');
+let W = 1, H = 1, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+// ---------- constants ----------
+const WORLD = { w: 1800, h: 1200 };
+const ROUND = 60, START_R = 20, BOTS = 5, TOWERS = 5, TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const KINDS = [
+  { name: 'coin', r: 7, v: 1, n: 150, cols: ['#ffd166', '#fee440'] },
+  { name: 'box', r: 12, v: 2, n: 70, cols: ['#06d6a0', '#118ab2', '#ef476f'] },
+  { name: 'ball', r: 19, v: 4, n: 26, cols: ['#9b5de5', '#f78c6b', '#00bbf9'] },
+];
+const TOWER_COLS = ['#e9c46a', '#8ecae6', '#f4a261'];
+const BOT_NAMES = ['Rex', 'Mia', 'Tom', 'Kai', 'Ivy'];
+const BOT_COLS = ['#ff7b9c', '#7bdff2', '#b8f2e6', '#ffd6a5', '#cdb4db'];
+
+// ---------- sound (coded, no files) ----------
+let AC = null;
+function ac() {
+  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+  if (AC.state === 'suspended') AC.resume();
+  return AC;
+}
+function tone(f, d, type, vol, slideTo) {
+  if (save.muted) return;
+  const a = ac(); if (!a) return;
+  const o = a.createOscillator(), g = a.createGain(), t = a.currentTime;
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + 0.02);
+}
+let lastEatSfx = 0;
+function sfx(k) {
+  const now = performance.now();
+  if (k === 'eat') { if (now - lastEatSfx < 50) return; lastEatSfx = now; tone(520 + Math.random() * 200, 0.08, 'triangle', 0.08, 760); }
+  else if (k === 'big') tone(300, 0.25, 'sine', 0.2, 700);
+  else if (k === 'boom') tone(120, 0.5, 'sawtooth', 0.16, 40);
+  else if (k === 'chip') tone(180, 0.06, 'square', 0.05, 120);
+  else if (k === 'tick') tone(880, 0.05, 'sine', 0.06);
+  else if (k === 'win') { tone(523, 0.15, 'triangle', 0.12); setTimeout(() => tone(784, 0.25, 'triangle', 0.12), 120); }
+}
+
+// ---------- state ----------
+let S = { mode: 'menu', time: ROUND, eaten: 0, kills: 0, deaths: 0, tick: 0 };
+let holes = [], player = null, items = [], towers = [], parts = [], texts = [];
+let cam = { x: WORLD.w / 2, y: WORLD.h / 2, z: 1 };
+let aim = null, pressed = false, shake = 0, towerTimer = 0, last = 0;
+const down = new Set();
+
+function mkHole(isPlayer, r, color, name) {
+  return { p: isPlayer, r, vr: r, x: 0, y: 0, color, name, dead: false, respawn: 0, oldR: r, inv: 0, tx: 0, ty: 0, think: 0, eat: 0 };
+}
+function placeFar(h) {
+  let x = 0, y = 0;
+  for (let i = 0; i < 40; i++) {
+    x = rnd(120, WORLD.w - 120); y = rnd(120, WORLD.h - 120);
+    if (holes.every((o) => o === h || o.dead || Math.hypot(o.x - x, o.y - y) > 380)) break;
+  }
+  h.x = x; h.y = y; h.tx = x; h.ty = y;
+}
+function respawn(h) {
+  h.dead = false; h.inv = 2.5;
+  h.r = h.p ? Math.max(START_R, h.oldR * 0.45) : START_R * rnd(0.9, 1.1);
+  h.vr = h.r;
+  placeFar(h);
+}
+function mkItem(k) {
+  const r = k.r * rnd(0.85, 1.15);
+  return { k, r, v: k.v, c: pick(k.cols), x: rnd(30, WORLD.w - 30), y: rnd(30, WORLD.h - 30), a: rnd(0, TAU), w: rnd(-2, 2), vx: 0, vy: 0, s: null, st: 0 };
+}
+function mkTower() {
+  return { x: rnd(160, WORLD.w - 160), y: rnd(160, WORLD.h - 160), r: rnd(58, 72), hp: 5, ch: 0, c: pick(TOWER_COLS), cr: [rnd(0, TAU), rnd(0, TAU), rnd(0, TAU), rnd(0, TAU), rnd(0, TAU)], dead: false };
+}
+
+function newRound() {
+  player = mkHole(true, START_R, '#ffd166', 'You');
+  holes = [player];
+  for (let i = 0; i < BOTS; i++) holes.push(mkHole(false, START_R * rnd(0.9, 1.15), BOT_COLS[i], BOT_NAMES[i]));
+  holes.forEach(placeFar);
+  items = [];
+  for (const k of KINDS) for (let i = 0; i < k.n; i++) items.push(mkItem(k));
+  towers = []; for (let i = 0; i < TOWERS; i++) towers.push(mkTower());
+  parts = []; texts = []; towerTimer = 12; shake = 0;
+  cam.x = player.x; cam.y = player.y; cam.z = 1;
+  S = { mode: 'play', time: ROUND, eaten: 0, kills: 0, deaths: 0, tick: 0 };
+  $('pause').classList.add('on'); $('board').classList.add('on'); $('hud').classList.add('on');
+  showOv(null);
+}
+function menuScene() {
+  // idle backdrop: bots move, nobody can win or lose
+  player = mkHole(true, START_R, '#ffd166', 'You');
+  holes = [player];
+  for (let i = 0; i < BOTS; i++) holes.push(mkHole(false, START_R * rnd(0.9, 1.15), BOT_COLS[i], BOT_NAMES[i]));
+  holes.forEach(placeFar);
+  items = []; for (const k of KINDS) for (let i = 0; i < k.n; i++) items.push(mkItem(k));
+  towers = []; for (let i = 0; i < TOWERS; i++) towers.push(mkTower());
+  parts = []; texts = []; towerTimer = 12;
+  player.dead = true; player.respawn = 1e9; // parked, not playable
+  S = { mode: 'menu', time: ROUND, eaten: 0, kills: 0, deaths: 0, tick: 0 };
+  $('pause').classList.remove('on'); $('board').classList.remove('on'); $('hud').classList.remove('on');
+  $('menuBest').textContent = `${L.best}: ${save.best}`;
+  showOv('menu');
+}
+function showOv(id) {
+  for (const o of ['menu', 'pausePanel', 'result']) $(o).classList.toggle('on', o === id);
+}
+
+// ---------- movement ----------
+const speedOf = (r) => clamp(300 * Math.pow(START_R / r, 0.35), 110, 300);
+function moveHole(h, tx, ty, dt, k = 1) {
+  const dx = tx - h.x, dy = ty - h.y, d = Math.hypot(dx, dy);
+  if (d < 0.5) return;
+  const v = Math.min(speedOf(h.r) * k, d * 5);
+  h.x += dx / d * v * dt; h.y += dy / d * v * dt;
+}
+function toWorld(sx, sy) { return { x: cam.x + (sx - W / 2) / cam.z, y: cam.y + (sy - H / 2) / cam.z }; }
+const KEY = { arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0], arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1] };
+function keyVector() {
+  let x = 0, y = 0;
+  for (const k of down) { const v = KEY[k]; if (v) { x += v[0]; y += v[1]; } }
+  const l = Math.hypot(x, y) || 1;
+  return { x: x / l, y: y / l, any: x !== 0 || y !== 0 };
+}
+function botThink(b, dt) {
+  b.think -= dt;
+  if (b.think <= 0) {
+    b.think = rnd(0.4, 0.7);
+    let threat = null;
+    for (const o of holes) {
+      if (o === b || o.dead) continue;
+      if (o.r > b.r * 1.2 && Math.hypot(o.x - b.x, o.y - b.y) < b.r * 7) { threat = o; break; }
+    }
+    if (threat) { b.tx = b.x + (b.x - threat.x) * 2; b.ty = b.y + (b.y - threat.y) * 2; }
+    else if (!player.dead && player.r < b.r * 0.85 && dist(player, b) < 420) { b.tx = player.x; b.ty = player.y; }
+    else {
+      let best = null, bd = Infinity;
+      for (const it of items) {
+        if (it.s || it.r > b.r * 0.85) continue;
+        const d = Math.hypot(it.x - b.x, it.y - b.y);
+        if (d < bd) { bd = d; best = it; }
+      }
+      if (best && bd < 450) { b.tx = best.x; b.ty = best.y; }
+      else { b.tx = rnd(80, WORLD.w - 80); b.ty = rnd(80, WORLD.h - 80); }
+    }
+  }
+  moveHole(b, b.tx, b.ty, dt, 0.9);
+}
+
+// ---------- rules ----------
+function burst(x, y, c, n) {
+  for (let i = 0; i < n && parts.length < 260; i++) {
+    const a = rnd(0, TAU), sp = rnd(60, 220);
+    parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rnd(0.3, 0.6), max: 0.6, c });
+  }
+}
+function floatText(x, y, s, c) { texts.push({ x, y, s, c, t: 0.9 }); }
+function consume(h, it) {
+  h.r = Math.sqrt(h.r * h.r + it.r * it.r * 0.15); // slow growth: a run ends around 60–90 units
+  h.eat += it.v;
+  if (h.p) {
+    S.eaten += it.v;
+    if (it.v >= 2) { floatText(h.x, h.y - h.r, '+' + it.v, '#fff'); }
+    sfx('eat');
+  }
+  burst(it.x, it.y, it.c, it.v >= 4 ? 10 : 4);
+}
+function eatHole(a, b) {
+  a.r = Math.sqrt(a.r * a.r + b.r * b.r * 0.7);
+  if (a.p) { S.kills++; floatText(a.x, a.y - a.r, L.kill, '#ffd166'); sfx('big'); }
+  b.dead = true; b.oldR = b.r; b.respawn = b.p ? 2.5 : 3;
+  burst(b.x, b.y, b.color, 18);
+  if (b.p) { S.deaths++; shake = 0.6; sfx('boom'); }
+}
+function eatTower(h, t) {
+  h.r = Math.sqrt(h.r * h.r + t.r * t.r * 0.3);
+  t.dead = true; burst(t.x, t.y, t.c, 24);
+  if (h.p) { S.eaten += 10; floatText(h.x, h.y - h.r, '+10', '#ffd166'); sfx('big'); }
+  shake = 0.5;
+}
+function collapse(t) {
+  t.dead = true; shake = 0.7; sfx('boom');
+  burst(t.x, t.y, t.c, 30);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * TAU, k = KINDS[i % 2 ? 1 : 2];
+    const it = mkItem(k);
+    it.x = t.x + Math.cos(a) * t.r * 0.5; it.y = t.y + Math.sin(a) * t.r * 0.5;
+    it.vx = Math.cos(a) * rnd(160, 260); it.vy = Math.sin(a) * rnd(160, 260);
+    items.push(it);
+  }
+  if (items.length > 420) items.splice(0, items.length - 420);
+}
+function updateTowers(dt) {
+  for (const t of towers) {
+    if (t.dead) continue;
+    for (const h of holes) {
+      if (h.dead) continue;
+      const dx = h.x - t.x, dy = h.y - t.y, d = Math.hypot(dx, dy) || 0.001;
+      const nx = dx / d, ny = dy / d, minD = h.r + t.r;
+      if (d >= minD) continue;
+      if (h.r >= t.r * 1.05 && d < h.r - t.r * 0.3) { eatTower(h, t); break; }
+      h.x = t.x + nx * minD; h.y = t.y + ny * minD; // a tower is solid until the pit is big enough
+      t.ch += dt * (0.8 + h.r / 30);
+      if (t.ch >= 1) {
+        t.ch = 0; t.hp--; sfx('chip'); shake = Math.max(shake, 0.15);
+        burst(t.x + nx * t.r, t.y + ny * t.r, '#fff', 4);
+        for (let i = 0; i < 2; i++) {
+          const it = mkItem(KINDS[1]);
+          it.x = t.x + nx * t.r; it.y = t.y + ny * t.r;
+          it.vx = nx * rnd(120, 200) + rnd(-40, 40); it.vy = ny * rnd(120, 200) + rnd(-40, 40);
+          items.push(it);
+        }
+        if (t.hp <= 0) { collapse(t); if (h.p) { floatText(t.x, t.y, L.tower, '#ffd166'); } break; }
+      }
+    }
+  }
+  towers = towers.filter((t) => !t.dead);
+  towerTimer -= dt;
+  if (towers.length < TOWERS && towerTimer <= 0) { towers.push(mkTower()); towerTimer = 12; }
+}
+function updateItems(dt) {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.s) {
+      const h = it.s;
+      if (h.dead) { it.s = null; }
+      else {
+        const k = 1 - Math.exp(-dt * 14);
+        it.x += (h.x - it.x) * k; it.y += (h.y - it.y) * k;
+        it.r *= 1 - dt * 1.5;
+        if (Math.hypot(h.x - it.x, h.y - it.y) < h.r * 0.35) { consume(h, it); respawnItem(it); }
+        continue;
+      }
+    }
+    it.a += it.w * dt;
+    if (it.vx || it.vy) {
+      it.x += it.vx * dt; it.y += it.vy * dt;
+      const f = Math.exp(-dt * 3.5); it.vx *= f; it.vy *= f;
+      if (Math.abs(it.vx) + Math.abs(it.vy) < 4) { it.vx = 0; it.vy = 0; }
+    }
+    it.x = clamp(it.x, it.r, WORLD.w - it.r); it.y = clamp(it.y, it.r, WORLD.h - it.r);
+    for (const h of holes) {
+      if (h.dead) continue;
+      if (it.r >= h.r * 0.92) continue;
+      const d = Math.hypot(h.x - it.x, h.y - it.y);
+      if (d < h.r * 0.85) { it.s = h; it.st = 0; break; }
+      if (d < h.r * 1.9) { // gravity well at the rim
+        const g = (1 - d / (h.r * 1.9)) * 70 * dt;
+        it.x += (h.x - it.x) / d * g; it.y += (h.y - it.y) / d * g;
+      }
+    }
+  }
+}
+function respawnItem(it) {
+  const k = it.k, fresh = mkItem(k);
+  Object.assign(it, fresh);
+}
+
+// ---------- update ----------
+function step(dt) {
+  if (S.mode === 'play') {
+    S.time -= dt;
+    const sec = Math.ceil(S.time);
+    if (sec !== S.tick && sec <= 10 && sec > 0) { S.tick = sec; sfx('tick'); }
+    if (S.time <= 0) { S.time = 0; finish(); return; }
+  }
+  // player
+  if (player.dead) {
+    if (S.mode === 'play') { player.respawn -= dt; if (player.respawn <= 0) respawn(player); }
+  } else if (S.mode === 'play') {
+    const kv = keyVector();
+    if (kv.any) moveHole(player, player.x + kv.x * 500, player.y + kv.y * 500, dt);
+    else if (aim) { const p = toWorld(aim.x, aim.y); moveHole(player, p.x, p.y, dt); }
+  }
+  // bots
+  for (const b of holes) {
+    if (b.p) continue;
+    if (b.dead) { b.respawn -= dt; if (b.respawn <= 0) respawn(b); continue; }
+    if (S.mode === 'play' || S.mode === 'menu') botThink(b, dt);
+  }
+  for (const h of holes) if (h.inv > 0) h.inv -= dt;
+  // hole vs hole
+  for (const a of holes) {
+    if (a.dead) continue;
+    for (const b of holes) {
+      if (a === b || b.dead || b.inv > 0) continue;
+      if (a.r > b.r * 1.15 && dist(a, b) < a.r * 0.7) eatHole(a, b);
+    }
+  }
+  for (const h of holes) {
+    if (h.dead) continue;
+    h.x = clamp(h.x, h.r, WORLD.w - h.r); h.y = clamp(h.y, h.r, WORLD.h - h.r);
+    h.vr += (h.r - h.vr) * Math.min(1, dt * 8);
+  }
+  if (S.mode !== 'play' && S.mode !== 'menu') return;
+  updateItems(dt);
+  updateTowers(dt);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= Math.exp(-dt * 4); p.vy *= Math.exp(-dt * 4); p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = texts.length - 1; i >= 0; i--) { const t = texts[i]; t.y -= 40 * dt; t.t -= dt; if (t.t <= 0) texts.splice(i, 1); }
+  shake = Math.max(0, shake - dt * 2);
+  // camera
+  const tz = clamp(Math.min(W, H) / (2 * (player.vr * 3.2 + 170)), 0.22, 1.25);
+  cam.z += (tz - cam.z) * Math.min(1, dt * 3);
+  cam.x += (player.x - cam.x) * Math.min(1, dt * 6);
+  cam.y += (player.y - cam.y) * Math.min(1, dt * 6);
+}
+
+function finish() {
+  S.mode = 'result';
+  const rank = 1 + holes.filter((h) => h !== player && !h.dead && h.r > player.r).length;
+  const score = Math.round(S.eaten * 10);
+  save.best = Math.max(save.best || 0, score); persist();
+  $('rPlace').textContent = `${L.place}: ${rank}/${holes.filter((h) => !h.dead).length + (player.dead ? 1 : 0)}`;
+  $('rSize').textContent = `${L.size}: ${Math.round(player.r)}`;
+  $('rScore').textContent = `${L.score}: ${score}`;
+  $('rBest').textContent = `${L.best}: ${save.best}`;
+  $('pause').classList.remove('on'); $('board').classList.remove('on'); $('hud').classList.remove('on'); $('dead').classList.remove('on');
+  showOv('result');
+  sfx('win');
+  window.__last = { rank, score };
+}
+
+// ---------- draw ----------
+function drawFloor() {
+  const cs = 100;
+  for (let gx = 0; gx < WORLD.w; gx += cs) for (let gy = 0; gy < WORLD.h; gy += cs) {
+    ctx.fillStyle = ((gx + gy) / cs) % 2 ? '#ece0ff' : '#e4d4ff';
+    ctx.fillRect(gx, gy, cs, cs);
+  }
+  ctx.lineWidth = 14; ctx.strokeStyle = '#1d1630';
+  ctx.strokeRect(-7, -7, WORLD.w + 14, WORLD.h + 14);
+}
+function drawItem(it) {
+  const s = it.s ? clamp(Math.hypot(it.s.x - it.x, it.s.y - it.y) / it.s.vr + 0.2, 0.2, 1) : 1;
+  const r = it.r;
+  ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.a); ctx.scale(s, s);
+  ctx.fillStyle = 'rgba(29,22,48,.18)';
+  ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = it.c;
+  if (it.k.name === 'coin') {
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 2; ctx.stroke();
+  } else if (it.k.name === 'box') {
+    ctx.beginPath(); ctx.roundRect(-r, -r, r * 2, r * 2, r * 0.25); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(-r * 0.6, -r * 0.7, r * 0.8, r * 0.35);
+  } else {
+    const g = ctx.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.1, 0, 0, r);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.25, it.c); g.addColorStop(1, '#1d1630');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => clamp(Math.round(v * k), 0, 255);
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+function drawTower(t) {
+  ctx.save(); ctx.translate(t.x, t.y);
+  ctx.fillStyle = 'rgba(29,22,48,.25)'; ctx.beginPath(); ctx.ellipse(8, 12, t.r, t.r * 0.9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = shade(t.c, 0.6); ctx.beginPath(); ctx.arc(0, 4, t.r, 0, TAU); ctx.fill();
+  ctx.fillStyle = t.c; ctx.beginPath(); ctx.arc(0, -4, t.r * 0.92, 0, TAU); ctx.fill();
+  ctx.strokeStyle = '#1d1630'; ctx.lineWidth = 3;
+  for (let i = 0; i < 5 - t.hp; i++) {
+    const a = t.cr[i];
+    ctx.beginPath(); ctx.moveTo(Math.cos(a) * t.r * 0.2, -4 + Math.sin(a) * t.r * 0.2);
+    ctx.lineTo(Math.cos(a) * t.r * 0.8, -4 + Math.sin(a) * t.r * 0.8); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawHole(h, now) {
+  const r = h.vr;
+  ctx.save();
+  if (h.inv > 0 && Math.floor(now * 10) % 2) ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.arc(h.x, h.y, r * 1.06, 0, TAU); ctx.fillStyle = h.color; ctx.fill();
+  const g = ctx.createRadialGradient(h.x, h.y, r * 0.1, h.x, h.y, r);
+  g.addColorStop(0, '#05020b'); g.addColorStop(0.7, '#140b24'); g.addColorStop(1, '#2a1f3d');
+  ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, TAU); ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = Math.max(1.5, r * 0.04);
+  ctx.beginPath(); ctx.arc(h.x, h.y, r * 0.62, now * 1.5, now * 1.5 + Math.PI * 1.2); ctx.stroke();
+  if (!h.p) {
+    ctx.font = `800 ${Math.max(14, r * 0.45)}px ${getComputedStyle(document.body).fontFamily}`;
+    ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#1d1630';
+    ctx.strokeText(h.name, h.x, h.y - r * 1.2); ctx.fillStyle = '#fff'; ctx.fillText(h.name, h.x, h.y - r * 1.2);
+  }
+  ctx.restore();
+}
+function draw(now) {
+  ctx.fillStyle = '#2a1f3d'; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(W / 2 + (shake ? rnd(-1, 1) * shake * 12 : 0), H / 2 + (shake ? rnd(-1, 1) * shake * 12 : 0));
+  ctx.scale(cam.z, cam.z); ctx.translate(-cam.x, -cam.y);
+  drawFloor();
+  for (const it of items) drawItem(it);
+  for (const t of towers) if (!t.dead) drawTower(t);
+  for (const h of [...holes].sort((a, b) => a.vr - b.vr)) if (!h.dead) drawHole(h, now);
+  for (const p of parts) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.c;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'center'; ctx.font = `900 ${Math.max(16, 22 / cam.z)}px ${getComputedStyle(document.body).fontFamily}`;
+  for (const t of texts) {
+    ctx.globalAlpha = Math.min(1, t.t * 2); ctx.lineWidth = 5; ctx.strokeStyle = '#1d1630';
+    ctx.strokeText(t.s, t.x, t.y); ctx.fillStyle = t.c; ctx.fillText(t.s, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// ---------- HUD ----------
+let hudT = 0;
+function updateHud(dt) {
+  hudT -= dt; if (hudT > 0 && S.mode === 'play') return; hudT = 0.2;
+  if (S.mode !== 'play') return;
+  const alive = holes.filter((h) => !h.dead).sort((a, b) => b.r - a.r);
+  const place = alive.indexOf(player) + 1 || alive.length;
+  $('tm').textContent = `⏱ ${Math.ceil(S.time)}`;
+  $('pl').textContent = `${L.place} ${place}/${alive.length}`;
+  $('board').innerHTML = alive.slice(0, 6).map((h, i) => `<div class="${h.p ? 'me' : ''}">${i + 1}. ${h.name} · ${Math.round(h.r)}</div>`).join('');
+  $('dead').textContent = L.dead;
+  $('dead').classList.toggle('on', player.dead && S.mode === 'play');
+}
+
+// ---------- loop ----------
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+  last = now;
+  if (S.mode === 'play' || S.mode === 'menu') step(dt);
+  updateHud(dt);
+  draw(now / 1000);
+}
+
+// ---------- flow ----------
+function startGame() { ac(); newRound(); }
+function togglePause() {
+  if (S.mode === 'play') { S.mode = 'pause'; showOv('pausePanel'); }
+  else if (S.mode === 'pause') { S.mode = 'play'; showOv(null); }
+}
+function toMenu() { menuScene(); }
+
+$('play').addEventListener('click', startGame);
+$('again').addEventListener('click', startGame);
+$('resume').addEventListener('click', togglePause);
+$('toMenu1').addEventListener('click', toMenu);
+$('toMenu2').addEventListener('click', toMenu);
+$('pause').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('pause').addEventListener('click', togglePause);
+
+cv.addEventListener('pointerdown', (e) => { if (S.mode !== 'play') return; pressed = true; aim = { x: e.clientX, y: e.clientY }; });
+addEventListener('pointermove', (e) => {
+  if (S.mode !== 'play') return;
+  if (e.pointerType === 'touch' && !pressed) return;
+  aim = { x: e.clientX, y: e.clientY };
+});
+addEventListener('pointerup', (e) => { pressed = false; if (e.pointerType === 'touch') aim = null; });
+addEventListener('pointercancel', () => { pressed = false; aim = null; });
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (KEY[k]) { down.add(k); e.preventDefault(); }
+  if (k === 'p' || k === 'escape') { if (S.mode === 'play' || S.mode === 'pause') togglePause(); }
+  if (k === 'm') { save.muted = !save.muted; persist(); }
+  if ((k === ' ' || k === 'enter') && (S.mode === 'menu' || S.mode === 'result')) { e.preventDefault(); startGame(); }
+});
+addEventListener('keyup', (e) => down.delete(e.key.toLowerCase()));
+addEventListener('blur', () => { if (S.mode === 'play') togglePause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && S.mode === 'play') togglePause(); });
+
+// test hooks (only with ?qa=1; not used by the real game)
+if (new URLSearchParams(location.search).has('qa')) {
+  window.__qa = {
+    state: () => ({ mode: S.mode, time: S.time, eaten: S.eaten, r: player.r, bots: holes.filter((h) => !h.p).map((h) => Math.round(h.r)), dead: player.dead, kills: S.kills, deaths: S.deaths, towers: towers.length, items: items.length, holes: holes.length }),
+    run: (sec) => { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); },
+    setAim: (x, y) => { aim = { x, y }; },
+    world: () => ({ x: player.x, y: player.y, w: WORLD.w, h: WORLD.h }),
+    toScreen: (x, y) => ({ x: W / 2 + (x - cam.x) * cam.z, y: H / 2 + (y - cam.y) * cam.z }),
+    target: () => { let b = null, bd = Infinity; for (const it of items) { if (it.s || it.r > player.r * 0.85) continue; const d = Math.hypot(it.x - player.x, it.y - player.y); if (d < bd) { bd = d; b = it; } } return b ? { x: b.x, y: b.y } : null; },
+  };
+}
+
+menuScene();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
