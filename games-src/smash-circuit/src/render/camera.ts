@@ -82,8 +82,10 @@ export class CameraRig {
     cam.top = halfH; cam.bottom = -halfH;
     cam.updateProjectionMatrix();
     const H = CONFIG.render.cameraHeight;
-    cam.position.set(x + Math.sin(az) * H * Math.sin(tilt), y + H * Math.cos(tilt), z + Math.cos(az) * H * Math.sin(tilt));
-    cam.lookAt(this.tmp.set(x, y, z));
+    // x, z are scene-local; the scene is mirrored along z (renderer.ts), so the camera works in world z = -z
+    const wz = -z;
+    cam.position.set(x + Math.sin(az) * H * Math.sin(tilt), y + H * Math.cos(tilt), wz + Math.cos(az) * H * Math.sin(tilt));
+    cam.lookAt(this.tmp.set(x, y, wz));
     cam.updateMatrixWorld();
     void fore;
   }

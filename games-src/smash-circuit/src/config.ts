@@ -112,6 +112,7 @@ export const CONFIG = {
     boundaryMargin: 150,       // m: unbreakable invisible fence around the track bounding box
     boundaryThickness: 8,
     wallFriction: 0.2, wallRestitution: 0.15,
+    propKick: { minSpeed: 2, forwardMul: 1.35, sideMul: 0.6, spin: 9 }, // dynamic props are thrown clear of the car
     propBody: { linearDamping: 2.5, angularDamping: 2.2, friction: 0.35, restitution: 0.3 },
     // Light props receive tiny contact impulses (~ m*v), so each type has its own threshold and damage multiplier.
     // damage = (impulse - threshold) * impulseToDamage * dmgMul. shape: box w x h, circle diameter w. mass 0 = static.

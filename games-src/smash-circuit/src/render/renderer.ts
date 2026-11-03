@@ -83,6 +83,10 @@ export class GameRenderer {
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.05;
     this.sun.shadow.radius = 2.5;
+    // Physics is right-handed in (x, y) and maps to scene (x, height, y). Seen from above that is a mirror image,
+    // which made the player's right turn show as a left turn. Mirror the whole scene back along z
+    // (three.js flips face winding for negative-determinant world matrices, shadows included).
+    this.scene.scale.z = -1;
     this.scene.add(this.hemi, this.sun, this.sun.target);
 
     this.fx = new FxManager(this.mats, CONFIG.race.cars);

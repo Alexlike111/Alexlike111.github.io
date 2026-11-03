@@ -57,6 +57,8 @@ export class Sim implements ISim {
   private events: SimEvent[] = [];
   private crashes: CrashHit[] = [];
   private staticHits: StaticHit[] = [];
+  /** car -> dynamic prop contacts this step: props get kicked clear after the step so they never ride on a bonnet */
+  private propKicks: { car: SimCar; id: number }[] = [];
   private acc = 0;
   private disposed = false;
   private gridSeed = 0;
@@ -234,6 +236,7 @@ export class Sim implements ISim {
       if (wm) {
         const nx = wm.normal.x, ny = wm.normal.y;
         // planck normals point from fixture A to fixture B: flip so that n points from the piece into the car
+        if (other.id >= 0 && this.destructibles[other.id].dynamic) this.propKicks.push({ car, id: other.id });
         if (other.id >= 0 && !this.destructibles[other.id].dynamic) this.staticHits.push({ car, id: other.id, nx: da.kind === 'car' ? -nx : nx, ny: da.kind === 'car' ? -ny : ny });
         if (other.kind !== 'prop') {
           const vn = st.vx * nx + st.vy * ny;
@@ -243,6 +246,40 @@ export class Sim implements ISim {
     }
     if (other.id >= 0 && other.id < this.lastHitBy.length) this.lastHitBy[other.id] = st.id;
     if (other.kind !== 'road') this.crashes.push({ x: p.x, y: p.y, impulse: total, carId: st.id });
+  }
+
+  /**
+   * The arcade car sets its own velocity every step, so a light prop it touches would just be pushed along
+   * on the bonnet. After the step, throw each touched prop clear: forward a bit faster than the car and
+   * sideways away from the car's centre line, with spin. A prop already flying faster than the car is left alone.
+   */
+  private kickProps(): void {
+    if (!this.propKicks.length) return;
+    const K = CONFIG.destruction.propKick;
+    const seen = new Set<number>();
+    for (const { car, id } of this.propKicks) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const body = this.destruction.bodyOf(id);
+      if (!body) continue;
+      const st = car.state;
+      const sp = Math.hypot(st.vx, st.vy);
+      if (sp < K.minSpeed) continue;
+      const fx = st.vx / sp, fy = st.vy / sp;
+      const pos = body.getPosition();
+      const rx = pos.x - st.x, ry = pos.y - st.y;
+      // side of the car's travel line the prop sits on (+1 left, -1 right); dead centre -> deterministic pick
+      let side = Math.sign(-fy * rx + fx * ry);
+      if (side === 0) side = (id & 1) ? 1 : -1;
+      const v = body.getLinearVelocity();
+      const along = v.x * fx + v.y * fy;
+      if (along > sp * K.forwardMul * 0.95) continue;
+      const fwd = sp * K.forwardMul, lat = sp * K.sideMul * side;
+      body.setLinearVelocity({ x: fx * fwd - fy * lat, y: fy * fwd + fx * lat });
+      body.setAngularVelocity(side * K.spin * Math.min(1, sp / 20));
+      body.setAwake(true);
+    }
+    this.propKicks = [];
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -295,6 +332,7 @@ export class Sim implements ISim {
         this.destruction.hitRoad(c.x, c.y, c.impulse);
       }
     }
+    this.kickProps();
     this.destruction.flush(events);
     this.plowThrough();
     this.countBreaks(evStart);
