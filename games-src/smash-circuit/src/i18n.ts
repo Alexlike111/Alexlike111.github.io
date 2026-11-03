@@ -1,0 +1,246 @@
+// Localisation: English (default / fallback) + Russian. Every player-visible string lives here.
+export type Lang = 'en' | 'ru';
+export type LangSetting = Lang | 'auto';
+
+type Dict = Record<string, string>;
+
+export const EN: Dict = {
+  'boot.loading': 'Loading...',
+  'boot.failed': 'Failed to start',
+  'menu.tagline': 'Race. Crash. Repeat.',
+  'menu.play': 'Play',
+  'menu.garage': 'Garage',
+  'menu.settings': 'Settings',
+  'ui.back': 'Back',
+  'ui.tapAgain': 'Tap again',
+  'ui.notEnough': 'Not enough coins',
+  'ui.on': 'On',
+  'ui.off': 'Off',
+  'unit.m': 'm',
+  'unit.kmh': 'km/h',
+  'input.gas': 'GAS',
+  'input.brake': 'BRAKE',
+
+  'tracks.title': 'Choose track',
+  'track.t1': 'Green Valley',
+  'track.t2': 'Dust Canyon',
+  'track.t3': 'Frost Pass',
+  'track.laps': 'Laps: {n}',
+  'track.difficulty': 'Difficulty',
+  'track.bestLap': 'Best lap',
+  'track.lockedHint': 'Finish top 3 on {track} to unlock',
+
+  'garage.title': 'Garage',
+  'garage.color': 'Paint',
+  'garage.stats': 'Car stats',
+  'garage.upgrades': 'Upgrades',
+  'garage.max': 'MAX',
+  'garage.maxed': 'Fully upgraded',
+  'garage.buy': 'Buy upgrade',
+  'stat.speed': 'Top speed',
+  'stat.accel': 'Acceleration',
+  'stat.grip': 'Grip',
+  'stat.armor': 'Armor',
+  'up.engine': 'Engine',
+  'up.engine.desc': 'More power and top speed',
+  'up.grip': 'Tyres',
+  'up.grip.desc': 'Sharper turns, less sliding',
+  'up.armor': 'Armor',
+  'up.armor.desc': 'Takes less crash damage',
+
+  'settings.title': 'Settings',
+  'settings.language': 'Language',
+  'settings.auto': 'Auto',
+  'settings.autoGas': 'Auto gas',
+  'settings.autoGas.hint': 'The car accelerates by itself',
+  'settings.quality': 'Graphics',
+  'settings.low': 'Low',
+  'settings.medium': 'Medium',
+  'settings.high': 'High',
+  'settings.sound': 'Sound',
+
+  'hud.place': 'POS',
+  'hud.lap': 'LAP',
+  'hud.last': 'Last',
+  'hud.best': 'Best',
+  'hud.go': 'GO!',
+  'hud.finalLap': 'Final lap!',
+  'hud.pause': 'Pause',
+  'hud.stuckHint': 'Stuck? Hold brake to reverse',
+  'hud.backOnTrack': 'Back on track',
+  'hud.repairKey': 'R',
+  'hud.repairTap': 'Repair',
+
+  'pause.title': 'Paused',
+  'pause.resume': 'Resume',
+  'pause.repair': 'Repair',
+  'pause.noDamage': 'No damage',
+  'pause.restart': 'Restart',
+  'pause.quit': 'Quit race',
+  'pause.keys': 'P pause, R repair',
+
+  'results.title': 'Race finished',
+  'results.place': 'place',
+  'results.time': 'Race time',
+  'results.bestLap': 'Best lap',
+  'results.newBest': 'New best!',
+  'results.reward': 'Reward',
+  'results.unlocked': 'New track unlocked: {track}',
+  'results.watchAd': 'Watch ad: x{n} reward',
+  'results.adSub': 'Plays a video ad, +{n} coins',
+  'results.adTag': 'AD',
+  'results.doubled': 'Reward doubled!',
+  'results.adFailed': 'Ad is not available right now',
+  'results.continue': 'Continue',
+  'ordinal.1': '1st', 'ordinal.2': '2nd', 'ordinal.3': '3rd', 'ordinal.4': '4th',
+  'ordinal.5': '5th', 'ordinal.6': '6th', 'ordinal.7': '7th', 'ordinal.8': '8th',
+
+  'tut.title': 'How to play',
+  'tut.touch.gas': 'Hold GAS to drive',
+  'tut.touch.steer': 'Slide the same finger left or right to steer',
+  'tut.smash': 'Smash walls and props, but watch your damage',
+  'tut.key.space': 'SPACE',
+  'tut.key.drive': 'Drive with W A S D or the arrow keys',
+  'tut.key.handbrake': 'Hold Space for the handbrake and drift',
+  'tut.key.repair': 'R repairs the car, P pauses',
+  'tut.ok': 'Got it',
+};
+
+export const RU: Dict = {
+  'boot.loading': 'Загрузка...',
+  'boot.failed': 'Не удалось запустить игру',
+  'menu.tagline': 'Гони. Круши. Повторяй.',
+  'menu.play': 'Играть',
+  'menu.garage': 'Гараж',
+  'menu.settings': 'Настройки',
+  'ui.back': 'Назад',
+  'ui.tapAgain': 'Нажми ещё раз',
+  'ui.notEnough': 'Не хватает монет',
+  'ui.on': 'Вкл',
+  'ui.off': 'Выкл',
+  'unit.m': 'м',
+  'unit.kmh': 'км/ч',
+  'input.gas': 'ГАЗ',
+  'input.brake': 'ТОРМОЗ',
+
+  'tracks.title': 'Выбери трассу',
+  'track.t1': 'Зелёная долина',
+  'track.t2': 'Пыльный каньон',
+  'track.t3': 'Морозный перевал',
+  'track.laps': 'Кругов: {n}',
+  'track.difficulty': 'Сложность',
+  'track.bestLap': 'Лучший круг',
+  'track.lockedHint': 'Финишируй в топ-3 на трассе «{track}», чтобы открыть',
+
+  'garage.title': 'Гараж',
+  'garage.color': 'Цвет',
+  'garage.stats': 'Параметры',
+  'garage.upgrades': 'Улучшения',
+  'garage.max': 'МАКС',
+  'garage.maxed': 'Улучшено до максимума',
+  'garage.buy': 'Купить улучшение',
+  'stat.speed': 'Скорость',
+  'stat.accel': 'Разгон',
+  'stat.grip': 'Сцепление',
+  'stat.armor': 'Броня',
+  'up.engine': 'Двигатель',
+  'up.engine.desc': 'Больше мощности и скорости',
+  'up.grip': 'Шины',
+  'up.grip.desc': 'Точнее повороты, меньше заносов',
+  'up.armor': 'Броня',
+  'up.armor.desc': 'Меньше урона от ударов',
+
+  'settings.title': 'Настройки',
+  'settings.language': 'Язык',
+  'settings.auto': 'Авто',
+  'settings.autoGas': 'Автогаз',
+  'settings.autoGas.hint': 'Машина разгоняется сама',
+  'settings.quality': 'Графика',
+  'settings.low': 'Низкая',
+  'settings.medium': 'Средняя',
+  'settings.high': 'Высокая',
+  'settings.sound': 'Звук',
+
+  'hud.place': 'МЕСТО',
+  'hud.lap': 'КРУГ',
+  'hud.last': 'Прошл.',
+  'hud.best': 'Лучш.',
+  'hud.go': 'СТАРТ!',
+  'hud.finalLap': 'Последний круг!',
+  'hud.pause': 'Пауза',
+  'hud.stuckHint': 'Застрял? Держи тормоз: задний ход',
+  'hud.backOnTrack': 'Вернули на трассу',
+  'hud.repairKey': 'R',
+  'hud.repairTap': 'Ремонт',
+
+  'pause.title': 'Пауза',
+  'pause.resume': 'Продолжить',
+  'pause.repair': 'Починить',
+  'pause.noDamage': 'Повреждений нет',
+  'pause.restart': 'Заново',
+  'pause.quit': 'Выйти',
+  'pause.keys': 'P пауза, R ремонт',
+
+  'results.title': 'Заезд завершён',
+  'results.place': 'место',
+  'results.time': 'Время заезда',
+  'results.bestLap': 'Лучший круг',
+  'results.newBest': 'Рекорд!',
+  'results.reward': 'Награда',
+  'results.unlocked': 'Открыта новая трасса: {track}',
+  'results.watchAd': 'Реклама: награда x{n}',
+  'results.adSub': 'Покажем видеорекламу, +{n} монет',
+  'results.adTag': 'РЕКЛАМА',
+  'results.doubled': 'Награда удвоена!',
+  'results.adFailed': 'Реклама сейчас недоступна',
+  'results.continue': 'Дальше',
+  'ordinal.1': '1-е', 'ordinal.2': '2-е', 'ordinal.3': '3-е', 'ordinal.4': '4-е',
+  'ordinal.5': '5-е', 'ordinal.6': '6-е', 'ordinal.7': '7-е', 'ordinal.8': '8-е',
+
+  'tut.title': 'Как играть',
+  'tut.touch.gas': 'Держи ГАЗ, чтобы ехать',
+  'tut.touch.steer': 'Води тем же пальцем влево-вправо: это руль',
+  'tut.smash': 'Круши стены и предметы, но следи за повреждениями',
+  'tut.key.space': 'ПРОБЕЛ',
+  'tut.key.drive': 'Езда: W A S D или стрелки',
+  'tut.key.handbrake': 'Пробел: ручной тормоз и дрифт',
+  'tut.key.repair': 'R: ремонт, P: пауза',
+  'tut.ok': 'Понятно',
+};
+
+const DICTS: Record<Lang, Dict> = { en: EN, ru: RU };
+
+/** Platform language tags that map to Russian UI (Russian-speaking players). */
+const RU_TAGS = ['ru', 'be', 'kk', 'uk', 'uz', 'ky', 'tg', 'hy', 'az', 'tk'];
+
+let platformLang = 'en';
+let setting: LangSetting = 'auto';
+let current: Lang = 'en';
+
+export function resolveLang(platformTag: string, s: LangSetting): Lang {
+  if (s === 'en' || s === 'ru') return s;
+  const tag = (platformTag || 'en').toLowerCase().split(/[-_]/)[0];
+  return RU_TAGS.includes(tag) ? 'ru' : 'en';
+}
+
+export function initLang(platformTag: string, s: LangSetting): void {
+  platformLang = platformTag || 'en';
+  setLangSetting(s);
+}
+
+/** Change the language setting after init (settings screen). */
+export function setLangSetting(s: LangSetting): void {
+  setting = s;
+  current = resolveLang(platformLang, setting);
+  try { if (typeof document !== 'undefined') document.documentElement.lang = current; } catch { /* ignore */ }
+}
+
+export function lang(): Lang { return current; }
+export function langSetting(): LangSetting { return setting; }
+
+export function t(key: string, p?: Record<string, string | number>): string {
+  let s = DICTS[current][key] ?? EN[key];
+  if (s === undefined) return key;
+  if (p) s = s.replace(/\{(\w+)\}/g, (m, k: string) => (k in p ? String(p[k]) : m));
+  return s;
+}

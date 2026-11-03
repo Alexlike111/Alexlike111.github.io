@@ -1,0 +1,416 @@
+// GameRenderer: owns the WebGL renderer and the whole scene. Reads ISim state only; never mutates the sim.
+import * as THREE from 'three';
+import { CONFIG, type Quality } from '../config';
+import { FxManager } from '../fx/fxManager';
+import type { CarState, ISim, SimEvent } from '../types';
+import { CameraRig } from './camera';
+import { CarFleet, buildCarGeometries, type CarGeometries, type CarPose } from './car';
+import { buildDecor, type DecorVisual } from './decor';
+import { DestructibleRenderer } from './destructibles';
+import { Materials } from './materials';
+import { MenuScene } from './menuScene';
+import { PlayerMarker } from './playerMarker';
+import { PALETTES, type ThemePalette } from './palette';
+import { wallVisual } from './structures';
+import { buildTrackVisual, type TrackVisual } from './trackBuilder';
+import { clamp } from './util';
+
+const QUALITY_ORDER: Quality[] = ['low', 'medium', 'high'];
+
+interface RaceScene {
+  sim: ISim;
+  group: THREE.Group;
+  pal: ThemePalette;
+  track: TrackVisual;
+  decor: DecorVisual;
+  destr: DestructibleRenderer;
+  fleet: CarFleet;
+  marker: PlayerMarker;
+  ghost: THREE.Mesh;
+}
+
+export interface RenderDebug {
+  fps: number; drawCalls: number; debrisActive: number; triangles: number; quality: Quality; particles: number; breaksShown: number;
+  /** ms spent in JS preparing a frame (sync, fx, camera) before the draw submit */
+  cpuMs: number;
+}
+
+declare global { interface Window { __render?: RenderDebug } }
+
+export class GameRenderer {
+  readonly canvas: HTMLCanvasElement;
+  private gl: THREE.WebGLRenderer;
+  private scene = new THREE.Scene();
+  private rig = new CameraRig();
+  private mats = new Materials();
+  private geos: CarGeometries = buildCarGeometries();
+  private sun: THREE.DirectionalLight;
+  private hemi: THREE.HemisphereLight;
+  private fx: FxManager;
+  private menu: MenuScene;
+  private race: RaceScene | null = null;
+  private mode: 'menu' | 'race' = 'menu';
+  private poses: CarPose[] = [];
+  private byId = new Map<number, CarPose>();
+  private requested: Quality | 'auto';
+  private level: Quality;
+  private fpsAvg = 60;
+  private lowFor = 0;
+  private sinceChange = 0;
+  private lastExternal = -1e9;
+  private menuRaf = 0;
+  private menuLast = 0;
+  private disposed = false;
+  private ro: ResizeObserver | null = null;
+  private lightDir = new THREE.Vector3(...CONFIG.render.lightDir).normalize();
+  private tF = new THREE.Vector3(); private tR = new THREE.Vector3(); private tU = new THREE.Vector3(); private tT = new THREE.Vector3();
+  private tY = new THREE.Vector3(0, 1, 0);
+  private debug: RenderDebug = { fps: 60, drawCalls: 0, debrisActive: 0, triangles: 0, quality: 'high', particles: 0, breaksShown: 0, cpuMs: 0 };
+  private onLost = (e: Event): void => { e.preventDefault(); };
+
+  constructor(canvas: HTMLCanvasElement, quality: Quality | 'auto') {
+    this.canvas = canvas;
+    this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false, stencil: false });
+    this.gl.shadowMap.type = THREE.PCFShadowMap;
+    this.gl.setClearColor(PALETTES.meadow.background);
+    this.requested = quality;
+    this.level = quality === 'auto' ? this.guessLevel() : quality;
+
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0xaaccaa, 1.3);
+    this.sun = new THREE.DirectionalLight(0xffffff, 1.9);
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 320;
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.05;
+    this.sun.shadow.radius = 2.5;
+    this.scene.add(this.hemi, this.sun, this.sun.target);
+
+    this.fx = new FxManager(this.mats, CONFIG.race.cars);
+    this.scene.add(this.fx.group);
+    this.menu = new MenuScene(this.geos, this.mats, PALETTES.meadow);
+    this.scene.add(this.menu.group);
+    this.applyPalette(PALETTES.meadow);
+
+    this.applyLevel(this.level, true);
+    this.resize();
+    if (typeof ResizeObserver !== 'undefined') {
+      this.ro = new ResizeObserver(() => this.resize());
+      this.ro.observe(canvas);
+    }
+    canvas.addEventListener('webglcontextlost', this.onLost);
+    window.__render = this.debug;
+  }
+
+  // ------------------------------------------------------------------ quality / size
+
+  get fps(): number { return this.fpsAvg; }
+  get quality(): Quality { return this.level; }
+  /** seconds of visual hit-stop left after a heavy hit (effects run slowed); the game loop may use it to hold its own presentation too */
+  get hitStop(): number { return this.fx.hitStopLeft; }
+
+  /** world metres per screen pixel at the current zoom (marker / ring sizes stay readable on a phone) */
+  private metresPerPixel(): number {
+    const w = this.canvas.clientWidth || this.canvas.width || 1;
+    return (this.rig.halfW * 2) / w;
+  }
+
+  private guessLevel(): Quality {
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+    const small = Math.min(screen.width, screen.height) < 700;
+    const weak = (nav.deviceMemory ?? 8) <= 3 || (nav.hardwareConcurrency ?? 8) <= 4;
+    if (weak) return 'low';
+    if (coarse || small) return 'medium';
+    return 'high';
+  }
+
+  setQuality(q: Quality | 'auto'): void {
+    this.requested = q;
+    this.applyLevel(q === 'auto' ? this.guessLevel() : q, false);
+  }
+
+  private applyLevel(level: Quality, first: boolean): void {
+    const q = CONFIG.render.quality[level];
+    const prevShadow = this.gl.shadowMap.enabled;
+    this.level = level;
+    this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    this.gl.shadowMap.enabled = q.shadows;
+    this.sun.castShadow = q.shadows;
+    if (q.shadows) {
+      const size = q.shadowMap || 1024;
+      if (this.sun.shadow.mapSize.x !== size || first) {
+        this.sun.shadow.mapSize.set(size, size);
+        this.sun.shadow.map?.dispose();
+        this.sun.shadow.map = null;
+      }
+      const e = CONFIG.render.shadowExtent;
+      const c = this.sun.shadow.camera;
+      c.left = -e; c.right = e; c.top = e; c.bottom = -e;
+      c.updateProjectionMatrix();
+    }
+    if (prevShadow !== q.shadows) this.mats.refresh();
+    this.fx.setQuality(level);
+    this.race?.decor.setDensity(CONFIG.render.decorDensity[level]);
+    this.race?.destr.setWallShadows(level === 'high');
+    this.race?.fleet.setBlobShadows(!q.shadows);
+    this.menu.fleet.setBlobShadows(!q.shadows);
+    this.sinceChange = 0; this.lowFor = 0;
+    this.debug.quality = level;
+    if (!first) this.resize();
+  }
+
+  resize(): void {
+    if (this.disposed) return;
+    const w = Math.max(1, this.canvas.clientWidth || this.canvas.width || 1);
+    const h = Math.max(1, this.canvas.clientHeight || this.canvas.height || 1);
+    this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, CONFIG.render.quality[this.level].pixelRatio));
+    this.gl.setSize(w, h, false);
+    this.rig.setAspect(w / h);
+    if (this.mode === 'menu') this.rig.update(0, 0, 0, 0, 0, 0, 0);
+  }
+
+  private trackFps(dt: number): void {
+    if (dt <= 0 || dt > 0.5) return;
+    const inst = 1 / dt;
+    this.fpsAvg += (inst - this.fpsAvg) * Math.min(1, dt * 2.5);
+    this.sinceChange += dt;
+    if (this.requested !== 'auto' || this.sinceChange < 2) return;
+    if (this.fpsAvg < CONFIG.render.autoQualityFpsDown) this.lowFor += dt; else this.lowFor = Math.max(0, this.lowFor - dt * 2);
+    if (this.lowFor >= CONFIG.render.autoQualityWindow) {
+      const i = QUALITY_ORDER.indexOf(this.level);
+      if (i > 0) this.applyLevel(QUALITY_ORDER[i - 1], false);
+      this.lowFor = 0; this.sinceChange = 0;
+    }
+  }
+
+  // ------------------------------------------------------------------ scene setup
+
+  private applyPalette(pal: ThemePalette): void {
+    this.gl.setClearColor(pal.background);
+    this.scene.background = new THREE.Color(pal.background);
+    this.hemi.color.setHex(pal.hemiSky); this.hemi.groundColor.setHex(pal.hemiGround); this.hemi.intensity = pal.hemiIntensity;
+    this.sun.color.setHex(pal.sun); this.sun.intensity = pal.sunIntensity;
+  }
+
+  private placeSun(x: number, z: number): void {
+    const E = CONFIG.render.shadowExtent;
+    const f = this.tF.copy(this.lightDir).negate();
+    const right = this.tR.crossVectors(f, this.tY).normalize();
+    const up = this.tU.crossVectors(right, f).normalize();
+    const t = this.tT.set(x, 0, z);
+    const size = this.sun.shadow.mapSize.x || 1024;
+    const texel = (2 * E) / size;
+    const a = t.dot(right), b = t.dot(up);
+    t.addScaledVector(right, Math.round(a / texel) * texel - a).addScaledVector(up, Math.round(b / texel) * texel - b);
+    this.sun.target.position.copy(t);
+    this.sun.position.copy(t).addScaledVector(this.lightDir, 150);
+    this.sun.target.updateMatrixWorld();
+  }
+
+  private unloadRace(): void {
+    if (!this.race) return;
+    this.scene.remove(this.race.group);
+    this.race.destr.dispose();
+    this.race.decor.dispose();
+    this.race.track.dispose();
+    this.race.fleet.dispose();
+    this.race.marker.dispose();
+    this.race = null;
+    this.fx.clear();
+  }
+
+  loadRace(sim: ISim): void {
+    this.stopMenuLoop();
+    this.unloadRace();
+    const def = sim.track.def;
+    const pal = PALETTES[def.theme];
+    this.applyPalette(pal);
+    const group = new THREE.Group();
+    const track = buildTrackVisual(sim.track, pal, this.mats);
+    const decor = buildDecor(sim.track, pal, this.mats, track.exclusions, CONFIG.render.decorDensity[this.level]);
+    const destr = new DestructibleRenderer(sim.destructibles, def, pal, this.mats);
+    destr.setWallShadows(this.level === 'high');
+    const fleet = new CarFleet(this.geos, this.mats, Math.max(CONFIG.race.cars, sim.cars.length));
+    fleet.setVisibleCount(sim.cars.length);
+    fleet.setBlobShadows(!CONFIG.render.quality[this.level].shadows);
+    const ghostMat = this.mats.ghost;
+    ghostMat.color.setHex(CONFIG.render.car.ghostColor);
+    ghostMat.opacity = CONFIG.render.car.ghostOpacity;
+    const ghost = new THREE.Mesh(this.geos.ghost, ghostMat);
+    ghost.visible = false;
+    ghost.frustumCulled = false;
+    ghost.renderOrder = 5;
+    const marker = new PlayerMarker();
+    group.add(track.group, decor.group, destr.group, destr.rubble, fleet.group, ghost, marker.group);
+    this.scene.add(group);
+    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost };
+    this.menu.group.visible = false;
+    this.mode = 'race';
+    this.rig.setMenu(false);
+    this.fx.setTheme(pal, wallVisual(def));
+    this.fx.clear();
+    this.poses = sim.cars.map((c) => ({ x: c.x, y: c.y, angle: c.angle, state: c }));
+    this.byId.clear();
+    for (const p of this.poses) this.byId.set(p.state.id, p);
+    destr.sync(sim.destructibles);
+    const player = sim.cars.find((c) => c.isPlayer) ?? sim.cars[0];
+    this.rig.snap(player.x, player.y);
+    this.resize();
+    this.rig.update(0, player.x, player.y, 0, 0, 0, 1);
+    decor.update(player.x, player.y, this.rig.radius + 8);
+    fleet.update(this.poses, 0);
+    marker.update(0, player.x, player.y, player.angle, true, this.metresPerPixel());
+    this.placeSun(player.x, player.y);
+    this.gl.compile(this.scene, this.rig.camera);
+  }
+
+  showMenuScene(colorIndex: number): void {
+    this.unloadRace();
+    this.mode = 'menu';
+    this.applyPalette(PALETTES.meadow);
+    this.fx.setTheme(PALETTES.meadow, 'concrete');
+    this.menu.group.visible = true;
+    this.menu.setColor(colorIndex);
+    this.rig.setMenu(true);
+    this.rig.setMenuView(11, new THREE.Vector3(0, 0.9, 0));
+    this.resize();
+    this.menu.update(0);
+    this.renderMenuFrame(0);
+    this.startMenuLoop();
+  }
+
+  private startMenuLoop(): void {
+    if (this.menuRaf || this.disposed) return;
+    this.menuLast = performance.now();
+    const tick = (now: number): void => {
+      this.menuRaf = requestAnimationFrame(tick);
+      const dt = Math.min(0.1, (now - this.menuLast) / 1000);
+      this.menuLast = now;
+      if (now - this.lastExternal < 250) return;   // the game loop is driving frames
+      this.renderMenuFrame(dt);
+    };
+    this.menuRaf = requestAnimationFrame(tick);
+  }
+
+  private stopMenuLoop(): void { if (this.menuRaf) cancelAnimationFrame(this.menuRaf); this.menuRaf = 0; }
+
+  private renderMenuFrame(dt: number): void {
+    this.trackFps(dt);
+    this.menu.update(dt);
+    this.rig.update(dt, 0, 0, 0, 0, 0, 0);
+    this.placeSun(0, 0);
+    this.fx.update(dt, this.rig.camera);
+    this.gl.render(this.scene, this.rig.camera);
+    this.publish();
+  }
+
+  // ------------------------------------------------------------------ per frame
+
+  frame(sim: ISim, events: SimEvent[], frameDt: number): void {
+    if (this.disposed) return;
+    const t0 = performance.now();
+    this.lastExternal = t0;
+    const dt = clamp(frameDt, 0, 0.1);
+    if (this.mode === 'menu' && !this.race) { this.renderMenuFrame(dt); return; }
+    if (!this.race || this.race.sim !== sim) this.loadRace(sim);
+    const R = this.race!;
+    this.trackFps(frameDt);
+
+    // ---- interpolated car poses
+    const back = (1 - sim.alpha) * CONFIG.physics.dt;
+    const cars = sim.cars;
+    if (this.poses.length !== cars.length) {
+      this.poses = cars.map((c) => ({ x: c.x, y: c.y, angle: c.angle, state: c }));
+      this.byId.clear();
+      for (const p of this.poses) this.byId.set(p.state.id, p);
+    }
+    let player: CarState = cars[0];
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i], p = this.poses[i];
+      p.state = c;
+      p.x = c.x - c.vx * back; p.y = c.y - c.vy * back; p.angle = c.angle - c.angularVel * back;
+      if (c.isPlayer) player = c;
+    }
+    const pp = this.byId.get(player.id) ?? this.poses[0];
+
+    // ---- camera (before fx so emission range uses the current view)
+    const topSpeed = CONFIG.car.baseTopSpeed;
+    const intro = R.sim.race.phase === 'countdown' ? clamp(R.sim.race.countdown / CONFIG.race.countdown, 0, 1) : 0;
+    this.rig.update(dt, pp.x, pp.y, player.vx, player.vy, Math.abs(player.speed) / topSpeed, intro);
+    const tgt = this.rig.target;
+    const ctx = {
+      playerId: player.id, camX: tgt.x, camZ: tgt.z, radius: this.rig.radius,
+      addTrauma: (t: number) => this.rig.addTrauma(t),
+      carById: (id: number) => this.byId.get(id),
+    };
+
+    // ---- scene content
+    R.destr.sync(sim.destructibles);
+    R.decor.update(tgt.x, tgt.z, this.rig.radius + 8);
+    R.fleet.update(this.poses, dt);
+    const gp = sim.ghostPose();
+    if (gp) {
+      R.ghost.visible = true;
+      R.ghost.position.set(gp.x, 0, gp.y);
+      R.ghost.rotation.set(0, -gp.a, 0);
+    } else R.ghost.visible = false;
+
+    // player marker: ring + arrow stay strong through the countdown and the first seconds, and flash again when the player is hit
+    for (const ev of events) if (ev.type === 'impact' && ev.carId === player.id && ev.strength > 0.25) R.marker.ping();
+    R.marker.update(dt, pp.x, pp.y, pp.angle, R.sim.race.phase === 'countdown', this.metresPerPixel());
+
+    if (dt > 0) {
+      this.fx.handleEvents(events, ctx);
+      this.fx.updateCars(this.poses, dt, ctx);
+    }
+    this.fx.update(dt, this.rig.camera);
+    this.placeSun(tgt.x, tgt.z);
+    this.debug.cpuMs += (performance.now() - t0 - this.debug.cpuMs) * 0.1;
+    this.gl.render(this.scene, this.rig.camera);
+    this.publish();
+  }
+
+  /** Debug: triangle budget per mesh name (tris x instances, summed over spatial chunks; frustum-culled chunks left out), biggest first. */
+  inspect(): { name: string; tris: number; instances: number; cast: boolean }[] {
+    const acc = new Map<string, { name: string; tris: number; instances: number; cast: boolean }>();
+    const cam = this.rig.camera;
+    const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return;
+      if (m.frustumCulled && !fr.intersectsObject(m)) return;   // what the main pass actually draws
+      const g = m.geometry;
+      const per = (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+      const inst = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1;
+      const name = (m.name || (m.parent?.type ?? '') + '/' + g.type) + '#' + (g.getAttribute('position')?.count ?? 0);
+      const e = acc.get(name) ?? { name, tris: 0, instances: 0, cast: m.castShadow };
+      e.tris += per * inst; e.instances += inst;
+      acc.set(name, e);
+    });
+    return [...acc.values()].sort((a, b) => b.tris - a.tris);
+  }
+
+  private publish(): void {
+    const d = this.debug, info = this.gl.info.render;
+    d.fps = this.fpsAvg; d.drawCalls = info.calls; d.triangles = info.triangles;
+    d.debrisActive = this.fx.debris.active;
+    d.particles = this.fx.smoke.active + this.fx.sparks.active;
+    d.breaksShown = this.race?.destr.brokenShown ?? 0;
+    d.quality = this.level;
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.stopMenuLoop();
+    this.ro?.disconnect();
+    this.canvas.removeEventListener('webglcontextlost', this.onLost);
+    this.unloadRace();
+    this.fx.dispose();
+    this.menu.dispose();
+    this.mats.dispose();
+    for (const g of [this.geos.body, this.geos.wheel, this.geos.lights, this.geos.ghost, ...Object.values(this.geos.parts)]) g.dispose();
+    this.gl.dispose();
+    if (window.__render === this.debug) delete window.__render;
+  }
+}
