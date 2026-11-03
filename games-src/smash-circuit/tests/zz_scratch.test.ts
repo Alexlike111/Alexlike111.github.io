@@ -37,3 +37,20 @@ it('dbg', () => {
   }
   console.log('DBG respawn at', t.toFixed(1)); for (const h of hist.slice(-14)) console.log('DBG', h.t, h.c, 'OILS', h.oils);
 }, 100000);
+
+it('dbg2', () => {
+  const sim = new Sim({ track: TRACKS.find((t) => t.id === 't3')!, cars: field(), seed: 1 });
+  let t = 0; const log: string[] = [];
+  const tr = sim.track;
+  const where = (id: number) => { const c = sim.cars.find((q) => q.id === id)!; const n = tr.nearest(c.x, c.y); return `s${n.s.toFixed(0)}l${n.lateral.toFixed(1)}v${c.speed.toFixed(0)}`; };
+  while (t < 120 && sim.respawns < 3) {
+    sim.update(1 / 60); t += 1 / 60;
+    for (const e of sim.drainEvents()) {
+      if (e.type === 'itemUse') log.push(`${t.toFixed(1)} car${e.carId} uses ${e.item} at ${where(e.carId)}`);
+      if (e.type === 'oilSpin') log.push(`${t.toFixed(1)} car${e.carId} oilSpin ${where(e.carId)}`);
+      if (e.type === 'pickup') log.push(`${t.toFixed(1)} car${e.carId} picks ${e.item}`);
+    }
+    if (Math.round(t * 60) % 60 === 0 && t > 36 && t < 46) log.push(`${t.toFixed(0)}  ` + sim.cars.map((c) => c.id + ':' + where(c.id)).join(' '));
+  }
+  console.log('DBG2 respawns', sim.respawns, 't', t.toFixed(1)); for (const l of log) console.log('DBG2', l);
+}, 100000);

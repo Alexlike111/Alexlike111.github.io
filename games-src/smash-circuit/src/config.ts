@@ -429,6 +429,7 @@ export const CONFIG = {
       shieldBehind: 10, shieldClose: 4, shieldHealth: 0.4,
       repairHealth: 0.55, repairHealthLow: 0.85,
       oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
+      oilMaxPack: 2, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
       oilCalmBehind: 40, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
       shockCount: 2, shockRadius: 7, shockSingle: 4,
     },

@@ -149,13 +149,18 @@ export class DebrisPool {
     const sp = Math.hypot(vx, vz);
     if (sp < CONFIG.render.fx.debrisKickMinSpeed) return;
     const r2 = radius * radius;
+    const fx = vx / sp, fz = vz / sp;
     for (let i = 0; i < this.n; i++) {
       const dx = this.px[i] - x, dz = this.pz[i] - z;
-      if (dx * dx + dz * dz > r2 || this.py[i] > 0.9) continue;
+      if (dx * dx + dz * dz > r2 || this.py[i] > 0.9 || this.age[i] < 0.4) continue;   // fresh pieces are still leaving their car
       const rel = Math.hypot(this.vx[i] - vx, this.vz[i] - vz);
       if (rel < sp * 0.4) continue;   // already flying with the car
       const r = this.rng;
-      this.vx[i] = vx * (0.75 + 0.35 * r()) + dx * 2; this.vz[i] = vz * (0.75 + 0.35 * r()) + dz * 2;
+      // thrown forward and out of the car's path (to the side the piece lies on), so it does not ride along on the bumper
+      let side = -fz * dx + fx * dz;
+      side = side >= 0 ? 1 : -1;
+      const fwd = sp * (0.55 + 0.3 * r()), lat = sp * (0.45 + 0.25 * r()) * side;
+      this.vx[i] = fx * fwd - fz * lat; this.vz[i] = fz * fwd + fx * lat;
       this.vy[i] = 2.5 + Math.min(5, sp * 0.18);
       this.wx[i] = (r() - 0.5) * 14; this.wy[i] = (r() - 0.5) * 10; this.wz[i] = (r() - 0.5) * 14;
     }

@@ -110,6 +110,7 @@ export class Sim implements ISim {
     this.itemUsers = setups.map((c, i) => this.drivers[i]
       ? new AiItemUser(c.ai?.skill ?? DEFAULT_PERSONALITY.skill, makeRng(Math.floor(rng() * 4294967296) ^ (c.id * 40503)))
       : null);
+    for (const u of this.itemUsers) if (u) u.oils = this.oils;
 
     this.tracker = new RaceTracker(this.track, laps, n);
     this.race = this.tracker.state;

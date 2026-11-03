@@ -173,8 +173,9 @@ describe('SimCar', () => {
     expect(car.state.wrecked).toBe(true);
     expect(ev.filter((e) => e.type === 'wrecked').length).toBe(1);
     expect(car.state.effects.powerMul).toBeLessThan(0.3);
-    expect(car.state.detachedParts.length).toBe(8);
-    expect(ev.filter((e) => e.type === 'partOff').length).toBe(8);
+    // 8 body panels + at most maxWheelsOff wheels
+    expect(car.state.detachedParts.length).toBe(8 + CONFIG.damage.maxWheelsOff);
+    expect(ev.filter((e) => e.type === 'partOff').length).toBe(8 + CONFIG.damage.maxWheelsOff);
 
     car.repair();
     car.flushDamage(ev);
@@ -183,6 +184,22 @@ describe('SimCar', () => {
     expect(car.state.health).toBe(1);
     expect(car.state.detachedParts).toEqual([]);
     expect(car.state.effects.powerMul).toBe(1);
+  });
+
+  it('one hard hit knocks the outermost part of the hit side off at once (bumper first, then hood on a harder hit)', () => {
+    const pw = new PhysicsWorld();
+    const car = new SimCar(pw, setup(0), 0, 0, 0);
+    const ev: SimEvent[] = [];
+    car.recordImpact(car.state.x + 2.1, car.state.y, CONFIG.damage.knockOffImpulse * 0.9, 'wall');
+    car.flushDamage(ev);
+    expect(car.state.detachedParts).toEqual([]);
+    car.recordImpact(car.state.x + 2.1, car.state.y, CONFIG.damage.knockOffImpulse * 1.05, 'wall');
+    car.flushDamage(ev);
+    expect(car.state.detachedParts).toEqual(['bumperF']);
+    car.recordImpact(car.state.x - 2.1, car.state.y, CONFIG.damage.knockOffSecond * 1.05, 'wall');
+    car.flushDamage(ev);
+    expect(car.state.detachedParts).toEqual(['bumperF', 'bumperR', 'spoiler']);
+    expect(ev.filter((e) => e.type === 'partOff').length).toBe(3);
   });
 
   it('startDamage is applied; wheel damage reduces grip', () => {

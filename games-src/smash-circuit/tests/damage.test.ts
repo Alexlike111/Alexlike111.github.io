@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG } from '../src/config';
 import {
-  applyImpulseDamage, computeEffects, createZoneHp, missingHp, partsToDetach, totalHealth, zoneForLocalPoint,
+  applyImpulseDamage, computeEffects, createZoneHp, missingHp, partsKnockedOff, partsToDetach, totalHealth, zoneForLocalPoint,
 } from '../src/sim/damage';
 import { ZONES } from '../src/types';
 import type { ZoneId } from '../src/types';
@@ -160,5 +160,22 @@ describe('parts', () => {
     expect(new Set(all).size).toBe(all.length);
     for (const part of ['bumperF', 'hood', 'bumperR', 'spoiler', 'doorL', 'doorR', 'mirrorL', 'mirrorR'] as const) expect(all).toContain(part);
     expect(partsToDetach(hp, all)).toEqual([]);
+  });
+  it('wheels come off only at ~0 hp and never more than maxWheelsOff', () => {
+    const hp = createZoneHp();
+    hp.wheelFL = 1;
+    expect(partsToDetach(hp, [])).toEqual([]);
+    hp.wheelFL = 0; hp.wheelFR = 0; hp.wheelRL = 0; hp.wheelRR = 0;
+    const w = partsToDetach(hp, []);
+    expect(w.length).toBe(CONFIG.damage.maxWheelsOff);
+    expect(partsToDetach(hp, w)).toEqual([]);
+  });
+  it('a single hard hit knocks parts off its side, outermost first', () => {
+    expect(partsKnockedOff('front', CONFIG.damage.knockOffImpulse - 1, [])).toEqual([]);
+    expect(partsKnockedOff('front', CONFIG.damage.knockOffImpulse, [])).toEqual(['bumperF']);
+    expect(partsKnockedOff('front', CONFIG.damage.knockOffSecond, [])).toEqual(['bumperF', 'hood']);
+    expect(partsKnockedOff('left', CONFIG.damage.knockOffImpulse, ['mirrorL'])).toEqual(['doorL']);
+    expect(partsKnockedOff('right', 1e6, ['mirrorR', 'doorR'])).toEqual([]);
+    expect(partsKnockedOff('engine', 1e6, [])).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@
 // Decisions are taken a few times per second and scale with `iq` (0..1, the driver's skill): a clever driver waits for the
 // right moment (clear straight for Nitro, a rival closing in for the shield ...), a weak one fires at a random moment.
 import { CONFIG } from '../config';
-import type { CarState, ItemType, TrackGeometry } from '../types';
+import type { CarState, ItemType, OilSlick, TrackGeometry } from '../types';
 
 const A = CONFIG.items.ai;
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -21,11 +21,13 @@ export interface Surroundings {
   aheadInLane: boolean;
   /** a rival behind in our lane between oilBehindMin and oilBehindMax */
   behindInLane: boolean;
+  /** rivals within oilBehindMax behind us on the road (a slick for a whole pack makes a pile-up) */
+  behindCount: number;
 }
 
 export function scanSurroundings(car: CarState, others: CarState[], out: Surroundings): Surroundings {
   const ca = Math.cos(car.angle), sa = Math.sin(car.angle);
-  out.nearCount = 0; out.alongside = false; out.chaser = false; out.blocker = false; out.aheadInLane = false; out.behindInLane = false;
+  out.nearCount = 0; out.alongside = false; out.chaser = false; out.blocker = false; out.aheadInLane = false; out.behindInLane = false; out.behindCount = 0;
   for (let i = 0; i < others.length; i++) {
     const o = others[i];
     if (o === car || o.finished) continue;
@@ -40,6 +42,7 @@ export function scanSurroundings(car: CarState, others: CarState[], out: Surroun
     if (fwd > 0 && fwd < 6 && Math.abs(side) < 2.2) out.blocker = true;
     if (fwd > 0 && fwd < A.nitroFree && Math.abs(side) < 3) out.aheadInLane = true;
     if (fwd < -A.oilBehindMin && fwd > -A.oilBehindMax && Math.abs(side) < A.oilLane) out.behindInLane = true;
+    if (fwd < 0 && fwd > -A.oilBehindMax) out.behindCount++;
   }
   return out;
 }
@@ -48,7 +51,9 @@ export class AiItemUser {
   private held = 0;
   private acc = 0;
   private readonly delay: number;
-  private readonly sur: Surroundings = { nearCount: 0, alongside: false, chaser: false, blocker: false, aheadInLane: false, behindInLane: false };
+  private readonly sur: Surroundings = { nearCount: 0, alongside: false, chaser: false, blocker: false, aheadInLane: false, behindInLane: false, behindCount: 0 };
+  /** oil slicks on the road (set by the Sim): the AI does not stack slicks */
+  oils: OilSlick[] | null = null;
 
   constructor(private readonly iq: number, private readonly rng: () => number) {
     this.delay = lerp(A.reaction[0], A.reaction[1], Math.min(1, Math.max(0, iq))) * (0.8 + 0.4 * rng());
@@ -88,7 +93,9 @@ export class AiItemUser {
       case 'oil': {
         // a slick only helps on a straight: in a bend the victim leaves the road and the whole pack piles up behind it
         if (!sur.behindInLane && !overdue) return false;
+        if (sur.behindCount > A.oilMaxPack) return false;
         const s = track.nearest(car.x, car.y, hintS).s;
+        if (this.oils) for (const o of this.oils) if (o.active && Math.hypot(o.x - car.x, o.y - car.y) < A.oilNoStack) return false;
         for (let d = -A.oilCalmBehind; d <= 12; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.oilCalmCurv) return false;
         return true;
       }

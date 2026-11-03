@@ -375,7 +375,7 @@ export class AiDriver {
         this.nearDs[n] = ds;
         this.nearW[n] = 1;
         this.nearSpeed[n] = 99;               // never a speed cap: steer around it
-        this.nearExtra[n] = o.radius - 0.4;
+        this.nearExtra[n] = o.radius - 0.9;
         n++;
       }
     }
