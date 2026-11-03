@@ -505,14 +505,17 @@ export class Sim implements ISim {
     for (let f = this.simCars[i].body.getFixtureList(); f; f = f.getNext()) f.setSensor(true);
   }
 
-  /** Puts a stuck AI car back onto the centre of the road, facing forward, on a free spot. */
+  /**
+   * Puts a stuck AI car back onto the centre of the road, facing forward, on a free spot: at its nearest road point or
+   * behind it, never ahead (a respawn must not gain ground, and it never skips a lap gate).
+   */
   private respawn(i: number): void {
     const car = this.simCars[i];
     const st = car.state;
     const near = this.track.nearest(st.x, st.y, this.tracker.hints[i]);
     let best: { x: number; y: number; angle: number } | null = null;
     for (let k = 0; k < 8 && !best; k++) {
-      const smp = this.track.sampleAt(near.s + 2 + k * 5);
+      const smp = this.track.sampleAt(near.s - k * 5);
       let free = true;
       for (const o of this.cars) {
         if (o !== st && Math.hypot(o.x - smp.x, o.y - smp.y) < 6) { free = false; break; }

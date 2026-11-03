@@ -16,7 +16,11 @@ initLang(langParam, langParam);
 const save: SaveData = defaultSave();
 save.settings.lang = langParam;
 save.money = params.has('poor') ? 120 : 1830;
-save.upgrades = { engine: 2, grip: 1, armor: 4 };
+save.carUpgrades = { scrapper: { engine: 2, grip: 1, armor: 4 } };
+save.car = params.get('car') ?? 'scrapper';
+save.carRaces = { scrapper: 7, brick: 2 };
+save.carWins = { scrapper: 3 };
+if (params.get('rivals')) save.settings.rivals = params.get('rivals') as SaveData['settings']['rivals'];
 save.unlockedTracks = ['t1', 't2'];
 save.bestPlace = { t1: 1, t2: 4 };
 save.bestLap = { t1: 71.42, t2: 98.1 };
@@ -48,7 +52,7 @@ const noop = (): void => undefined;
 const ui = new UI(root, {
   start: noop, pause: noop, resume: noop, quit: noop, restart: noop, repair: noop, buy: noop,
   doubleReward: () => new Promise((r) => setTimeout(() => r(true), 600)),
-  settings: noop, color: noop, continueAfterResults: noop,
+  settings: noop, color: noop, continueAfterResults: noop, selectCar: noop, previewCar: noop,
 });
 
 const touch = screen.endsWith('Touch') || params.has('touch');
@@ -58,7 +62,8 @@ input.setLabels('GAS', 'BRAKE');
 switch (screen) {
   case 'menu': ui.showMainMenu(save); break;
   case 'tracks': ui.showTrackSelect(save); break;
-  case 'garage': ui.showGarage(save); break;
+  case 'garage': ui.showGarage(save, params.get('show') ?? undefined); break;
+  case 'rivals': ui.showTrackSelect(save); (document.querySelector('[data-act="rivals"]') as HTMLElement | null)?.click(); break;
   case 'settings': ui.showSettings(save); break;
   case 'hud':
   case 'hudTouch':

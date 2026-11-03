@@ -5,7 +5,8 @@ import { initLang, lang, t } from './i18n';
 import { AudioManager } from './audio/audio';
 import { InputController } from './input/input';
 import { applyRaceResult, buyUpgrade, nextTrackId, raceRewardParts, repairCost } from './meta/economy';
-import { makeOpponents, makePlayerSetup } from './meta/opponents';
+import { makeOpponents, makePlayerSetup, rivalChoiceOf } from './meta/opponents';
+import { carIdOr } from './meta/cars';
 import { defaultSave, loadSave, writeSave, type SaveStatus } from './meta/save';
 import { StuckWatch, pickResetPose } from './playerReset';
 import { platform } from './platform/bridge';
@@ -194,7 +195,13 @@ export class Game {
       nextTrack: (id) => { if (this.state === 'results') this.startRace(id); },
       retrySave: () => { this.reloadN = 0; this.scheduleReload(true); },
       useItem: () => this.useItem(),
-      buy: (b) => this.buy(b),
+      buy: (b, carId) => this.buy(b, carId),
+      selectCar: (id) => {
+        this.save = { ...this.save, car: carIdOr(id) };
+        this.renderer.showMenuScene(this.save.carColor, this.save.car);
+        void writeSave(this.save);
+      },
+      previewCar: (id) => this.renderer.showMenuScene(this.save.carColor, carIdOr(id)),
       doubleReward: () => this.doubleReward(),
       settings: (s) => this.setSettings(s),
       color: (i) => {
@@ -215,7 +222,7 @@ export class Game {
     this.repairIntent = 'none';
     this.input?.setEnabled(false);
     this.closeLevel('failed');
-    this.renderer.showMenuScene(this.save.carColor);
+    this.renderer.showMenuScene(this.save.carColor, this.save.car);
     const old = this.sim;
     this.sim = null;
     old?.dispose();
@@ -235,7 +242,7 @@ export class Game {
     const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(def.id));
     const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
     const player = makePlayerSetup(this.save, 'Player');
-    const cars = [player, ...makeOpponents(idx, player.stats, seed, this.save.carColor)];
+    const cars = [player, ...makeOpponents(idx, player.stats, seed, this.save.carColor, rivalChoiceOf(this.save))];
     const old = this.sim;
     this.sim = null;
     old?.dispose();
@@ -389,13 +396,13 @@ export class Game {
     sim.useItem();
   }
 
-  private buy(b: UpgradeBranch): void {
-    const next = buyUpgrade(this.save, b);
+  private buy(b: UpgradeBranch, carId?: string): void {
+    const next = buyUpgrade(this.save, b, carId);
     if (next) {
       this.save = next;
       void writeSave(this.save);
     }
-    this.ui.showGarage(this.save);   // overwrite the UI's optimistic copy with the truth
+    this.ui.showGarage(this.save, carId);   // overwrite the UI's optimistic copy with the truth
   }
 
   private setSettings(s: SaveData['settings']): void {

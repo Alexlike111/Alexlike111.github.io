@@ -3,12 +3,13 @@
 import './ui.css';
 import { CONFIG } from '../config';
 import { lang, setLangSetting, t } from '../i18n';
-import { buyUpgrade, canBuy, maxLevel, statsFor, upgradeCost, repairCost as repairPrice } from '../meta/economy';
+import { buyUpgrade, canBuy, upgradeCost, repairCost as repairPrice } from '../meta/economy';
 import { buildTrackGeometry } from '../track/spline';
 import { TRACKS } from '../track/tracks';
-import type { CarState, CarStats, ISim, ItemType, SaveData, UpgradeBranch, ZoneId } from '../types';
-import { UPGRADE_BRANCHES } from '../config';
+import type { CarState, ISim, ItemType, RivalMode, SaveData, UpgradeBranch, ZoneId } from '../types';
 import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icons';
+import { carGrid, carSvg, garageHtml, rivalLabel, rivalsSheetHtml, RIVAL_MODES, type GarageTab } from './garage';
+import { CAR_IDS, carIdOr, levelsOf, rivalModeOr } from '../meta/cars';
 
 export interface UiHandlers {
   start(trackId: string): void;
@@ -27,7 +28,12 @@ export interface UiHandlers {
   retrySave?(): void;
   /** Use the held power-up item (HUD item button). */
   useItem?(): void;
-  buy(b: UpgradeBranch): void;
+  /** Buy the next level of `b` for car `carId` (upgrades are per car). */
+  buy(b: UpgradeBranch, carId?: string): void;
+  /** Garage: drive this car from now on (every car is selectable). */
+  selectCar?(id: string): void;
+  /** Garage: show this car on the turntable while browsing (not selected yet). */
+  previewCar?(id: string): void;
   /** Resolve `false` when the ad did not reward (UI then keeps the button); `true`/void = reward granted. */
   doubleReward(): Promise<boolean | void>;
   settings(s: SaveData['settings']): void;
@@ -61,7 +67,6 @@ export function fmtTime(sec: number): string {
 }
 const fmtMoney = (n: number): string => Math.floor(n).toLocaleString(lang() === 'ru' ? 'ru-RU' : 'en-US');
 
-const hex = (c: number): string => '#' + c.toString(16).padStart(6, '0');
 const THEMES: Record<string, { a: string; b: string; road: string }> = {
   meadow: { a: '#58d66b', b: '#2a9d4b', road: '#fdf6e3' },
   desert: { a: '#ffb55a', b: '#d8782a', road: '#fff2d6' },
@@ -106,6 +111,9 @@ export class UI {
   private resultsState: { r: ResultsData; doubled: boolean; busy: boolean } | null = null;
   private armed: { act: string; timer: number } | null = null;
   private touchMode = false;
+  /** garage: car being looked at and the open tab */
+  private gCar = '';
+  private gTab: GarageTab = 'car';
 
   // HUD cache
   private hud: {
@@ -171,7 +179,10 @@ export class UI {
   setMoney(m: number): void { this.money = m; this.updateMoneyChip(); }
 
   showMainMenu(s: SaveData): void { this.enter('menu', s, () => this.renderMenu()); }
-  showGarage(s: SaveData): void { this.enter('garage', s, () => this.renderGarage()); }
+  showGarage(s: SaveData, carId?: string): void {
+    if (carId || !this.gCar || this.current?.name !== 'garage') this.gCar = carIdOr(carId ?? s.car);
+    this.enter('garage', s, () => this.renderGarage());
+  }
   showTrackSelect(s: SaveData): void { this.enter('tracks', s, () => this.renderTracks()); }
   showSettings(s: SaveData): void { this.enter('settings', s, () => this.renderSettings()); }
 
@@ -527,7 +538,12 @@ export class UI {
       case 'play': this.sfx('click'); if (save) this.showTrackSelect(save); break;
       case 'garage': this.sfx('click'); if (save) this.showGarage(save); break;
       case 'settings': this.sfx('click'); if (save) this.showSettings(save); break;
-      case 'back': this.sfx('click'); if (save) this.showMainMenu(save); break;
+      case 'back':
+        this.sfx('click');
+        // leaving the garage while looking at another car: the turntable goes back to the car you drive
+        if (save && this.current?.name === 'garage' && this.gCar && this.gCar !== carIdOr(save.car)) this.h.previewCar?.(carIdOr(save.car));
+        if (save) this.showMainMenu(save);
+        break;
       case 'track': {
         const id = el.dataset.id!;
         if (el.classList.contains('locked')) { this.sfx('error'); this.toast(t('track.lockedHint', { track: t(this.prevTrackKey(id)) })); break; }
@@ -547,15 +563,44 @@ export class UI {
       case 'buy': {
         const b = el.dataset.b as UpgradeBranch;
         if (!save) break;
-        if (!canBuy(save, b)) { this.sfx('error'); this.toast(upgradeCost(save.upgrades[b]) === null ? t('garage.maxed') : t('ui.notEnough')); break; }
-        const next = buyUpgrade(save, b);
+        const car = carIdOr(this.gCar || save.car);
+        if (!canBuy(save, b, car)) { this.sfx('error'); this.toast(upgradeCost(levelsOf(save, car)[b]) === null ? t('garage.maxed') : t('ui.notEnough')); break; }
+        const next = buyUpgrade(save, b, car);
         if (!next) break;
         this.sfx('buy');
         this.save = next;
-        this.h.buy(b);
+        this.h.buy(b, car);
         this.renderGarage();
         break;
       }
+      case 'gcar': case 'gstep': {
+        if (!save) break;
+        const cur = CAR_IDS.indexOf(carIdOr(this.gCar || save.car));
+        const id = act === 'gcar' ? carIdOr(el.dataset.id) : CAR_IDS[(cur + Number(el.dataset.d) + CAR_IDS.length) % CAR_IDS.length];
+        this.sfx('click');
+        this.gCar = id;
+        this.h.previewCar?.(id);
+        this.renderGarage();
+        this.layers.screen.querySelector<HTMLElement>(`.g-chip[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
+        break;
+      }
+      case 'gtab': this.sfx('click'); this.gTab = (el.dataset.tab as GarageTab) || 'car'; this.renderGarage(); break;
+      case 'gselect': {
+        if (!save) break;
+        const id = carIdOr(el.dataset.id);
+        if (id === carIdOr(save.car)) { this.sfx('click'); break; }
+        this.sfx('buy');
+        this.save = { ...save, car: id };
+        this.h.selectCar?.(id);
+        this.toast(t('garage.nowDriving', { car: t('car.' + id) }));
+        this.renderGarage();
+        break;
+      }
+      case 'rivals': this.sfx('click'); this.openRivals(); break;
+      case 'rival': this.sfx('click'); this.setRivals(el.dataset.v as RivalMode); break;
+      case 'rivalCar': this.sfx('click'); this.setRivals('pick', carIdOr(el.dataset.id)); break;
+      case 'sheetClose': this.sfx('click'); this.closeSheet(); break;
+      case 'noop': break;
       case 'set': this.changeSetting(el.dataset.k!, el.dataset.v!); break;
       case 'resume': this.sfx('click'); this.h.resume(); break;
       case 'pauseBtn': this.sfx('click'); this.h.pause(); break;
@@ -619,6 +664,7 @@ export class UI {
     else if (k === 'autoGas') s.autoGas = v === '1';
     else if (k === 'camera') s.camera = v as SaveData['settings']['camera'];
     else if (k === 'muted') s.muted = v === '1';
+    else if (k === 'rivals') { s.rivals = rivalModeOr(v); if (s.rivals === 'pick' && !s.rivalCar) s.rivalCar = carIdOr(this.save?.car); }
     this.sfx('click');
     this.settings = s;
     if (this.save) this.save = { ...this.save, settings: s };
@@ -697,63 +743,55 @@ export class UI {
         </div>` : `<div class="best lockbadge">${icon('lock')}</div>`}
       </article>`;
     }).join('');
-    this.setScreen('tracks', `${this.header('tracks.title')}<div class="cards">${cards}</div>`);
-  }
-
-  private statValues(stats: CarStats): Record<'speed' | 'accel' | 'grip' | 'armor', number> {
-    return { speed: stats.topSpeed * 3.6, accel: stats.enginePower, grip: stats.grip, armor: stats.armor };
+    const car = carIdOr(s.car), r = this.rivalState();
+    const paint = CONFIG.render.carColors[s.carColor % CONFIG.render.carColors.length];
+    const pre = `<div class="prerace">
+      <button class="pr-btn" data-act="garage"><small>${esc(t('prerace.yourCar'))}</small>${carSvg(car, paint)}<b>${esc(t('car.' + car))}</b></button>
+      <button class="pr-btn" data-act="rivals"><small>${esc(t('rivals.title'))}</small><b>${esc(rivalLabel(r.mode, r.car))}</b>${icon('gear')}</button>
+    </div>`;
+    this.setScreen('tracks', `${this.header('tracks.title')}${pre}<div class="cards">${cards}</div>`);
   }
 
   private renderGarage(): void {
     const s = this.save!;
-    const cur = statsFor(s.upgrades);
-    const base = statsFor({ engine: 0, grip: 0, armor: 0 });
-    const top = statsFor({ engine: maxLevel(), grip: maxLevel(), armor: maxLevel() });
-    const nextOf = (b: UpgradeBranch): CarStats => statsFor({ ...s.upgrades, [b]: Math.min(maxLevel(), s.upgrades[b] + 1) });
-    const cv = this.statValues(cur), bv = this.statValues(base), tv = this.statValues(top);
-    const nvEng = this.statValues(nextOf('engine')), nvGrip = this.statValues(nextOf('grip')), nvArm = this.statValues(nextOf('armor'));
-    const rows: { key: 'speed' | 'accel' | 'grip' | 'armor'; ic: string; next: number; unit: string }[] = [
-      { key: 'speed', ic: icon('speed'), next: nvEng.speed, unit: ' ' + t('unit.kmh') },
-      { key: 'accel', ic: icon('bolt'), next: nvEng.accel, unit: '' },
-      { key: 'grip', ic: icon('tyre'), next: nvGrip.grip, unit: '' },
-      { key: 'armor', ic: icon('shield'), next: nvArm.armor, unit: '' },
-    ];
-    const frac = (v: number, k: 'speed' | 'accel' | 'grip' | 'armor'): number => 0.14 + 0.86 * Math.max(0, Math.min(1, (v - bv[k]) / (tv[k] - bv[k] || 1)));
-    const fmtVal = (v: number, k: string): string => (k === 'speed' ? String(Math.round(v)) : String(Math.round((v / (k === 'accel' ? base.enginePower : k === 'grip' ? base.grip : base.armor)) * 100)));
-    const statHtml = rows.map((r) => {
-      const c = frac(cv[r.key], r.key), n = frac(r.next, r.key);
-      const gain = Math.max(0, n - c);
-      const dv = Math.round(r.key === 'speed' ? r.next - cv[r.key] : ((r.next - cv[r.key]) / (r.key === 'accel' ? base.enginePower : r.key === 'grip' ? base.grip : base.armor)) * 100);
-      return `<div class="stat s-${r.key}" title="${esc(t('stat.' + r.key))}"><span class="si">${r.ic}</span><span class="sl">${esc(t('stat.' + r.key))}</span>
-        <div class="bar2"><i class="cur" style="width:${(c * 100).toFixed(1)}%"></i><i class="gain" style="left:${(c * 100).toFixed(1)}%;width:${(gain * 100).toFixed(1)}%"></i></div>
-        <span class="sv">${fmtVal(cv[r.key], r.key)}${r.key === 'speed' ? '' : '%'}${dv > 0 ? `<em>+${dv}</em>` : ''}</span></div>`;
-    }).join('');
+    if (!this.gCar) this.gCar = carIdOr(s.car);
+    const keepScroll = this.layers.screen.querySelector<HTMLElement>('.g-strip')?.scrollLeft ?? 0;
+    this.setScreen('garage', garageHtml({ save: s, shown: this.gCar, tab: this.gTab, fmtMoney, header: this.header('garage.title') }));
+    const strip = this.layers.screen.querySelector<HTMLElement>('.g-strip');
+    if (strip) strip.scrollLeft = keepScroll;
+  }
 
-    const swatches = CONFIG.render.carColors.map((c, i) =>
-      `<button class="swatch${s.carColor === i ? ' on' : ''}" data-act="color" data-i="${i}" style="--c:${hex(c)}" aria-label="${esc(t('garage.color'))} ${i + 1}" aria-pressed="${s.carColor === i}"><i class="disc">${s.carColor === i ? icon('check') : ''}</i></button>`).join('');
+  // ------------------------------------------------------------------ rivals (pre-race sheet + settings)
 
-    const ups = UPGRADE_BRANCHES.map((b) => {
-      const lvl = s.upgrades[b];
-      const cost = upgradeCost(lvl);
-      const afford = cost !== null && s.money >= cost;
-      const pips = Array.from({ length: maxLevel() }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('');
-      const ic = b === 'engine' ? icon('engine') : b === 'grip' ? icon('tyre') : icon('shield');
-      const btn = cost === null
-        ? `<button class="btn buy max" disabled><span>${esc(t('garage.max'))}</span></button>`
-        : `<button class="btn buy ${afford ? 'green' : 'cant'}" data-act="buy" data-b="${b}" aria-label="${esc(t('garage.buy'))}"><span class="cost">${icon('coin')}<b>${fmtMoney(cost)}</b></span></button>`;
-      return `<div class="up ${b}">
-        <div class="up-ic">${ic}</div>
-        <div class="up-main"><div class="up-name">${esc(t('up.' + b))}<small>${lvl}/${maxLevel()}</small></div><div class="pips">${pips}</div><div class="up-desc">${esc(t('up.' + b + '.desc'))}</div></div>
-        ${btn}
-      </div>`;
-    }).join('');
+  private rivalState(): { mode: RivalMode; car?: string } {
+    return { mode: rivalModeOr(this.settings.rivals), car: this.settings.rivalCar };
+  }
 
-    this.setScreen('garage', `
-      ${this.header('garage.title')}
-      <div class="g-colors panel"><span class="lab">${esc(t('garage.color'))}</span><div class="swatches">${swatches}</div></div>
-      <div class="g-view" aria-hidden="true"></div>
-      <div class="g-stats panel"><div class="ph">${esc(t('garage.stats'))}</div><div class="stat-list">${statHtml}</div></div>
-      <div class="g-ups panel"><div class="ph">${esc(t('garage.upgrades'))}</div>${ups}</div>`);
+  private setRivals(mode: RivalMode, car?: string): void {
+    const s = { ...this.settings, rivals: rivalModeOr(mode) };
+    if (car) s.rivalCar = car;
+    else if (s.rivals === 'pick' && !s.rivalCar) s.rivalCar = carIdOr(this.save?.car);
+    this.settings = s;
+    if (this.save) this.save = { ...this.save, settings: s };
+    this.h.settings({ ...s });
+    this.rerender();
+  }
+
+  private openRivals(): void {
+    this.overlayRender = () => this.renderRivalsSheet();
+    this.renderRivalsSheet();
+  }
+
+  private renderRivalsSheet(): void {
+    const r = this.rivalState();
+    const s = this.save;
+    this.layers.overlay.innerHTML = rivalsSheetHtml(r.mode, r.car, carIdOr(s?.car), CONFIG.render.carColors[(s?.carColor ?? 0) % CONFIG.render.carColors.length]);
+  }
+
+  private closeSheet(): void {
+    this.overlayRender = null;
+    this.layers.overlay.replaceChildren();
+    if (this.current?.name === 'tracks') this.renderTracks();
   }
 
   private seg(k: string, cur: string, opts: { v: string; label: string }[]): string {
@@ -786,6 +824,8 @@ export class UI {
           { v: 'rotating', label: t('settings.camera.rotating') }, { v: 'fixed', label: t('settings.camera.fixed') },
         ]), t('settings.camera.hint'))}
         ${row(st.muted ? icon('speakerOff') : icon('speakerOn'), t('settings.sound'), toggle('muted', !st.muted))}
+        ${row(icon('trophy'), t('rivals.title'), this.seg('rivals', rivalModeOr(st.rivals), RIVAL_MODES.map((m) => ({ v: m, label: t('rivals.short.' + m) }))), t('rivals.' + rivalModeOr(st.rivals) + '.hint'))}
+        ${rivalModeOr(st.rivals) === 'pick' ? `<div class="srow s-cars">${carGrid('rivalCar', carIdOr(st.rivalCar ?? this.save?.car), CONFIG.render.carColors[2])}</div>` : ''}
       </div>`);
   }
 

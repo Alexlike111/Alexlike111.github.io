@@ -43,6 +43,18 @@ export class SimCar {
   private preVx = 0;
   private preVy = 0;
   private preW = 0;
+  /** impact layer (world frame): sideways velocity and spin a collision gave the car, decaying on their own (CONFIG.car.impact) */
+  private impVx = 0;
+  private impVy = 0;
+  private impW = 0;
+  /** s left of the crash state after a heavy hit: steering and grip re-alignment suspended */
+  private crashT = 0;
+  private crashStats: CarStats | null = null;
+  private readonly crashInput: CarInput = { ...NEUTRAL };
+  /** side the first real hit came from (+1 right, -1 left, 0 none yet): which way a symmetric nose loss pulls */
+  private pullDir = 0;
+  /** per-piece hit windows (wall / guardrail / prop): impulses summed so the damage threshold applies once per hit */
+  private windows: { key: number; t: number; sum: number }[] = [];
   /** biggest single hit (N*s) per body side in the step being flushed: front, rear, left, right */
   private knock = new Float64Array(4);
   /** hitbox (m) of this model */
@@ -119,7 +131,12 @@ export class SimCar {
     this.body.setAngularVelocity(0);
     this.kin = { x, y, angle, vx: 0, vy: 0, angularVel: 0, steer: 0 };
     this.drift.reset();
+    this.preVx = 0; this.preVy = 0; this.preW = 0;
+    this.impVx = 0; this.impVy = 0; this.impW = 0; this.crashT = 0;
   }
+
+  /** Seconds left of the crash state (0 = driving normally). */
+  get crashTime(): number { return this.crashT; }
 
   /** integrateCar -> set body velocities. Reads current velocity from the body (collisions included). */
   preStep(surface: Surface = SURFACE_ROAD, dt: number = CONFIG.physics.dt): void {
@@ -127,7 +144,25 @@ export class SimCar {
     const p = b.getPosition(), v = b.getLinearVelocity();
     const k = this.kin;
     k.x = p.x; k.y = p.y; k.angle = b.getAngle();
-    k.vx = v.x; k.vy = v.y; k.angularVel = b.getAngularVelocity();
+    const bw = b.getAngularVelocity();
+    // ---- impact layer: what the contacts did to the car since our last preStep. The sideways part (car frame) and the spin
+    // are kept apart from the arcade model, which would turn a shove into forward speed and damp a spin out within 0.2 s
+    const IM = CONFIG.car.impact;
+    {
+      const ca = Math.cos(k.angle), sa = Math.sin(k.angle);
+      const dvx = v.x - this.preVx, dvy = v.y - this.preVy;
+      const dl = -dvx * sa + dvy * ca;
+      if (Math.abs(dl) >= IM.minDv) { this.impVx -= sa * dl; this.impVy += ca * dl; }
+      const dw = bw - this.preW;
+      if (Math.abs(dw) >= IM.minDw) this.impW += dw;
+      const kv = Math.exp(-IM.decay * dt), kw = Math.exp(-IM.spinDecay * dt);
+      this.impVx *= kv; this.impVy *= kv; this.impW *= kw;
+      const lim = IM.maxFrac * Math.hypot(v.x, v.y), im = Math.hypot(this.impVx, this.impVy);
+      if (im > lim) { const f = lim / Math.max(im, 1e-9); this.impVx *= f; this.impVy *= f; }
+      if (this.impW > IM.spinMax) this.impW = IM.spinMax; else if (this.impW < -IM.spinMax) this.impW = -IM.spinMax;
+      if (this.buffs.spinT > 0) this.impW = 0;      // the oil spin owns the rotation
+    }
+    k.vx = v.x - this.impVx; k.vy = v.y - this.impVy; k.angularVel = bw - this.impW;
     // ---- drift: entry / exit decisions; a clean exit with a charged tier kicks the car forward along the nose
     const sp = Math.hypot(k.vx, k.vy);
     const fwd = k.vx * Math.cos(k.angle) + k.vy * Math.sin(k.angle);
@@ -145,13 +180,26 @@ export class SimCar {
       o.shake = surface.shake;
       surface = o;
     }
-    const out = integrateCar(k, this.input, this.statsNow(), this.state.effects, surface, dt, dr.ctl);
+    // crash state after a heavy hit: no steering, (almost) no re-alignment of the slide onto the nose
+    let input = this.input, stats = this.statsNow();
+    if (this.crashT > 0) {
+      this.crashT -= dt;
+      const ci = this.crashInput;
+      ci.throttle = input.throttle; ci.brake = input.brake; ci.handbrake = input.handbrake; ci.drift = 0; ci.steer = 0;
+      input = ci;
+      const cs = this.crashStats ?? (this.crashStats = { ...stats });
+      Object.assign(cs, stats);
+      cs.grip = stats.grip * IM.crashGripMul;
+      stats = cs;
+    }
+    const out = integrateCar(k, input, stats, this.state.effects, surface, dt, dr.ctl);
     k.steer = out.steer;
     // oil slick: the car spins whatever the driver does (the model would damp a kick within a few steps)
-    const w = this.buffs.spinT > 0 ? this.buffs.spinRate() : out.angularVel;
-    b.setLinearVelocity({ x: out.vx, y: out.vy });
+    const w = this.buffs.spinT > 0 ? this.buffs.spinRate() : out.angularVel + this.impW;
+    const vx = out.vx + this.impVx, vy = out.vy + this.impVy;
+    b.setLinearVelocity({ x: vx, y: vy });
     b.setAngularVelocity(w);
-    this.preVx = out.vx; this.preVy = out.vy; this.preW = w;
+    this.preVx = vx; this.preVy = vy; this.preW = w;
     this.state.onCurb = surface.shake > 0 && surface.drag > 0 && surface.gripMul > 0.7;
     this.state.offRoad = !this.state.onCurb && (surface.drag > 0 || surface.gripMul < 1);
     if (this.scrapeCooldown > 0) this.scrapeCooldown -= dt;
@@ -178,10 +226,14 @@ export class SimCar {
     return b;
   }
 
-  /** Power-up shove: add a velocity change (m/s) to the body right now. */
-  kick(dvx: number, dvy: number): void {
+  /**
+   * Power-up shove: add a velocity change (m/s) to the body right now. A boost (default) is the car's own speed; `asImpact`
+   * (a shockwave hit) goes to the impact layer like a collision, so the tyres do not turn it into forward speed.
+   */
+  kick(dvx: number, dvy: number, asImpact = false): void {
     const v = this.body.getLinearVelocity();
     this.body.setLinearVelocity({ x: v.x + dvx, y: v.y + dvy });
+    if (!asImpact) { this.preVx += dvx; this.preVy += dvy; }
   }
 
   /** Ram shield on/off: a shielded car is heavier in collisions (mass x CONFIG.items.shield.massMul). */
@@ -241,10 +293,13 @@ export class SimCar {
    * The piece `otherId` (a static wall / guardrail / prop with outward contact normal n = (nx, ny), pointing from the
    * piece into the car) broke under this car in the step that just ran: the solver already bounced the car off it.
    * Restore the approach speed along the normal to `keep` of what it was before the solver ran (the car plows through),
-   * give back the spin the contact caused, and shrink the queued damage of that piece to the impulse of the smaller
-   * speed change (never more than `damageCap` N*s). Tangential speed is left as the solver produced it.
+   * give back the spin the contact caused, and soften the queued damage of that piece: the impulse that breaks the piece
+   * (`breakImpulse`) is charged in full, only the part above it shrinks to the impulse of the smaller speed change, never
+   * more than `damageCap` N*s in all. So a harder hit never costs less than a softer one. Tangential speed is left as the
+   * solver produced it.
    */
-  plowThrough(otherId: number, nx: number, ny: number, keep: number, damageCap: number): void {
+  plowThrough(otherId: number, nx: number, ny: number, keep: number, damageCap: number,
+    breakImpulse: number = damageCap / CONFIG.destruction.plowDamageCap): void {
     const b = this.body;
     const v = b.getLinearVelocity();
     const vnPre = this.preVx * nx + this.preVy * ny;      // < 0: moving into the piece
@@ -260,7 +315,7 @@ export class SimCar {
     const ratio = Math.max(0, Math.min(1, (vnNew - vnPre) / solverDv));
     for (const e of this.queue) {
       if (e.otherId !== otherId) continue;
-      e.impulse = Math.min(e.impulse * ratio, damageCap);
+      e.impulse = Math.min(damageCap, Math.min(e.impulse, breakImpulse) + Math.max(0, e.impulse - breakImpulse) * ratio);
     }
   }
 
@@ -271,9 +326,16 @@ export class SimCar {
       this.repaired = false;
       events.push({ type: 'repair', carId: s.id });
     }
+    // age the per-piece hit windows
+    const win = this.windows;
+    for (let i = win.length - 1; i >= 0; i--) {
+      win[i].t += CONFIG.physics.dt;
+      if (win[i].t > D.hitWindow) win.splice(i, 1);
+    }
     if (this.queue.length === 0) { this.regen(CONFIG.physics.dt); return; }
     const q = this.queue;
     this.queue = [];
+    const IM = C.impact;
 
     let biggest: QueuedImpact | null = null;
     const knock = this.knock;
@@ -286,8 +348,30 @@ export class SimCar {
       if (tr?.frontTakenMul !== undefined && zoneForLocalPoint(e.lx, e.ly, this.dims)[0] === 'front') mul *= tr.frontTakenMul;
       // mass normalisation: the same impulse is a bigger velocity change (more damage) for a lighter car; the no-damage
       // threshold applies to the normalised impulse, so a heavy car is not punished for its mass on walls
-      const hit = applyImpulseDamage(s.hp, e.lx, e.ly, e.impulse * mn, this.setup.stats.armor, mul, this.dims);
-      if (hit.damage > 0) this.sinceHit = 0;
+      let imp = e.impulse * mn;
+      if (e.other !== 'car') {
+        // one hit on a piece is a few solver steps (a glancing hit: 3-4 small ones): sum them, the threshold applies once
+        const key = e.otherId >= 0 ? e.otherId : -2;
+        let w = win.find((x) => x.key === key);
+        if (!w) { w = { key, t: 0, sum: 0 }; win.push(w); }
+        const thr = D.impulseThreshold;
+        const before = Math.max(0, w.sum - thr);
+        w.sum += imp;
+        const inc = Math.max(0, w.sum - thr) - before;
+        imp = inc > 0 ? thr + inc : 0;
+      }
+      const hit = applyImpulseDamage(s.hp, e.lx, e.ly, imp, this.setup.stats.armor, mul, this.dims);
+      if (hit.damage > 0) {
+        this.sinceHit = 0;
+        // remember the side of the first real hit: a symmetric nose loss pulls that way (seeded pick for a dead-centre hit)
+        if (this.pullDir === 0) this.pullDir = Math.abs(e.ly) > 0.05 ? (e.ly < 0 ? 1 : -1) : (this.rng() < 0.5 ? -1 : 1);
+      }
+      // a heavy hit: short crash state (no steering, the slide is not pulled back onto the nose)
+      const crashAt = IM.crashImpulse * (e.other === 'car' ? IM.crashCarMul : 1);
+      if (e.raw >= crashAt) {
+        const f = Math.min(1, e.raw / crashAt - 1);
+        this.crashT = Math.max(this.crashT, IM.crashTime[0] + (IM.crashTime[1] - IM.crashTime[0]) * f);
+      }
       // the bang (solver impulse, before plow-through softening) decides what is knocked off; armor makes parts stick better
       const k = KNOCK_SIDES.indexOf(hit.zones[0]);
       if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mn * mul) / Math.max(1, this.setup.stats.armor));
@@ -347,6 +431,8 @@ export class SimCar {
     s.wrecked = false;
     this.repaired = true;
     this.queue = [];
+    this.windows.length = 0;
+    this.pullDir = 0;
     this.refreshDamageState();
   }
 
@@ -354,7 +440,7 @@ export class SimCar {
     const s = this.state, D = CONFIG.damage;
     s.health = totalHealth(s.hp, s.zoneMaxHp);
     if (s.health <= D.wreckedBelow) s.wrecked = true; // sticky until repair()
-    const fx = computeEffects(s.hp, s.zoneMaxHp);
+    const fx = computeEffects(s.hp, s.zoneMaxHp, this.pullDir);
     if (s.wrecked) {
       fx.powerMul *= D.wreckPowerMul;
       fx.topSpeedMul = Math.min(fx.topSpeedMul, 0.45);

@@ -223,7 +223,7 @@ export class PowerUpSystem {
       }
       const ux = d > 1e-3 ? dx / d : Math.cos(me.angle), uy = d > 1e-3 ? dy / d : Math.sin(me.angle);
       const fall = 1 - d / S.radius;
-      if (!o.setup.stats.traits?.shockImmune) o.kick(ux * S.push * fall, uy * S.push * fall);   // a juggernaut is not pushed
+      if (!o.setup.stats.traits?.shockImmune) o.kick(ux * S.push * fall, uy * S.push * fall, true);   // a juggernaut is not pushed; the push is a hit (impact layer)
       o.buffs.nitroT = 0;                        // cancels Nitro
       const dmg = S.damage * (0.4 + 0.6 * fall);
       o.recordImpact(os.x - ux * 1.0, os.y - uy * 1.0, D.impulseThreshold + dmg / (D.impulseToDamage * D.carVsCarMul), 'car');

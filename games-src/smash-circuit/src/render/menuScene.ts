@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config';
 import type { CarState, ZoneId } from '../types';
 import { ZONES } from '../types';
-import { CarFleet, type CarGeometries } from './car';
+import { CarFleet, getCarGeometries } from './car';
 import type { Materials } from './materials';
 import type { ThemePalette } from './palette';
 import { propGeometry, treeGeometry, bushGeometry, rockGeometry } from './structures';
@@ -13,13 +13,17 @@ import { makeRng } from './util';
 
 export class MenuScene {
   readonly group = new THREE.Group();
-  readonly fleet: CarFleet;
+  fleet: CarFleet;
+  private mats: Materials;
+  private modelId: string = CONFIG.cars.starter;
+  private blobOn = false;
   private state: CarState;
   private t = 0;
   private disposables: { dispose(): void }[] = [];
   private car: THREE.Group;
 
-  constructor(geos: CarGeometries, mats: Materials, pal: ThemePalette) {
+  constructor(mats: Materials, pal: ThemePalette) {
+    this.mats = mats;
     // ground
     const tex = makeGroundTexture('meadow', pal);
     tex.repeat.set(10, 10);
@@ -74,7 +78,7 @@ export class MenuScene {
       detachedParts: [], wrecked: false, lap: 0, progress: 0, place: 1, finished: false, finishTime: 0, lastLapTime: 0, bestLapTime: 0,
       onCurb: false, offRoad: false,
     };
-    this.fleet = new CarFleet(geos, mats, 1);
+    this.fleet = new CarFleet(getCarGeometries(this.modelId), mats, 1);
     this.car = new THREE.Group();
     this.car.add(this.fleet.group);
     this.car.position.y = 0.55;
@@ -82,6 +86,21 @@ export class MenuScene {
   }
 
   setColor(i: number): void { this.state.colorIndex = i; }
+
+  /** Show another car model on the turntable (geometry is cached; only the small fleet is rebuilt). */
+  setModel(id: string): void {
+    const g = getCarGeometries(id);
+    if (g.modelId === this.modelId) return;
+    this.modelId = g.modelId;
+    this.car.remove(this.fleet.group);
+    this.fleet.dispose();
+    this.fleet = new CarFleet(g, this.mats, 1);
+    this.fleet.setBlobShadows(this.blobOn);
+    this.car.add(this.fleet.group);
+    this.fleet.update([{ x: 0, y: 0, angle: this.state.angle, state: this.state }], 0);
+  }
+
+  setBlobShadows(on: boolean): void { this.blobOn = on; this.fleet.setBlobShadows(on); }
 
   update(dt: number): void {
     this.t += dt;

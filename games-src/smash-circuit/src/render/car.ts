@@ -7,6 +7,9 @@ import type { CarPart, CarState, ZoneId } from '../types';
 import { GeoBuilder, concat } from './geo';
 import type { Materials } from './materials';
 import { clamp, lerp, makeRng } from './util';
+import { CHROME, MODEL_BUILDERS, type WheelSpec } from './carModels';
+
+export type { WheelSpec } from './carModels';
 
 const CR = CONFIG.render.car;
 const CFX = CONFIG.render.fx;
@@ -19,95 +22,27 @@ export const PART_LIST: BodyPart[] = ['bumperF', 'bumperR', 'hood', 'doorL', 'do
 /** wheel order of the wheel instances (k = 0..3 per car): (+x,+z) FL, (+x,-z) FR, (-x,+z) RL, (-x,-z) RR */
 export const WHEEL_LIST: WheelPart[] = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 
-/** pivot (car-local) each part bends around when damaged */
-const PIVOT: Record<BodyPart, [number, number, number]> = {
-  bumperF: [1.75, 0.55, 0], bumperR: [-1.75, 0.55, 0],
-  hood: [0.5, 0.9, 0], doorL: [0.7, 0.62, 0.9], doorR: [0.7, 0.62, -0.9],
-  spoiler: [-1.85, 1.1, 0], mirrorL: [0.5, 0.98, 0.9], mirrorR: [0.5, 0.98, -0.9],
-};
-
-const DARK = 0x1c1f27, GLASS = 0x2f5273, CHROME = 0xdfe6f1, STRIPE = 0xffffff;
-
 export interface CarGeometries {
+  /** roster id of this model */
+  modelId: string;
   body: THREE.BufferGeometry;
   parts: Record<BodyPart, THREE.BufferGeometry>;
+  /** the shared reference wheel (radius CR.wheelRadius, width CR.wheelWidth); every model scales it per wheel */
   wheel: THREE.BufferGeometry;
+  /** wheel layout of this model (FL, FR, RL, RR) */
+  wheels: WheelSpec[];
+  /** pivot (car-local) each part bends around when damaged (derived from the part's bounding box) */
+  pivots: Record<BodyPart, [number, number, number]>;
   lights: THREE.BufferGeometry;
   ghost: THREE.BufferGeometry;
+  /** footprint (m) of the whole model, for the blob shadow */
+  length: number; width: number;
 }
 
-export function buildCarGeometries(): CarGeometries {
-  // ---------------- body shell (non-detachable)
-  const b = new GeoBuilder();
-  // underbody / sills
-  b.box(3.7, 0.16, 1.5, { pos: [0, 0.36, 0], color: DARK });
-  // main tub (subdivided: the damage shader crumples it per vertex)
-  b.box(3.5, 0.5, 1.74, { pos: [0, 0.6, 0], color: 0xffffff, paint: 1, vgrad: [0.3, 0.9, 0.78, 1], seg: [10, 2, 5], noBottom: true });
-  // rounded-looking shoulders (slightly narrower upper slab)
-  b.box(3.3, 0.14, 1.56, { pos: [0, 0.91, 0], color: 0xffffff, paint: 1, seg: [10, 1, 5], noBottom: true });
-  // what a lost panel uncovers: engine bay under the hood, crash bars behind the bumpers, brake hubs inside the wheels
-  b.box(1.25, 0.1, 1.3, { pos: [1.1, 0.95, 0], color: 0x24262c });
-  b.box(0.55, 0.1, 0.6, { pos: [1.0, 0.975, 0.1], color: 0x8d939e });       // engine block
-  b.box(0.3, 0.07, 0.3, { pos: [1.45, 0.98, -0.42], color: 0xc9a227 });    // battery
-  b.box(0.12, 0.07, 1.0, { pos: [1.62, 0.98, 0], color: 0x3a3d45 });       // radiator
-  for (const sx of [-1, 1]) b.box(0.16, 0.2, 1.5, { pos: [sx * 1.8, 0.56, 0], color: 0x2b2d33 });
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    b.cyl(0.24, 0.24, 0.1, 8, { pos: [sx * WX, WR, sz * (WZ + 0.11)], rot: [Math.PI / 2, 0, 0], color: 0xa3a7ae });
-  }
-  // front/rear fenders over the inner half of each wheel
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    b.box(1.1, 0.16, 0.34, { pos: [sx * WX, 0.97, sz * (WZ - 0.1)], color: 0xffffff, paint: 1 });
-  }
-  // cabin: dark glass frustum + paint roof
-  b.frustum(1.95, 1.56, 1.2, 1.18, 0.44, { pos: [-0.35, 1.2, 0], color: GLASS, vgrad: [1.0, 1.45, 0.8, 1.15] });
-  b.box(1.1, 0.07, 1.14, { pos: [-0.35, 1.44, 0], color: 0xffffff, paint: 1 });
-  // roof + trunk racing stripes (white)
-  for (const sz of [-1, 1]) {
-    b.box(1.1, 0.012, 0.16, { pos: [-0.35, 1.485, sz * 0.2], color: STRIPE });
-    b.box(1.05, 0.012, 0.16, { pos: [-1.27, 1.0, sz * 0.2], color: STRIPE });
-  }
-  // trunk deck
-  b.box(1.05, 0.1, 1.5, { pos: [-1.27, 0.95, 0], color: 0xffffff, paint: 1, seg: [3, 1, 4], noBottom: true });
-  // little side-skirt accent
-  for (const sz of [-1, 1]) b.box(2.4, 0.06, 0.06, { pos: [0, 0.5, sz * 0.9], color: 0xffffff });
-  const body = b.build();
-
-  // ---------------- detachable parts
-  const hood = new GeoBuilder()
-    .box(1.35, 0.13, 1.56, { pos: [1.12, 0.97, 0], color: 0xffffff, paint: 1 })
-    .box(1.2, 0.012, 0.16, { pos: [1.1, 1.04, 0.2], color: STRIPE })
-    .box(1.2, 0.012, 0.16, { pos: [1.1, 1.04, -0.2], color: STRIPE })
-    .box(0.35, 0.05, 0.5, { pos: [0.9, 1.06, 0], color: DARK }) // vent scoop
-    .build();
-  const bumperF = new GeoBuilder()
-    .box(0.4, 0.38, 1.74, { pos: [1.95, 0.6, 0], color: 0xffffff, paint: 1, vgrad: [0.4, 0.8, 0.8, 1] })
-    .box(0.55, 0.07, 1.64, { pos: [1.96, 0.4, 0], color: DARK })
-    .box(0.06, 0.16, 0.9, { pos: [2.16, 0.62, 0], color: DARK })       // grille
-    .build();
-  const bumperR = new GeoBuilder()
-    .box(0.4, 0.38, 1.74, { pos: [-1.95, 0.6, 0], color: 0xffffff, paint: 1, vgrad: [0.4, 0.8, 0.8, 1] })
-    .box(0.5, 0.07, 1.64, { pos: [-1.96, 0.4, 0], color: DARK })
-    .cyl(0.09, 0.09, 0.4, 7, { pos: [-2.2, 0.5, 0.42], rot: [0, 0, Math.PI / 2], color: CHROME })
-    .cyl(0.09, 0.09, 0.4, 7, { pos: [-2.2, 0.5, -0.42], rot: [0, 0, Math.PI / 2], color: CHROME })
-    .build();
-  const mkDoor = (sz: number): THREE.BufferGeometry => new GeoBuilder()
-    .box(1.5, 0.36, 0.2, { pos: [-0.05, 0.64, sz * 0.94], color: 0xffffff, paint: 1, vgrad: [0.4, 0.85, 0.8, 1] })
-    .box(0.5, 0.05, 0.02, { pos: [0.1, 0.72, sz * 1.05], color: DARK })
-    .box(0.26, 0.26, 0.012, { pos: [-0.45, 0.66, sz * 1.045], color: 0xffffff })   // number roundel
-    .build();
-  const spoiler = new GeoBuilder()
-    .box(0.62, 0.07, 1.9, { pos: [-1.92, 1.3, 0], rot: [0, 0, 0.1], color: 0xffffff, paint: 1 })
-    .box(0.7, 0.34, 0.06, { pos: [-1.92, 1.2, 0.95], color: 0xffffff, paint: 1 })
-    .box(0.7, 0.34, 0.06, { pos: [-1.92, 1.2, -0.95], color: 0xffffff, paint: 1 })
-    .box(0.12, 0.34, 0.1, { pos: [-1.8, 1.1, 0.5], color: DARK })
-    .box(0.12, 0.34, 0.1, { pos: [-1.8, 1.1, -0.5], color: DARK })
-    .build();
-  const mkMirror = (sz: number): THREE.BufferGeometry => new GeoBuilder()
-    .box(0.2, 0.12, 0.3, { pos: [0.5, 1.02, sz * 1.0], color: 0xffffff, paint: 1 })
-    .box(0.08, 0.1, 0.14, { pos: [0.5, 0.97, sz * 0.86], color: DARK })
-    .build();
-
-  // ---------------- wheel (axis = z): tyre, chrome disc, hub cap
+let sharedWheel: THREE.BufferGeometry | null = null;
+/** Reference wheel (axis = z): tyre, chrome disc, hub cap. Built once, shared by every model and fleet. */
+export function wheelGeometry(): THREE.BufferGeometry {
+  if (sharedWheel) return sharedWheel;
   const w = new GeoBuilder();
   w.cyl(WR, WR, WW, 12, { rot: [Math.PI / 2, 0, 0], color: 0x24272f, vgrad: [-WR, WR, 0.75, 1.1] });
   for (const sz of [-1, 1]) {
@@ -115,27 +50,63 @@ export function buildCarGeometries(): CarGeometries {
     // spokes dropped (they are ~2 px on a phone): chrome disc + gold hub cap, 160 triangles per wheel instead of 296
     w.cyl(WR * 0.14, WR * 0.14, 0.06, 6, { pos: [0, 0, sz * (WW / 2 + 0.04)], rot: [Math.PI / 2, 0, 0], color: 0xffcc33 });
   }
-  const wheel = w.build();
+  sharedWheel = w.build();
+  return sharedWheel;
+}
 
-  // ---------------- lights (basic material): head lamps constant, tail lamps tinted by the instance colour (brake light)
-  const l = new GeoBuilder();
-  for (const sz of [-1, 1]) {
-    l.box(0.12, 0.14, 0.34, { pos: [1.78, 0.86, sz * 0.58], color: 0xfff7c4 });
-    l.box(0.1, 0.15, 0.44, { pos: [-1.78, 0.86, sz * 0.58], color: 0xff2a1a, paint: 1 });
+function pivotOf(part: BodyPart, geo: THREE.BufferGeometry): [number, number, number] {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  switch (part) {
+    case 'bumperF': return [bb.min.x, cy, cz];
+    case 'bumperR': return [bb.max.x, cy, cz];
+    case 'hood': return [bb.min.x, bb.min.y, cz];
+    case 'doorL': return [bb.max.x, cy, bb.min.z];
+    case 'doorR': return [bb.max.x, cy, bb.max.z];
+    case 'spoiler': return [cx, bb.min.y, cz];
+    case 'mirrorL': return [cx, cy, bb.min.z];
+    default: return [cx, cy, bb.max.z];
   }
-  const lights = l.build();
+}
 
-  const parts: Record<BodyPart, THREE.BufferGeometry> = {
-    bumperF, bumperR, hood, doorL: mkDoor(1), doorR: mkDoor(-1), spoiler, mirrorL: mkMirror(1), mirrorR: mkMirror(-1),
-  };
-
+/** Build the geometries of one roster model (default: the starter). Use getCarGeometries() for the cached copy. */
+export function buildCarGeometries(modelId: string = CONFIG.cars.starter): CarGeometries {
+  const build = MODEL_BUILDERS[modelId] ?? MODEL_BUILDERS[CONFIG.cars.starter];
+  const m = build();
+  const wheel = wheelGeometry();
+  const pivots = {} as Record<BodyPart, [number, number, number]>;
+  for (const p of PART_LIST) pivots[p] = pivotOf(p, m.parts[p]);
   // merged silhouette for the ghost car
-  const wheelM = new THREE.Matrix4();
-  const list: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [{ geo: body }, { geo: lights }];
-  for (const p of PART_LIST) list.push({ geo: parts[p] });
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) list.push({ geo: wheel, matrix: wheelM.clone().makeTranslation(sx * WX, WR, sz * WZ) });
+  const list: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[] = [{ geo: m.body }, { geo: m.lights }];
+  for (const p of PART_LIST) list.push({ geo: m.parts[p] });
+  for (const k of m.wheels) list.push({ geo: wheel, matrix: new THREE.Matrix4().compose(new THREE.Vector3(k.x, k.r, k.z), new THREE.Quaternion(), new THREE.Vector3(k.r / WR, k.r / WR, k.w / WW)) });
   const ghost = concat(list);
-  return { body, parts, wheel, lights, ghost };
+  ghost.computeBoundingBox();
+  const size = ghost.boundingBox!.getSize(new THREE.Vector3());
+  return { modelId: MODEL_BUILDERS[modelId] ? modelId : CONFIG.cars.starter, body: m.body, parts: m.parts, wheel, wheels: m.wheels, pivots, lights: m.lights, ghost, length: size.x, width: size.z };
+}
+
+const geoCache = new Map<string, CarGeometries>();
+/** Cached geometries of a model: built once per session, shared by races, the garage and the ghost. */
+export function getCarGeometries(modelId: string | undefined): CarGeometries {
+  const id = modelId && MODEL_BUILDERS[modelId] ? modelId : CONFIG.cars.starter;
+  let g = geoCache.get(id);
+  if (!g) { g = buildCarGeometries(id); geoCache.set(id, g); }
+  return g;
+}
+
+/** Wheel layout of a model (FX: skid marks, tyre smoke and hub sparks come from the real wheels). */
+export function wheelLayout(modelId: string | undefined): WheelSpec[] { return getCarGeometries(modelId).wheels; }
+
+/** Release every cached car geometry (renderer dispose). */
+export function disposeCarGeometries(): void {
+  for (const g of geoCache.values()) {
+    for (const x of [g.body, g.lights, g.ghost, ...Object.values(g.parts)]) x.dispose();
+  }
+  geoCache.clear();
+  sharedWheel?.dispose();
+  sharedWheel = null;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -187,10 +158,13 @@ export class CarFleet {
   readonly count: number;
   /** currently drawn instance count */
   private shown: number;
+  /** blob shadow sized to this model's footprint */
+  private blobScale: THREE.Vector3;
 
   constructor(private geos: CarGeometries, mats: Materials, count: number) {
     this.count = count;
     this.shown = count;
+    this.blobScale = new THREE.Vector3(Math.max(0.8, geos.length / 4.4), 1, Math.max(0.8, geos.width / 2.1));
     this.spin = new Float32Array(count);
     this.dentSeed = new Float32Array(count * 4);
     this.lightLevel = new Float32Array(count).fill(0.5);
@@ -253,7 +227,7 @@ export class CarFleet {
     const raw = Math.max(0, 1 - hpFrac - CFX.bendStart) / (1 - CFX.bendStart);   // 0 healthy .. 1 destroyed
     if (raw < 0.004) return _m.identity();
     const dm = Math.pow(raw, 0.6) * 1.35;
-    const pv = PIVOT[part];
+    const pv = this.geos.pivots[part];
     const s = this.dentSeed;
     const j = id * 4;
     let rx = 0, ry = 0, rz = 0, sx = 1, tx = 0, tz = 0;
@@ -308,7 +282,7 @@ export class CarFleet {
       _c.copy(col).lerp(BURNT, dirt);
       this.body.setColorAt(i, _c);
       this.body.setMatrixAt(i, bodyM);
-      this.blob.setMatrixAt(i, _t.compose(_v.set(P.x + 0.5, 0.05, P.y + 0.4), _q.setFromAxisAngle(_ay, -P.angle), _one));
+      this.blob.setMatrixAt(i, _t.compose(_v.set(P.x + 0.5, 0.05, P.y + 0.4), _q.setFromAxisAngle(_ay, -P.angle), this.blobScale));
       this.blob.setColorAt(i, BLOB_COLOR);
 
       // ---- body crumple per end of the car (front, rear, left, right): shader pulls those vertices in and scuffs the paint
@@ -331,21 +305,20 @@ export class CarFleet {
       }
 
       // ---- wheels
-      this.spin[i] += (speed * dt) / WR;
+      this.spin[i] += (speed * dt) / WR;    // angle of the reference wheel; each wheel turns by its own radius below
       const steerYaw = st.steer * CR.maxSteerVisual;
       const wz: ZoneId[] = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
-      let k = 0;
-      for (const sx of [1, -1]) {
-        for (const sz of [1, -1]) {
-          if (dp.includes(WHEEL_LIST[k])) { this.wheels.setMatrixAt(i * 4 + k, ZERO); k++; continue; }
-          const hp = clamp(st.hp[wz[k]] / zmax, 0, 1);
-          const camber = (1 - hp) * 0.35 * sz;
-          _e.set(camber, sx > 0 ? steerYaw : 0, -this.spin[i], 'YXZ');
-          _q.setFromEuler(_e);
-          _m.compose(_v.set(sx * WX, WR, sz * WZ), _q, _one);
-          this.wheels.setMatrixAt(i * 4 + k, _t.multiplyMatrices(_b, _m));
-          k++;
-        }
+      const W = this.geos.wheels;
+      for (let k = 0; k < 4; k++) {
+        if (dp.includes(WHEEL_LIST[k])) { this.wheels.setMatrixAt(i * 4 + k, ZERO); continue; }
+        const w = W[k];
+        const sz = w.z >= 0 ? 1 : -1;
+        const hp = clamp(st.hp[wz[k]] / zmax, 0, 1);
+        const camber = (1 - hp) * 0.35 * sz;
+        _e.set(camber, k < 2 ? steerYaw : 0, -this.spin[i] * (WR / w.r), 'YXZ');
+        _q.setFromEuler(_e);
+        _m.compose(_v.set(w.x, w.r, w.z), _q, _sc.set(w.r / WR, w.r / WR, w.w / WW));
+        this.wheels.setMatrixAt(i * 4 + k, _t.multiplyMatrices(_b, _m));
       }
 
       // ---- brake / tail lights: dim idle, bright on brake or handbrake
@@ -380,3 +353,44 @@ export function carLocalToWorld(x: number, y: number, angle: number, lx: number,
   return { x: x + c * lx - s * ly, y: y + s * lx + c * ly };
 }
 export const CAR_DIMS = { wheelX: WX, wheelZ: WZ, wheelR: WR, lerp };
+
+/**
+ * Cars of several models in one race: one CarFleet (a handful of instanced meshes) per model present, cars mapped onto
+ * their model's fleet. `models[i]` = model id of car i (same order as the poses passed to update).
+ */
+export class CarFleets {
+  readonly group = new THREE.Group();
+  readonly fleets: CarFleet[] = [];
+  private slot: { fleet: number; k: number }[] = [];
+  private sub: CarPose[][] = [];
+
+  constructor(mats: Materials, models: (string | undefined)[]) {
+    const byModel = new Map<string, number>();
+    const counts: number[] = [];
+    const ids: string[] = [];
+    for (const m of models) {
+      const id = getCarGeometries(m).modelId;
+      let f = byModel.get(id);
+      if (f === undefined) { f = ids.length; byModel.set(id, f); ids.push(id); counts.push(0); }
+      this.slot.push({ fleet: f, k: counts[f]++ });
+    }
+    ids.forEach((id, f) => {
+      const fleet = new CarFleet(getCarGeometries(id), mats, counts[f]);
+      this.fleets.push(fleet);
+      this.group.add(fleet.group);
+      this.sub.push([]);
+    });
+  }
+
+  get meshes(): THREE.InstancedMesh[] { return this.fleets.flatMap((f) => f.meshes); }
+  setBlobShadows(on: boolean): void { for (const f of this.fleets) f.setBlobShadows(on); }
+
+  update(poses: CarPose[], dt: number): void {
+    for (const s of this.sub) s.length = 0;
+    const n = Math.min(poses.length, this.slot.length);
+    for (let i = 0; i < n; i++) { const sl = this.slot[i]; this.sub[sl.fleet][sl.k] = poses[i]; }
+    for (let f = 0; f < this.fleets.length; f++) if (this.sub[f].length) this.fleets[f].update(this.sub[f], dt);
+  }
+
+  dispose(): void { for (const f of this.fleets) f.dispose(); }
+}

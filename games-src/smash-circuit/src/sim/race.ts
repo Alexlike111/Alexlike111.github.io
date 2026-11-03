@@ -161,8 +161,10 @@ export class RaceTracker {
       if (driven) {
         this.unwrapped[i] += delta;
         if (dt > 0) this.rate[i] += (delta / dt - this.rate[i]) * Math.min(1, dt * 0.6);
+      } else if (small) {
+        this.debt[i] += delta;                       // beside / far off the road: not credited, signed (back and forth nets out)
       } else if (delta < 0 && -delta <= P.gateJumpTolerance) {
-        this.unwrapped[i] += delta;                  // going back never helps: always charged
+        this.unwrapped[i] += delta;                  // a hop back (respawn behind) never helps: always charged
       } else if (delta > 0) {
         this.debt[i] += delta;                       // jumped forward (cut, leg switch, teleport): not credited
       }

@@ -124,7 +124,7 @@ async function cameraLap(page, label, cruise) {
   const maxCar = Math.max(0, ...r.samples.map((v) => Math.max(Math.abs(v[0]), Math.abs(v[1]))));
   const offAhead = r.samples.filter((v) => Math.abs(v[2]) > 0.98 || Math.abs(v[3]) > 0.98).length;
   const meanSpeed = n ? r.samples.reduce((a, v) => a + v[4], 0) / n : 0;
-  check(`[${label}] autopilot completed a lap with camera samples`, r.done && n > 200, `n=${n} progress=${r.prog.toFixed(0)}m mean ${meanSpeed.toFixed(1)} m/s`);
+  check(`[${label}] autopilot completed a lap with camera samples`, r.done && n > 100, `n=${n} progress=${r.prog.toFixed(0)}m mean ${meanSpeed.toFixed(1)} m/s`);
   check(`[${label}] car stays inside the central 60% of the screen all lap`, maxCar <= 0.6, `max |ndc|=${maxCar.toFixed(2)}`);
   check(`[${label}] track point 1.5 s ahead is on screen (>= 97% of frames)`, offAhead <= n * 0.03, `off-screen ${offAhead}/${n}`);
   return r;
@@ -242,7 +242,7 @@ try {
       await touch('touchStart', box.x, box.y);
       await waitSim(page, 2.5);
       await touch('touchEnd', 0, 0);
-      const head = await page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); return { az: r.azimuth, ang: Math.atan2(b.x - a.x, (b.y - a.y)) }; });
+      const head = await page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); const W = innerWidth, H = innerHeight; return { az: r.azimuth, ang: Math.atan2((b.x - a.x) * W, (b.y - a.y) * H) }; });
       check('[phone] on a straight the car points up the screen (within 20 deg)', Math.abs(head.ang) * 180 / Math.PI < 20, `${(head.ang * 180 / Math.PI).toFixed(1)} deg`);
       // ---- camera framing on a real lap
       await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });

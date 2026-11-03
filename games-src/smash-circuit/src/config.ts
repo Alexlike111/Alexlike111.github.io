@@ -63,6 +63,22 @@ export const CONFIG = {
     assistMargin: 1.2,        // m inside the edge where the assist starts
     assistMax: 0.3,           // max steer added
     assistMaxAngle: 0.6,      // rad: heading error above which the assist stays out (deliberate smashes, U-turns)
+    // ---- appended: impact layer (audit #13, P1/P2) ----
+    // what a collision does to the car is kept apart from the arcade model, so grip and yaw damping cannot erase it at once:
+    // the sideways part of the solver's velocity change (car frame) and its spin decay on their own
+    impact: {
+      minDv: 0.5,             // m/s: a step's sideways velocity change from contacts at least this big goes to the impact layer
+      decay: 3.5,             // 1/s decay of the impact velocity (a 10 m/s shove slides ~3 m)
+      maxFrac: 0.6,           // |impact velocity| <= this x the car's speed
+      minDw: 0.25,            // rad/s: a step's spin change from contacts at least this big goes to the impact spin
+      spinDecay: 1.5,         // 1/s decay of the impact spin (a hard hit can spin the car out)
+      spinMax: 3.5,           // rad/s cap of the impact spin
+      lowSpeed: [0.5, 1.5] as [number, number], // m/s forward speed band below which the model only damps sideways speed (never turns it into forward / reverse)
+      crashImpulse: 12000,    // N*s of one solver hit (~36 km/h square into a wall) that starts the crash state (car-car x crashCarMul)
+      crashCarMul: 1.5,
+      crashTime: [0.25, 0.4] as [number, number], // s of crash state, from crashImpulse to 2x crashImpulse
+      crashGripMul: 0.15,     // grip (re-alignment of the velocity onto the nose) during the crash state; steering is suspended
+    },
   },
   damage: {
     zoneMaxHp: 100,
@@ -89,6 +105,12 @@ export const CONFIG = {
     knockOffSecond: 26000,    // N*s (~80 km/h) from which the hit also knocks the next part of that side off (bumper + hood)
     wheelOffHp: 0.5,          // wheel zone hp at or below which that wheel comes off
     maxWheelsOff: 2,          // a car never loses more wheels than this (it must still read as a car)
+    // ---- appended: fair damage (audit #14 / #19) ----
+    gripFloor: 0.3,           // effects.gripMul never drops below this (a battered car still steers)
+    hitWindow: 0.08,          // s: contact impulses of one car on one piece (wall, guardrail, prop) are summed over this window and
+                              // the no-damage threshold applies once per window (a glancing hit's 3-4 solver steps count as one hit)
+                              // plow-through (see destruction.plowKeep): the impulse that breaks the piece is charged in full and
+                              // only the part of the hit above it is softened, so a harder hit never costs less (no cliff)
   },
   destruction: {
     // HP of segments; a hit subtracts (impulse - threshold) * impulseToDamage. Measured contact impulse ~ 1200 * normal speed (m/s)
@@ -189,7 +211,7 @@ export const CONFIG = {
     apexBias: 0.55,            // fraction of free half-width the racing line moves to the inside of a bend
     followGap: 3,              // m: gap kept behind a car that cannot be passed
     followGapPerSpeed: 0.25,   // extra gap per m/s
-    passClearance: 2.35,       // m lateral centre distance when passing
+    passClearance: 2.6,        // m lateral centre distance when passing (2.35 before audit #22: packs touched in corners)
     passClearanceAggr: 0.35,   // minus this * aggression
     formAmp: 0.075,             // slow pace wobble of a driver (fraction of cornering speed, scaled by 1.3 - skill)
     lineRateMin: 2.5,          // m/s: line changes at low speed are never slower than this
@@ -223,6 +245,13 @@ export const CONFIG = {
     rubberChase: 0.1,          // fraction of planned cornering speed gained at the full chase
     rubberPower: 0.2,          // engine power assist of the Sim at the full chase (fraction)
     rubberTop: 0.07,           // top speed assist at the full chase (fraction)
+    // ---- appended: AI race quality (audit #10 / #22) ----
+    lateBrakeMul: 1.5,         // 'lateBrake' mistake: plans with this x its real braking, so it brakes too late (was inverted: 0.5 + a speed buff)
+    tightRadius: 25,           // m: bends tighter than this make the outer of two cars side by side lift ...
+    outerLift: 0.9,            // ... to this fraction of its target speed instead of being squeezed into the wall
+    recoverBeyond: 1.7,        // m beyond the road edge (past the wall line: through a gap) from which the car drives back to where it left the road
+    recoverAhead: 3,           // m past that point it aims for
+    recoverSpeed: 5,           // m/s base speed when driving back through the gap (+0.4 per m of distance)
   },
   upgrades: {
     maxLevel: 5,
@@ -281,7 +310,7 @@ export const CONFIG = {
     skidCapacity: { low: 160, medium: 420, high: 800 },         // skid mark quads
     particleCapacity: 900,     // smoke/dust/confetti pool at particles = 1
     sparkCapacity: 420,        // additive pool (sparks, fire) at particles = 1
-    shadowExtent: 58,          // half-size (m) of the shadow frustum around the camera target
+    shadowExtent: 64,          // half-size (m) of the shadow frustum around the camera target
     lightDir: [-0.5, 1.0, -0.42] as [number, number, number],   // direction TO the sun (x, up, z)
     camera: {
       follow: 16,              // 1/s position smoothing (7 lagged ~8 m behind the car at 200 km/h and ate the look-ahead)
@@ -301,14 +330,14 @@ export const CONFIG = {
       lookMin: 12,             // m of road ahead used for framing at rest (the grid)
       needMin: 3,              // m added to speed * lookTime for the "must be visible" point
       lookGain: 0.6,           // view centre moves this fraction of the way to the road ahead (before the clamp)
-      maxShift: 0.46,          // the view centre may sit at most this fraction of half the view away from the car
-      safeEdge: 0.56,          // hard limit: the car never leaves the central 56% box (the follow lag fits in the gap to maxShift)
+      maxShift: 0.52,          // the view centre may sit at most this fraction of half the view away from the car
+      safeEdge: 0.58,          // hard limit: the car never leaves the central 58% box (the follow lag fits in the gap to maxShift)
       aheadFit: 1.4,           // the road point lookTime ahead must fit within this many half views from the car
       shiftSmooth: 3,          // 1/s smoothing of the look-ahead shift (screen space)
       speedSmooth: 4,          // 1/s smoothing of the speed that sets the look-ahead distance (crashes do not jerk the view)
-      zoomMax: 2,              // upper bound of the zoom factor (the forward-visibility rule may ask for more)
+      zoomMax: 2.4,            // upper bound of the zoom factor (the forward-visibility rule may ask for more)
       minPxPerMetre: 8,        // zoom never goes out past this many CSS px per metre (the car stays >= ~36 px long)
-      maxRadius: 60,           // m, upper bound of the view half diagonal (keeps decor / shadow coverage)
+      maxRadius: 70,           // m, upper bound of the view half diagonal (keeps decor / shadow coverage)
       rotFollow: 6,            // 1/s azimuth following the track tangent
       rotMaxRate: 1.6,         // rad/s cap of the azimuth rate
       rotLook: 0.35,           // the tangent is read this fraction of the look distance ahead of the car

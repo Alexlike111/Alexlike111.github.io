@@ -4,7 +4,7 @@ import { CONFIG, type Quality } from '../config';
 import { FxManager } from '../fx/fxManager';
 import type { CarState, ISim, SimEvent } from '../types';
 import { CameraRig } from './camera';
-import { CarFleet, buildCarGeometries, type CarGeometries, type CarPose } from './car';
+import { CarFleets, disposeCarGeometries, getCarGeometries, type CarPose } from './car';
 import { buildDecor, type DecorVisual } from './decor';
 import { DestructibleRenderer } from './destructibles';
 import { Materials } from './materials';
@@ -25,7 +25,7 @@ interface RaceScene {
   track: TrackVisual;
   decor: DecorVisual;
   destr: DestructibleRenderer;
-  fleet: CarFleet;
+  fleet: CarFleets;
   marker: PlayerMarker;
   ghost: THREE.Mesh;
   powerups: PowerUpVisuals;
@@ -48,7 +48,6 @@ export class GameRenderer {
   private scene = new THREE.Scene();
   private rig = new CameraRig();
   private mats = new Materials();
-  private geos: CarGeometries = buildCarGeometries();
   private sun: THREE.DirectionalLight;
   private hemi: THREE.HemisphereLight;
   private fx: FxManager;
@@ -107,7 +106,7 @@ export class GameRenderer {
 
     this.fx = new FxManager(this.mats, CONFIG.race.cars);
     this.scene.add(this.fx.group);
-    this.menu = new MenuScene(this.geos, this.mats, PALETTES.meadow);
+    this.menu = new MenuScene(this.mats, PALETTES.meadow);
     this.scene.add(this.menu.group);
     this.applyPalette(PALETTES.meadow);
 
@@ -176,7 +175,7 @@ export class GameRenderer {
     this.race?.decor.setDensity(CONFIG.render.decorDensity[level]);
     this.race?.destr.setWallShadows(level === 'high');
     this.race?.fleet.setBlobShadows(!q.shadows);
-    this.menu.fleet.setBlobShadows(!q.shadows);
+    this.menu.setBlobShadows(!q.shadows);
     this.sinceChange = 0; this.lowFor = 0; this.okFor = 0;
     this.debug.quality = level;
     if (!first) this.resize();
@@ -287,13 +286,14 @@ export class GameRenderer {
     }
     const destr = new DestructibleRenderer(sim.destructibles, def, pal, this.mats);
     destr.setWallShadows(this.level === 'high');
-    const fleet = new CarFleet(this.geos, this.mats, Math.max(CONFIG.race.cars, sim.cars.length));
-    fleet.setVisibleCount(sim.cars.length);
+    // one instanced fleet per car model on the grid (a Same-as-mine field is one fleet, a Mixed field up to 8)
+    const fleet = new CarFleets(this.mats, sim.cars.map((c) => c.modelId));
     fleet.setBlobShadows(!CONFIG.render.quality[this.level].shadows);
     const ghostMat = this.mats.ghost;
     ghostMat.color.setHex(CONFIG.render.car.ghostColor);
     ghostMat.opacity = CONFIG.render.car.ghostOpacity;
-    const ghost = new THREE.Mesh(this.geos.ghost, ghostMat);
+    const playerCar = sim.cars.find((c) => c.isPlayer) ?? sim.cars[0];
+    const ghost = new THREE.Mesh(getCarGeometries(playerCar?.modelId).ghost, ghostMat);
     ghost.visible = false;
     ghost.frustumCulled = false;
     ghost.renderOrder = 5;
@@ -335,7 +335,8 @@ export class GameRenderer {
     try { this.gl.compile(this.scene, cam); } finally { this.sun.castShadow = sh; }
   }
 
-  showMenuScene(colorIndex: number): void {
+  /** Garage / menu turntable: the car `modelId` (default: keep the current one) in paint `colorIndex`. */
+  showMenuScene(colorIndex: number, modelId?: string): void {
     this.dirty = true;
     this.unloadRace();
     this.mode = 'menu';
@@ -343,6 +344,7 @@ export class GameRenderer {
     this.fx.setTheme(PALETTES.meadow, 'concrete');
     this.menu.group.visible = true;
     this.menu.setColor(colorIndex);
+    if (modelId) this.menu.setModel(modelId);
     this.rig.setMenu(true);
     this.rig.setMenuView(11, new THREE.Vector3(0, 0.9, 0));
     this.resize();
@@ -494,7 +496,7 @@ export class GameRenderer {
     this.fx.dispose();
     this.menu.dispose();
     this.mats.dispose();
-    for (const g of [this.geos.body, this.geos.wheel, this.geos.lights, this.geos.ghost, ...Object.values(this.geos.parts)]) g.dispose();
+    disposeCarGeometries();
     this.gl.dispose();
     if (window.__render === this.debug) delete window.__render;
   }

@@ -79,7 +79,11 @@ export function missingHp(hp: ZoneHp, max: number): number {
   return m;
 }
 
-export function computeEffects(hp: ZoneHp, max: number): DamageEffects {
+/**
+ * Effects of the zone damage. `pullDir` (+1 right, -1 left, 0 none) is the side a car remembers its first real hit came from:
+ * it decides which way a symmetric front / nose loss pulls (no built-in default to the right).
+ */
+export function computeEffects(hp: ZoneHp, max: number, pullDir = 0): DamageEffects {
   const lf = loss(hp, 'front', max), lr = loss(hp, 'rear', max);
   const ll = loss(hp, 'left', max), lrt = loss(hp, 'right', max), le = loss(hp, 'engine', max);
   const wFL = loss(hp, 'wheelFL', max), wFR = loss(hp, 'wheelFR', max);
@@ -87,11 +91,13 @@ export function computeEffects(hp: ZoneHp, max: number): DamageEffects {
 
   const powerMul = 1 - D.frontPowerLoss * lf - D.enginePowerLoss * le;
   const topSpeedMul = 1 - D.engineTopSpeedLoss * le;
-  const gripMul = 1 - D.rearGripLoss * lr - D.wheelGripLoss * (wFL + wFR + wRL + wRR);
+  // never below the floor: a battered car still steers (the drift and AI paths clamp the same way)
+  const gripMul = Math.max(D.gripFloor, 1 - D.rearGripLoss * lr - D.wheelGripLoss * (wFL + wFR + wRL + wRR));
 
-  // pull toward the damaged side; the front zone adds pull in the direction already pulling (default right)
+  // pull toward the damaged side; the front zone adds pull in the direction already pulling, or the remembered side of
+  // the first hit when the loss is symmetric (no pull at all when there is neither)
   const lateral = D.sidePull * (lrt - ll) + D.frontSteerPull * 0.6 * (wFR - wFL);
-  const dir = lateral < 0 ? -1 : 1;
+  const dir = Math.abs(lateral) > 1e-9 ? Math.sign(lateral) : Math.sign(pullDir);
   const steerPull = Math.max(-1, Math.min(1, lateral + dir * D.frontSteerPull * lf * 0.7));
 
   const health = totalHealth(hp, max);

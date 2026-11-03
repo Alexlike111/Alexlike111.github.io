@@ -84,6 +84,8 @@ export class AiDriver {
   private reverseExtra = 0;           // s the current reverse was extended because a car still sits right ahead
   private markS = 0;
   private markInit = false;
+  /** last track position at which the car was on the road (off-road recovery heads back there: that is where the gap is) */
+  private roadS = 0;
   private markTime = 0;
 
   constructor(p: AiPersonality, rng: () => number) {
@@ -134,7 +136,10 @@ export class AiDriver {
     const maxOff = Math.max(0.5, half - A.laneMargin);
 
     // ---------- progress watchdog
-    if (!this.markInit) { this.markInit = true; this.markS = s; this.markTime = 0; }
+    if (!this.markInit) { this.markInit = true; this.markS = s; this.markTime = 0; this.roadS = s; }
+    if (Math.abs(lat) <= half) this.roadS = s;
+    // through a wall gap (beyond the wall line): drive back to the road where it left it instead of into the wall from behind
+    const recovering = Math.abs(lat) > half + A.recoverBeyond;
     const moved = wrap2(s - this.markS, L);
     if (moved > 6 || moved < -40) { this.markS = s; this.markTime = 0; } else this.markTime += h;
     if (this.markTime > A.respawnAfter) this.wantsRespawn = true;
@@ -187,7 +192,8 @@ export class AiDriver {
     let wideOffset = 0;
     const m = this.mistake;
     if (m) {
-      if (m.kind === 'lateBrake') { aBrake *= 0.5; speedMul *= 1.1; }
+      // late braking: plans with more brake than the car has, so it brakes too late and runs in too fast (no corner-speed buff)
+      if (m.kind === 'lateBrake') aBrake *= A.lateBrakeMul;
       else if (m.kind === 'wide') wideOffset = m.dir * 3.5;
       else steerTwitch = m.dir * 0.35 * (m.timer > 0.15 ? 1 : 0);
     }
@@ -222,7 +228,7 @@ export class AiDriver {
     const lookNominal = A.lookAhead * clamp(0.35 + av / 20, 0.35, 1) + A.lookAheadPerSpeed * av;   // short when crawling: sharp corrections
     // slow "form" wobble (a driver has good and bad minutes) so the order shuffles even between equal cars
     const form = 1 + A.formAmp * (1.3 - skill) * (0.65 * Math.sin(this.time * 0.23 + this.phase[2]) + 0.35 * Math.sin(this.time * 0.61 + this.phase[3]));
-    const scan = this.scan(track, s, clamp(lat, -half, half), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal,
+    const scan = this.scan(track, s, clamp(this.offset, -maxOff, maxOff), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal,
       cs?.traits?.downforce ?? 0, cs?.topSpeed ?? C.baseTopSpeed);
     let look = Math.min(lookNominal, Math.max(6, scan.minRadius * 0.9 + 2));
     if (this.lookCur === 0) this.lookCur = look;
@@ -283,8 +289,8 @@ export class AiDriver {
     if (blockGap < 6 && av < 8 && Math.abs(this.offset - lat) > 0.6) look = Math.max(2.5, Math.min(look, 2.5 + blockGap));
 
     // ---------- steering: pure pursuit, exact inverse of the car model's steering (steerForCurvature)
-    const tp = track.sampleAt(s + look);
-    const off = this.offset;
+    const tp = recovering ? track.sampleAt(this.roadS + A.recoverAhead) : track.sampleAt(s + look);
+    const off = recovering ? 0 : this.offset;
     const tx = tp.x + tp.nx * off, ty = tp.y + tp.ny * off;
     const dx = tx - car.x, dy = ty - car.y;
     const dist = Math.max(Math.hypot(dx, dy), 2);
@@ -307,7 +313,21 @@ export class AiDriver {
     let vT = scan.vAllowed;
     vT = Math.min(vT, followCap, this.speedCap);
     if (car.offRoad && Math.abs(lat) > half) vT = Math.min(vT, A.offroadSpeedCap);
-    if (Math.abs(headErr) > 1.5 && av > 4) vT = 0;       // facing the wrong way: stop first
+    if (recovering) {
+      vT = Math.min(vT, A.recoverSpeed + dist * 0.4);   // creep back through the gap
+      if (Math.abs(alpha) > 1.5 && av > 4) vT = 0;       // the road is behind: stop, then turn round
+    } else if (Math.abs(headErr) > 1.5 && av > 4) vT = 0;       // facing the wrong way: stop first
+    // tight corner side by side: the car on the outside lifts instead of being squeezed into the wall
+    if (nCar > 0 && !recovering) {
+      const kc = track.sampleAt(s + Math.max(4, look * 0.5)).curvature;
+      if (Math.abs(kc) > 1 / A.tightRadius) {
+        for (let j = 0; j < nCar; j++) {
+          if (this.nearSpeed[j] > 90) continue;                     // an oil slick, not a car
+          if (Math.abs(this.nearDs[j]) > this.nearLen[j] + 1.5) continue;
+          if (Math.sign(kc) * (lat - this.nearLat[j]) < -0.5) { vT *= A.outerLift; break; }
+        }
+      }
+    }
 
     // pushing something heavy (a prop on the nose, a car) with the throttle pinned: jink sideways to shed it
     this.speedMarkTime += h;
