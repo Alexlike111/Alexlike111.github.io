@@ -16,6 +16,7 @@ export interface DebrisSpec {
   life?: number;                             // default CONFIG.destruction.debrisLife
   spin?: number;                             // angular speed scale, default 1
   shape?: DebrisShape;                       // default 'chunk'
+  rot?: [number, number, number];            // initial Euler XYZ (default random): car panels start aligned with the car
 }
 
 export type DebrisShape = 'chunk' | 'panel' | 'wheel';
@@ -125,7 +126,8 @@ export class DebrisPool {
     const r = this.rng;
     this.px[i] = d.x; this.py[i] = d.y; this.pz[i] = d.z;
     this.vx[i] = d.vx; this.vy[i] = d.vy; this.vz[i] = d.vz;
-    this.rx[i] = r() * 6.28; this.ry[i] = r() * 6.28; this.rz[i] = r() * 6.28;
+    if (d.rot) { this.rx[i] = d.rot[0]; this.ry[i] = d.rot[1]; this.rz[i] = d.rot[2]; }
+    else { this.rx[i] = r() * 6.28; this.ry[i] = r() * 6.28; this.rz[i] = r() * 6.28; }
     const sp = (d.spin ?? 1) * 13;
     this.wx[i] = (r() - 0.5) * sp; this.wy[i] = (r() - 0.5) * sp; this.wz[i] = (r() - 0.5) * sp;
     this.sx[i] = d.sx; this.sy[i] = d.sy; this.sz[i] = d.sz;

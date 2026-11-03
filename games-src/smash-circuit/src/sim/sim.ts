@@ -106,6 +106,7 @@ export class Sim implements ISim {
     this.others = this.cars.map((c) => this.cars.filter((o) => o !== c));
     this.powerups = new PowerUpSystem(this.track, this.simCars, this.destruction, opts.seed);
     this.pads = this.powerups.pads; this.boxes = this.powerups.boxes; this.oils = this.powerups.oils;
+    for (const d of this.drivers) if (d) d.hazards = this.oils;
     this.itemUsers = setups.map((c, i) => this.drivers[i]
       ? new AiItemUser(c.ai?.skill ?? DEFAULT_PERSONALITY.skill, makeRng(Math.floor(rng() * 4294967296) ^ (c.id * 40503)))
       : null);

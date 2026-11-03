@@ -1,7 +1,7 @@
 // AI driver: follows the spline with a racing-line bias, brakes by upcoming curvature, avoids and passes cars,
 // makes small human mistakes and recovers when stuck. PURE (no physics, no DOM). Deterministic given the rng.
 import { CONFIG } from '../config';
-import type { AiPersonality, CarInput, CarState, TrackGeometry } from '../types';
+import type { AiPersonality, CarInput, CarState, OilSlick, TrackGeometry } from '../types';
 
 const A = CONFIG.ai;
 const C = CONFIG.car;
@@ -41,6 +41,8 @@ export class AiDriver {
   /** Hard speed ceiling set from outside (e.g. cruising after the finish). */
   speedCap = Infinity;
   readonly personality: AiPersonality;
+  /** Oil slicks on the road (set by the Sim): treated as obstacles to steer around, never as cars to follow. */
+  hazards: OilSlick[] | null = null;
 
   private readonly rng: () => number;
   private out: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
@@ -58,6 +60,7 @@ export class AiDriver {
   private readonly nearDs: number[] = [];
   private readonly nearW: number[] = [];
   private readonly nearSpeed: number[] = [];
+  private readonly nearExtra: number[] = [];   // extra clearance (m) on top of the car-to-car clearance (oil slicks)
 
   // errors
   private mistake: Mistake | null = null;
@@ -231,7 +234,7 @@ export class AiDriver {
       for (let k = -1; k < K; k++) {
         const c = k < 0 ? desired : -maxOff + (2 * maxOff * k) / (K - 1);
         let cost = Math.abs(c - desired) + A.lineHysteresis * Math.abs(c - this.offset);
-        for (let j = 0; j < nCar; j++) cost += A.carPenalty * stubborn * this.nearW[j] * overlap(c, this.nearLat[j], clear);
+        for (let j = 0; j < nCar; j++) cost += A.carPenalty * stubborn * this.nearW[j] * overlap(c, this.nearLat[j], clear + this.nearExtra[j]);
         if (cost < bestCost - 1e-6) { bestCost = cost; bestC = c; }
       }
       target = bestC;
@@ -240,8 +243,8 @@ export class AiDriver {
         const ds = this.nearDs[j];
         if (ds <= 0) continue;
         // judge both where we want to go and where we physically are (we cannot teleport sideways)
-        const ovLine = overlap(target, this.nearLat[j], clear);
-        const ovNow = ds < A.closeFollow ? overlap(lat, this.nearLat[j], clear * 0.9) : 0;
+        const ovLine = overlap(target, this.nearLat[j], clear + this.nearExtra[j]);
+        const ovNow = ds < A.closeFollow ? overlap(lat, this.nearLat[j], (clear + this.nearExtra[j]) * 0.9) : 0;
         if (Math.max(ovLine, ovNow) < 0.25) continue;
         const gap = ds - C.length;
         const want = A.followGap + A.followGapPerSpeed * av * (1 - 0.5 * p.aggression);
@@ -355,7 +358,26 @@ export class AiDriver {
       this.nearDs[n] = ds;
       this.nearW[n] = w;
       this.nearSpeed[n] = o.speed;
+      this.nearExtra[n] = 0;
       n++;
+    }
+    const oils = this.hazards;
+    if (oils) {
+      for (let i = 0; i < oils.length; i++) {
+        const o = oils[i];
+        if (!o.active) continue;
+        const dx = o.x - car.x, dy = o.y - car.y;
+        if (dx * dx + dy * dy > 2500) continue;
+        const on = track.nearest(o.x, o.y, s);
+        const ds = wrap2(on.s - s, L);
+        if (ds < -3 || ds > A.avoidRadius + 18 + av * 0.6) continue;
+        this.nearLat[n] = on.lateral;
+        this.nearDs[n] = ds;
+        this.nearW[n] = 1;
+        this.nearSpeed[n] = 99;               // never a speed cap: steer around it
+        this.nearExtra[n] = o.radius - 0.4;
+        n++;
+      }
     }
     return n;
   }

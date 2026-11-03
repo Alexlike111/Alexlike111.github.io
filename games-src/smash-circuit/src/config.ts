@@ -259,7 +259,7 @@ export const CONFIG = {
       maxSteerVisual: 0.6,     // rad of front wheel yaw at steer = 1
       rollPerLatAccel: 0.0035, // body roll (rad) per m/s^2 of lateral acceleration
       maxRoll: 0.085,
-      partDebrisLife: 2.4,     // s, flying car parts live a bit longer than other debris
+      partDebrisLife: 9,       // s, flying car parts lie on the road for a while (oldest recycled first when the debris pool is full)
       ghostColor: 0x9ff0ff, ghostOpacity: 0.38,
     },
     fx: {
@@ -295,6 +295,15 @@ export const CONFIG = {
       dirtMax: 0.55,           // max mix towards the burnt colour (a wreck keeps ~45% of its paint so it still reads as a car)
       bendStart: 0.12,         // part bend starts at (1 - zone hp fraction) above this (bumpers / hood bend from ~0.85 hp)
       dentDepth: 0.6,          // metres of body crumple at a destroyed zone (the cabin and wheels always stay)
+      // ---- appended: visible car damage (soot / scratches, fire, lost wheels, parts lying on the road) ----
+      sootMax: 0.82,           // max mix of the burnt patches over a destroyed zone (per pixel and patchy: paint survives between patches)
+      scrapeSparks: 9,         // sparks fanned per scrape event at strength ~0.6 (metal grinding along a wall)
+      fireBelow: 0.3,          // health below which the engine end burns (flames grow to full at a wreck)
+      hubSparks: 34,           // sparks per second from the dragging hub of a lost wheel (at ~55 km/h)
+      wheelOffSag: 0.07,       // rad of body roll / pitch toward a lost wheel
+      debrisGroundFriction: 2.4, // 1/s sliding friction of debris on the ground (parts skid to a stop and stay on the road)
+      debrisKickRadius: 1.9,   // m: a car driving over a lying part kicks it along (visual only)
+      debrisKickMinSpeed: 4,   // m/s
     },
     // ---- player marker (the player car is one of eight similar cars) ----
     marker: {

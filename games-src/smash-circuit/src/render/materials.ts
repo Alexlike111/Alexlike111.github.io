@@ -161,7 +161,8 @@ export class Materials {
     this.paint = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.gradient });
     patchPaint(this.paint);
     // flat shaded: a crumpled (displaced) facet catches the light differently, so the dents read even from straight above
-    this.body = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.gradient, flatShading: true });
+    this.body = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.gradient });
+    (this.body as unknown as { flatShading: boolean }).flatShading = true;   // toon shader honours FLAT_SHADED (derivative normals); the typings omit it
     patchBodyDamage(this.body, CONFIG.render.fx.dentDepth, 'body');
     this.carPart = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: this.gradient });
     patchBodyDamage(this.carPart, CONFIG.render.fx.dentDepth, 'part');

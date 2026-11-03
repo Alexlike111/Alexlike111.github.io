@@ -1,12 +1,12 @@
 // Turns sim events and car state into visuals: debris, tyre smoke, dust, sparks, fire, confetti, skid marks.
 import * as THREE from 'three';
 import { CONFIG, type Quality } from '../config';
-import { carColor, type CarPose } from '../render/car';
+import { WHEEL_LIST, carColor, type CarPose } from '../render/car';
 import type { Materials } from '../render/materials';
 import type { ThemePalette } from '../render/palette';
 import { clamp, makeRng } from '../render/util';
 import type { WallVisual } from '../render/structures';
-import type { CarPart, DestructibleKind, PropType, SimEvent, TrackDef } from '../types';
+import type { CarPart, DestructibleKind, PropType, SimEvent, TrackDef, ZoneId } from '../types';
 import { DebrisPool } from './debris';
 import { ParticleSystem } from './particles';
 import { ShockwavePool } from './shockwave';
@@ -19,7 +19,18 @@ const CONFETTI = [0xff4d4d, 0xffd23c, 0x3a9bff, 0x3ccf6e, 0xff7ac6, 0xffffff];
 const PART_DIMS: Record<CarPart, [number, number, number]> = {
   bumperF: [0.5, 0.4, 1.7], bumperR: [0.5, 0.4, 1.7], hood: [1.35, 0.14, 1.55], doorL: [1.5, 0.36, 0.2], doorR: [1.5, 0.36, 0.2],
   spoiler: [0.62, 0.3, 1.8], mirrorL: [0.2, 0.12, 0.3], mirrorR: [0.2, 0.12, 0.3],
+  wheelFL: [CR.wheelRadius * 2, CR.wheelWidth, CR.wheelRadius * 2], wheelFR: [CR.wheelRadius * 2, CR.wheelWidth, CR.wheelRadius * 2],
+  wheelRL: [CR.wheelRadius * 2, CR.wheelWidth, CR.wheelRadius * 2], wheelRR: [CR.wheelRadius * 2, CR.wheelWidth, CR.wheelRadius * 2],
 };
+/** zone whose damage scorches a flying part */
+const PART_ZONE: Record<CarPart, ZoneId> = {
+  bumperF: 'front', bumperR: 'rear', hood: 'front', doorL: 'left', doorR: 'right', spoiler: 'rear', mirrorL: 'left', mirrorR: 'right',
+  wheelFL: 'wheelFL', wheelFR: 'wheelFR', wheelRL: 'wheelRL', wheelRR: 'wheelRR',
+};
+const BURNT = 0x3a2f29;
+const FLAME = [0xff8a1a, 0xffc93c, 0xff5a1a, 0xffe08a];
+/** car-local (x forward, z left) corner of each wheel instance k (WHEEL_LIST order) */
+const WHEEL_X = [1, 1, -1, -1], WHEEL_Z = [1, -1, 1, -1];
 
 export interface FxContext {
   playerId: number;
@@ -164,7 +175,12 @@ export class FxManager {
         }
         case 'scrape': {
           if (Math.hypot(ev.x - ctx.camX, ev.y - ctx.camZ) > ctx.radius * 1.2) break;
-          this.sparkBurst(ev.x, 0.35, ev.y, 1 + ev.strength * 4, 2.5 + ev.strength * 4);
+          // metal on wall: a fan of sparks thrown along the car's travel, plus a few loose ones
+          const car = ctx.carById(ev.carId);
+          const vx = car ? car.state.vx : 0, vz = car ? car.state.vy : 0;
+          const sp = Math.hypot(vx, vz);
+          this.sparkFan(ev.x, 0.4, ev.y, FX.scrapeSparks * (0.4 + ev.strength), 3 + Math.min(12, sp * 0.4), sp > 1 ? vx / sp : 0, sp > 1 ? vz / sp : 0, 0.55);
+          this.sparkBurst(ev.x, 0.35, ev.y, 1 + ev.strength * 3, 2.5 + ev.strength * 4);
           break;
         }
         case 'break': this.onBreak(ev, ctx); break;
@@ -293,16 +309,27 @@ export class FxManager {
   private onPartOff(ev: Extract<SimEvent, { type: 'partOff' }>, ctx: FxContext): void {
     const p = ctx.carById(ev.carId);
     const d = PART_DIMS[ev.part];
-    const color = p ? carColor(p.state.colorIndex) : 0xcccccc;
+    const wheel = WHEEL_LIST.includes(ev.part as typeof WHEEL_LIST[number]);
+    let color = 0xffffff;
+    if (!wheel) {
+      // the panel keeps the car's paint, scorched as badly as its zone was
+      const st = p?.state;
+      const loss = st ? 1 - clamp(st.hp[PART_ZONE[ev.part]] / (st.zoneMaxHp || 100), 0, 1) : 0.5;
+      color = this.tmpC.setHex(p ? carColor(st!.colorIndex) : 0xcccccc).lerp(this.tmpC2.setHex(BURNT), clamp(loss * 0.5, 0, FX.dirtMax)).getHex();
+    }
     const sp = Math.hypot(ev.vx, ev.vy);
-    const k = sp > 20 ? 20 / sp : 1;
+    const k = sp > 22 ? 22 / sp : 1;
+    const big = d[0] * d[2] > 0.5;   // hood, doors, bumpers, spoiler, wheels: thrown high and spinning
     this.debris.spawn({
-      x: ev.x, y: 1.0, z: ev.y, vx: ev.vx * k, vy: this.rnd(7, 11), vz: ev.vy * k,
-      sx: d[0], sy: d[1], sz: d[2], color, life: CR.partDebrisLife, spin: 1.3,
+      x: ev.x, y: 0.9, z: ev.y, vx: ev.vx * k, vy: big ? this.rnd(6, 10) : this.rnd(4, 7), vz: ev.vy * k,
+      sx: d[0], sy: d[1], sz: d[2], color, life: CR.partDebrisLife, spin: wheel ? 1.1 : 0.9, shape: wheel ? 'wheel' : 'panel',
+      rot: [0, -(p ? p.angle : Math.atan2(ev.vy, ev.vx)), 0],
     });
-    this.sparkBurst(ev.x, 0.8, ev.y, 10, 7);
-    this.puff(ev.x, 0.7, ev.y, 2, this.pal.dust, 1.4, 2);
-    ctx.addTrauma(0.08 * this.near(ctx, ev.x, ev.y));
+    if (Math.hypot(ev.x - ctx.camX, ev.y - ctx.camZ) < ctx.radius * 1.3) {
+      this.sparkBurst(ev.x, 0.8, ev.y, 14, 8);
+      this.puff(ev.x, 0.7, ev.y, 3, 0x6b6b70, 1.6, 2.4, 1.4, 0.75);
+    }
+    ctx.addTrauma((ev.carId === ctx.playerId ? 0.16 : 0.08) * this.near(ctx, ev.x, ev.y));
   }
 
   // ------------------------------------------------------------------ continuous car effects
@@ -318,6 +345,8 @@ export class FxManager {
       const wz = (lx: number, lz: number): number => P.y + sin * lx + cos * lz;
       const inRange = Math.hypot(P.x - ctx.camX, P.y - ctx.camZ) < range;
       const speed = Math.abs(st.speed);
+      // cars plough through the parts lying on the road (visual only)
+      if (inRange && this.debris.active > 0) this.debris.kick(P.x, P.y, st.vx, st.vy, FX.debrisKickRadius);
 
       // ---- skid marks (also keeps trails closed when out of range)
       const slideMark = st.slip > FX.skidSlip || (st.handbrake && speed > 6) || (st.brake > 0.85 && speed > 14);
@@ -370,7 +399,8 @@ export class FxManager {
         while (this.acc[a + 2] >= 1) {
           this.acc[a + 2] -= 1;
           const col = this.tmpC.setHex(0xf0f2f5).lerp(this.tmpC2.setHex(0x23242a), clamp(dmg * 1.3 - 0.1, 0, 1));
-          this.smoke.spawn(wx(1.2, this.rnd(-0.4, 0.4)), 1.0, wz(1.2, this.rnd(-0.4, 0.4)), st.vx * 0.3 + this.rnd(-0.5, 0.5), this.rnd(1.6, 3), st.vy * 0.3 + this.rnd(-0.5, 0.5), {
+          const sx = this.smokeEnd(st);
+          this.smoke.spawn(wx(sx, this.rnd(-0.4, 0.4)), 1.0, wz(sx, this.rnd(-0.4, 0.4)), st.vx * 0.3 + this.rnd(-0.5, 0.5), this.rnd(1.6, 3), st.vy * 0.3 + this.rnd(-0.5, 0.5), {
             life: this.rnd(0.8, 1.4), size0: (0.4 + dmg * 0.2) * sizeK, size1: (1.3 + dmg * 0.9) * sizeK, color: col.getHex(), alpha: Math.min(FX.smokeAlphaMax, 0.4 + 0.2 * clamp(dmg * 3, 0, 1)), drag: 0.8,
           });
         }
@@ -388,18 +418,48 @@ export class FxManager {
         }
       } else this.acc[a + 3] = 0;
 
-      // ---- fire on wrecked cars
-      if (st.wrecked) {
-        this.acc[a + 4] += dt * 20 * this.essential;
+      // ---- fire at critical health (grows to full at a wreck): flames licking out of the engine end, black smoke above
+      const fire = st.wrecked ? 1 : h < FX.fireBelow ? 0.35 + 0.65 * (FX.fireBelow - h) / FX.fireBelow : 0;
+      if (fire > 0) {
+        this.acc[a + 4] += dt * (10 + 26 * fire) * this.essential;
+        const fx0 = this.smokeEnd(st);
+        const lo = fx0 > 0 ? 0.7 : -1.9, hi = fx0 > 0 ? 1.9 : -0.7;
         while (this.acc[a + 4] >= 1) {
           this.acc[a + 4] -= 1;
-          const lx = this.rnd(0.8, 1.8), lz = this.rnd(-0.5, 0.5);
-          this.sparks.spawn(wx(lx, lz), 0.9, wz(lx, lz), this.rnd(-0.5, 0.5), this.rnd(1.8, 3.4), this.rnd(-0.5, 0.5), {
-            life: this.rnd(0.3, 0.55), size0: this.rnd(0.3, 0.5), size1: 0.08, color: this.pick([0xff8a1a, 0xffc93c, 0xff5a1a]), alpha: 0.7, drag: 1.2, mode: 1,
+          const lx = this.rnd(lo, hi), lz = this.rnd(-0.55, 0.55);
+          this.sparks.spawn(wx(lx, lz), 1.0, wz(lx, lz), st.vx * 0.5 + this.rnd(-0.6, 0.6), this.rnd(2, 4) * (0.7 + 0.5 * fire), st.vy * 0.5 + this.rnd(-0.6, 0.6), {
+            life: this.rnd(0.3, 0.6), size0: this.rnd(0.4, 0.75) * (0.7 + 0.5 * fire), size1: 0.1, color: this.pick(FLAME), alpha: 0.85, drag: 1.2, mode: 1,
           });
+          if (this.rng() < 0.3) {
+            this.smoke.spawn(wx(lx, lz), 1.6, wz(lx, lz), st.vx * 0.3 + this.rnd(-0.4, 0.4), this.rnd(2.2, 3.4), st.vy * 0.3 + this.rnd(-0.4, 0.4), {
+              life: this.rnd(0.8, 1.3), size0: 0.5, size1: this.rnd(1.4, 2.1), color: 0x18181c, alpha: FX.smokeAlphaMax, drag: 0.8,
+            });
+          }
         }
       } else this.acc[a + 4] = 0;
+
+      // ---- a lost wheel: the hub drags on the tarmac and throws a stream of sparks
+      if (st.detachedParts.length && speed > 3) {
+        this.acc[a + 5] += dt * FX.hubSparks * clamp(speed / 15, 0.4, 1.3) * this.essential;
+        while (this.acc[a + 5] >= 1) {
+          this.acc[a + 5] -= 1;
+          let k = Math.floor(this.rng() * 4);
+          for (let t = 0; t < 4 && !st.detachedParts.includes(WHEEL_LIST[k]); t++) k = (k + 1) % 4;
+          if (!st.detachedParts.includes(WHEEL_LIST[k])) break;
+          const lx = WHEEL_X[k] * CR.wheelX, lz = WHEEL_Z[k] * (CR.wheelZ + 0.1);
+          this.sparks.spawn(wx(lx, lz), 0.15, wz(lx, lz), st.vx * 0.55 + this.rnd(-2.5, 2.5), this.rnd(1.5, 4.5), st.vy * 0.55 + this.rnd(-2.5, 2.5), {
+            life: this.rnd(0.2, 0.45), size0: this.rnd(0.14, 0.26), size1: 0.03, color: this.pick(SPARK_COLORS), alpha: 1, drag: 1.4, gravity: 14, mode: 1,
+          });
+        }
+      } else this.acc[a + 5] = 0;
     }
+  }
+
+  /** car-local x of the end that smokes / burns: the engine (front) unless the rear is clearly the worse wreck */
+  private smokeEnd(st: CarPose['state']): number {
+    const m = st.zoneMaxHp || 100;
+    const front = Math.min(st.hp.front, st.hp.engine) / m, rear = st.hp.rear / m;
+    return rear < front - 0.25 ? -1.7 : 1.2;
   }
 
   update(dt: number, camera: THREE.Camera): void {
