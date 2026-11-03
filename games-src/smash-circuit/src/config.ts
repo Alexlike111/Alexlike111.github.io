@@ -408,8 +408,8 @@ export const CONFIG = {
     shield: { time: 5, damageTaken: 0.25, dealMul: 2, massMul: 2, wallImpulseMul: 2.6, popBlink: 1 },
     repair: { frac: 0.5, minHp: 25 },
     oil: {
-      time: 14, radius: 2.5, dropBack: 3.4, max: 16, ownerImmune: 1.0,
-      spinTime: 0.95, spinRate: 7.5, gripMul: 0.22, gripTime: 1.5, cooldown: 2.0,
+      time: 9, radius: 2.3, dropBack: 3.4, max: 16, ownerImmune: 1.0,
+      spinTime: 0.75, spinRate: 5.2, gripMul: 0.25, gripTime: 1.2, cooldown: 2.5,
     },
     shock: { radius: 9, push: 9, damage: 12, propRadius: 6, propMul: 1.4 },
     // Item roll weights by race position: [nitro, shield, repair, oil, shockwave]. Trailing cars get the stronger tools (catch-up).
@@ -429,6 +429,7 @@ export const CONFIG = {
       shieldBehind: 10, shieldClose: 4, shieldHealth: 0.4,
       repairHealth: 0.55, repairHealthLow: 0.85,
       oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
+      oilCalmBehind: 40, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
       shockCount: 2, shockRadius: 7, shockSingle: 4,
     },
     fx: {

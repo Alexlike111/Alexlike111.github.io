@@ -85,8 +85,13 @@ export class AiItemUser {
         return overdue || sur.chaser || (car.health < A.shieldHealth && sur.nearCount > 0) || (clever && sur.blocker && car.speed > 12);
       case 'repair':
         return car.health < (clever ? A.repairHealth : A.repairHealthLow) || overdue;
-      case 'oil':
-        return overdue || sur.behindInLane;
+      case 'oil': {
+        // a slick only helps on a straight: in a bend the victim leaves the road and the whole pack piles up behind it
+        if (!sur.behindInLane && !overdue) return false;
+        const s = track.nearest(car.x, car.y, hintS).s;
+        for (let d = -A.oilCalmBehind; d <= 12; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.oilCalmCurv) return false;
+        return true;
+      }
       case 'shockwave':
         if (raceTime < A.noShockBefore) return false;      // fairness: nothing in the opening seconds
         return sur.nearCount >= A.shockCount || sur.alongside || (overdue && sur.nearCount > 0);
