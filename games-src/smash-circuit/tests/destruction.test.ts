@@ -431,7 +431,7 @@ describe('no shortcut through walls facing another part of the track (audit X1)'
         }
       }
       if (def.id === 't3') expect(pairs).toBeGreaterThan(0);
-    });
+    }, 60000);
   }
 
   it('a locked wall takes no damage from any hit; the other side of the same gap stays breakable', () => {

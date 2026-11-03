@@ -224,15 +224,16 @@ try {
       // one finger: slide the GAS finger to the left of the button centre -> steer left
       await onStraight(page, 15); await waitSim(page, 0.2);
       const a0 = await angle(page);
+      // measured early (0.3 s): a full-lock touch steer drifts the car round past 180 degrees within ~0.6 s, which wraps the sign
       for (let i = 1; i <= 6; i++) { await touch('touchMove', box.x - i * 15, box.y); await sleep(30); }
-      await waitSim(page, 0.6);
+      await waitSim(page, 0.3);
       const a1 = await angle(page);
       check('[phone] sliding the GAS finger left turns left', unwrap(a1 - a0) > 0.15, `dAngle=${unwrap(a1 - a0).toFixed(2)}`);
       await touch('touchMove', box.x, box.y);
       await onStraight(page, 15); await waitSim(page, 0.2);
       const a1b = await angle(page);
       for (let i = 1; i <= 6; i++) { await touch('touchMove', box.x + i * 15, box.y); await sleep(30); }
-      await waitSim(page, 0.6);
+      await waitSim(page, 0.3);
       const a2 = await angle(page);
       check('[phone] sliding the GAS finger right turns right', unwrap(a2 - a1b) < -0.15, `dAngle=${unwrap(a2 - a1b).toFixed(2)}`);
       await page.screenshot({ path: path.join(OUT, 'phone-steer.png') });

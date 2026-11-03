@@ -41,12 +41,15 @@ describe('upgrade costs and stats', () => {
     expect(canBuy(s, 'engine')).toBe(true);
     const bought = buyUpgrade(s, 'engine')!;
     expect(bought.money).toBe(0);
-    expect(bought.upgrades.engine).toBe(1);
+    expect(bought.carUpgrades[s.car].engine).toBe(1);            // upgrades belong to the selected car
     expect(buyUpgrade(bought, 'engine')).toBeNull();            // 600 needed
-    expect(s.upgrades.engine).toBe(0);                          // input not mutated
-    s = { ...s, money: 1e6, upgrades: { engine: 5, grip: 5, armor: 5 } };
+    expect(s.carUpgrades[s.car]).toBeUndefined();               // input not mutated
+    s = { ...s, money: 1e6, carUpgrades: { [s.car]: { engine: 5, grip: 5, armor: 5 } } };
     expect(buyUpgrade(s, 'grip')).toBeNull();
     expect(canBuy(s, 'armor')).toBe(false);
+    // another car still starts from level 0
+    expect(canBuy(s, 'armor', 'mammoth')).toBe(true);
+    expect(buyUpgrade(s, 'armor', 'mammoth')!.carUpgrades.mammoth).toEqual({ engine: 0, grip: 0, armor: 1 });
   });
 });
 
@@ -150,10 +153,11 @@ describe('opponents', () => {
   });
 
   it('player setup uses the saved colour and upgrades', () => {
-    const s = { ...defaultSave(), carColor: 4, upgrades: { engine: 2, grip: 0, armor: 1 } };
+    const s = { ...defaultSave(), carColor: 4, car: 'brick', carUpgrades: { brick: { engine: 2, grip: 0, armor: 1 } } };
     const p = makePlayerSetup(s, 'You');
     expect(p).toMatchObject({ id: 0, isPlayer: true, colorIndex: 4, name: 'You' });
-    expect(p.stats).toEqual(statsFor(s.upgrades));
+    expect(p.stats).toEqual(statsFor({ engine: 2, grip: 0, armor: 1 }, 'brick'));
+    expect(p.stats.modelId).toBe('brick');
   });
 });
 
@@ -169,7 +173,7 @@ describe('save sanitising', () => {
       bestLap: { t1: 70.2, t2: 'x' }, settings: { lang: 'fr', autoGas: true, quality: 'ultra', muted: 1 }, carColor: 99, racesFinished: 4.8,
     }, null);
     expect(s.money).toBe(0);
-    expect(s.upgrades).toEqual({ engine: 5, grip: 0, armor: 3 });
+    expect(s.carUpgrades).toEqual({ scrapper: { engine: 5, grip: 0, armor: 3 } });   // v1 global upgrades -> the starter car
     expect(s.unlockedTracks).toEqual(['t1', 't2']);
     expect(s.bestPlace).toEqual({ t2: 3 });
     expect(s.bestLap).toEqual({ t1: 70.2 });

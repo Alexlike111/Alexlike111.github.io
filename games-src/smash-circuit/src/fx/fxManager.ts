@@ -1,7 +1,7 @@
 // Turns sim events and car state into visuals: debris, tyre smoke, dust, sparks, fire, confetti, skid marks.
 import * as THREE from 'three';
 import { CONFIG, type Quality } from '../config';
-import { WHEEL_LIST, carColor, type CarPose } from '../render/car';
+import { WHEEL_LIST, carColor, wheelLayout, type CarPose } from '../render/car';
 import type { Materials } from '../render/materials';
 import type { ThemePalette } from '../render/palette';
 import { clamp, makeRng } from '../render/util';
@@ -32,7 +32,7 @@ const PART_ZONE: Record<CarPart, ZoneId> = {
 const BURNT = 0x3a2f29;
 const FLAME = [0xff8a1a, 0xffc93c, 0xff5a1a, 0xffe08a];
 /** car-local (x forward, z left) corner of each wheel instance k (WHEEL_LIST order) */
-const WHEEL_X = [1, 1, -1, -1], WHEEL_Z = [1, -1, 1, -1];
+const WHEEL_Z = [1, -1, 1, -1];
 
 export interface FxContext {
   playerId: number;
@@ -425,11 +425,12 @@ export class FxManager {
       const slideMark = st.slip > FX.skidSlip || (st.handbrake && speed > 6) || (st.brake > 0.85 && speed > 14);
       const k0 = i * 4;
       const intensity = inRange && slideMark && !st.offRoad ? clamp(Math.max(st.slip, st.handbrake ? 0.7 : 0, st.brake > 0.85 ? 0.45 : 0), 0, 1) : 0;
-      this.skids.mark(k0 + 2, wx(-CR.wheelX, CR.wheelZ), wz(-CR.wheelX, CR.wheelZ), intensity);
-      this.skids.mark(k0 + 3, wx(-CR.wheelX, -CR.wheelZ), wz(-CR.wheelX, -CR.wheelZ), intensity);
+      const WL = wheelLayout(st.modelId);   // the model's own wheels (FL, FR, RL, RR)
+      this.skids.mark(k0 + 2, wx(WL[2].x, WL[2].z), wz(WL[2].x, WL[2].z), intensity);
+      this.skids.mark(k0 + 3, wx(WL[3].x, WL[3].z), wz(WL[3].x, WL[3].z), intensity);
       const frontI = intensity > 0 && st.slip > 0.65 ? intensity * 0.8 : 0;
-      this.skids.mark(k0 + 0, wx(CR.wheelX, CR.wheelZ), wz(CR.wheelX, CR.wheelZ), frontI);
-      this.skids.mark(k0 + 1, wx(CR.wheelX, -CR.wheelZ), wz(CR.wheelX, -CR.wheelZ), frontI);
+      this.skids.mark(k0 + 0, wx(WL[0].x, WL[0].z), wz(WL[0].x, WL[0].z), frontI);
+      this.skids.mark(k0 + 1, wx(WL[1].x, WL[1].z), wz(WL[1].x, WL[1].z), frontI);
       if (!inRange) continue;
       this.driftFx.update(i, P, dt, st.id === ctx.playerId, this.share, this.essential);
 
@@ -440,7 +441,7 @@ export class FxManager {
         while (this.acc[a] >= 1) {
           this.acc[a] -= 1;
           const side = this.rng() > 0.5 ? 1 : -1;
-          const lx = -CR.wheelX, lz = side * CR.wheelZ;
+          const lx = WL[2].x, lz = side * Math.abs(WL[2].z);
           this.smoke.spawn(wx(lx, lz), 0.25, wz(lx, lz), st.vx * 0.15 + this.rnd(-0.6, 0.6), this.rnd(0.5, 1.3), st.vy * 0.15 + this.rnd(-0.6, 0.6), {
             life: this.rnd(0.5, 0.95), size0: 0.5, size1: this.rnd(1.7, 2.6), color: pal.dust === 0xffffff ? 0xf2f6fb : 0xf0f0f0, alpha: 0.5, drag: 2.0,
           });
@@ -453,7 +454,7 @@ export class FxManager {
         while (this.acc[a + 1] >= 1) {
           this.acc[a + 1] -= 1;
           const side = this.rng() > 0.5 ? 1 : -1;
-          const lx = -CR.wheelX, lz = side * CR.wheelZ;
+          const lx = WL[2].x, lz = side * Math.abs(WL[2].z);
           this.smoke.spawn(wx(lx, lz), 0.3, wz(lx, lz), st.vx * -0.05 + this.rnd(-1.4, 1.4), this.rnd(0.9, 2.2), st.vy * -0.05 + this.rnd(-1.4, 1.4), {
             life: this.rnd(0.5, 1.0), size0: 0.5, size1: this.rnd(1.6, 2.8), color: pal.dust, alpha: 0.65, drag: 1.6,
           });
@@ -540,7 +541,7 @@ export class FxManager {
           let k = Math.floor(this.rng() * 4);
           for (let t = 0; t < 4 && !st.detachedParts.includes(WHEEL_LIST[k]); t++) k = (k + 1) % 4;
           if (!st.detachedParts.includes(WHEEL_LIST[k])) break;
-          const lx = WHEEL_X[k] * CR.wheelX, lz = WHEEL_Z[k] * (CR.wheelZ + 0.1);
+          const lx = WL[k].x, lz = WL[k].z + WHEEL_Z[k] * 0.1;
           this.sparks.spawn(wx(lx, lz), 0.15, wz(lx, lz), st.vx * 0.55 + this.rnd(-2.5, 2.5), this.rnd(1.5, 4.5), st.vy * 0.55 + this.rnd(-2.5, 2.5), {
             life: this.rnd(0.2, 0.45), size0: this.rnd(0.14, 0.26), size1: 0.03, color: this.pick(SPARK_COLORS), alpha: 1, drag: 1.4, gravity: 14, mode: 1,
           });

@@ -112,7 +112,11 @@ describe('health and effects', () => {
     const only = (z: ZoneId) => { const hp = createZoneHp(); hp[z] = 0; return computeEffects(hp, MAX); };
     const front = only('front');
     expect(front.powerMul).toBeCloseTo(1 - CONFIG.damage.frontPowerLoss, 6);
-    expect(Math.abs(front.steerPull)).toBeGreaterThan(0.05);
+    // a symmetric nose loss pulls the way the first hit came from (never a built-in default to the right), none without one
+    expect(front.steerPull).toBe(0);
+    const frontHp = createZoneHp(); frontHp.front = 0;
+    expect(computeEffects(frontHp, MAX, 1).steerPull).toBeGreaterThan(0.05);
+    expect(computeEffects(frontHp, MAX, -1).steerPull).toBeLessThan(-0.05);
     expect(front.topSpeedMul).toBe(1);
     const left = only('left'), right = only('right');
     expect(left.steerPull).toBeLessThan(0);
@@ -124,6 +128,12 @@ describe('health and effects', () => {
     expect(only('wheelRL').gripMul).toBeCloseTo(1 - CONFIG.damage.wheelGripLoss, 6);
     expect(only('wheelFL').steerPull).toBeLessThan(0);
     expect(only('wheelFR').steerPull).toBeGreaterThan(0);
+  });
+
+  it('grip never drops below the floor, however wrecked the rear and the wheels are', () => {
+    const hp = createZoneHp();
+    hp.rear = 0; hp.wheelFL = 0; hp.wheelFR = 0; hp.wheelRL = 0; hp.wheelRR = 0;
+    expect(computeEffects(hp, MAX).gripMul).toBeCloseTo(CONFIG.damage.gripFloor, 6);
   });
 
   it('smoke and sparks appear only at low health', () => {

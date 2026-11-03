@@ -1,0 +1,159 @@
+/* Garage car browser, pre-race car / rivals bar, rivals sheet. Portrait first; landscape puts the sheet in a left column. */
+
+/* ------------------------------------------------------------ garage layout */
+.ui-root .screen.garage {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "bar" "strip" "title" "view" "sheet";
+  gap: 0.45em;
+}
+.ui-root .screen.garage > .bar { grid-area: bar; }
+.ui-root .screen.garage > .g-view { grid-area: view; min-height: 0; pointer-events: none !important; }
+
+/* car strip: all 10 cars, scrolls sideways on phones */
+.ui-root .g-strip {
+  grid-area: strip; display: flex; gap: 0.35em; overflow-x: auto; overflow-y: hidden; padding: 0.15em 0.1em 0.3em;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; touch-action: pan-x;
+}
+.ui-root .g-strip::-webkit-scrollbar { display: none; }
+.ui-root .g-chip {
+  pointer-events: auto; appearance: none; cursor: pointer; position: relative; flex: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
+  width: 5.2em; min-height: max(3.5em, 44px); padding: 0.25em 0.2em 0.2em;
+  background: rgba(16, 27, 58, 0.88); border: 0.14em solid var(--ink); border-radius: 0.8em;
+  box-shadow: 0 0.18em 0 rgba(0, 0, 0, 0.35); color: #dfe6f8; touch-action: manipulation;
+  font: 900 italic 0.66em/1 var(--display); text-transform: uppercase; letter-spacing: 0.01em;
+}
+.ui-root .g-chip .car-svg { width: 6.2em; height: 3.1em; display: block; }
+.ui-root .g-chip span { display: block; white-space: nowrap; }
+.ui-root .g-chip.on { background: linear-gradient(#2b4fa6, #1a2f6c); border-color: var(--yellow); color: #fff; box-shadow: 0 0 0 0.12em var(--ink), 0 0.18em 0 rgba(0, 0, 0, 0.35); }
+.ui-root .g-chip .g-tick {
+  position: absolute; top: -0.35em; right: -0.3em; width: 1.7em; height: 1.7em; border-radius: 50%;
+  display: grid; place-items: center; background: var(--green); border: 0.14em solid var(--ink); color: #fff;
+}
+.ui-root .g-chip .g-tick .ic { width: 1.1em; height: 1.1em; }
+
+/* name row with prev / next */
+.ui-root .g-title { grid-area: title; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5em; }
+.ui-root .g-arrow.next .ic { transform: scaleX(-1); }
+.ui-root .g-name { text-align: center; min-width: 0; pointer-events: none; }
+.ui-root .g-name h3 {
+  font: 900 italic 1.65em/1 var(--display); text-transform: uppercase; color: var(--yellow);
+  -webkit-text-stroke: 0.09em var(--ink); paint-order: stroke fill; text-shadow: 0 0.08em 0 var(--ink);
+}
+.ui-root .g-sub { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0.35em 0.5em; margin-top: 0.25em; }
+.ui-root .g-class {
+  padding: 0.12em 0.6em; border-radius: 2em; background: rgba(11, 20, 48, 0.85); border: 0.12em solid var(--ink);
+  font: 900 italic 0.72em/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.ui-root .g-count { font-size: 0.75em; padding: 0.1em 0.5em; border-radius: 2em; background: rgba(11, 20, 48, 0.7); font-variant-numeric: tabular-nums; }
+.ui-root .g-stars { display: inline-flex; gap: 0.05em; }
+.ui-root .g-stars .star { width: 1.05em; height: 1.05em; color: rgba(255, 255, 255, 0.18); }
+.ui-root .g-stars .star.on { color: var(--yellow); }
+.ui-root .g-rec { margin-top: 0.2em; font-size: 0.72em; opacity: 0.85; text-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.6); }
+
+/* bottom sheet: tabs, pane, action */
+.ui-root .g-sheet { grid-area: sheet; display: flex; flex-direction: column; gap: 0.45em; padding: 0.5em 0.6em 0.6em; min-height: 0; }
+.ui-root .g-tabs { flex: none; }
+.ui-root .g-pane { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ui-root .g-select { width: 100%; flex: none; }
+.ui-root .g-select.done { --c1: #3d8f5a; --c2: #23683e; }
+
+.ui-root .g-trait { display: grid; grid-template-columns: 2.3em minmax(0, 1fr); align-items: center; gap: 0.55em; padding: 0.1em 0 0.45em; }
+.ui-root .gt-ic { width: 2.3em; height: 2.3em; border-radius: 0.7em; display: grid; place-items: center; background: linear-gradient(#ffe17a, #ffb62b); border: 0.13em solid var(--ink); color: #3a2300; }
+.ui-root .gt-ic .ic { width: 1.4em; height: 1.4em; }
+.ui-root .g-trait b { display: block; font: 900 italic 0.95em/1.1 var(--display); text-transform: uppercase; color: var(--yellow); }
+.ui-root .g-trait p { font-size: 0.8em; line-height: 1.2; font-weight: 700; opacity: 0.92; }
+
+.ui-root .g-bars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.25em 0.8em; }
+.ui-root .g-bar { display: grid; grid-template-columns: 1.15em minmax(0, 1fr) auto; grid-template-areas: "gi gl gv" "bar bar bar"; align-items: center; gap: 0.12em 0.35em; }
+.ui-root .g-bar .gi { grid-area: gi; }
+.ui-root .g-bar .gi .ic { width: 1.1em; height: 1.1em; color: var(--yellow); }
+.ui-root .g-bar .gl { grid-area: gl; font-size: 0.78em; white-space: nowrap; }
+.ui-root .g-bar .gv { grid-area: gv; font-size: 0.8em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-root .g-bar .gv small { margin-left: 0.15em; font-size: 0.85em; opacity: 0.8; }
+.ui-root .g-bar .bar2 { grid-area: bar; height: 0.62em; }
+.ui-root .g-bar.b-armor .bar2 .cur { background: linear-gradient(#7dff9c, #3ccf6e); }
+.ui-root .g-bar.b-weight .bar2 .cur { background: linear-gradient(#c7d2ea, #7d8cab); }
+.ui-root .g-bar.b-drift .bar2 .cur { background: linear-gradient(#e2a3ff, #b26bff); }
+.ui-root .g-bar.b-accel .bar2 .cur { background: linear-gradient(#ffd27a, #ff9a2a); }
+
+.ui-root .g-pane .g-ups { padding: 0; }
+.ui-root .g-pane .up { padding: 0.3em 0; }
+.ui-root .g-note { font-size: 0.72em; opacity: 0.75; margin-top: 0.2em; text-align: center; }
+.ui-root .g-pane .swatches { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+
+/* portrait phones: the 3D car keeps the middle of the screen; trim the sheet */
+@media (max-aspect-ratio: 5/4) {
+  .ui-root .g-pane .up-desc { display: none; }
+  .ui-root .g-pane .up { grid-template-columns: 2.3em minmax(0, 1fr) auto; gap: 0.55em; }
+  .ui-root .g-pane .up-ic { width: 2.3em; height: 2.3em; }
+}
+
+/* landscape / desktop: strip on top, the sheet is a left column, the 3D car in the middle stays free */
+@media (min-aspect-ratio: 5/4) {
+  .ui-root .screen.garage {
+    grid-template-columns: minmax(0, 24em) minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas: "bar bar" "strip strip" "sheet title" "sheet view";
+  }
+  .ui-root .g-strip { justify-content: safe center; }
+  .ui-root .g-title { width: min(100%, 26em); justify-self: center; }
+  .ui-root .g-sheet { align-self: stretch; }
+  .ui-root .g-pane .swatches { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+}
+/* short landscape phones: compact everything */
+@media (min-aspect-ratio: 5/4) and (max-height: 460px) {
+  .ui-root .screen.garage { grid-template-columns: minmax(0, 21em) minmax(0, 1fr); gap: 0.35em; }
+  .ui-root .g-chip { width: 4.7em; min-height: 44px; padding-top: 0.15em; }
+  .ui-root .g-chip .car-svg { width: 5.4em; height: 2.7em; }
+  .ui-root .g-name h3 { font-size: 1.35em; }
+  .ui-root .g-rec { display: none; }
+  .ui-root .g-trait { padding-bottom: 0.25em; }
+  .ui-root .g-trait p { font-size: 0.74em; }
+  .ui-root .g-sheet { gap: 0.3em; padding: 0.35em 0.5em 0.45em; }
+  .ui-root .g-pane .up-desc { display: none; }
+}
+
+/* ------------------------------------------------------------ pre-race bar (track select) */
+.ui-root .prerace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6em; flex: none; }
+.ui-root .pr-btn {
+  pointer-events: auto; appearance: none; cursor: pointer; min-height: max(3.4em, 48px);
+  display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; column-gap: 0.5em;
+  padding: 0.35em 0.7em; text-align: left; color: #fff; background: rgba(16, 27, 58, 0.92);
+  border: 0.16em solid var(--ink); border-radius: 0.9em; box-shadow: 0 0.25em 0 var(--ink); touch-action: manipulation;
+  font: inherit;
+}
+.ui-root .pr-btn:active { transform: translateY(0.15em); box-shadow: 0 0.1em 0 var(--ink); }
+.ui-root .pr-btn small { grid-column: 1 / -1; font: 900 italic 0.68em/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--yellow); }
+.ui-root .pr-btn .car-svg { width: 3.6em; height: 1.8em; }
+.ui-root .pr-btn b { font: 900 italic 0.95em/1.1 var(--display); text-transform: uppercase; overflow-wrap: anywhere; }
+.ui-root .pr-btn > .ic { width: 1.6em; height: 1.6em; color: var(--yellow); justify-self: center; }
+
+/* ------------------------------------------------------------ rivals sheet */
+.ui-root .sheet-dim { place-items: end center; }
+.ui-root .rv-sheet {
+  width: min(100%, 34em); max-height: 100%; overflow-y: auto; padding: 0.8em; display: flex; flex-direction: column; gap: 0.55em;
+  animation: pop-in 0.22s cubic-bezier(.2, 1.4, .4, 1) both; cursor: default;
+}
+.ui-root .rv-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.6em; }
+.ui-root .rv-head .title { text-align: left; }
+.ui-root .rv-opts { display: grid; grid-template-columns: 1fr; gap: 0.45em; }
+.ui-root .rv-opt {
+  pointer-events: auto; appearance: none; cursor: pointer; display: grid; grid-template-columns: 1.9em minmax(0, 1fr) auto; align-items: center; gap: 0.6em;
+  min-height: max(3.3em, 48px); padding: 0.4em 0.6em; text-align: left; color: #fff; font: inherit;
+  background: rgba(0, 0, 0, 0.32); border: 0.14em solid var(--ink); border-radius: 0.85em; touch-action: manipulation;
+}
+.ui-root .rv-opt.on { background: linear-gradient(#2b4fa6, #1a2f6c); border-color: var(--yellow); }
+.ui-root .rv-radio { width: 1.7em; height: 1.7em; border-radius: 50%; border: 0.16em solid #9fb0d6; display: grid; place-items: center; }
+.ui-root .rv-opt.on .rv-radio { background: var(--green); border-color: var(--ink); }
+.ui-root .rv-radio .ic { width: 1.1em; height: 1.1em; }
+.ui-root .rv-txt b { display: block; font: 900 italic 0.95em/1.1 var(--display); text-transform: uppercase; }
+.ui-root .rv-txt small { display: block; font-size: 0.75em; line-height: 1.15; opacity: 0.8; }
+.ui-root .rv-prev { display: flex; align-items: center; gap: 0.1em; }
+.ui-root .rv-prev .car-svg.mini { width: 2.6em; height: 1.3em; }
+.ui-root .rv-q { width: 2.6em; text-align: center; font: 900 italic 1.4em/1 var(--display); color: var(--yellow); }
+.ui-root .rv-fair { font-size: 0.75em; opacity: 0.8; text-align: center; line-height: 1.2; }
+.ui-root .car-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.2em, 1fr)); gap: 0.35em; }
+.ui-root .car-grid .g-chip { width: auto; }
+.ui-root .s-cars { display: block; }

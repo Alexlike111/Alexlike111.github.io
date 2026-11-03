@@ -747,7 +747,7 @@ export class UI {
     const paint = CONFIG.render.carColors[s.carColor % CONFIG.render.carColors.length];
     const pre = `<div class="prerace">
       <button class="pr-btn" data-act="garage"><small>${esc(t('prerace.yourCar'))}</small>${carSvg(car, paint)}<b>${esc(t('car.' + car))}</b></button>
-      <button class="pr-btn" data-act="rivals"><small>${esc(t('rivals.title'))}</small><b>${esc(rivalLabel(r.mode, r.car))}</b>${icon('gear')}</button>
+      <button class="pr-btn" data-act="rivals"><small>${esc(t('rivals.title'))}</small>${r.mode === 'pick' || r.mode === 'same' ? carSvg(r.mode === 'pick' ? carIdOr(r.car ?? s.car) : car, r.mode === 'pick' ? CONFIG.render.carColors[2] : paint) : icon('trophy')}<b>${esc(rivalLabel(r.mode, r.car))}</b></button>
     </div>`;
     this.setScreen('tracks', `${this.header('tracks.title')}${pre}<div class="cards">${cards}</div>`);
   }
