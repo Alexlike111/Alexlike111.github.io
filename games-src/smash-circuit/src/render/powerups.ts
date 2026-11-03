@@ -66,6 +66,7 @@ export class PowerUpVisuals {
   private readonly boxShell: THREE.InstancedMesh;
   private readonly boxCore: THREE.InstancedMesh;
   private readonly boxMark: THREE.InstancedMesh;
+  private readonly boxGlow: THREE.InstancedMesh;
   private readonly boxPop: Float32Array;
   private readonly boxWas: Uint8Array;
   private readonly qTex: THREE.CanvasTexture;
@@ -129,16 +130,22 @@ export class PowerUpVisuals {
     const bs = FX.boxSize;
     const shellGeo = new THREE.BoxGeometry(bs, bs, bs);
     const coreGeo = new THREE.BoxGeometry(bs * 0.55, bs * 0.55, bs * 0.55);
-    const markGeo = new THREE.PlaneGeometry(bs * 1.15, bs * 1.15);
+    const markGeo = new THREE.PlaneGeometry(bs * 1.5, bs * 1.5);
     markGeo.rotateX(-Math.PI / 2);
-    const shellMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.62, depthWrite: false });
+    markGeo.scale(1, 1, -1);   // the scene is mirrored along z: flip the glyph back so the "?" reads correctly
+    const glowGeo = new THREE.CircleGeometry(bs * 0.8, 24);
+    glowGeo.rotateX(-Math.PI / 2);
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending });
+    const shellMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false });
     const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.qTex = questionTexture();
-    const markMat = new THREE.MeshBasicMaterial({ map: this.qTex, transparent: true, depthWrite: false });
+    const markMat = new THREE.MeshBasicMaterial({ map: this.qTex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.boxShell = new THREE.InstancedMesh(shellGeo, shellMat, Math.max(1, this.boxN));
     this.boxCore = new THREE.InstancedMesh(coreGeo, coreMat, Math.max(1, this.boxN));
     this.boxMark = new THREE.InstancedMesh(markGeo, markMat, Math.max(1, this.boxN));
-    for (const m of [this.boxShell, this.boxCore, this.boxMark]) {
+    this.boxGlow = new THREE.InstancedMesh(glowGeo, glowMat, Math.max(1, this.boxN));
+    this.boxGlow.renderOrder = 3;
+    for (const m of [this.boxGlow, this.boxShell, this.boxCore, this.boxMark]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
       m.count = this.boxN;
@@ -150,7 +157,9 @@ export class PowerUpVisuals {
     this.boxShell.renderOrder = 4;
     this.boxPop = new Float32Array(Math.max(1, this.boxN)).fill(1);
     this.boxWas = new Uint8Array(Math.max(1, this.boxN)).fill(1);
-    this.disposables.push(shellGeo, coreGeo, markGeo, shellMat, coreMat, markMat, this.qTex);
+    this.boxGlow.setColorAt(0, _c.set(0xffffff));
+    this.boxGlow.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    this.disposables.push(shellGeo, coreGeo, markGeo, glowGeo, shellMat, coreMat, markMat, glowMat, this.qTex);
 
     // ---- oil slicks
     this.oilN = oils.length;
@@ -205,11 +214,17 @@ export class PowerUpVisuals {
       _q.setFromAxisAngle(UP, Math.sin(T * 1.2 + i) * 0.35);
       _m.compose(_p.set(b.x, y + 0.9, b.y), _q, _s.set(k, k, k));
       this.boxMark.setMatrixAt(i, _m);
-      this.boxShell.setColorAt(i, _c.setHSL((T * 0.25 + i * 0.13) % 1, 0.85, 0.6));
+      const hue = (T * 0.25 + i * 0.13) % 1;
+      this.boxShell.setColorAt(i, _c.setHSL(hue, 1, 0.55));
+      _m.compose(_p.set(b.x, 0.11, b.y), _q.identity(), _s.set(k, 1, k));
+      this.boxGlow.setMatrixAt(i, _m);
+      this.boxGlow.setColorAt(i, _c.setHSL(hue, 1, 0.5));
     }
     if (this.boxN) {
       this.boxShell.instanceMatrix.needsUpdate = true; this.boxCore.instanceMatrix.needsUpdate = true; this.boxMark.instanceMatrix.needsUpdate = true;
       if (this.boxShell.instanceColor) this.boxShell.instanceColor.needsUpdate = true;
+      this.boxGlow.instanceMatrix.needsUpdate = true;
+      if (this.boxGlow.instanceColor) this.boxGlow.instanceColor.needsUpdate = true;
     }
 
     // ---- oil
@@ -247,7 +262,7 @@ export class PowerUpVisuals {
 
   dispose(): void {
     for (const d of this.disposables) d.dispose();
-    this.boxShell.dispose(); this.boxCore.dispose(); this.boxMark.dispose(); this.oilMesh.dispose();
+    this.boxGlow.dispose(); this.boxShell.dispose(); this.boxCore.dispose(); this.boxMark.dispose(); this.oilMesh.dispose();
     this.group.removeFromParent();
   }
 }

@@ -777,18 +777,20 @@ export class UI {
     let active = 0;
     if ((p.shieldT ?? 0) > 0) active = Math.ceil(20 * (p.shieldT ?? 0) / I.shield.time);
     else if ((p.nitroT ?? 0) > 0) active = Math.ceil(20 * (p.nitroT ?? 0) / I.nitro.time);
-    const key = `${item}|${active}|${this.touchMode ? 1 : 0}`;
+    // while a shield / nitro runs with the slot empty, the slot shows that effect (dimmed) with its remaining-time bar
+    const shown: ItemType | null = item ?? ((p.shieldT ?? 0) > 0 ? 'shield' : (p.nitroT ?? 0) > 0 ? 'nitro' : null);
+    const key = `${item}|${shown}|${active}|${this.touchMode ? 1 : 0}`;
     if (key !== this.itemKey) {
       this.itemKey = key;
       const had = u.root.dataset.item ?? '';
-      u.root.dataset.item = item ?? '';
-      u.root.hidden = !item && active === 0 && this.touchMode;
+      u.root.dataset.item = shown ?? '';
+      u.root.hidden = !shown && this.touchMode;
       u.root.classList.toggle('empty', !item);
       u.root.classList.toggle('running', active > 0);
-      if ((item ?? '') !== had) {
-        u.ic.innerHTML = item ? icon(ITEM_ICON[item]) : '';
-        u.name.textContent = item ? t('item.' + item) : '';
-        u.btn.setAttribute('aria-label', item ? t('item.' + item) : t('hud.itemTap'));
+      if ((shown ?? '') !== had) {
+        u.ic.innerHTML = shown ? icon(ITEM_ICON[shown]) : '';
+        u.name.textContent = shown ? t('item.' + shown) : '';
+        u.btn.setAttribute('aria-label', shown ? t('item.' + shown) : t('hud.itemTap'));
         if (item) { u.root.classList.remove('got'); void u.root.offsetWidth; u.root.classList.add('got'); }
       }
       u.bar.style.transform = `scaleX(${(active / 20).toFixed(2)})`;

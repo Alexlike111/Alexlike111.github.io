@@ -625,6 +625,7 @@
 }
 .ui-root .item-slot:active { transform: scale(0.94) translateY(0.1em); filter: brightness(1.15); }
 .ui-root .hud-item.empty .item-slot { background: rgba(16, 27, 58, 0.55); border-style: dashed; border-color: rgba(255, 255, 255, 0.45); box-shadow: none; pointer-events: none; }
+.ui-root .hud-item.empty.running .item-slot { background: radial-gradient(circle at 35% 28%, var(--ic1), var(--ic2) 60%, var(--ic3)); border-style: solid; border-color: var(--ink); opacity: 0.8; }
 .ui-root .item-ic { display: grid; place-items: center; width: 62%; height: 62%; filter: drop-shadow(0 0.08em 0 rgba(0, 0, 0, 0.35)); }
 .ui-root .item-ic .ic { width: 100%; height: 100%; }
 .ui-root .item-key {
@@ -634,7 +635,7 @@
 .ui-root.is-touch .item-key { display: none; }
 .ui-root .item-bar { position: absolute; left: 12%; right: 12%; bottom: -0.55em; height: 0.35em; border-radius: 0.2em; background: #fff; border: 0.08em solid var(--ink);
   transform-origin: 0 50%; transform: scaleX(0); transition: transform 0.12s linear; }
-.ui-root .item-name { font: 900 italic 0.8em/1 var(--display); text-transform: uppercase; color: #fff; -webkit-text-stroke: 0.1em var(--ink); paint-order: stroke fill;
+.ui-root .item-name { margin-top: 0.4em; font: 900 italic 0.8em/1 var(--display); text-transform: uppercase; color: #fff; -webkit-text-stroke: 0.1em var(--ink); paint-order: stroke fill;
   text-shadow: 0 0.08em 0 var(--ink); white-space: nowrap; }
 .ui-root .hud-item.got .item-slot { animation: item-got 0.5s cubic-bezier(.2, 1.5, .4, 1) both; }
 @keyframes item-got { 0% { transform: scale(0.3) rotate(-25deg); } 100% { transform: scale(1) rotate(0); } }
@@ -652,6 +653,6 @@
   -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 38%, #000 100%);
   mask-image: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 38%, #000 100%);
 }
-.ui-root .speedlines.on { opacity: 0.75; animation: sl-flicker 0.14s steps(2) infinite; }
+.ui-root .speedlines.on { opacity: 0.5; animation: sl-flicker 0.14s steps(2) infinite; }
 @keyframes sl-flicker { 0% { transform: rotate(0deg) scale(1.02); } 100% { transform: rotate(1.6deg) scale(1.05); } }
 @media (prefers-reduced-motion: reduce) { .ui-root .speedlines.on { animation: none; opacity: 0.4; } }

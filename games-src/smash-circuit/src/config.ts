@@ -458,7 +458,7 @@ export const CONFIG = {
       shockCount: 2, shockRadius: 7, shockSingle: 4, shockCalmCurv: 0.006,
     },
     fx: {
-      boxSize: 1.5, boxBob: 0.25, boxSpin: 1.6, boxHeight: 1.5,
+      boxSize: 2.1, boxBob: 0.25, boxSpin: 1.6, boxHeight: 1.6,
       padColorA: 0x19e6ff, padColorB: 0xfff25a,
       zoomBoost: 0.08, zoomIn: 14, zoomOut: 3.5, punch: 0.06, punchDecay: 7, shakePad: 0.14,
       speedLinesFull: 1,           // boost level at which the speed lines are at full strength
