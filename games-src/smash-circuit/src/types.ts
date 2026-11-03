@@ -224,11 +224,11 @@ export interface ISim {
   drainEvents(): SimEvent[];
   repairPlayer(): void;               // full repair (money handled by caller)
   /** Boost strips, item boxes and oil slicks (power-ups). */
-  readonly pads: BoostPad[];
-  readonly boxes: ItemBox[];
-  readonly oils: OilSlick[];
+  readonly pads?: BoostPad[];
+  readonly boxes?: ItemBox[];
+  readonly oils?: OilSlick[];
   /** Use the player's held item (key E / Shift / HUD button). Returns true when something was used. */
-  useItem(): boolean;
+  useItem?(): boolean;
   /** Interpolation alpha 0..1 of the accumulator for smooth rendering. */
   readonly alpha: number;
   /** Ghost position at current race time for the current lap, or null. */

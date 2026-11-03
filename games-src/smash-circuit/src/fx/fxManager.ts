@@ -56,7 +56,7 @@ export class FxManager {
     this.skids = new SkidMarks(CONFIG.render.skidCapacity.high, carCount * 4);
     this.acc = new Float32Array(carCount * 6);
     this.rings = new ShockwavePool();
-    this.group.add(this.skids.mesh, this.debris.mesh, this.rings.mesh, this.smoke.mesh, this.sparks.mesh);
+    this.group.add(this.skids.mesh, ...this.debris.meshes, this.rings.mesh, this.smoke.mesh, this.sparks.mesh);
   }
 
   setTheme(pal: ThemePalette, wallStyle: WallVisual): void {

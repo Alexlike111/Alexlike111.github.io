@@ -4,10 +4,12 @@ import type * as planck from 'planck';
 import { CONFIG } from '../config';
 import { buildTrackGeometry } from '../track/spline';
 import type {
-  CarInput, CarSetup, CarState, DestructibleKind, DestructibleState, GhostData, ISim, RaceState, SimEvent,
+  BoostPad, CarInput, CarSetup, CarState, DestructibleKind, DestructibleState, GhostData, ISim, ItemBox, OilSlick, RaceState, SimEvent,
   SimOptions, TrackGeometry,
 } from '../types';
 import { AiDriver, DEFAULT_PERSONALITY } from './ai';
+import { AiItemUser } from './aiItems';
+import { PowerUpSystem } from './powerups';
 import { SimCar } from './car';
 import { DestructionSystem } from './destruction';
 import { GhostRecorder, ghostPoseAt } from './ghost';
@@ -44,7 +46,13 @@ export class Sim implements ISim {
   readonly destruction: DestructionSystem;
   readonly tracker: RaceTracker;
   readonly simCars: SimCar[];
+  /** boost pads, item boxes, oil slicks and the item logic */
+  readonly powerups: PowerUpSystem;
+  readonly pads: BoostPad[];
+  readonly boxes: ItemBox[];
+  readonly oils: OilSlick[];
 
+  private readonly itemUsers: (AiItemUser | null)[];
   private readonly drivers: (AiDriver | null)[];
   private readonly others: CarState[][];
   private readonly byId = new Map<number, SimCar>();
@@ -96,6 +104,11 @@ export class Sim implements ISim {
       }
     }
     this.others = this.cars.map((c) => this.cars.filter((o) => o !== c));
+    this.powerups = new PowerUpSystem(this.track, this.simCars, this.destruction, opts.seed);
+    this.pads = this.powerups.pads; this.boxes = this.powerups.boxes; this.oils = this.powerups.oils;
+    this.itemUsers = setups.map((c, i) => this.drivers[i]
+      ? new AiItemUser(c.ai?.skill ?? DEFAULT_PERSONALITY.skill, makeRng(Math.floor(rng() * 4294967296) ^ (c.id * 40503)))
+      : null);
 
     this.tracker = new RaceTracker(this.track, laps, n);
     this.race = this.tracker.state;
@@ -142,6 +155,11 @@ export class Sim implements ISim {
 
   repairPlayer(): void {
     if (this.playerIndex >= 0) this.simCars[this.playerIndex].repair();
+  }
+
+  useItem(): boolean {
+    if (this.playerIndex < 0 || this.race.phase !== 'racing') return false;
+    return this.powerups.use(this.playerIndex, this.events);
   }
 
   ghostPose(): { x: number; y: number; a: number } | null {
@@ -219,8 +237,10 @@ export class Sim implements ISim {
     const p = contactPoint(contact);
     if (da.kind === 'car' && db.kind === 'car') {
       const a = this.byId.get(da.carId), b = this.byId.get(db.carId);
-      if (a) a.recordImpact(p.x, p.y, total, 'car');
-      if (b) b.recordImpact(p.x, p.y, total, 'car');
+      const dealA = a && a.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1;   // a ram shield multiplies the damage the OTHER car takes
+      const dealB = b && b.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1;
+      if (a) a.recordImpact(p.x, p.y, total, 'car', -1, dealB);
+      if (b) b.recordImpact(p.x, p.y, total, 'car', -1, dealA);
       if (a) this.crashes.push({ x: p.x, y: p.y, impulse: total, carId: da.carId });
       return;
     }
@@ -230,7 +250,7 @@ export class Sim implements ISim {
     if (!car || !other) return;
     car.recordImpact(p.x, p.y, total, other.kind, other.id);
     const st = car.state;
-    this.destruction.recordHit(other.id, total, p.x, p.y, st.vx, st.vy);
+    this.destruction.recordHit(other.id, car.buffs.shieldT > 0 ? total * CONFIG.items.shield.wallImpulseMul : total, p.x, p.y, st.vx, st.vy);
     if (other.kind === 'wall' || other.kind === 'guardrail' || other.kind === 'prop') {
       const wm = contact.getWorldManifold(null);
       if (wm) {
@@ -291,6 +311,15 @@ export class Sim implements ISim {
     const n = this.cars.length;
     const racing = this.race.phase !== 'countdown';
     const hints = this.tracker.hints;
+
+    // ---- power-ups: pads, boxes, oil, timers; AI cars decide whether to use their item
+    this.powerups.update(dt, racing && this.race.phase === 'racing', this.events);
+    if (racing) {
+      for (let i = 0; i < n; i++) {
+        const iu = this.itemUsers[i];
+        if (iu && iu.update(dt, this.cars[i], this.others[i], this.track, hints[i], this.race.time)) this.powerups.use(i, this.events);
+      }
+    }
 
     // ---- inputs
     for (let i = 0; i < n; i++) {

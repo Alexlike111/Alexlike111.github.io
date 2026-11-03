@@ -84,7 +84,7 @@ export class AiItemUser {
       case 'shield':
         return overdue || sur.chaser || (car.health < A.shieldHealth && sur.nearCount > 0) || (clever && sur.blocker && car.speed > 12);
       case 'repair':
-        return car.health < (clever ? A.repairHealth : A.repairHealthLow) || (overdue && car.health < 0.97);
+        return car.health < (clever ? A.repairHealth : A.repairHealthLow) || overdue;
       case 'oil':
         return overdue || sur.behindInLane;
       case 'shockwave':

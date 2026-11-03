@@ -12,10 +12,15 @@ const CR = CONFIG.render.car;
 const CFX = CONFIG.render.fx;
 const WR = CR.wheelRadius, WW = CR.wheelWidth, WX = CR.wheelX, WZ = CR.wheelZ;
 
-export const PART_LIST: CarPart[] = ['bumperF', 'bumperR', 'hood', 'doorL', 'doorR', 'spoiler', 'mirrorL', 'mirrorR'];
+/** Wheels are CarParts too (they come off at heavy damage), but they are drawn by the wheel mesh, not as body panels. */
+export type WheelPart = 'wheelFL' | 'wheelFR' | 'wheelRL' | 'wheelRR';
+export type BodyPart = Exclude<CarPart, WheelPart>;
+export const PART_LIST: BodyPart[] = ['bumperF', 'bumperR', 'hood', 'doorL', 'doorR', 'spoiler', 'mirrorL', 'mirrorR'];
+/** wheel order of the wheel instances (k = 0..3 per car): (+x,+z) FL, (+x,-z) FR, (-x,+z) RL, (-x,-z) RR */
+export const WHEEL_LIST: WheelPart[] = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 
 /** pivot (car-local) each part bends around when damaged */
-const PIVOT: Record<CarPart, [number, number, number]> = {
+const PIVOT: Record<BodyPart, [number, number, number]> = {
   bumperF: [1.75, 0.55, 0], bumperR: [-1.75, 0.55, 0],
   hood: [0.5, 0.9, 0], doorL: [0.7, 0.62, 0.9], doorR: [0.7, 0.62, -0.9],
   spoiler: [-1.85, 1.1, 0], mirrorL: [0.5, 0.98, 0.9], mirrorR: [0.5, 0.98, -0.9],
@@ -25,7 +30,7 @@ const DARK = 0x1c1f27, GLASS = 0x2f5273, CHROME = 0xdfe6f1, STRIPE = 0xffffff;
 
 export interface CarGeometries {
   body: THREE.BufferGeometry;
-  parts: Record<CarPart, THREE.BufferGeometry>;
+  parts: Record<BodyPart, THREE.BufferGeometry>;
   wheel: THREE.BufferGeometry;
   lights: THREE.BufferGeometry;
   ghost: THREE.BufferGeometry;
@@ -36,10 +41,19 @@ export function buildCarGeometries(): CarGeometries {
   const b = new GeoBuilder();
   // underbody / sills
   b.box(3.7, 0.16, 1.5, { pos: [0, 0.36, 0], color: DARK });
-  // main tub
-  b.box(3.5, 0.5, 1.74, { pos: [0, 0.6, 0], color: 0xffffff, paint: 1, vgrad: [0.3, 0.9, 0.78, 1] });
+  // main tub (subdivided: the damage shader crumples it per vertex)
+  b.box(3.5, 0.5, 1.74, { pos: [0, 0.6, 0], color: 0xffffff, paint: 1, vgrad: [0.3, 0.9, 0.78, 1], seg: [10, 2, 5], noBottom: true });
   // rounded-looking shoulders (slightly narrower upper slab)
-  b.box(3.3, 0.14, 1.56, { pos: [0, 0.91, 0], color: 0xffffff, paint: 1 });
+  b.box(3.3, 0.14, 1.56, { pos: [0, 0.91, 0], color: 0xffffff, paint: 1, seg: [10, 1, 5], noBottom: true });
+  // what a lost panel uncovers: engine bay under the hood, crash bars behind the bumpers, brake hubs inside the wheels
+  b.box(1.25, 0.1, 1.3, { pos: [1.1, 0.95, 0], color: 0x24262c });
+  b.box(0.55, 0.1, 0.6, { pos: [1.0, 0.975, 0.1], color: 0x8d939e });       // engine block
+  b.box(0.3, 0.07, 0.3, { pos: [1.45, 0.98, -0.42], color: 0xc9a227 });    // battery
+  b.box(0.12, 0.07, 1.0, { pos: [1.62, 0.98, 0], color: 0x3a3d45 });       // radiator
+  for (const sx of [-1, 1]) b.box(0.16, 0.2, 1.5, { pos: [sx * 1.8, 0.56, 0], color: 0x2b2d33 });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    b.cyl(0.24, 0.24, 0.1, 8, { pos: [sx * WX, WR, sz * (WZ + 0.11)], rot: [Math.PI / 2, 0, 0], color: 0x7a5a48 });
+  }
   // front/rear fenders over the inner half of each wheel
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     b.box(1.1, 0.16, 0.34, { pos: [sx * WX, 0.97, sz * (WZ - 0.1)], color: 0xffffff, paint: 1 });
@@ -53,7 +67,7 @@ export function buildCarGeometries(): CarGeometries {
     b.box(1.05, 0.012, 0.16, { pos: [-1.27, 1.0, sz * 0.2], color: STRIPE });
   }
   // trunk deck
-  b.box(1.05, 0.1, 1.5, { pos: [-1.27, 0.95, 0], color: 0xffffff, paint: 1 });
+  b.box(1.05, 0.1, 1.5, { pos: [-1.27, 0.95, 0], color: 0xffffff, paint: 1, seg: [3, 1, 4], noBottom: true });
   // little side-skirt accent
   for (const sz of [-1, 1]) b.box(2.4, 0.06, 0.06, { pos: [0, 0.5, sz * 0.9], color: 0xffffff });
   const body = b.build();
@@ -111,7 +125,7 @@ export function buildCarGeometries(): CarGeometries {
   }
   const lights = l.build();
 
-  const parts: Record<CarPart, THREE.BufferGeometry> = {
+  const parts: Record<BodyPart, THREE.BufferGeometry> = {
     bumperF, bumperR, hood, doorL: mkDoor(1), doorR: mkDoor(-1), spoiler, mirrorL: mkMirror(1), mirrorR: mkMirror(-1),
   };
 
@@ -128,7 +142,7 @@ export function buildCarGeometries(): CarGeometries {
 
 export interface CarPose { x: number; y: number; angle: number; state: CarState }
 
-const PART_ZONE: Record<CarPart, ZoneId> = {
+const PART_ZONE: Record<BodyPart, ZoneId> = {
   bumperF: 'front', bumperR: 'rear', hood: 'front', doorL: 'left', doorR: 'right', spoiler: 'rear', mirrorL: 'left', mirrorR: 'right',
 };
 /** scorched paint. The mix towards it is capped (CFX.dirtMax ~55%) so even a wreck keeps its body colour and stays readable as a car */
@@ -164,7 +178,9 @@ export class CarFleet {
   private bodyGeo: THREE.BufferGeometry;
   private dmgAttr: THREE.InstancedBufferAttribute;
   private wheels: THREE.InstancedMesh;
-  private partMesh = new Map<CarPart, THREE.InstancedMesh>();
+  private partMesh = new Map<BodyPart, THREE.InstancedMesh>();
+  /** per-fleet clones of the panel / lamp geometries carrying the shared aDmg attribute */
+  private dmgGeos: THREE.BufferGeometry[] = [];
   private spin: Float32Array;
   private dentSeed: Float32Array;
   private lightLevel: Float32Array;
@@ -195,9 +211,16 @@ export class CarFleet {
     this.dmgAttr = new THREE.InstancedBufferAttribute(new Float32Array(count * 4), 4).setUsage(THREE.DynamicDrawUsage);
     this.bodyGeo.setAttribute('aDmg', this.dmgAttr);
     this.body = mk(this.bodyGeo, mats.body, count, true);
-    for (const p of PART_LIST) this.partMesh.set(p, mk(geos.parts[p], mats.paint, count, p !== 'mirrorL' && p !== 'mirrorR'));
+    // panels and lamps read the same per-car damage (instance i = car i in every mesh): scuffs, soot, cracked lamps
+    const withDmg = (g: THREE.BufferGeometry): THREE.BufferGeometry => {
+      const c = g.clone();
+      c.setAttribute('aDmg', this.dmgAttr);
+      this.dmgGeos.push(c);
+      return c;
+    };
+    for (const p of PART_LIST) this.partMesh.set(p, mk(withDmg(geos.parts[p]), mats.carPart, count, p !== 'mirrorL' && p !== 'mirrorR'));
     this.wheels = mk(geos.wheel, mats.paint, count * 4, true);
-    this.lights = mk(geos.lights, mats.paintBasic, count, false);
+    this.lights = mk(withDmg(geos.lights), mats.carLamp, count, false);
     for (const m of [this.body, ...this.partMesh.values(), this.wheels, this.lights]) m.instanceColor!.setUsage(THREE.DynamicDrawUsage);
     const bg = new THREE.PlaneGeometry(6.4, 3.8);
     bg.rotateX(-Math.PI / 2);
@@ -226,7 +249,7 @@ export class CarFleet {
   get meshes(): THREE.InstancedMesh[] { return [this.body, this.lights, this.wheels, this.blob, ...this.partMesh.values()]; }
 
   /** Local transform of a damaged part (bend around its pivot), written into _m. Bends start early (hp < ~85%) and grow fast. */
-  private partMatrix(part: CarPart, id: number, hpFrac: number): THREE.Matrix4 {
+  private partMatrix(part: BodyPart, id: number, hpFrac: number): THREE.Matrix4 {
     const raw = Math.max(0, 1 - hpFrac - CFX.bendStart) / (1 - CFX.bendStart);   // 0 healthy .. 1 destroyed
     if (raw < 0.004) return _m.identity();
     const dm = Math.pow(raw, 0.6) * 1.35;
@@ -261,9 +284,19 @@ export class CarFleet {
       _b.compose(_v.set(P.x, 0, P.y), _q, _one);     // wheels sit on the ground
       const speed = st.speed;
       const latAcc = st.angularVel * speed;
-      const roll = clamp(-latAcc * CR.rollPerLatAccel, -CR.maxRoll, CR.maxRoll);
-      const pitch = (st.throttle - st.brake) * 0.018;
-      const bounce = st.offRoad ? Math.sin(performance.now() * 0.03 + i * 2) * 0.03 * clamp(Math.abs(speed) / 20, 0, 1) : 0;
+      let roll = clamp(-latAcc * CR.rollPerLatAccel, -CR.maxRoll, CR.maxRoll);
+      let pitch = (st.throttle - st.brake) * 0.018;
+      let bounce = st.offRoad ? Math.sin(performance.now() * 0.03 + i * 2) * 0.03 * clamp(Math.abs(speed) / 20, 0, 1) : 0;
+      // a lost wheel: that corner of the body drops onto the hub (+roll lowers the left side, -pitch the nose)
+      const dp = st.detachedParts;
+      if (dp.length) {
+        for (let k = 0; k < 4; k++) {
+          if (!dp.includes(WHEEL_LIST[k])) continue;
+          roll += (k % 2 === 0 ? 1 : -1) * CFX.wheelOffSag;
+          pitch += (k < 2 ? -1 : 1) * CFX.wheelOffSag * 0.55;
+          bounce -= 0.06;
+        }
+      }
       _qa.setFromAxisAngle(_ax, roll);
       _q.setFromAxisAngle(_az, pitch);
       _qa.multiply(_q);
@@ -304,6 +337,7 @@ export class CarFleet {
       let k = 0;
       for (const sx of [1, -1]) {
         for (const sz of [1, -1]) {
+          if (dp.includes(WHEEL_LIST[k])) { this.wheels.setMatrixAt(i * 4 + k, ZERO); k++; continue; }
           const hp = clamp(st.hp[wz[k]] / zmax, 0, 1);
           const camber = (1 - hp) * 0.35 * sz;
           _e.set(camber, sx > 0 ? steerYaw : 0, -this.spin[i], 'YXZ');
@@ -328,7 +362,11 @@ export class CarFleet {
     this.dmgAttr.needsUpdate = true;
   }
 
-  dispose(): void { for (const m of this.meshes) m.dispose(); this.bodyGeo.dispose(); this.blobGeo.dispose(); }
+  dispose(): void {
+    for (const m of this.meshes) m.dispose();
+    this.bodyGeo.dispose(); this.blobGeo.dispose();
+    for (const g of this.dmgGeos) g.dispose();
+  }
 }
 
 export function carColor(index: number): number {
