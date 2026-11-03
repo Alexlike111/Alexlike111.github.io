@@ -1,0 +1,263 @@
+{
+ "atlas": "atlas.png",
+ "cell": {
+  "width": 96,
+  "height": 128
+ },
+ "columns": 16,
+ "rows": 2,
+ "cell_order": "row-major; fan N: calm = cell 2*(N-1), raised = cell 2*(N-1)+1",
+ "poses": [
+  "calm",
+  "raised"
+ ],
+ "fans_count": 12,
+ "fans": [
+  {
+   "id": "fan01",
+   "calm": {
+    "cell": 0,
+    "row": 0,
+    "col": 0,
+    "source_sheet": "calm03",
+    "source_index": 0
+   },
+   "raised": {
+    "cell": 1,
+    "row": 0,
+    "col": 1,
+    "source_sheet": "raise01",
+    "source_index": 0
+   }
+  },
+  {
+   "id": "fan02",
+   "calm": {
+    "cell": 2,
+    "row": 0,
+    "col": 2,
+    "source_sheet": "calm03",
+    "source_index": 1
+   },
+   "raised": {
+    "cell": 3,
+    "row": 0,
+    "col": 3,
+    "source_sheet": "raise01",
+    "source_index": 1
+   }
+  },
+  {
+   "id": "fan03",
+   "calm": {
+    "cell": 4,
+    "row": 0,
+    "col": 4,
+    "source_sheet": "calm03",
+    "source_index": 2
+   },
+   "raised": {
+    "cell": 5,
+    "row": 0,
+    "col": 5,
+    "source_sheet": "raise01",
+    "source_index": 2
+   }
+  },
+  {
+   "id": "fan04",
+   "calm": {
+    "cell": 6,
+    "row": 0,
+    "col": 6,
+    "source_sheet": "calm03",
+    "source_index": 3
+   },
+   "raised": {
+    "cell": 7,
+    "row": 0,
+    "col": 7,
+    "source_sheet": "raise01",
+    "source_index": 3
+   }
+  },
+  {
+   "id": "fan05",
+   "calm": {
+    "cell": 8,
+    "row": 0,
+    "col": 8,
+    "source_sheet": "calm03",
+    "source_index": 4
+   },
+   "raised": {
+    "cell": 9,
+    "row": 0,
+    "col": 9,
+    "source_sheet": "raise01",
+    "source_index": 4
+   }
+  },
+  {
+   "id": "fan06",
+   "calm": {
+    "cell": 10,
+    "row": 0,
+    "col": 10,
+    "source_sheet": "calm03",
+    "source_index": 5
+   },
+   "raised": {
+    "cell": 11,
+    "row": 0,
+    "col": 11,
+    "source_sheet": "raise01",
+    "source_index": 5
+   }
+  },
+  {
+   "id": "fan07",
+   "calm": {
+    "cell": 12,
+    "row": 0,
+    "col": 12,
+    "source_sheet": "calm04",
+    "source_index": 0
+   },
+   "raised": {
+    "cell": 13,
+    "row": 0,
+    "col": 13,
+    "source_sheet": "raise01",
+    "source_index": 6
+   }
+  },
+  {
+   "id": "fan08",
+   "calm": {
+    "cell": 14,
+    "row": 0,
+    "col": 14,
+    "source_sheet": "calm04",
+    "source_index": 1
+   },
+   "raised": {
+    "cell": 15,
+    "row": 0,
+    "col": 15,
+    "source_sheet": "raise01",
+    "source_index": 7
+   }
+  },
+  {
+   "id": "fan09",
+   "calm": {
+    "cell": 16,
+    "row": 1,
+    "col": 0,
+    "source_sheet": "calm04",
+    "source_index": 2
+   },
+   "raised": {
+    "cell": 17,
+    "row": 1,
+    "col": 1,
+    "source_sheet": "raise01",
+    "source_index": 8
+   }
+  },
+  {
+   "id": "fan10",
+   "calm": {
+    "cell": 18,
+    "row": 1,
+    "col": 2,
+    "source_sheet": "calm04",
+    "source_index": 3
+   },
+   "raised": {
+    "cell": 19,
+    "row": 1,
+    "col": 3,
+    "source_sheet": "raise01",
+    "source_index": 9
+   }
+  },
+  {
+   "id": "fan11",
+   "calm": {
+    "cell": 20,
+    "row": 1,
+    "col": 4,
+    "source_sheet": "calm04",
+    "source_index": 4
+   },
+   "raised": {
+    "cell": 21,
+    "row": 1,
+    "col": 5,
+    "source_sheet": "raise01",
+    "source_index": 10
+   }
+  },
+  {
+   "id": "fan12",
+   "calm": {
+    "cell": 22,
+    "row": 1,
+    "col": 6,
+    "source_sheet": "calm04",
+    "source_index": 5
+   },
+   "raised": {
+    "cell": 23,
+    "row": 1,
+    "col": 7,
+    "source_sheet": "raise01",
+    "source_index": 11
+   }
+  }
+ ],
+ "note": "calm и raised одного фаната — разные люди из одного слота (спокойный лист и лист руки вверх); один человек в двух позах не делался",
+ "sources": {
+  "raise01": {
+   "file": "raw/raise01.png",
+   "resolution": "1280x720",
+   "figures": 12,
+   "waist_crop_fraction": 1.0
+  },
+  "calm03": {
+   "file": "raw/calm03.png",
+   "resolution": "1280x720",
+   "figures": 6,
+   "waist_crop_fraction": 0.68
+  },
+  "calm04": {
+   "file": "raw/calm04.png",
+   "resolution": "1280x720",
+   "figures": 7,
+   "waist_crop_fraction": 0.68
+  }
+ },
+ "source_prompts": {
+  "calm03": "one row of 6 fans standing calmly, arms at sides",
+  "calm04": "one row of 7 fans standing calmly, arms at sides (use first 6)"
+ },
+ "dropped_cells": [],
+ "generator": {
+  "tool": "ComfyUI 0.42.0 (local, без облака)",
+  "model": "Z-Image Turbo: z_image_turbo_nvfp4.safetensors + qwen_3_4b.safetensors + ae.safetensors",
+  "steps": 8,
+  "cfg": 1.0,
+  "sampler": "euler",
+  "scheduler": "simple",
+  "shift": 3,
+  "resolution": "1280x720"
+ },
+ "built_at": "2026-11-04T01:17:12",
+ "sources_used": [
+  "raise01",
+  "calm03",
+  "calm04"
+ ]
+}
