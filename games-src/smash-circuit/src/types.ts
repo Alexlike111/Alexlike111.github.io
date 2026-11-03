@@ -18,7 +18,9 @@ export type ZoneId = 'front' | 'rear' | 'left' | 'right' | 'engine' | 'wheelFL' 
 export const ZONES: ZoneId[] = ['front', 'rear', 'left', 'right', 'engine', 'wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
 export type ZoneHp = Record<ZoneId, number>; // 0..zoneMaxHp
 /** Visual parts that can fly off the car when a zone is badly damaged. */
-export type CarPart = 'bumperF' | 'bumperR' | 'hood' | 'doorL' | 'doorR' | 'spoiler' | 'mirrorL' | 'mirrorR';
+export type CarPart = 'bumperF' | 'bumperR' | 'hood' | 'doorL' | 'doorR' | 'spoiler' | 'mirrorL' | 'mirrorR'
+  // wheels come off only at heavy damage (wheel zone hp ~0, at most CONFIG.damage.maxWheelsOff per car)
+  | 'wheelFL' | 'wheelFR' | 'wheelRL' | 'wheelRR';
 
 /** Multipliers derived from damage, applied by the car model. 1 = healthy. */
 export interface DamageEffects {
@@ -86,6 +88,12 @@ export interface CarState {
   bestLapTime: number;
   onCurb: boolean;
   offRoad: boolean;
+  // power-ups (set by the sim every step; absent on hand-built states, read with `?? 0`)
+  item?: ItemType | null;  // held item (one slot)
+  boostT?: number;         // s of boost-pad boost left
+  nitroT?: number;         // s of nitro left
+  shieldT?: number;        // s of ram shield left
+  spinT?: number;          // s of oil spin left
 }
 
 // ---------- Track ----------
@@ -148,7 +156,24 @@ export type SimEvent =
   | { type: 'finish'; carId: number; place: number; time: number }
   | { type: 'wrecked'; carId: number }
   | { type: 'countdown'; value: number }   // 3,2,1,0(=GO)
-  | { type: 'repair'; carId: number };
+  | { type: 'repair'; carId: number }
+  // ---- power-ups (boost pads, item boxes, items)
+  | { type: 'boost'; carId: number; x: number; y: number; angle: number; source: 'pad' | 'nitro' }
+  | { type: 'pickup'; carId: number; boxId: number; x: number; y: number; item: ItemType }
+  | { type: 'itemUse'; carId: number; item: ItemType; x: number; y: number; angle: number }
+  | { type: 'shieldPop'; carId: number; x: number; y: number }
+  | { type: 'oilSpin'; carId: number; x: number; y: number };
+
+// ---------- Power-ups ----------
+export type ItemType = 'nitro' | 'shield' | 'repair' | 'oil' | 'shockwave';
+export const ITEMS: ItemType[] = ['nitro', 'shield', 'repair', 'oil', 'shockwave'];
+
+/** Boost strip on the road. angle = travel direction (the chevrons point along it). */
+export interface BoostPad { id: number; x: number; y: number; angle: number; length: number; width: number }
+/** Pickup box. ready=false while respawning (timer = seconds left). */
+export interface ItemBox { id: number; x: number; y: number; ready: boolean; timer: number }
+/** Oil slick on the road; active=false slots are free. age/life in seconds. */
+export interface OilSlick { x: number; y: number; radius: number; age: number; life: number; active: boolean; owner: number }
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 
@@ -198,6 +223,12 @@ export interface ISim {
   update(frameDt: number): number;
   drainEvents(): SimEvent[];
   repairPlayer(): void;               // full repair (money handled by caller)
+  /** Boost strips, item boxes and oil slicks (power-ups). */
+  readonly pads: BoostPad[];
+  readonly boxes: ItemBox[];
+  readonly oils: OilSlick[];
+  /** Use the player's held item (key E / Shift / HUD button). Returns true when something was used. */
+  useItem(): boolean;
   /** Interpolation alpha 0..1 of the accumulator for smooth rendering. */
   readonly alpha: number;
   /** Ghost position at current race time for the current lap, or null. */

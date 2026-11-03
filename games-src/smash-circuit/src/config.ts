@@ -74,6 +74,11 @@ export const CONFIG = {
     bodyShare: 0.65,          // share of damage taken by the primary body zone (rest to the second zone)
     wheelRadius: 1.0,         // m: a hit this close to a wheel also damages it
     partKick: 6,              // m/s extra velocity of detaching parts
+    // ---- appended: visible crash damage (parts knocked off by one hard hit, wheels at heavy damage) ----
+    knockOffImpulse: 15000,   // N*s of ONE solver hit (~1200 per m/s of normal speed: ~45 km/h square into a wall) that knocks the outermost part of the hit side off, whatever the zone hp
+    knockOffSecond: 26000,    // N*s (~80 km/h) from which the hit also knocks the next part of that side off (bumper + hood)
+    wheelOffHp: 0.5,          // wheel zone hp at or below which that wheel comes off
+    maxWheelsOff: 2,          // a car never loses more wheels than this (it must still read as a car)
   },
   destruction: {
     // HP of segments; a hit subtracts (impulse - threshold) * impulseToDamage. Measured contact impulse ~ 1200 * normal speed (m/s)
@@ -361,6 +366,69 @@ export const CONFIG = {
   },
   save: {
     maxGhostChars: 240000,     // total size of the ghost storage record; thinned above this
+  },
+  // ---- appended by power-ups (boost pads, item boxes, items) ----
+  items: {
+    // Boost stack: pad and nitro multiply, capped (GDD 7.1: power x2.0, ceiling x1.30).
+    caps: { power: 2.0, ceil: 1.3 },
+    pad: {
+      length: 6, width: 4.6,       // m (along travel x across the road)
+      kick: 6,                     // m/s added along the nose x cos(heading - pad direction)
+      powerMul: 1.6, ceilMul: 1.18, time: 0.9,
+      cooldown: 0.8,               // s per car per pad
+      exitOffset: 13,              // m after the end of a corner
+      straightOffset: 14,          // m after the start of the longest straight
+      minFromLine: 70,             // m from the start/finish line (both sides)
+      minSpacing: 50,              // m between two pads
+      cornersPerTrack: { t1: 2, t2: 2, t3: 3 } as Record<string, number>,
+      cornersDefault: 2,
+      straightMaxCurv: 0.003,
+    },
+    box: {
+      radius: 1.8,                 // m pickup radius
+      respawn: 8,                  // s
+      rowEvery: 300,               // m of track per row
+      perRow: 3, lane: 0.3,        // boxes per row, lateral spacing as a fraction of the road width
+      calmCurv: 0.004,            // |curvature| allowed within +-calmSpan of a row
+      calmSpan: 25,
+      search: 60,                  // m a row may slide to find a calm spot
+      minFromLine: 50,
+      padClear: 30,                // m from any pad
+    },
+    nitro: { time: 2.2, kick: 3, powerMul: 1.8, ceilMul: 1.22, gripMul: 0.92 },
+    shield: { time: 5, damageTaken: 0.25, dealMul: 2, massMul: 2, wallImpulseMul: 2.6, popBlink: 1 },
+    repair: { frac: 0.5, minHp: 25 },
+    oil: {
+      time: 14, radius: 2.5, dropBack: 3.4, max: 16, ownerImmune: 1.0,
+      spinTime: 0.95, spinRate: 7.5, gripMul: 0.22, gripTime: 1.5, cooldown: 2.0,
+    },
+    shock: { radius: 9, push: 9, damage: 12, propRadius: 6, propMul: 1.4 },
+    // Item roll weights by race position: [nitro, shield, repair, oil, shockwave]. Trailing cars get the stronger tools (catch-up).
+    weights: [
+      { upTo: 1, w: [40, 30, 10, 16, 4] },
+      { upTo: 3, w: [36, 22, 13, 15, 14] },
+      { upTo: 6, w: [30, 13, 17, 12, 28] },
+      { upTo: 99, w: [28, 8, 20, 10, 34] },
+    ] as { upTo: number; w: number[] }[],
+    repairLowHealth: 0.5, repairLowMul: 2.5, repairSkipHealth: 0.9,
+    ai: {
+      thinkEvery: 0.1,             // s between item decisions of one AI car
+      reaction: [1.2, 0.3] as [number, number],   // s after pickup before use [itemIQ 0, itemIQ 1]
+      maxHold: 8,                  // s: use anyway
+      noShockBefore: 8,            // s of race time (fairness: no opening-seconds wipe-out)
+      nitroLook: 2, nitroCurv: 0.004, nitroFree: 25,
+      shieldBehind: 10, shieldClose: 4, shieldHealth: 0.4,
+      repairHealth: 0.55, repairHealthLow: 0.85,
+      oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
+      shockCount: 2, shockRadius: 7, shockSingle: 4,
+    },
+    fx: {
+      boxSize: 1.5, boxBob: 0.25, boxSpin: 1.6, boxHeight: 1.5,
+      padColorA: 0x19e6ff, padColorB: 0xfff25a,
+      zoomBoost: 0.08, zoomIn: 14, zoomOut: 3.5, punch: 0.06, punchDecay: 7, shakePad: 0.14,
+      speedLinesFull: 1,           // boost level at which the speed lines are at full strength
+      shieldColor: 0x58a8ff, nitroColor: 0xff9a2a, padFlame: 0x4cf2ff,
+    },
   },
 } as const;
 

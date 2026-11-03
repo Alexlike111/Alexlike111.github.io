@@ -16,6 +16,8 @@ export interface AddOpts {
   noBottom?: boolean;
   /** vertical shading: multiplier goes from k0 at y0 to k1 at y1 (cheap ambient occlusion look) */
   vgrad?: [number, number, number, number];
+  /** box only: width / height / depth segments (a subdivided shell can crumple in the car damage shader) */
+  seg?: [number, number, number];
 }
 
 const _c = new THREE.Color();
@@ -65,7 +67,10 @@ export class GeoBuilder {
     return this;
   }
 
-  box(w: number, h: number, d: number, o: AddOpts = {}): this { return this.add(new THREE.BoxGeometry(w, h, d), o); }
+  box(w: number, h: number, d: number, o: AddOpts = {}): this {
+    const sg = o.seg ?? [1, 1, 1];
+    return this.add(new THREE.BoxGeometry(w, h, d, sg[0], sg[1], sg[2]), o);
+  }
   cyl(rTop: number, rBottom: number, h: number, seg: number, o: AddOpts = {}): this {
     return this.add(new THREE.CylinderGeometry(rTop, rBottom, h, seg, 1), o);
   }

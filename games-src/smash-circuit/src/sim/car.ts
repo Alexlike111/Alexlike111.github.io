@@ -2,19 +2,22 @@
 import * as planck from 'planck';
 import { CONFIG } from '../config';
 import type {
-  CarInput, CarPart, CarSetup, CarState, CarStats, DestructibleKind, SimEvent, ZoneHp,
+  CarInput, CarPart, CarSetup, CarState, CarStats, DestructibleKind, SimEvent, ZoneHp, ZoneId,
 } from '../types';
 import { ZONES } from '../types';
 import { engineRpm, integrateCar, lateralSpeed, forwardSpeed, type CarKinematics, type Surface, SURFACE_ROAD } from './carModel';
 import {
-  PART_OFFSET, applyImpulseDamage, computeEffects, createZoneHp, partsToDetach, totalHealth,
+  PART_OFFSET, applyImpulseDamage, computeEffects, createZoneHp, partsKnockedOff, partsToDetach, totalHealth,
 } from './damage';
+import { CarBuffs } from './buffs';
 import { makeRng } from './rng';
 import type { PhysicsWorld } from './world';
 
 interface QueuedImpact { wx: number; wy: number; lx: number; ly: number; impulse: number; raw: number; other: 'car' | DestructibleKind; otherId: number }
 
 const NEUTRAL: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+/** body sides a single hard hit can knock parts off (index into SimCar.knock) */
+const KNOCK_SIDES: ZoneId[] = ['front', 'rear', 'left', 'right'];
 
 export class SimCar {
   body: planck.Body;
@@ -31,9 +34,14 @@ export class SimCar {
   /** Rubber-band assist 0..1 (AI only, set by the Sim): extra engine power / top speed when far behind the human. */
   assist = 0;
   private boosted: CarStats | null = null;
+  /** timed power-up effects (boost pad, nitro, ram shield, oil spin); driven by the PowerUpSystem */
+  readonly buffs = new CarBuffs();
+  private baseDensity = 0;
   private preVx = 0;
   private preVy = 0;
   private preW = 0;
+  /** biggest single hit (N*s) per body side in the step being flushed: front, rear, left, right */
+  private knock = new Float64Array(4);
 
   constructor(pw: PhysicsWorld, setup: CarSetup, x: number, y: number, angle: number) {
     this.setup = setup;
@@ -49,6 +57,7 @@ export class SimCar {
       friction: 0.25, restitution: 0.2,
       userData: { kind: 'car', carId: setup.id },
     });
+    this.baseDensity = setup.stats.mass / (C.length * C.width);
     this.kin = { x, y, angle, vx: 0, vy: 0, angularVel: 0, steer: 0 };
 
     const hp = createZoneHp(CONFIG.damage.zoneMaxHp);
@@ -96,9 +105,11 @@ export class SimCar {
     k.vx = v.x; k.vy = v.y; k.angularVel = b.getAngularVelocity();
     const out = integrateCar(k, this.input, this.statsNow(), this.state.effects, surface, dt);
     k.steer = out.steer;
+    // oil slick: the car spins whatever the driver does (the model would damp a kick within a few steps)
+    const w = this.buffs.spinT > 0 ? this.buffs.spinRate() : out.angularVel;
     b.setLinearVelocity({ x: out.vx, y: out.vy });
-    b.setAngularVelocity(out.angularVel);
-    this.preVx = out.vx; this.preVy = out.vy; this.preW = out.angularVel;
+    b.setAngularVelocity(w);
+    this.preVx = out.vx; this.preVy = out.vy; this.preW = w;
     this.state.onCurb = surface.shake > 0 && surface.drag > 0 && surface.gripMul > 0.7;
     this.state.offRoad = !this.state.onCurb && (surface.drag > 0 || surface.gripMul < 1);
     if (this.scrapeCooldown > 0) this.scrapeCooldown -= dt;
@@ -106,13 +117,42 @@ export class SimCar {
 
   /** Base stats, or a boosted copy while the rubber-band assist is on. */
   private statsNow(): CarStats {
-    const a = this.assist;
-    if (!(a > 0.001)) return this.setup.stats;
+    const a = this.assist > 0.001 ? this.assist : 0;
+    const bf = this.buffs;
+    if (a === 0 && !bf.active) return this.setup.stats;
     const b = this.boosted ?? (this.boosted = { ...this.setup.stats });
     const base = this.setup.stats;
-    b.enginePower = base.enginePower * (1 + CONFIG.ai.rubberPower * a);
-    b.topSpeed = base.topSpeed * (1 + CONFIG.ai.rubberTop * a);
+    b.enginePower = base.enginePower * (1 + CONFIG.ai.rubberPower * a) * bf.powerMul;
+    b.topSpeed = base.topSpeed * (1 + CONFIG.ai.rubberTop * a) * bf.ceilMul;
+    b.grip = base.grip * bf.gripMul;
     return b;
+  }
+
+  /** Power-up shove: add a velocity change (m/s) to the body right now. */
+  kick(dvx: number, dvy: number): void {
+    const v = this.body.getLinearVelocity();
+    this.body.setLinearVelocity({ x: v.x + dvx, y: v.y + dvy });
+  }
+
+  /** Ram shield on/off: a shielded car is heavier in collisions (mass x CONFIG.items.shield.massMul). */
+  setHeavy(on: boolean): void {
+    const f = this.body.getFixtureList();
+    if (!f) return;
+    f.setDensity(this.baseDensity * (on ? CONFIG.items.shield.massMul : 1));
+    this.body.resetMassData();
+  }
+
+  /** Repair kit: every zone regains `frac` of its missing hp (at least `minHp`, never above max). Lost parts stay lost. */
+  heal(frac: number, minHp: number): void {
+    const s = this.state;
+    for (const z of ZONES) {
+      const missing = s.zoneMaxHp - s.hp[z];
+      if (missing <= 0) continue;
+      s.hp[z] = Math.min(s.zoneMaxHp, s.hp[z] + Math.max(minHp, missing * frac));
+    }
+    this.repaired = true;                 // emits the 'repair' event (sparks + sound) at the next flush
+    this.refreshDamageState();
+    if (s.wrecked && s.health > CONFIG.damage.wreckedBelow * 2) { s.wrecked = false; this.refreshDamageState(); }
   }
 
   /** Copy body -> state; derive slip / rpm. */
@@ -134,11 +174,11 @@ export class SimCar {
   }
 
   /** Queued: applied in flushDamage (called after the world step, outside contact callbacks). */
-  recordImpact(worldX: number, worldY: number, impulse: number, other: 'car' | DestructibleKind, otherId = -1): void {
+  recordImpact(worldX: number, worldY: number, impulse: number, other: 'car' | DestructibleKind, otherId = -1, dealMul = 1): void {
     if (impulse < CONFIG.car.scrapeMin) return;
     const dx = worldX - this.state.x, dy = worldY - this.state.y;
     const c = Math.cos(this.state.angle), s = Math.sin(this.state.angle);
-    this.queue.push({ wx: worldX, wy: worldY, lx: dx * c + dy * s, ly: -dx * s + dy * c, impulse, raw: impulse, other, otherId });
+    this.queue.push({ wx: worldX, wy: worldY, lx: dx * c + dy * s, ly: -dx * s + dy * c, impulse: impulse * dealMul, raw: impulse, other, otherId });
   }
 
   /**
@@ -180,9 +220,14 @@ export class SimCar {
     this.queue = [];
 
     let biggest: QueuedImpact | null = null;
+    const knock = this.knock;
+    knock.fill(0);
     for (const e of q) {
-      const mul = e.other === 'car' ? D.carVsCarMul : 1;
-      applyImpulseDamage(s.hp, e.lx, e.ly, e.impulse, this.setup.stats.armor, mul);
+      const mul = (e.other === 'car' ? D.carVsCarMul : 1) * (this.buffs.shieldT > 0 ? CONFIG.items.shield.damageTaken : 1);
+      const hit = applyImpulseDamage(s.hp, e.lx, e.ly, e.impulse, this.setup.stats.armor, mul);
+      // the bang (solver impulse, before plow-through softening) decides what is knocked off; armor makes parts stick better
+      const k = KNOCK_SIDES.indexOf(hit.zones[0]);
+      if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mul) / Math.max(1, this.setup.stats.armor));
       if (!biggest || e.raw > biggest.raw) biggest = e;   // the bang is as loud as the solver's hit (plow-through only softens the damage)
     }
     if (biggest) {
@@ -231,21 +276,26 @@ export class SimCar {
 
   private detachParts(events: SimEvent[]): void {
     const s = this.state;
-    const parts: CarPart[] = partsToDetach(s.hp, s.detachedParts);
-    if (parts.length === 0) return;
-    const c = Math.cos(s.angle), sn = Math.sin(s.angle);
-    for (const part of parts) {
-      s.detachedParts.push(part);
-      const o = PART_OFFSET[part];
-      const kick = CONFIG.damage.partKick * (0.6 + 0.8 * this.rng());
-      const side = Math.hypot(o.x, o.y) || 1;
-      const dirx = (o.x / side) * c - (o.y / side) * sn;
-      const diry = (o.x / side) * sn + (o.y / side) * c;
-      events.push({
-        type: 'partOff', carId: s.id, part,
-        x: s.x + o.x * c - o.y * sn, y: s.y + o.x * sn + o.y * c,
-        vx: s.vx * 0.8 + dirx * kick, vy: s.vy * 0.8 + diry * kick,
-      });
+    for (let k = 0; k < KNOCK_SIDES.length; k++) {
+      if (this.knock[k] <= 0) continue;
+      for (const part of partsKnockedOff(KNOCK_SIDES[k], this.knock[k], s.detachedParts)) this.emitPartOff(part, events);
     }
+    for (const part of partsToDetach(s.hp, s.detachedParts)) this.emitPartOff(part, events);
+  }
+
+  private emitPartOff(part: CarPart, events: SimEvent[]): void {
+    const s = this.state;
+    const c = Math.cos(s.angle), sn = Math.sin(s.angle);
+    s.detachedParts.push(part);
+    const o = PART_OFFSET[part];
+    const kick = CONFIG.damage.partKick * (0.6 + 0.8 * this.rng());
+    const side = Math.hypot(o.x, o.y) || 1;
+    const dirx = (o.x / side) * c - (o.y / side) * sn;
+    const diry = (o.x / side) * sn + (o.y / side) * c;
+    events.push({
+      type: 'partOff', carId: s.id, part,
+      x: s.x + o.x * c - o.y * sn, y: s.y + o.x * sn + o.y * c,
+      vx: s.vx * 0.8 + dirx * kick, vy: s.vy * 0.8 + diry * kick,
+    });
   }
 }

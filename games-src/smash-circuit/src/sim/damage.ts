@@ -113,11 +113,42 @@ const PART_TABLE: { part: CarPart; zone: ZoneId; factor: number }[] = [
   { part: 'doorR', zone: 'right', factor: 0.5 },
 ];
 
+export const WHEEL_PARTS: CarPart[] = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
+
 export function partsToDetach(hp: ZoneHp, already: CarPart[]): CarPart[] {
   const out: CarPart[] = [];
   for (const e of PART_TABLE) {
     if (already.includes(e.part) || out.includes(e.part)) continue;
     if (hp[e.zone] < D.partOffHp * e.factor) out.push(e.part);
+  }
+  // wheels: only a wrecked corner loses its wheel, and never more than maxWheelsOff per car
+  let wheelsOff = 0;
+  for (const w of WHEEL_PARTS) if (already.includes(w)) wheelsOff++;
+  for (const w of WHEEL_PARTS) {
+    if (wheelsOff >= D.maxWheelsOff) break;
+    if (already.includes(w)) continue;
+    if (hp[w as ZoneId] <= D.wheelOffHp) { out.push(w); wheelsOff++; }
+  }
+  return out;
+}
+
+/** Outermost-first parts of each body side: what one hard hit on that side knocks off. */
+const SIDE_PARTS: Partial<Record<ZoneId, CarPart[]>> = {
+  front: ['bumperF', 'hood'], rear: ['bumperR', 'spoiler'], left: ['mirrorL', 'doorL'], right: ['mirrorR', 'doorR'],
+};
+
+/**
+ * A single hard hit (solver impulse, N*s) on body side `zone` knocks parts off whatever the zone hp:
+ * >= knockOffImpulse the outermost part still on, >= knockOffSecond also the next one. Deterministic.
+ */
+export function partsKnockedOff(zone: ZoneId, impulse: number, already: CarPart[]): CarPart[] {
+  const list = SIDE_PARTS[zone];
+  if (!list || !(impulse >= D.knockOffImpulse)) return [];
+  const n = impulse >= D.knockOffSecond ? 2 : 1;
+  const out: CarPart[] = [];
+  for (const p of list) {
+    if (out.length >= n) break;
+    if (!already.includes(p)) out.push(p);
   }
   return out;
 }
@@ -126,4 +157,5 @@ export function partsToDetach(hp: ZoneHp, already: CarPart[]): CarPart[] {
 export const PART_OFFSET: Record<CarPart, { x: number; y: number }> = {
   bumperF: { x: 2.0, y: 0 }, hood: { x: 1.1, y: 0 }, bumperR: { x: -2.0, y: 0 }, spoiler: { x: -1.8, y: 0 },
   doorL: { x: 0.1, y: 1.0 }, doorR: { x: 0.1, y: -1.0 }, mirrorL: { x: 0.7, y: 1.05 }, mirrorR: { x: 0.7, y: -1.05 },
+  wheelFL: { x: 1.3, y: 0.82 }, wheelFR: { x: 1.3, y: -0.82 }, wheelRL: { x: -1.3, y: 0.82 }, wheelRR: { x: -1.3, y: -0.82 },
 };
