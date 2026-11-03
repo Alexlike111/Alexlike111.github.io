@@ -2,6 +2,8 @@
 // makes small human mistakes and recovers when stuck. PURE (no physics, no DOM). Deterministic given the rng.
 import { CONFIG } from '../config';
 import type { AiPersonality, CarInput, CarState, OilSlick, TrackGeometry } from '../types';
+import { driftSteerForCurvature, steerForCurvature } from './carModel';
+import { DRIFT_HOLD, DRIFT_NONE } from './drift';
 
 const A = CONFIG.ai;
 const C = CONFIG.car;
@@ -75,6 +77,7 @@ export class AiDriver {
   private stuckTimer = 0;
   private stuckLimit: number;       // s of being stuck before reversing (jittered per driver and attempt: two jammed cars must not reverse in lockstep)
   private reverseTimer = 0;
+  private drifting = false;           // holding a drift through a tight corner
   private markS = 0;
   private markInit = false;
   private markTime = 0;
@@ -260,22 +263,22 @@ export class AiDriver {
     const rate = Math.min(lerp(A.offsetRate[0], A.offsetRate[1], skill), Math.max(A.lineRateMin, A.lineSlope * av));
     this.offset += clamp(target - this.offset, -rate * h, rate * h);
 
-    // ---------- steering: pure pursuit, exact inverse of the car's bicycle model
+    // ---------- steering: pure pursuit, exact inverse of the car model's steering (steerForCurvature)
     const tp = track.sampleAt(s + look);
     const off = this.offset;
     const tx = tp.x + tp.nx * off, ty = tp.y + tp.ny * off;
     const dx = tx - car.x, dy = ty - car.y;
     const dist = Math.max(Math.hypot(dx, dy), 2);
-    const alpha = wrap(Math.atan2(dy, dx) - car.angle);
+    // in a drift the nose points into the bend: pursue relative to where the car is actually going
+    const sp2 = Math.hypot(car.vx, car.vy);
+    const course = car.driftActive && sp2 > 3 ? Math.atan2(car.vy, car.vx) : car.angle;
+    const alpha = wrap(Math.atan2(dy, dx) - course);
     let steer: number;
     if (Math.abs(alpha) > 1.3) {
       steer = -Math.sign(alpha);
     } else {
       const kappa = (2 * Math.sin(alpha)) / dist;
-      const delta = Math.atan(C.wheelBase * kappa);
-      const sf = clamp(av / C.baseTopSpeed, 0, 1);
-      const deltaMax = C.maxSteerAngle + (C.minSteerAngleAtTop - C.maxSteerAngle) * Math.sqrt(sf);
-      steer = -clamp(delta / deltaMax, -1, 1);
+      steer = car.driftActive ? driftSteerForCurvature(kappa, sp2, car.driftDir ?? 1, gripFactor) : steerForCurvature(kappa, Math.max(av, 1), gripFactor);
     }
     // damage steering pull is added by the car model: counter it (feed-forward) so a bent car still tracks the line
     steer = clamp(steer - fx.steerPull + steerTwitch, -1, 1);
@@ -310,7 +313,14 @@ export class AiDriver {
     const latSpeed = -car.vx * Math.sin(car.angle) + car.vy * Math.cos(car.angle);
     if (Math.abs(latSpeed) > 2.2) throttle *= 0.4;        // sliding: let the tyres recover
     if (Math.abs(alpha) > 1.0 && av < 8) throttle = Math.min(throttle, 0.6);
-    this.out = { throttle, brake, steer, handbrake: false };
+    // ---------- drift through tight corners (skilled drivers): hold the drift while the bend lasts
+    const Dr = CONFIG.drift;
+    const kHere = track.sampleAt(s + 4).curvature;
+    if (!this.drifting) {
+      this.drifting = skill >= Dr.aiSkill && !m && av > Dr.aiMinSpeed && Math.abs(kHere) > 1 / Dr.aiRadius
+        && steer * kHere < 0 && Math.abs(steer) > 0.3 && !car.offRoad;
+    } else if (Math.abs(kHere) < 1 / (Dr.aiRadius * 1.6) || av < Dr.keepSpeed + 2 || car.offRoad || m) this.drifting = false;
+    this.out = { throttle, brake, steer, handbrake: false, drift: this.drifting ? DRIFT_HOLD : DRIFT_NONE };
   }
 
   /** Walks the road ahead and returns the speed that is safe now plus the tightest radius close by. */

@@ -52,7 +52,7 @@ export function buildCarGeometries(): CarGeometries {
   b.box(0.12, 0.07, 1.0, { pos: [1.62, 0.98, 0], color: 0x3a3d45 });       // radiator
   for (const sx of [-1, 1]) b.box(0.16, 0.2, 1.5, { pos: [sx * 1.8, 0.56, 0], color: 0x2b2d33 });
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    b.cyl(0.24, 0.24, 0.1, 8, { pos: [sx * WX, WR, sz * (WZ + 0.11)], rot: [Math.PI / 2, 0, 0], color: 0x7a5a48 });
+    b.cyl(0.24, 0.24, 0.1, 8, { pos: [sx * WX, WR, sz * (WZ + 0.11)], rot: [Math.PI / 2, 0, 0], color: 0xa3a7ae });
   }
   // front/rear fenders over the inner half of each wheel
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {

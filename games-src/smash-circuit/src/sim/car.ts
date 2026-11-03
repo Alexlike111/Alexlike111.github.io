@@ -5,7 +5,8 @@ import type {
   CarInput, CarPart, CarSetup, CarState, CarStats, DestructibleKind, SimEvent, ZoneHp, ZoneId,
 } from '../types';
 import { ZONES } from '../types';
-import { engineRpm, integrateCar, lateralSpeed, forwardSpeed, type CarKinematics, type Surface, SURFACE_ROAD } from './carModel';
+import { engineRpm, integrateCar, lateralSpeed, forwardSpeed, wrapAngle, type CarKinematics, type Surface, SURFACE_ROAD } from './carModel';
+import { DriftTracker } from './drift';
 import {
   PART_OFFSET, applyImpulseDamage, computeEffects, createZoneHp, partsKnockedOff, partsToDetach, totalHealth,
 } from './damage';
@@ -36,6 +37,8 @@ export class SimCar {
   private boosted: CarStats | null = null;
   /** timed power-up effects (boost pad, nitro, ram shield, oil spin); driven by the PowerUpSystem */
   readonly buffs = new CarBuffs();
+  /** drift mechanic: entry / exit, boost tiers, points (src/sim/drift.ts) */
+  readonly drift = new DriftTracker();
   private baseDensity = 0;
   private preVx = 0;
   private preVy = 0;
@@ -86,6 +89,7 @@ export class SimCar {
     this.input.brake = i.brake;
     this.input.steer = i.steer;
     this.input.handbrake = i.handbrake;
+    this.input.drift = i.drift ?? 0;
   }
 
   /** Teleport / place (e.g. start grid) and zero velocities. */
@@ -94,6 +98,7 @@ export class SimCar {
     this.body.setLinearVelocity({ x: 0, y: 0 });
     this.body.setAngularVelocity(0);
     this.kin = { x, y, angle, vx: 0, vy: 0, angularVel: 0, steer: 0 };
+    this.drift.reset();
   }
 
   /** integrateCar -> set body velocities. Reads current velocity from the body (collisions included). */
@@ -103,7 +108,15 @@ export class SimCar {
     const k = this.kin;
     k.x = p.x; k.y = p.y; k.angle = b.getAngle();
     k.vx = v.x; k.vy = v.y; k.angularVel = b.getAngularVelocity();
-    const out = integrateCar(k, this.input, this.statsNow(), this.state.effects, surface, dt);
+    // ---- drift: entry / exit decisions; a clean exit with a charged tier kicks the car forward along the nose
+    const sp = Math.hypot(k.vx, k.vy);
+    const fwd = k.vx * Math.cos(k.angle) + k.vy * Math.sin(k.angle);
+    const beta = sp > 1 ? wrapAngle(k.angle - Math.atan2(k.vy, k.vx)) : 0;
+    const dr = this.drift;
+    if (this.buffs.spinT > 0 && dr.active) dr.cancel();             // oil spin: no drift
+    const pre = dr.pre(this.input, fwd, sp, beta, this.setup.isPlayer, dt);
+    if (pre.kick > 0) { k.vx += Math.cos(k.angle) * pre.kick; k.vy += Math.sin(k.angle) * pre.kick; }
+    const out = integrateCar(k, this.input, this.statsNow(), this.state.effects, surface, dt, dr.ctl);
     k.steer = out.steer;
     // oil slick: the car spins whatever the driver does (the model would damp a kick within a few steps)
     const w = this.buffs.spinT > 0 ? this.buffs.spinRate() : out.angularVel;
@@ -119,11 +132,16 @@ export class SimCar {
   private statsNow(): CarStats {
     const a = this.assist > 0.001 ? this.assist : 0;
     const bf = this.buffs;
-    if (a === 0 && !bf.active) return this.setup.stats;
+    const db = this.drift.boostT > 0;
+    if (a === 0 && !bf.active && !db) return this.setup.stats;
     const b = this.boosted ?? (this.boosted = { ...this.setup.stats });
     const base = this.setup.stats;
-    b.enginePower = base.enginePower * (1 + CONFIG.ai.rubberPower * a) * bf.powerMul;
-    b.topSpeed = base.topSpeed * (1 + CONFIG.ai.rubberTop * a) * bf.ceilMul;
+    const caps = CONFIG.items.caps;
+    // drift exit boost stacks with pads / nitro under the same caps
+    const pm = db ? Math.min(caps.power, bf.powerMul * CONFIG.drift.boostPowerMul) : bf.powerMul;
+    const cm = db ? Math.min(caps.ceil, bf.ceilMul * CONFIG.drift.boostCeilMul) : bf.ceilMul;
+    b.enginePower = base.enginePower * (1 + CONFIG.ai.rubberPower * a) * pm;
+    b.topSpeed = base.topSpeed * (1 + CONFIG.ai.rubberTop * a) * cm;
     b.grip = base.grip * bf.gripMul;
     return b;
   }
@@ -167,9 +185,15 @@ export class SimCar {
     s.throttle = this.input.throttle; s.brake = this.input.brake; s.handbrake = this.input.handbrake;
     const lat = Math.abs(lateralSpeed(k));
     const thr = C.driftSlipThreshold;
-    this.drifting = lat > (this.drifting ? thr * C.driftExitMul : thr);
+    const dr = this.drift;
+    this.drifting = dr.active || lat > (this.drifting ? thr * C.driftExitMul : thr);
     s.drifting = this.drifting;
-    s.slip = Math.min(1, lat / (thr * 2.4));
+    s.slip = Math.min(1, Math.max(lat / (thr * 2.4), dr.active ? 0.45 + 0.55 * Math.min(1, dr.angle / CONFIG.drift.angleMax) : 0));
+    s.driftActive = dr.active; s.driftDir = dr.dir; s.driftAngle = dr.active ? dr.angle : 0;
+    s.driftTier = dr.active ? dr.tier : 0; s.driftCharge = dr.charge;
+    s.driftPoints = dr.active ? dr.livePoints : 0; s.driftCombo = dr.combo; s.driftScore = dr.score;
+    s.driftBank = dr.lastBank; s.driftBankT = dr.bankT; s.driftCancelT = dr.cancelT;
+    s.driftBoostT = dr.boostT; s.driftBoostTier = dr.boostTier;
     s.rpm = engineRpm(s.speed, this.setup.stats.topSpeed * s.effects.topSpeedMul, this.input.throttle, s.rpm, CONFIG.physics.dt);
   }
 
@@ -229,6 +253,8 @@ export class SimCar {
       const k = KNOCK_SIDES.indexOf(hit.zones[0]);
       if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mul) / Math.max(1, this.setup.stats.armor));
       if (!biggest || e.raw > biggest.raw) biggest = e;   // the bang is as loud as the solver's hit (plow-through only softens the damage)
+      // a hard hit ends the drift with nothing banked (car taps need twice the impulse)
+      if (e.raw >= CONFIG.drift.cancelImpulse * (e.other === 'car' ? 2 : 1)) this.drift.cancel();
     }
     if (biggest) {
       if (biggest.raw >= C.impactEventMin) {

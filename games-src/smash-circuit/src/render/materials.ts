@@ -130,7 +130,7 @@ export function patchBodyDamage(m: THREE.Material, depth: number, look: DamageLo
           diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.9, 0.88, 0.84 ), scratch * 0.8 );
           // burnt / torn patches spreading with the damage
           float soot = smoothstep( 0.58, 0.72, n * 0.7 + n2 * 0.3 + dm * 0.6 - 0.2 );
-          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.07, 0.06, 0.06 ), soot * ${sootMax.toFixed(2)} );`}
+          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.07, 0.06, 0.06 ), soot * ${sootMax.toFixed(2)} * ( 0.35 + 0.65 * vDmgPaint ) );`}
         }
       }`,
     );

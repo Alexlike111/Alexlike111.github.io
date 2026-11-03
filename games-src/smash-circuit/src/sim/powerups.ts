@@ -50,14 +50,14 @@ export class PowerUpSystem {
   private readonly wasShield: boolean[];
   private activeOils = 0;
 
-  constructor(track: TrackGeometry, cars: SimCar[], destruction: DestructionSystem, seed: number) {
+  constructor(track: TrackGeometry, cars: SimCar[], destruction: DestructionSystem, seed: number, enabled = true) {
     this.cars = cars;
     this.destruction = destruction;
     this.rng = makeRng((seed ^ 0x7f4a7c15) >>> 0);
-    const layout = planItems(track);
+    const layout = enabled ? planItems(track) : { pads: [], boxes: [] };
     layout.pads.forEach((p, i) => this.pads.push({ id: i, x: p.x, y: p.y, angle: p.angle, length: p.length, width: p.width }));
     layout.boxes.forEach((b, i) => this.boxes.push({ id: i, x: b.x, y: b.y, ready: true, timer: 0 }));
-    for (let i = 0; i < I.oil.max; i++) this.oils.push({ x: 0, y: 0, radius: I.oil.radius, age: 0, life: I.oil.time, active: false, owner: -1 });
+    for (let i = 0; i < I.oil.max; i++) this.oils.push({ x: 0, y: 0, radius: I.oil.radius, age: 0, life: I.oil.time, active: false, owner: -1, hits: 0 });
     this.padCd = new Float32Array(cars.length * Math.max(1, this.pads.length));
     this.wasShield = cars.map(() => false);
     for (const c of cars) this.sync(c);
@@ -139,6 +139,7 @@ export class PowerUpSystem {
             bf.spinT = I.oil.spinTime; bf.gripT = I.oil.gripTime; bf.oilCd = I.oil.cooldown;
             bf.spinDir = this.rng() < 0.5 ? -1 : 1;
             events.push({ type: 'oilSpin', carId: st.id, x: st.x, y: st.y });
+            if (++o.hits >= I.oil.maxHits) o.life = Math.min(o.life, o.age + 0.4);   // a slick is spent after a couple of victims
           }
         }
       }
@@ -199,7 +200,7 @@ export class PowerUpSystem {
     }
     if (!slot) return;
     if (!slot.active) this.activeOils++;
-    slot.x = x; slot.y = y; slot.radius = I.oil.radius; slot.age = 0; slot.life = I.oil.time; slot.active = true; slot.owner = owner;
+    slot.x = x; slot.y = y; slot.radius = I.oil.radius; slot.age = 0; slot.life = I.oil.time; slot.active = true; slot.owner = owner; slot.hits = 0;
   }
 
   private shockwave(user: number, events: SimEvent[]): void {

@@ -11,6 +11,8 @@ import { StuckWatch, pickResetPose } from './playerReset';
 import { platform } from './platform/bridge';
 import { GameRenderer } from './render';
 import { missingHp } from './sim/damage';
+import { DriftTracker, driftCoins } from './sim/drift';
+import * as carModel from './sim/carModel';
 import { Sim } from './sim/sim';
 import { trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, UpgradeBranch } from './types';
@@ -34,6 +36,8 @@ declare global {
       resume(): void;
       repair(): void;
       menu(): void;
+      /** pure car model for e2e/feel.mjs (debug builds only) */
+      readonly model: typeof carModel & { DriftTracker: typeof DriftTracker };
     };
   }
 }
@@ -89,7 +93,7 @@ export class Game {
     this.ui = new UI(uiRoot, this.handlers());
     this.input = new InputController(uiRoot);
     this.input.setAutoGas(this.save.settings.autoGas);
-    this.input.setLabels(t('input.gas'), t('input.brake'));
+    this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
     this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else this.repairNow(); });
     this.input.onTouchMode((touch) => this.ui.setTouchMode(touch));
     this.ui.setTouchMode(this.input.touchActive);
@@ -242,7 +246,7 @@ export class Game {
     if (s.tutorialDone) this.tutorialHold = false;
     this.applyMute();
     this.input.setAutoGas(s.autoGas);
-    this.input.setLabels(t('input.gas'), t('input.brake'));
+    this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
     this.renderer.setQuality(s.quality);
     document.documentElement.lang = lang();
     void writeSave(this.save);
@@ -322,7 +326,8 @@ export class Game {
     const prevBest = this.save.bestLap[this.trackId];
     const bestLap = p.bestLapTime;
     const newBestLap = bestLap > 0 && (!prevBest || bestLap < prevBest);
-    const reward = raceReward(this.trackId, info.place, sim.brokenByPlayer);
+    const drift = driftCoins(p.driftScore ?? 0);
+    const reward = raceReward(this.trackId, info.place, sim.brokenByPlayer) + drift;
     const res = applyRaceResult(this.save, this.trackId, info.place, reward, bestLap);
     this.save = res.save;
     const ghost = sim.bestGhost();
@@ -339,7 +344,7 @@ export class Game {
     this.results = {
       place: info.place, time: info.time, bestLap, reward,
       canDouble: platform.isRewardedSupported() && reward > 0,
-      unlocked: res.unlocked, newBestLap,
+      unlocked: res.unlocked, newBestLap, drift,
     };
     if (this.state === 'racing') this.state = 'finishing';
   }
@@ -465,6 +470,7 @@ export class Game {
       resume: () => g.resumeRace(),
       repair: () => g.repairNow(),
       menu: () => g.toMenu(),
+      model: { ...carModel, DriftTracker },
     };
   }
 }

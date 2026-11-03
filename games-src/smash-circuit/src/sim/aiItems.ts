@@ -96,12 +96,18 @@ export class AiItemUser {
         if (sur.behindCount > A.oilMaxPack) return false;
         const s = track.nearest(car.x, car.y, hintS).s;
         if (this.oils) for (const o of this.oils) if (o.active && Math.hypot(o.x - car.x, o.y - car.y) < A.oilNoStack) return false;
-        for (let d = -A.oilCalmBehind; d <= 12; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.oilCalmCurv) return false;
+        for (let d = -A.oilCalmBehind; d <= A.oilCalmAhead; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.oilCalmCurv) return false;
         return true;
       }
       case 'shockwave':
         if (raceTime < A.noShockBefore) return false;      // fairness: nothing in the opening seconds
-        return sur.nearCount >= A.shockCount || sur.alongside || (overdue && sur.nearCount > 0);
+        // a blast shoves cars sideways: only on open road, never in a bend where the push ends in a wall
+        if (!(sur.nearCount >= A.shockCount || sur.alongside || (overdue && sur.nearCount > 0))) return false;
+        {
+          const s = track.nearest(car.x, car.y, hintS).s;
+          for (let d = -10; d <= 30; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.shockCalmCurv) return false;
+        }
+        return true;
     }
   }
 }

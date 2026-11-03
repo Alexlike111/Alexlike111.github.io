@@ -10,6 +10,7 @@ import type {
 import { AiDriver, DEFAULT_PERSONALITY } from './ai';
 import { AiItemUser } from './aiItems';
 import { PowerUpSystem } from './powerups';
+import { assistedInput } from './assist';
 import { SimCar } from './car';
 import { DestructionSystem } from './destruction';
 import { GhostRecorder, ghostPoseAt } from './ghost';
@@ -68,6 +69,8 @@ export class Sim implements ISim {
   /** car -> dynamic prop contacts this step: props get kicked clear after the step so they never ride on a bonnet */
   private propKicks: { car: SimCar; id: number }[] = [];
   private acc = 0;
+  /** gentle steer-away-from-the-edge assist for the human (src/sim/assist.ts); tests may switch it off */
+  playerAssist = true;
   private disposed = false;
   private gridSeed = 0;
 
@@ -104,7 +107,7 @@ export class Sim implements ISim {
       }
     }
     this.others = this.cars.map((c) => this.cars.filter((o) => o !== c));
-    this.powerups = new PowerUpSystem(this.track, this.simCars, this.destruction, opts.seed);
+    this.powerups = new PowerUpSystem(this.track, this.simCars, this.destruction, opts.seed, opts.powerUps !== false);
     this.pads = this.powerups.pads; this.boxes = this.powerups.boxes; this.oils = this.powerups.oils;
     for (const d of this.drivers) if (d) d.hazards = this.oils;
     this.itemUsers = setups.map((c, i) => this.drivers[i]
@@ -130,6 +133,7 @@ export class Sim implements ISim {
     this.input.brake = input.brake;
     this.input.steer = input.steer;
     this.input.handbrake = input.handbrake;
+    this.input.drift = input.drift ?? 0;
   }
 
   update(frameDt: number): number {
@@ -334,7 +338,7 @@ export class Sim implements ISim {
           if (d.wantsRespawn && !st.finished) this.respawn(i);
           input = d.think(st, this.others[i], this.track, dt, hints[i]);
           this.simCars[i].assist = st.finished ? 0 : d.catchUp;
-        } else input = this.input;
+        } else input = this.playerAssist ? assistedInput(this.input, st, this.track, hints[i]) : this.input;
       }
       this.simCars[i].setInput(input);
     }

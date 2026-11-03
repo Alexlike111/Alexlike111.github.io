@@ -8,6 +8,7 @@ import { clamp, makeRng } from '../render/util';
 import type { WallVisual } from '../render/structures';
 import type { CarPart, DestructibleKind, PropType, SimEvent, TrackDef, ZoneId } from '../types';
 import { DebrisPool } from './debris';
+import { DriftFx } from './driftFx';
 import { ParticleSystem } from './particles';
 import { ShockwavePool } from './shockwave';
 import { SkidMarks } from './skidmarks';
@@ -57,6 +58,8 @@ export class FxManager {
   /** sparks, damage smoke and fire keep a reduced budget even on low, so damage stays readable (REQUIREMENTS: smoke and sparks at low HP) */
   private essential = 1;
   private acc: Float32Array;
+  /** drift tier sparks, exit boost jet, speed streaks (driftFx.ts) */
+  private driftFx!: DriftFx;
   private tmpC = new THREE.Color();
   private tmpC2 = new THREE.Color();
 
@@ -64,6 +67,7 @@ export class FxManager {
     this.debris = new DebrisPool(mats);
     this.smoke = new ParticleSystem(CONFIG.render.particleCapacity, false, 0.72);
     this.sparks = new ParticleSystem(CONFIG.render.sparkCapacity, true, 0.15);
+    this.driftFx = new DriftFx(this.sparks, this.smoke, carCount);
     this.skids = new SkidMarks(CONFIG.render.skidCapacity.high, carCount * 4);
     this.acc = new Float32Array(carCount * 6);
     this.rings = new ShockwavePool();
@@ -358,6 +362,7 @@ export class FxManager {
       this.skids.mark(k0 + 0, wx(CR.wheelX, CR.wheelZ), wz(CR.wheelX, CR.wheelZ), frontI);
       this.skids.mark(k0 + 1, wx(CR.wheelX, -CR.wheelZ), wz(CR.wheelX, -CR.wheelZ), frontI);
       if (!inRange) continue;
+      this.driftFx.update(i, P, dt, st.id === ctx.playerId, this.share, this.essential);
 
       const a = i * 6;
       // ---- tyre smoke while sliding
@@ -390,7 +395,11 @@ export class FxManager {
       const h = st.health;
       const base = h < FX.smokeBelow ? 0.15 + 0.85 * clamp((FX.smokeBelow - h) / FX.smokeBelow, 0, 1)
         : h < FX.wispBelow ? 0.15 * (FX.wispBelow - h) / (FX.wispBelow - FX.smokeBelow) : 0;
-      const dmg = Math.max(st.effects.smoke, base);
+      // a smashed end steams on its own (radiator / exhaust), even while total health is still high
+      const zm = st.zoneMaxHp || 100;
+      const endLoss = 1 - Math.min(st.hp.front, st.hp.engine, st.hp.rear) / zm;
+      const steam = endLoss > FX.steamFromLoss ? 0.1 + 0.25 * (endLoss - FX.steamFromLoss) / (1 - FX.steamFromLoss) : 0;
+      const dmg = Math.max(st.effects.smoke, base, steam);
       if (dmg > 0.02) {
         // near-wreck: the plume stays small and see-through over the body so the car itself remains readable (alpha capped at smokeAlphaMax)
         const wreck = clamp((FX.wreckSmokeBelow - h) / FX.wreckSmokeBelow, 0, 1);
@@ -421,18 +430,19 @@ export class FxManager {
       // ---- fire at critical health (grows to full at a wreck): flames licking out of the engine end, black smoke above
       const fire = st.wrecked ? 1 : h < FX.fireBelow ? 0.35 + 0.65 * (FX.fireBelow - h) / FX.fireBelow : 0;
       if (fire > 0) {
-        this.acc[a + 4] += dt * (10 + 26 * fire) * this.essential;
+        this.acc[a + 4] += dt * (10 + 26 * fire) * Math.max(this.essential, FX.fireMinShare);   // a burning car must read even on low
         const fx0 = this.smokeEnd(st);
         const lo = fx0 > 0 ? 0.7 : -1.9, hi = fx0 > 0 ? 1.9 : -0.7;
         while (this.acc[a + 4] >= 1) {
           this.acc[a + 4] -= 1;
           const lx = this.rnd(lo, hi), lz = this.rnd(-0.55, 0.55);
           this.sparks.spawn(wx(lx, lz), 1.0, wz(lx, lz), st.vx * 0.5 + this.rnd(-0.6, 0.6), this.rnd(2, 4) * (0.7 + 0.5 * fire), st.vy * 0.5 + this.rnd(-0.6, 0.6), {
-            life: this.rnd(0.3, 0.6), size0: this.rnd(0.4, 0.75) * (0.7 + 0.5 * fire), size1: 0.1, color: this.pick(FLAME), alpha: 0.85, drag: 1.2, mode: 1,
+            life: this.rnd(0.35, 0.65), size0: this.rnd(0.5, 0.85) * (0.7 + 0.5 * fire), size1: 0.12, color: this.pick(FLAME), alpha: 0.9, drag: 1.2, mode: 1,
           });
-          if (this.rng() < 0.3) {
+          if (this.rng() < 0.3) {   // small, high black puffs: the wreck under them stays readable (same shrink as the damage plume)
+            const shrink = 1 - FX.wreckSmokeShrink * clamp((FX.wreckSmokeBelow - h) / FX.wreckSmokeBelow, 0, 1);
             this.smoke.spawn(wx(lx, lz), 1.6, wz(lx, lz), st.vx * 0.3 + this.rnd(-0.4, 0.4), this.rnd(2.2, 3.4), st.vy * 0.3 + this.rnd(-0.4, 0.4), {
-              life: this.rnd(0.8, 1.3), size0: 0.5, size1: this.rnd(1.4, 2.1), color: 0x18181c, alpha: FX.smokeAlphaMax, drag: 0.8,
+              life: this.rnd(0.8, 1.3), size0: 0.4 * shrink, size1: this.rnd(1.1, 1.5) * shrink, color: 0x18181c, alpha: FX.smokeAlphaMax, drag: 0.8,
             });
           }
         }
@@ -440,7 +450,7 @@ export class FxManager {
 
       // ---- a lost wheel: the hub drags on the tarmac and throws a stream of sparks
       if (st.detachedParts.length && speed > 3) {
-        this.acc[a + 5] += dt * FX.hubSparks * clamp(speed / 15, 0.4, 1.3) * this.essential;
+        this.acc[a + 5] += dt * FX.hubSparks * clamp(speed / 15, 0.4, 1.3) * Math.max(this.essential, FX.fireMinShare);
         while (this.acc[a + 5] >= 1) {
           this.acc[a + 5] -= 1;
           let k = Math.floor(this.rng() * 4);

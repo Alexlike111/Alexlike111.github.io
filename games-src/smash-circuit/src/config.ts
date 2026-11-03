@@ -14,21 +14,21 @@ export const CONFIG = {
   car: {
     length: 4.2, width: 2.0,
     mass: 1000,
-    baseEnginePower: 8.0,     // m/s^2 at full throttle (tuned so 0-100 km/h ~ 4.1 s with drag)
-    baseTopSpeed: 50,         // m/s: start of the speed ceiling; the last 10% tapers and air drag settles the base car at ~45.5 m/s (~164 km/h) on a straight
-    baseGrip: 8,              // GRIP = 8 [4.10 default]
+    baseEnginePower: 13.0,    // m/s^2 at full throttle from standstill (arcade: 0-100 km/h ~2.5 s, 0-120 ~3.2 s); falls off with speed (powerFalloff)
+    baseTopSpeed: 60,         // m/s: start of the speed ceiling; the last 10% tapers and air drag settles the base car at ~57 m/s (~205 km/h) on a long straight
+    baseGrip: 12,             // 1/s: how fast the velocity swings back onto the nose (high = planted, arcade)
     handbrakeGripMul: 0.25,   // grip while handbrake held -> drift
-    brakeDecel: 9.7,          // m/s^2 -> 80-0 km/h in ~23 m
+    brakeDecel: 14,           // m/s^2 -> 80-0 km/h in ~17 m, 200-0 in ~1/4 of a long straight (arcade brakes match the higher speeds)
     reverseMax: 8,            // m/s
     reversePower: 5,
-    rollingDrag: 0.15,        // m/s^2 constant
-    airDrag: 0.0034,          // * v^2
-    maxSteerAngle: 0.6,       // rad of front wheels at low speed
-    minSteerAngleAtTop: 0.16, // steering narrows with speed (arcade stability)
+    rollingDrag: 0.3,         // m/s^2 constant (lift-off slows the car a little: easy speed control without braking)
+    airDrag: 0.0011,          // * v^2
+    maxSteerAngle: 0.6,       // rad of front wheels at low speed (sets the low-speed turn radius)
+    minSteerAngleAtTop: 0.16, // (legacy, no longer read: at speed the steering is a linear fraction of the grip-limited turn rate, see carModel)
     wheelBase: 2.6,
-    steerSpeed: 6,            // how fast steering input follows target, 1/s
-    yawDamping: 9,            // angular velocity correction toward bicycle model, 1/s
-    driftSlipThreshold: 2.5,  // m/s lateral speed -> drifting
+    steerSpeed: 11,           // how fast steering input follows target, 1/s (0.09 s to full lock)
+    yawDamping: 16,           // angular velocity correction toward the steering target, 1/s (also the stability control: spins die in ~0.15 s)
+    driftSlipThreshold: 3.5,  // m/s lateral speed -> drifting flag (smoke) outside the drift mechanic
     curbSlowdown: 0.985,      // speed multiplier per step*120 on curbs (applied as per-second factor ^dt)
     curbShake: 0.6,
     offRoadDrag: 2.2,         // m/s^2 extra drag on grass/holes
@@ -36,11 +36,11 @@ export const CONFIG = {
     holeDrag: 4.0,            // torn road chunk
     bullet: true,             // CCD [4.14]
     // --- appended by module A (physics & car) ---
-    maxLatAccel: 19,          // m/s^2 lateral acceleration limit on healthy road (steady-state slip ~ maxLatAccel/grip)
-    maxYawRate: 4.2,          // rad/s absolute cap
+    maxLatAccel: 25,          // m/s^2 lateral acceleration limit on healthy road: full lock at any speed = this much cornering
+    maxYawRate: 3.2,          // rad/s absolute cap
     handbrakeYawMul: 1.35,    // yaw authority multiplier while handbrake held (rear steps out)
     handbrakeDecel: 3.2,      // m/s^2 extra forward drag while handbrake held
-    cornerScrub: 0.25,        // fraction of slip speed bled per grip correction (tyre scrub)
+    cornerScrub: 0.12,        // fraction of slip speed bled per grip correction (tyre scrub; low = corners keep the speed)
     curbDrag: 1.2,            // m/s^2 (reference) on curb: mild (rubbing a curb costs ~15 km/h per second at 100 km/h), grass (offRoadDrag) is the real penalty
     curbGripMul: 0.9,
     holeGripMul: 0.4,
@@ -53,6 +53,14 @@ export const CONFIG = {
     impactStrengthFull: 50000, // N*s mapped to SimEvent.impact.strength = 1 (~1200 N*s per m/s of normal speed: 180 km/h)
     impactStrengthCurve: 0.8,  // strength = (impulse / full) ^ curve; < 1 keeps taps (30 km/h) audible, 100 km/h ~0.7, saturates at ~180 km/h
     scrapeInterval: 0.06,     // s between scrape events per car
+    // ---- arcade feel pass (driving model) ----
+    powerFalloff: 0.55,       // engine force at the ceiling = (1 - this) of the standstill force (strong launch, still pulls at the top)
+    steerExpo: 0.25,          // 0 = linear steering; > 0 softens small inputs (precision around centre on touch / analog)
+    // player-only assist: a gentle steer away from the road edge when the nose points out of the road
+    assistLook: 0.75,         // s of travel looked ahead for the road edge
+    assistMargin: 1.2,        // m inside the edge where the assist starts
+    assistMax: 0.3,           // max steer added
+    assistMaxAngle: 0.6,      // rad: heading error above which the assist stays out (deliberate smashes, U-turns)
   },
   damage: {
     zoneMaxHp: 100,
@@ -151,7 +159,7 @@ export const CONFIG = {
     lookAhead: 14,             // metres base
     lookAheadPerSpeed: 0.55,   // extra metres per m/s
     cornerSpeedK: 1.0,         // v_max = sqrt(latAccel / curvature)
-    maxLatAccel: 19,           // m/s^2 the AI plans cornering with: the car sustains ~19 on healthy road (car.maxLatAccel); the top AI now matches it
+    maxLatAccel: 24,           // m/s^2 the AI plans cornering with: the car sustains 25 on healthy road (car.maxLatAccel); the top AI nearly matches it
     avoidRadius: 7,
     overtakeOffset: 0.55,      // fraction of half width
     rubberBand: 0.08,          // mild catch-up (fraction of speed) for cars far behind / ahead
@@ -175,7 +183,7 @@ export const CONFIG = {
     creepSpeed: 4,             // m/s a car may creep forward to steer around a stopped car
     closeFollow: 12,           // m: within this distance a car ahead also blocks us by our current position
     alongsideBehind: 5,        // m behind us a car still counts as a neighbour
-    horizon: [40, 180] as [number, number],   // m look-ahead window for the speed profile [min, max]
+    horizon: [40, 260] as [number, number],   // m look-ahead window for the speed profile [min, max]
     // per-track multiplier on the planned cornering speed (difficulty ramp). > 1 because the AI plans for the centre line while the road is wide enough
     // for a larger-radius racing line; with skill 1 the top AI laps t1/t2/t3 in ~26.5/30.5/33 s (a clean crude-bot human: 27.2/30.7/33.3)
     trackSpeed: { t1: 1.09, t2: 1.12, t3: 1.14 } as Record<string, number>,
@@ -222,8 +230,8 @@ export const CONFIG = {
     cameraHeight: 80,
     cameraTilt: 0.32,          // rad from vertical (slight 3/4 look, still top-down ortho)
     viewMetres: { portrait: 35, landscape: 56 }, // visible width at rest (portrait 35 m: the car is ~50 px long on a 390 px wide phone)
-    zoomOutAtSpeed: 0.25,      // +25% view at top speed
-    lookAhead: 0.5,            // seconds of velocity
+    zoomOutAtSpeed: 0.42,      // +42% view at top speed (the faster car needs to see further ahead)
+    lookAhead: 0.6,            // seconds of velocity
     quality: {
       // particles = ambient dust / tyre smoke / confetti (OFF on low, REQUIREMENTS: particles off on weak devices);
       // essential = sparks, damage smoke and fire, which keep a reduced budget on low so damage stays readable
@@ -242,11 +250,11 @@ export const CONFIG = {
     shadowExtent: 52,          // half-size (m) of the shadow frustum around the camera target
     lightDir: [-0.5, 1.0, -0.42] as [number, number, number],   // direction TO the sun (x, up, z)
     camera: {
-      follow: 7,               // 1/s position smoothing
+      follow: 16,              // 1/s position smoothing (7 lagged ~8 m behind the car at 200 km/h and ate the look-ahead)
       zoomFollow: 2.2,         // 1/s zoom smoothing
-      lookAheadMaxX: 0.3,      // max look-ahead as fraction of half view width
-      lookAheadMaxY: 0.38,     // ... of half view height
-      lookAheadSmooth: 3,      // 1/s smoothing of the velocity used for look-ahead
+      lookAheadMaxX: 0.42,     // max look-ahead as fraction of half view width
+      lookAheadMaxY: 0.5,      // ... of half view height
+      lookAheadSmooth: 2.5,    // 1/s smoothing of the velocity used for look-ahead
       introZoom: 0.22,         // extra zoom-out during the countdown (fraction)
       shakeDecay: 1.9,         // trauma per second
       shakeMax: 1.3,           // metres at full trauma
@@ -299,11 +307,23 @@ export const CONFIG = {
       sootMax: 0.82,           // max mix of the burnt patches over a destroyed zone (per pixel and patchy: paint survives between patches)
       scrapeSparks: 9,         // sparks fanned per scrape event at strength ~0.6 (metal grinding along a wall)
       fireBelow: 0.3,          // health below which the engine end burns (flames grow to full at a wreck)
+      steamFromLoss: 0.3,      // front / engine / rear zone loss above which that end steams (white wisps) whatever the total health
+      fireMinShare: 0.75,      // fire and lost-wheel sparks keep at least this emission share on the low preset (few particles, high signal)
       hubSparks: 34,           // sparks per second from the dragging hub of a lost wheel (at ~55 km/h)
       wheelOffSag: 0.07,       // rad of body roll / pitch toward a lost wheel
       debrisGroundFriction: 2.4, // 1/s sliding friction of debris on the ground (parts skid to a stop and stay on the road)
       debrisKickRadius: 1.9,   // m: a car driving over a lying part kicks it along (visual only)
       debrisKickMinSpeed: 4,   // m/s
+    },
+    // ---- drift / speed visuals (src/fx/driftFx.ts) ----
+    driftFx: {
+      tierColors: [0x4fc3ff, 0xff9a2a, 0xc061ff] as [number, number, number],   // blue, orange, purple
+      sparkRate: [26, 40, 58] as [number, number, number],   // sparks per second while drifting at each tier
+      boostRate: 70,           // jet particles per second during the exit boost
+      streakSpeed: 25,         // m/s (90 km/h) from which ground streaks appear around the player
+      streakFull: 52,          // m/s at full strength
+      streakRate: 55,          // specks per second at full strength
+      streakAlpha: 0.32,
     },
     // ---- player marker (the player car is one of eight similar cars) ----
     marker: {
@@ -349,19 +369,20 @@ export const CONFIG = {
   },
   controls: {
     gasButtonSize: 0.26,       // fraction of min(screen w,h)
-    steerDeadZone: 0.04,       // fraction of screen width
-    steerFullAt: 0.22,         // finger offset (fraction of screen width) for full lock
+    steerDeadZone: 0.025,      // fraction of screen width (~10 px on a phone: small slides already steer)
+    steerFullAt: 0.2,          // finger offset (fraction of screen width) for full lock
     // ---- appended by module E (input) ----
     brakePull: 0.4,            // GAS finger this many button-sizes below the button centre = brake / reverse (must stay < (0.5 + buttonMargin/gasButtonSize) so it is reachable before the screen edge)
     brakeButtonSize: 0.17,     // fraction of min(screen w,h): optional BRAKE button (bottom-left, second finger)
     buttonMargin: 0.04,        // fraction of min(screen w,h): gap of touch buttons from the screen edge
-    keySteerRise: 9,           // 1/s: how fast keyboard steering ramps to full lock
+    keySteerRise: 12,          // 1/s: how fast keyboard steering ramps to full lock (0.08 s; the car model smooths too)
     keySteerReturn: 14,        // 1/s: and back to centre
+    driftButtonSize: 0.17,     // fraction of min(screen w,h): DRIFT button left of GAS (second finger; holds a drift like Space)
   },
   // ---- appended by module F (integration) ----
   game: {
     resultsDelay: 2.5,         // s of real time between the player's finish and the results screen
-    maxFrameDt: 0.1,           // s clamp of one frame's dt
+    maxFrameDt: 0.15,          // s clamp of one frame's dt (game time = wall time down to ~7 fps; the sim step costs < 1 ms)
     maxTimeScale: 20,          // debug time scale limit
     leaderboardPrefix: 'best_lap_',   // + track id; score = best lap in milliseconds
     seedMask: 0x7fffffff,
@@ -379,11 +400,11 @@ export const CONFIG = {
   // ---- appended by power-ups (boost pads, item boxes, items) ----
   items: {
     // Boost stack: pad and nitro multiply, capped (GDD 7.1: power x2.0, ceiling x1.30).
-    caps: { power: 2.0, ceil: 1.3 },
+    caps: { power: 2.0, ceil: 1.25 },
     pad: {
       length: 6, width: 4.6,       // m (along travel x across the road)
       kick: 6,                     // m/s added along the nose x cos(heading - pad direction)
-      powerMul: 1.6, ceilMul: 1.18, time: 0.9,
+      powerMul: 1.6, ceilMul: 1.14, time: 0.9,
       cooldown: 0.8,               // s per car per pad
       exitOffset: 13,              // m after the end of a corner
       straightOffset: 14,          // m after the start of the longest straight
@@ -396,7 +417,7 @@ export const CONFIG = {
     box: {
       radius: 1.8,                 // m pickup radius
       respawn: 8,                  // s
-      rowEvery: 300,               // m of track per row
+      rowEvery: 380,               // m of track per row
       perRow: 3, lane: 0.3,        // boxes per row, lateral spacing as a fraction of the road width
       calmCurv: 0.004,            // |curvature| allowed within +-calmSpan of a row
       calmSpan: 25,
@@ -404,14 +425,14 @@ export const CONFIG = {
       minFromLine: 50,
       padClear: 30,                // m from any pad
     },
-    nitro: { time: 2.2, kick: 3, powerMul: 1.8, ceilMul: 1.22, gripMul: 0.92 },
+    nitro: { time: 2.2, kick: 3, powerMul: 1.8, ceilMul: 1.18, gripMul: 0.92 },
     shield: { time: 5, damageTaken: 0.25, dealMul: 2, massMul: 2, wallImpulseMul: 2.6, popBlink: 1 },
     repair: { frac: 0.5, minHp: 25 },
     oil: {
-      time: 9, radius: 2.3, dropBack: 3.4, max: 16, ownerImmune: 1.0,
-      spinTime: 0.75, spinRate: 5.2, gripMul: 0.25, gripTime: 1.2, cooldown: 2.5,
+      time: 9, maxHits: 2, radius: 2.3, dropBack: 3.4, max: 16, ownerImmune: 1.0,
+      spinTime: 0.9, spinTurns: 1, gripMul: 0.3, gripTime: 1.15, cooldown: 2.5,   // one full spin-out (the nose ends up pointing the way it started, so the car keeps going)
     },
-    shock: { radius: 9, push: 9, damage: 12, propRadius: 6, propMul: 1.4 },
+    shock: { radius: 9, push: 5.5, damage: 12, propRadius: 6, propMul: 1.4 },
     // Item roll weights by race position: [nitro, shield, repair, oil, shockwave]. Trailing cars get the stronger tools (catch-up).
     weights: [
       { upTo: 1, w: [40, 30, 10, 16, 4] },
@@ -429,9 +450,9 @@ export const CONFIG = {
       shieldBehind: 10, shieldClose: 4, shieldHealth: 0.4,
       repairHealth: 0.55, repairHealthLow: 0.85,
       oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
-      oilMaxPack: 2, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
-      oilCalmBehind: 40, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
-      shockCount: 2, shockRadius: 7, shockSingle: 4,
+      oilMaxPack: 1, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
+      oilCalmBehind: 40, oilCalmAhead: 55, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
+      shockCount: 2, shockRadius: 7, shockSingle: 4, shockCalmCurv: 0.006,
     },
     fx: {
       boxSize: 1.5, boxBob: 0.25, boxSpin: 1.6, boxHeight: 1.5,
@@ -440,6 +461,47 @@ export const CONFIG = {
       speedLinesFull: 1,           // boost level at which the speed lines are at full strength
       shieldColor: 0x58a8ff, nitroColor: 0xff9a2a, padFlame: 0x4cf2ff,
     },
+  },
+  // ---- appended by the driving-model pass: drift mechanic (src/sim/drift.ts + carModel drift dynamics) ----
+  drift: {
+    minSpeed: 11,             // m/s (~40 km/h): a held drift (Space / DRIFT button) starts above this
+    autoSpeed: 16.7,          // m/s (~60 km/h): a hard touch steer starts a drift above this
+    autoSteer: 0.92,          // |steer| that counts as a hard touch steer (finger past the full-lock distance)
+    brakeTapSpeed: 15,        // m/s: brake + hard steer at speed starts a drift (player, keyboard)
+    brakeTapSteer: 0.6,
+    brakeTapMax: 0.3,         // s: only a short brake TAP starts a drift (on release); ordinary braking into a corner never does
+    holdSteer: 0.3,           // steer into the turn that keeps an auto / brake-tap drift alive
+    keepSpeed: 7,             // m/s: below this the drift ends
+    exitDelay: 0.12,          // s without a drift request before the drift ends (debounce)
+    counterExit: 0.3,         // s of counter-steer that straightens the car out of the drift
+    angleMin: 0.14,           // rad slip angle with full counter-steer (8 deg)
+    angleMid: 0.42,           // rad with neutral steer (24 deg)
+    angleMax: 0.62,           // rad with full steer into the turn (36 deg)
+    angleRate: 6,             // 1/s: how fast the slip angle follows the target (no spin: it can never overshoot)
+    latAccel: 30,             // m/s^2 path curvature at full steer (tighter than grip: drifting is the hairpin tool)
+    pathMin: 0.25,            // fraction of latAccel with full counter-steer
+    pathMid: 0.6,             // ... with neutral steer
+    powerMul: 0.8,            // engine power while sliding
+    angleDrag: 2.2,           // m/s^2 extra drag at angleMax (speed loss stays small)
+    brakeMul: 0.6,            // brake effect while drifting
+    // charge and exit boost tiers (1 blue, 2 orange, 3 purple)
+    tierTime: [0.7, 1.6, 2.8] as [number, number, number],   // s of drift charge for each tier
+    minChargeAngle: 0.18,     // rad: below this slip angle the drift charges slowly (0.3x)
+    boostKick: [2.5, 4.5, 7] as [number, number, number],   // m/s added along the nose on a clean exit
+    boostTime: [0.5, 0.9, 1.3] as [number, number, number],  // s of extra engine power after the exit
+    boostPowerMul: 1.5, boostCeilMul: 1.1,
+    // points / combo
+    pointsRate: 90,           // points per second at 100 km/h and full angle
+    minPointsTime: 0.35,      // s: shorter drifts score nothing
+    comboWindow: 2.2,         // s after a clean exit in which the next drift raises the combo
+    comboMax: 5,
+    coinsPerPoint: 0.05,      // drift points -> coins at the race end
+    maxCoins: 400,
+    cancelImpulse: 700,       // N*s: a hit this hard (walls, cars, props) cancels the drift: no boost, points and combo lost
+    // AI
+    aiRadius: 25,             // m: AI drifts corners tighter than this ...
+    aiMinSpeed: 15,           // m/s ... when going at least this fast
+    aiSkill: 0.55,            // ... and its skill is at least this
   },
 } as const;
 

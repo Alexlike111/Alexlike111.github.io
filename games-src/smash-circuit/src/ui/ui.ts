@@ -30,6 +30,8 @@ export interface UiHandlers {
 export interface ResultsData {
   place: number; time: number; bestLap: number; reward: number;
   canDouble: boolean; unlocked: string | null; newBestLap: boolean;
+  /** coins from drift points (already included in `reward`) */
+  drift?: number;
 }
 
 const esc = (s: string | number): string =>
@@ -94,7 +96,10 @@ export class UI {
     place: HTMLElement; placeTotal: HTMLElement; lap: HTMLElement; timer: HTMLElement; last: HTMLElement; best: HTMLElement;
     speed: HTMLElement; money: HTMLElement; countdown: HTMLElement; zones: Map<string, SVGElement>; repair: HTMLElement; repairCost: HTMLElement;
     car: HTMLElement; fps: HTMLElement | null;
+    drift: HTMLElement; driftLabel: HTMLElement; driftPts: HTMLElement; driftBar: HTMLElement;
   } | null = null;
+  /** drift meter: last written key (avoids DOM writes) */
+  private driftKey = '';
   private hudLast = { place: -1, total: -1, lap: -1, laps: -1, timer: '', last: '', best: '', speed: -1, cd: '', zones: [] as number[], cost: -1, money: -1, health: -1 };
   private lastLapShown = -1;
 
@@ -206,7 +211,41 @@ export class UI {
       hud.countdown.classList.toggle('go', cd === 'GO');
       hud.countdown.hidden = !cd;
     }
+    this.updateDrift(p);
     if (hud.fps) hud.fps.textContent = `${Math.round(fps)} fps`;
+  }
+
+  /** Drift meter: "DRIFT x2 +350" with the boost tier colour and charge bar while drifting; flashes the banked points, a lost drift, the boost. */
+  private updateDrift(p: ISim['cars'][number]): void {
+    const hud = this.hud;
+    if (!hud) return;
+    const D = CONFIG.drift;
+    let mode = '', label = '', pts = '', tier = 0, bar = 0;
+    if (p.driftActive) {
+      mode = 'on'; tier = p.driftTier ?? 0;
+      const combo = p.driftCombo ?? 1;
+      label = t('hud.drift') + (combo > 1 ? ` x${combo}` : '');
+      pts = '+' + (p.driftPoints ?? 0);
+      const ch = p.driftCharge ?? 0;
+      bar = tier >= 3 ? 1 : (ch - (tier > 0 ? D.tierTime[tier - 1] : 0)) / (D.tierTime[tier] - (tier > 0 ? D.tierTime[tier - 1] : 0));
+    } else if ((p.driftCancelT ?? 99) < 1.2) {
+      mode = 'lost'; label = t('hud.driftLost');
+    } else if ((p.driftBankT ?? 99) < 1.4 && (p.driftBank ?? 0) > 0) {
+      mode = 'bank'; tier = p.driftBoostTier ?? 0;
+      label = tier > 0 ? t('hud.boost') : t('hud.drift');
+      pts = '+' + p.driftBank;
+    }
+    const q = Math.round(Math.max(0, Math.min(1, bar)) * 20);
+    const key = `${mode}|${label}|${pts}|${tier}|${q}`;
+    if (key === this.driftKey) return;
+    this.driftKey = key;
+    const el = hud.drift;
+    el.hidden = !mode;
+    el.dataset.mode = mode;
+    el.dataset.tier = String(tier);
+    hud.driftLabel.textContent = label;
+    hud.driftPts.textContent = pts;
+    hud.driftBar.style.width = `${q * 5}%`;
   }
 
   showPause(repairCost: number, money: number): void {
@@ -233,11 +272,12 @@ export class UI {
       ? [
         { ic: `<div class="tut-gas">${icon('finger')}<i></i></div>`, tx: t('tut.touch.gas') },
         { ic: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`, tx: t('tut.touch.steer') },
+        { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.drift') },
         { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
       ]
       : [
         { ic: `<div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div><div class="keys sub"><kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></div>`, tx: t('tut.key.drive') },
-        { ic: `<div class="keys"><kbd class="wide">${esc(t('tut.key.space'))}</kbd></div>`, tx: t('tut.key.handbrake') },
+        { ic: `<div class="keys"><kbd class="wide">${esc(t('tut.key.space'))}</kbd></div>`, tx: t('tut.key.drift') },
         { ic: `<div class="keys"><kbd>R</kbd><kbd>P</kbd></div>`, tx: t('tut.key.repair') },
       ];
     this.root.classList.add('tut-on');   // CSS hides the countdown while the sim is held behind the tutorial
@@ -623,6 +663,7 @@ export class UI {
         <button class="btn blue${confirmArmed('restart')}" data-act="restart">${icon('restart')}<span>${esc(t('pause.restart'))}</span></button>
         <button class="btn red${confirmArmed('quit')}" data-act="quit">${icon('exit')}<span>${esc(t('pause.quit'))}</span></button>
       </div>
+      <div class="drift-hint">${icon('bolt')}<span>${esc(t(this.touchMode ? 'pause.driftTouch' : 'pause.driftKeys'))}</span></div>
       <div class="pc-foot"><span>${icon('coin')}<b>${fmtMoney(money)}</b></span><span class="keyhint">${esc(this.touchMode ? '' : t('pause.keys'))}</span></div>
     </div></div>`;
   }
@@ -652,6 +693,7 @@ export class UI {
         <div class="stats-list">
           <div class="rr"><span>${icon('flag')}${esc(t('results.time'))}</span><b>${fmtTime(r.time)}</b></div>
           <div class="rr"><span>${icon('bolt')}${esc(t('results.bestLap'))}</span><b>${fmtTime(r.bestLap)}${r.newBestLap ? `<em>${esc(t('results.newBest'))}</em>` : ''}</b></div>
+          ${r.drift ? `<div class="rr"><span>${icon('bolt')}${esc(t('results.drift'))}</span><b>+${fmtMoney(r.drift)}</b></div>` : ''}
           <div class="rr reward${st.doubled ? ' dbl' : ''}"><span>${icon('coin')}${esc(t('results.reward'))}</span><b>+${fmtMoney(reward)}${st.doubled ? `<em>x${mult}</em>` : ''}</b></div>
         </div>
         ${r.unlocked ? `<div class="unlock">${icon('flag')}<span>${esc(t('results.unlocked', { track: unlockName }))}</span></div>` : ''}
@@ -684,7 +726,7 @@ export class UI {
           <button class="btn round grey pausebtn" data-act="pauseBtn" data-ta="hud.pause" aria-label="">${icon('pause')}</button>
           <div class="chip money">${icon('coin')}<b class="mn">0</b></div>
         </div>
-        <div class="hud-bc"><div class="speed"><b class="sp">0</b><small data-t="unit.kmh"></small></div></div>
+        <div class="hud-bc"><div class="driftm" hidden><div class="dl"><b class="dlab"></b><span class="dpts"></span></div><div class="dbar"><i></i></div></div><div class="speed"><b class="sp">0</b><small data-t="unit.kmh"></small></div></div>
         <div class="countdown" hidden></div>
         <div class="hud-fps"></div>
       </div>`;
@@ -696,7 +738,9 @@ export class UI {
       place: q('.pn'), placeTotal: q('.pt'), lap: q('.lapn'), timer: q('.timer'), last: q('.lastl'), best: q('.bestl'),
       speed: q('.sp'), money: q('.mn'), countdown: q('.countdown'), zones, repair: q('.cardmg'), repairCost: q('.rcn'),
       car: q('.car-wrap'), fps: showFps || CONFIG.ui.hudFpsDebug ? q('.hud-fps') : null,
+      drift: q('.driftm'), driftLabel: q('.dlab'), driftPts: q('.dpts'), driftBar: q('.dbar i'),
     };
+    this.driftKey = '';
     this.refreshHudText();
   }
 

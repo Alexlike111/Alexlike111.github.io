@@ -396,6 +396,26 @@
 @keyframes cd-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0.85; transform: translate(-50%, -50%) scale(0.9); } }
 .ui-root .hud-fps { left: 50%; bottom: 0.2em; transform: translateX(-50%); font-size: 0.7em; opacity: 0.7; }
 
+/* drift meter (above the speedometer) */
+.ui-root .hud-bc { display: flex; flex-direction: column; align-items: center; gap: 0.25em; }
+.ui-root .driftm { --dc: #fff; display: flex; flex-direction: column; align-items: center; gap: 0.15em; pointer-events: none;
+  font: 900 italic 1.05em/1 var(--display); color: var(--dc); text-shadow: 0 0.1em 0 var(--ink), 0 0 0.6em rgba(0, 0, 0, 0.35); }
+.ui-root .driftm[hidden] { display: none; }
+.ui-root .driftm .dl { display: flex; gap: 0.4em; align-items: baseline; white-space: nowrap; }
+.ui-root .driftm .dpts { font-size: 0.9em; color: #fff; }
+.ui-root .driftm .dbar { width: 6.5em; height: 0.36em; border-radius: 0.2em; background: rgba(0, 0, 0, 0.45); overflow: hidden; border: 0.08em solid var(--ink); }
+.ui-root .driftm .dbar i { display: block; height: 100%; width: 0; background: var(--dc); }
+.ui-root .driftm[data-mode="bank"] .dbar, .ui-root .driftm[data-mode="lost"] .dbar { display: none; }
+.ui-root .driftm[data-tier="1"] { --dc: #5fc8ff; }
+.ui-root .driftm[data-tier="2"] { --dc: #ffa63a; }
+.ui-root .driftm[data-tier="3"] { --dc: #c77dff; }
+.ui-root .driftm[data-mode="lost"] { --dc: #ff5a5a; }
+.ui-root .driftm[data-mode="bank"] { animation: drift-pop 0.35s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes drift-pop { 0% { transform: scale(1.5); } 100% { transform: scale(1); } }
+.ui-root .drift-hint { display: flex; gap: 0.4em; align-items: center; font-size: 0.78em; line-height: 1.15; opacity: 0.9; margin-top: 0.3em; }
+.ui-root .drift-hint svg { width: 1.1em; height: 1.1em; flex: none; color: var(--yellow); }
+.ui-root .tut-drift svg { width: 2.2em; height: 2.2em; color: #c77dff; }
+
 /* touch buttons (created by InputController) */
 .ui-root .touch-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .ui-root .touch-layer .gas-btn, .ui-root .touch-layer .brake-btn {
@@ -419,6 +439,19 @@
   box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.35);
 }
 .ui-root .touch-layer .brake-btn svg { width: 38%; height: 38%; }
+.ui-root .touch-layer .drift-btn {
+  position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
+  border-radius: 50%; pointer-events: auto; touch-action: none; color: #fff; border: 0.18em solid var(--ink);
+  font: 900 italic calc(var(--drift, 66px) * 0.18)/1 var(--display); text-transform: uppercase; letter-spacing: 0.03em;
+  text-shadow: 0 0.08em 0 rgba(0, 0, 0, 0.35); transition: transform 0.06s, filter 0.1s;
+  /* left of GAS, lifted a little so the thumb sliding left to steer does not land on it */
+  right: calc(var(--gap, 16px) * 1.6 + var(--gas, 100px) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--gap, 16px) + var(--gas, 100px) * 0.62 + env(safe-area-inset-bottom, 0px));
+  width: var(--drift, 66px); height: var(--drift, 66px);
+  background: radial-gradient(circle at 35% 28%, #d39bff, #8a3cf0 55%, #4e1a9e);
+  box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.35);
+}
+.ui-root .touch-layer .drift-btn svg { width: 40%; height: 40%; }
 .ui-root .touch-layer .down { transform: scale(0.94) translateY(0.1em); filter: brightness(1.2); }
 
 /* ---------------------------------------------------------------- tutorial + toasts */

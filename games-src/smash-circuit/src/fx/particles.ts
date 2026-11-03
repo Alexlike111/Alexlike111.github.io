@@ -12,8 +12,10 @@ varying vec4 vC;
 void main() {
   vUv = position.xy;
   vC = iColor;
-  vec3 p = iPos + (uRight * position.x + uUp * position.y) * iSize;
-  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  // iPos is scene-local; the scene root is mirrored along z (renderer.ts), so go through modelMatrix first, then billboard in world space
+  vec4 w = modelMatrix * vec4(iPos, 1.0);
+  w.xyz += (uRight * position.x + uUp * position.y) * iSize;
+  gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 const FRAG = /* glsl */`
 uniform float uSoft;
@@ -79,6 +81,7 @@ export class ParticleSystem {
       vertexShader: VERT, fragmentShader: FRAG,
       uniforms: { uRight: { value: new THREE.Vector3(1, 0, 0) }, uUp: { value: new THREE.Vector3(0, 0, -1) }, uSoft: { value: soft } },
       transparent: true, depthWrite: false, depthTest: true,
+      side: THREE.DoubleSide,   // the mirrored scene root flips the winding three.js expects
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
     this.mesh = new THREE.Mesh(this.geo, this.mat);

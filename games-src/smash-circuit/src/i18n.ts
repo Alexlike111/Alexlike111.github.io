@@ -20,6 +20,7 @@ export const EN: Dict = {
   'unit.kmh': 'km/h',
   'input.gas': 'GAS',
   'input.brake': 'BRAKE',
+  'input.drift': 'DRIFT',
 
   'tracks.title': 'Choose track',
   'track.t1': 'Green Valley',
@@ -78,6 +79,8 @@ export const EN: Dict = {
   'pause.restart': 'Restart',
   'pause.quit': 'Quit race',
   'pause.keys': 'P pause, R repair',
+  'pause.driftKeys': 'Drift: hold Space and steer (or tap brake + steer at speed). Let go for a boost',
+  'pause.driftTouch': 'Drift: steer hard at speed or hold DRIFT. Let go for a boost',
 
   'results.title': 'Race finished',
   'results.place': 'place',
@@ -102,6 +105,12 @@ export const EN: Dict = {
   'tut.key.space': 'SPACE',
   'tut.key.drive': 'Drive with W A S D or the arrow keys',
   'tut.key.handbrake': 'Hold Space for the handbrake and drift',
+  'tut.key.drift': 'Hold SPACE + steer to drift, let go for a boost',
+  'tut.touch.drift': 'Steer hard to drift (or hold DRIFT), let go for a boost',
+  'hud.drift': 'DRIFT',
+  'hud.driftLost': 'Drift lost!',
+  'hud.boost': 'BOOST',
+  'results.drift': 'Drift bonus',
   'tut.key.repair': 'R repairs the car, P pauses',
   'tut.ok': 'Got it',
 };
@@ -122,6 +131,7 @@ export const RU: Dict = {
   'unit.kmh': 'км/ч',
   'input.gas': 'ГАЗ',
   'input.brake': 'ТОРМОЗ',
+  'input.drift': 'ДРИФТ',
 
   'tracks.title': 'Выбери трассу',
   'track.t1': 'Зелёная долина',
@@ -180,6 +190,8 @@ export const RU: Dict = {
   'pause.restart': 'Заново',
   'pause.quit': 'Выйти',
   'pause.keys': 'P пауза, R ремонт',
+  'pause.driftKeys': 'Дрифт: держи Пробел и поворачивай (или тормоз + поворот на скорости). Отпусти: ускорение',
+  'pause.driftTouch': 'Дрифт: резко поверни на скорости или держи ДРИФТ. Отпусти: ускорение',
 
   'results.title': 'Заезд завершён',
   'results.place': 'место',
@@ -204,6 +216,12 @@ export const RU: Dict = {
   'tut.key.space': 'ПРОБЕЛ',
   'tut.key.drive': 'Езда: W A S D или стрелки',
   'tut.key.handbrake': 'Пробел: ручной тормоз и дрифт',
+  'tut.key.drift': 'Держи ПРОБЕЛ и поворачивай: дрифт. Отпусти: ускорение',
+  'tut.touch.drift': 'Резко поверни: дрифт (или держи ДРИФТ). Отпусти: ускорение',
+  'hud.drift': 'ДРИФТ',
+  'hud.driftLost': 'Дрифт сорван!',
+  'hud.boost': 'УСКОРЕНИЕ',
+  'results.drift': 'Бонус за дрифт',
   'tut.key.repair': 'R: ремонт, P: пауза',
   'tut.ok': 'Понятно',
 };

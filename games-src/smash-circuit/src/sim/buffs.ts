@@ -38,7 +38,7 @@ export class CarBuffs {
   /** Boost level 0..1 for visuals (camera punch, flames). */
   get boostLevel(): number { return this.padT > 0 || this.nitroT > 0 ? 1 : 0; }
   /** Forced yaw rate (rad/s) while spinning, fading out over the spin. */
-  spinRate(): number { return this.spinT > 0 ? this.spinDir * I.oil.spinRate * clamp(this.spinT / I.oil.spinTime, 0, 1) : 0; }
+  spinRate(): number { return this.spinT > 0 ? this.spinDir * (4 * Math.PI * I.oil.spinTurns / I.oil.spinTime) * clamp(this.spinT / I.oil.spinTime, 0, 1) : 0; }
 
   tick(dt: number): void {
     if (this.padT > 0) this.padT = Math.max(0, this.padT - dt);

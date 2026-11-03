@@ -9,12 +9,16 @@
 // works with a second finger. With auto-gas on, throttle is always 1 and any touch steers (relative to the
 // screen centre).
 //
-// Keyboard: WASD / arrows, Space = handbrake, P = pause, R = repair. Esc is never bound (Playgama 1.5.2).
+// Drift (src/sim/drift.ts): a touch steer past the full-lock distance asks for an auto drift (the sim starts it above
+// ~60 km/h); the DRIFT button (left of GAS, second finger) holds a drift like Space does on a keyboard.
+//
+// Keyboard: WASD / arrows, Space = handbrake / drift, P = pause, R = repair. Esc is never bound (Playgama 1.5.2).
 import { CONFIG } from '../config';
+import { DRIFT_AUTO, DRIFT_HOLD, DRIFT_NONE } from '../sim/drift';
 import type { CarInput } from '../types';
 
 type KeyAction = 'pause' | 'repair';
-type PointerKind = 'gas' | 'brake' | 'steer';
+type PointerKind = 'gas' | 'brake' | 'steer' | 'drift';
 
 interface Ptr { kind: PointerKind; x: number; y: number; homeX: number; homeY: number; size: number }
 
@@ -47,7 +51,9 @@ export function steerAxis(x: number, homeX: number, screenW: number, onGasButton
   const dx = (x - homeX) / W;
   let full: number = C.steerFullAt;
   if (onGasButton) {
-    const room = dx > 0 ? (W - homeX) / W * 0.8 : homeX / W;
+    // the thumb has little room to the right of the button: full lock comes before the edge, and the same distance
+    // to the left (symmetric feel: the same slide gives the same turn either way)
+    const room = (W - homeX) / W * 0.8;
     full = Math.min(full, Math.max(C.steerDeadZone + 0.02, room));
   }
   const mag = clamp((Math.abs(dx) - C.steerDeadZone) / (full - C.steerDeadZone), 0, 1);
@@ -73,6 +79,7 @@ export class InputController {
   private layer: HTMLDivElement;
   private gasEl: HTMLDivElement;
   private brakeEl: HTMLDivElement;
+  private driftEl: HTMLDivElement;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -89,7 +96,11 @@ export class InputController {
     this.brakeEl.className = 'brake-btn';
     this.brakeEl.setAttribute('role', 'button');
     this.brakeEl.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="14" y="14" width="36" height="36" rx="8" fill="currentColor"/></svg><span data-brake-label></span>';
-    this.layer.append(this.gasEl, this.brakeEl);
+    this.driftEl = document.createElement('div');
+    this.driftEl.className = 'drift-btn';
+    this.driftEl.setAttribute('role', 'button');
+    this.driftEl.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M14 44c6-14 18-22 34-24l-4-7 14 10-14 10 3-7c-12 2-21 8-27 20z" fill="currentColor"/><circle cx="16" cy="50" r="5" fill="currentColor" opacity=".7"/></svg><span data-drift-label></span>';
+    this.layer.append(this.gasEl, this.brakeEl, this.driftEl);
     root.appendChild(this.layer);
 
     window.addEventListener('keydown', this.onKeyDown);
@@ -125,9 +136,10 @@ export class InputController {
     const handbrake = k.has('Space');
 
     // --- touch
-    let tThrottle = 0, tBrake = 0, tSteer = 0, steerSet = false;
+    let tThrottle = 0, tBrake = 0, tSteer = 0, steerSet = false, tDrift = false;
     for (const p of this.pointers.values()) {
       if (p.kind === 'brake') { tBrake = 1; continue; }
+      if (p.kind === 'drift') { tDrift = true; continue; }
       if (p.kind === 'gas') {
         if (p.y > brakeThresholdY(p.homeY, p.size)) { tBrake = 1; } else { tThrottle = 1; }
       } else if (p.y > brakeThresholdY(p.homeY, p.size)) {
@@ -144,7 +156,10 @@ export class InputController {
     const steer = steerSet ? tSteer : this.kbSteer;
     this.gasEl.classList.toggle('down', tThrottle > 0);
     this.brakeEl.classList.toggle('down', tBrake > 0);
-    return { throttle, brake, steer: clamp(steer, -1, 1), handbrake };
+    this.driftEl.classList.toggle('down', tDrift);
+    // touch steering: a hard steer asks for an auto drift (the sim decides on speed); the DRIFT button holds one
+    const drift = tDrift ? DRIFT_HOLD : steerSet ? DRIFT_AUTO : DRIFT_NONE;
+    return { throttle, brake, steer: clamp(steer, -1, 1), handbrake, drift };
   }
 
   setAutoGas(on: boolean): void {
@@ -165,10 +180,12 @@ export class InputController {
   onTouchMode(cb: (touch: boolean) => void): void { this.touchCb = cb; }
 
   /** Label texts of the on-screen buttons (already translated). */
-  setLabels(gas: string, brake: string): void {
+  setLabels(gas: string, brake: string, drift?: string): void {
     const g = this.gasEl.querySelector('[data-gas-label]'), b = this.brakeEl.querySelector('[data-brake-label]');
     if (g) g.textContent = gas;
     if (b) b.textContent = brake;
+    const d = this.driftEl.querySelector('[data-drift-label]');
+    if (d && drift !== undefined) d.textContent = drift;
   }
 
   get touchActive(): boolean { return this._touch; }
@@ -214,6 +231,7 @@ export class InputController {
     const s = this.layer.style;
     s.setProperty('--gas', Math.round(m * C.gasButtonSize) + 'px');
     s.setProperty('--brake', Math.round(m * C.brakeButtonSize) + 'px');
+    s.setProperty('--drift', Math.round(m * C.driftButtonSize) + 'px');
     s.setProperty('--gap', Math.round(m * C.buttonMargin) + 'px');
   };
 
@@ -223,6 +241,7 @@ export class InputController {
     this.kbSteer = 0;
     this.gasEl.classList.remove('down');
     this.brakeEl.classList.remove('down');
+    this.driftEl.classList.remove('down');
   };
 
   private setTouch(on: boolean): void {
@@ -261,12 +280,14 @@ export class InputController {
       homeX = r.left + r.width / 2; homeY = r.top + r.height / 2; size = r.width;
     } else if (target?.closest('.brake-btn')) {
       kind = 'brake';
+    } else if (target?.closest('.drift-btn')) {
+      kind = 'drift';
     } else if (target?.closest('button, a, input, select, [data-ui]')) {
       return; // HUD / menu controls keep their own behaviour
     } else if (this.autoGas === false && this.hasGasPointer()) {
       return; // manual gas: only the GAS finger steers while it is down
     }
-    if (kind !== 'brake' && e.cancelable) e.preventDefault();
+    if (kind !== 'brake' && kind !== 'drift' && e.cancelable) e.preventDefault();
     this.pointers.set(e.pointerId, { kind, x: e.clientX, y: e.clientY, homeX, homeY, size });
   };
 

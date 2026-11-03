@@ -11,6 +11,7 @@ export interface CarInput {
   brake: number;      // 0..1 (brake, then reverse when nearly stopped)
   steer: number;      // -1 (left) .. +1 (right)
   handbrake: boolean;
+  drift?: number;     // drift request (src/sim/drift.ts): 0 none, 1 auto (hard touch steer), 2 hold (DRIFT button)
 }
 
 // ---------- Damage ----------
@@ -94,6 +95,20 @@ export interface CarState {
   nitroT?: number;         // s of nitro left
   shieldT?: number;        // s of ram shield left
   spinT?: number;          // s of oil spin left
+  // drift mechanic (set by SimCar every step; absent on hand-built states, read with `?? 0` / `?? false`)
+  driftActive?: boolean;   // in a drift right now
+  driftDir?: number;       // +1 drifting left (CCW), -1 right
+  driftAngle?: number;     // rad |slip angle|
+  driftTier?: number;      // 0..3 exit boost tier charged so far (1 blue, 2 orange, 3 purple)
+  driftCharge?: number;    // s of charge
+  driftPoints?: number;    // live points of the current drift incl. combo
+  driftCombo?: number;     // combo multiplier of the current drift
+  driftScore?: number;     // banked drift points this race
+  driftBank?: number;      // last banked amount ...
+  driftBankT?: number;     // ... and seconds since it was banked
+  driftCancelT?: number;   // s since the last drift was cancelled by a hit
+  driftBoostT?: number;    // s of drift exit boost left
+  driftBoostTier?: number; // tier of that boost
 }
 
 // ---------- Track ----------
@@ -173,7 +188,7 @@ export interface BoostPad { id: number; x: number; y: number; angle: number; len
 /** Pickup box. ready=false while respawning (timer = seconds left). */
 export interface ItemBox { id: number; x: number; y: number; ready: boolean; timer: number }
 /** Oil slick on the road; active=false slots are free. age/life in seconds. */
-export interface OilSlick { x: number; y: number; radius: number; age: number; life: number; active: boolean; owner: number }
+export interface OilSlick { x: number; y: number; radius: number; age: number; life: number; active: boolean; owner: number; hits: number }
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 
@@ -211,6 +226,7 @@ export interface SimOptions {
   seed: number;
   ghost?: GhostData;      // playback ghost for player
   laps?: number;          // override
+  powerUps?: boolean;      // false: no boost pads / item boxes (pure-driving tests); default true
 }
 
 export interface ISim {
