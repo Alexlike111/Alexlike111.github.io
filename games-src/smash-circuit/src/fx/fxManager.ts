@@ -16,6 +16,7 @@ import { SkidMarks } from './skidmarks';
 const FX = CONFIG.render.fx;
 const CR = CONFIG.render.car;
 const SPARK_COLORS = [0xffe27a, 0xffb02e, 0xff7a1a, 0xffffff];
+const BOX_COLORS = [0xffe27a, 0x7ad9ff, 0xff7ac6, 0x9bff9c, 0xffffff];
 const CONFETTI = [0xff4d4d, 0xffd23c, 0x3a9bff, 0x3ccf6e, 0xff7ac6, 0xffffff];
 const PART_DIMS: Record<CarPart, [number, number, number]> = {
   bumperF: [0.5, 0.4, 1.7], bumperR: [0.5, 0.4, 1.7], hood: [1.35, 0.14, 1.55], doorL: [1.5, 0.36, 0.2], doorR: [1.5, 0.36, 0.2],
@@ -58,6 +59,8 @@ export class FxManager {
   /** sparks, damage smoke and fire keep a reduced budget even on low, so damage stays readable (REQUIREMENTS: smoke and sparks at low HP) */
   private essential = 1;
   private acc: Float32Array;
+  /** boost / nitro flame emitter accumulators, one per car */
+  private accFlame: Float32Array;
   /** drift tier sparks, exit boost jet, speed streaks (driftFx.ts) */
   private driftFx!: DriftFx;
   private tmpC = new THREE.Color();
@@ -70,6 +73,7 @@ export class FxManager {
     this.driftFx = new DriftFx(this.sparks, this.smoke, carCount);
     this.skids = new SkidMarks(CONFIG.render.skidCapacity.high, carCount * 4);
     this.acc = new Float32Array(carCount * 6);
+    this.accFlame = new Float32Array(carCount);
     this.rings = new ShockwavePool();
     this.group.add(this.skids.mesh, ...this.debris.meshes, this.rings.mesh, this.smoke.mesh, this.sparks.mesh);
   }
@@ -89,7 +93,7 @@ export class FxManager {
   }
 
   clear(): void {
-    this.debris.clear(); this.smoke.clear(); this.sparks.clear(); this.skids.clear(); this.rings.clear(); this.acc.fill(0); this.hitStopLeft = 0;
+    this.debris.clear(); this.smoke.clear(); this.sparks.clear(); this.skids.clear(); this.rings.clear(); this.acc.fill(0); this.accFlame.fill(0); this.hitStopLeft = 0;
   }
 
   private rnd(a: number, b: number): number { return a + (b - a) * this.rng(); }
@@ -207,6 +211,32 @@ export class FxManager {
           }
           break;
         }
+        case 'boost': this.onBoost(ev, ctx); break;
+        case 'pickup': {
+          if (Math.hypot(ev.x - ctx.camX, ev.y - ctx.camZ) > ctx.radius * 1.3) break;
+          const n = Math.round(14 * this.essential);
+          for (let i = 0; i < n; i++) {
+            const a = this.rng() * Math.PI * 2, v = this.rnd(2, 6);
+            this.sparks.spawn(ev.x, this.rnd(1, 2), ev.y, Math.cos(a) * v, this.rnd(1, 4), Math.sin(a) * v, {
+              life: this.rnd(0.35, 0.65), size0: this.rnd(0.18, 0.3), size1: 0.05, color: this.pick(BOX_COLORS), alpha: 1, drag: 1.5, mode: 1,
+            });
+          }
+          this.rings.spawn(ev.x, ev.y, 0.35, 0xffffff);
+          break;
+        }
+        case 'itemUse': this.onItemUse(ev, ctx); break;
+        case 'shieldPop': {
+          this.rings.spawn(ev.x, ev.y, 0.7, CONFIG.items.fx.shieldColor, 5);
+          this.sparkBurst(ev.x, 0.9, ev.y, 16, 8);
+          if (ev.carId === ctx.playerId) ctx.addTrauma(0.25);
+          break;
+        }
+        case 'oilSpin': {
+          const near = this.near(ctx, ev.x, ev.y);
+          this.puff(ev.x, 0.3, ev.y, 8, 0x2a2540, 2.4, 3.2, 1.0, 0.75);
+          if (ev.carId === ctx.playerId) ctx.addTrauma(0.2); else ctx.addTrauma(0.1 * near);
+          break;
+        }
         case 'finish': {
           if (ev.carId !== ctx.playerId) break;
           const p = ctx.carById(ev.carId);
@@ -222,6 +252,45 @@ export class FxManager {
         }
         default: break;
       }
+    }
+  }
+
+  /** boost pad / nitro kick: ground ring + spark fan thrown backwards */
+  private onBoost(ev: Extract<SimEvent, { type: 'boost' }>, ctx: FxContext): void {
+    const X = CONFIG.items.fx;
+    const near = this.near(ctx, ev.x, ev.y);
+    if (near <= 0 && ev.carId !== ctx.playerId) return;
+    const bx = -Math.cos(ev.angle), bz = -Math.sin(ev.angle);
+    this.rings.spawn(ev.x, ev.y, 0.55, ev.source === 'pad' ? X.padColorA : X.nitroColor);
+    this.sparkFan(ev.x, 0.5, ev.y, 18, 9, bx, bz, 0.5);
+    this.puff(ev.x + bx * 2, 0.4, ev.y + bz * 2, 3, this.dustColor(), 2.0, 2.4, 1.0, 0.6, bx * 3, bz * 3);
+  }
+
+  private onItemUse(ev: Extract<SimEvent, { type: 'itemUse' }>, ctx: FxContext): void {
+    const X = CONFIG.items.fx;
+    const own = ev.carId === ctx.playerId;
+    const near = this.near(ctx, ev.x, ev.y);
+    if (!own && near <= 0) return;
+    switch (ev.item) {
+      case 'shockwave':
+        this.rings.spawn(ev.x, ev.y, 1, 0xd9a0ff, CONFIG.items.shock.radius);
+        this.rings.spawn(ev.x, ev.y, 0.8, 0xffffff, CONFIG.items.shock.radius * 0.6);
+        this.sparkBurst(ev.x, 0.8, ev.y, 24, 11);
+        this.puff(ev.x, 0.4, ev.y, 10, this.dustColor(), 3.0, 6.0, 1.2, 0.7);
+        ctx.addTrauma(own ? 0.45 : 0.3 * near);
+        break;
+      case 'oil': {
+        const bx = -Math.cos(ev.angle), bz = -Math.sin(ev.angle);
+        this.puff(ev.x + bx * 3, 0.3, ev.y + bz * 3, 7, 0x2a2540, 2.2, 2.4, 0.8, 0.8);
+        break;
+      }
+      case 'shield':
+        this.rings.spawn(ev.x, ev.y, 0.6, X.shieldColor, 4.5);
+        break;
+      case 'nitro':
+        this.rings.spawn(ev.x, ev.y, 0.5, X.nitroColor);
+        break;
+      default: break;   // repair: the sim also emits 'repair' (green sparks)
     }
   }
 
@@ -447,6 +516,21 @@ export class FxManager {
           }
         }
       } else this.acc[a + 4] = 0;
+
+      // ---- boost / nitro flames out of the exhaust
+      if ((st.boostT ?? 0) > 0 || (st.nitroT ?? 0) > 0) {
+        const nitro = (st.nitroT ?? 0) > 0;
+        this.accFlame[i] += dt * (nitro ? 90 : 60) * this.essential;
+        while (this.accFlame[i] >= 1) {
+          this.accFlame[i] -= 1;
+          const lz = this.rng() > 0.5 ? 0.5 : -0.5, lx = -2.25;
+          const hot = this.rng();
+          this.sparks.spawn(wx(lx, lz), 0.55, wz(lx, lz), st.vx * 0.55 - cos * this.rnd(3, 8), this.rnd(0.2, 0.9), st.vy * 0.55 - sin * this.rnd(3, 8), {
+            life: this.rnd(0.14, 0.3), size0: this.rnd(0.35, 0.55), size1: 0.06, alpha: 0.9, drag: 1.2, mode: 1,
+            color: nitro ? (hot > 0.6 ? 0xffe27a : hot > 0.2 ? 0xff9a2a : 0xff5a1a) : (hot > 0.55 ? 0xd9fbff : 0x4cf2ff),
+          });
+        }
+      } else this.accFlame[i] = 0;
 
       // ---- a lost wheel: the hub drags on the tarmac and throws a stream of sparks
       if (st.detachedParts.length && speed > 3) {

@@ -19,12 +19,23 @@ function step(k: CarKinematics, i: CarInput, fx: DamageEffects = NO_DAMAGE, s: S
 }
 
 describe('car model performance targets', () => {
-  it('0-100 km/h in 4.1 s +-0.4', () => {
+  // arcade feel pass: 0-100 km/h ~2.5 s, 0-120 ~3.2 s, ~200 km/h on a long straight (was 4.1 s / 164 km/h: players found the cars slow)
+  it('0-100 km/h in 2.5 s +-0.35, 0-120 km/h in about 3.2 s', () => {
     let k = start();
     let t = 0;
     while (forwardSpeed(k) < 100 / 3.6 && t < 15) { k = step(k, { ...IDLE, throttle: 1 }); t += dt; }
-    expect(t).toBeGreaterThan(3.7);
-    expect(t).toBeLessThan(4.5);
+    expect(t).toBeGreaterThan(2.15);
+    expect(t).toBeLessThan(2.85);
+    while (forwardSpeed(k) < 120 / 3.6 && t < 15) { k = step(k, { ...IDLE, throttle: 1 }); t += dt; }
+    expect(t).toBeGreaterThan(2.8);
+    expect(t).toBeLessThan(3.6);
+  });
+
+  it('settles at about 200 km/h on a long straight', () => {
+    let k = start();
+    for (let i = 0; i < 120 * 40; i++) k = step(k, { ...IDLE, throttle: 1 });
+    expect(forwardSpeed(k) * 3.6).toBeGreaterThan(190);
+    expect(forwardSpeed(k) * 3.6).toBeLessThan(220);
   });
 
   it('reaches a sane top speed and does not exceed the ceiling', () => {
@@ -35,14 +46,15 @@ describe('car model performance targets', () => {
     expect(v).toBeLessThanOrEqual(baseStats().topSpeed + 0.01);
   });
 
-  it('braking 80 -> 0 km/h in about 23 m +-3', () => {
+  // arcade brakes scaled with the higher speeds (was 23 m)
+  it('braking 80 -> 0 km/h in about 17 m +-3', () => {
     let k = start(80 / 3.6);
     const x0 = k.x;
     let t = 0;
     while (forwardSpeed(k) > 0.05 && t < 10) { k = step(k, { ...IDLE, brake: 1 }); t += dt; }
     const d = k.x - x0;
-    expect(d).toBeGreaterThan(20);
-    expect(d).toBeLessThan(26);
+    expect(d).toBeGreaterThan(14);
+    expect(d).toBeLessThan(20);
     expect(Math.abs(forwardSpeed(k))).toBeLessThan(1); // does not shoot into reverse instantly
   });
 
@@ -104,7 +116,8 @@ describe('handling', () => {
       maxLat = Math.max(maxLat, Math.abs(lateralSpeed(k)));
       minF = Math.min(minF, forwardSpeed(k));
     }
-    expect(maxW).toBeLessThan(1.6);          // bounded heading change rate
+    // bounded heading change rate: the stronger engine gains speed under throttle 0.3, so the bound is the yaw cap
+    expect(maxW).toBeLessThanOrEqual(CONFIG.car.maxYawRate + 1e-9);
     expect(maxLat).toBeLessThan(1.5);        // not sliding
     expect(minF).toBeGreaterThan(2);         // car keeps moving forward
     expect(angle0 - k.angle).toBeGreaterThan(2); // and it does turn (right = clockwise)

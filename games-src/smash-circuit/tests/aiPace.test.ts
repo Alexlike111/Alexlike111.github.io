@@ -16,13 +16,16 @@ import { createZoneHp } from '../src/sim/damage';
 const DT = 1 / 60;
 
 /** Best lap (s) a clean car can drive per track with these physics, measured from the fastest clear AI (trackSpeed 1.15). */
-const OPTIMAL_LAP: Record<string, number> = { t1: 26.1, t2: 30.2, t3: 33.0 };
+// (arcade feel pass: faster car, 25 m/s^2 grip, drifting AI in hairpins, no power-ups; was 26.1 / 30.2 / 33.0;
+// the top AI measured 22.0 / 24.7 / 26.3)
+const OPTIMAL_LAP: Record<string, number> = { t1: 21.6, t2: 24.2, t3: 25.9 };
 
 function soloLap(ti: number, skill: number): { lap: number; respawns: number; health: number } {
   const sim = new Sim({
     track: TRACKS[ti],
     cars: [{ id: 0, isPlayer: false, name: 'x', colorIndex: 0, stats: baseStats(), ai: { skill, aggression: 0.5, laneOffset: 0, mistakeRate: 0 } }],
     seed: 1,
+    powerUps: false,   // pace is measured without boost pads / items
   });
   let t = 0;
   while (t < 200 && sim.race.phase !== 'finished') { sim.update(DT); t += DT; sim.drainEvents(); }
@@ -41,8 +44,8 @@ describe('AI pace', () => {
     }
   }, 60000);
 
-  it('the cornering plan is as hard as the car can take (maxLatAccel 17..19) and the ramp rises with the track', () => {
-    expect(CONFIG.ai.maxLatAccel).toBeGreaterThanOrEqual(17);
+  it('the cornering plan is as hard as the car can take (maxLatAccel 22..car) and the ramp rises with the track', () => {
+    expect(CONFIG.ai.maxLatAccel).toBeGreaterThanOrEqual(22);
     expect(CONFIG.ai.maxLatAccel).toBeLessThanOrEqual(CONFIG.car.maxLatAccel);
     const r = CONFIG.ai.trackSpeed;
     expect(r.t1).toBeLessThanOrEqual(r.t2);
@@ -73,7 +76,8 @@ describe('AI vs a crude human', () => {
       if (stuck > 1.2) { stuck = 0; rev = 1; }
       let kmax = 0;
       for (let d = 0; d < 40; d += 5) kmax = Math.max(kmax, Math.abs(tr.sampleAt(near.s + d).curvature));
-      const vsafe = Math.sqrt(16 / Math.max(kmax, 1e-3));
+      // a crude human uses ~84% of the car's grip (16 of 19 before the arcade feel pass)
+      const vsafe = Math.sqrt(CONFIG.car.maxLatAccel * (16 / 19) / Math.max(kmax, 1e-3));
       return {
         throttle: (Math.abs(a) < 0.5 || p.speed < 12) && p.speed < vsafe + 3 ? 1 : 0,
         brake: p.speed > vsafe + 8 ? 1 : 0,
@@ -88,6 +92,7 @@ describe('AI vs a crude human', () => {
       track: TRACKS[ti],
       cars: [{ id: 0, isPlayer: true, name: 'p', colorIndex: 0, stats: baseStats() }, ...makeOpponents(ti, baseStats(), seed, 0)],
       seed,
+      powerUps: false,
     });
     const bot = makeBot();
     let t = 0;
@@ -145,6 +150,7 @@ describe('rubber band: chase a runaway human', () => {
       track: TRACKS[0],
       cars: [{ id: 0, isPlayer: true, name: 'p', colorIndex: 0, stats: baseStats() }, ...makeOpponents(0, baseStats(), 3, 0)],
       seed: 3,
+      powerUps: false,
     });
     while (sim.race.phase === 'countdown') sim.update(DT);
     // the human is placed 400 m down the road (the tracker confirms such a jump after CONFIG.race.jumpConfirmTime)

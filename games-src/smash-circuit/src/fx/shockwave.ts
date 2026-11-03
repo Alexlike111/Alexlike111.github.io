@@ -42,13 +42,13 @@ export class ShockwavePool {
   get active(): number { return this.n; }
 
   /** weight 0..1 scales the final radius; color is the ring tint at full brightness. */
-  spawn(x: number, z: number, weight: number, color = 0xfff0c4): void {
+  spawn(x: number, z: number, weight: number, color = 0xfff0c4, radius = 0): void {
     let i: number;
     if (this.n < this.max) i = this.n++;
     else { i = 0; let best = -1; for (let k = 0; k < this.n; k++) { const a = this.age[k] / this.life[k]; if (a > best) { best = a; i = k; } } }
     this.x[i] = x; this.z[i] = z;
     this.age[i] = 0; this.life[i] = FX.shockwaveLife * (0.8 + 0.4 * weight);
-    this.r1[i] = FX.shockwaveRadius * (0.45 + 0.55 * weight);
+    this.r1[i] = radius > 0 ? radius : FX.shockwaveRadius * (0.45 + 0.55 * weight);
     _c.set(color);
     this.col[i * 3] = _c.r; this.col[i * 3 + 1] = _c.g; this.col[i * 3 + 2] = _c.b;
   }

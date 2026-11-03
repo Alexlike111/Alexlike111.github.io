@@ -28,6 +28,9 @@ export const ICONS = {
   finger: svg('<path d="M9.2 3.2a1.7 1.7 0 0 1 3.4 0v7.2l5.1 1.1a2.4 2.4 0 0 1 1.9 2.5l-.4 4.8a3 3 0 0 1-3 2.7h-4.5a3 3 0 0 1-2.4-1.2L5 14.4a1.6 1.6 0 0 1 2.6-1.8l1.6 1.9z" fill="currentColor"/>'),
   crash: svg('<path d="m12 1.8 2 5.4 5.2-2.5-2.2 5.5 5.2 1.6-5.2 2 3 4.7-5.3-1.6-.7 5.6L12 17l-3 4.5-.7-5.6-5.3 1.6 3-4.7-5.2-2 5.2-1.6-2.2-5.5 5.2 2.5z" fill="currentColor"/>'),
   info: svg('<circle cx="12" cy="12" r="10" fill="currentColor"/><rect x="10.6" y="10.5" width="2.8" height="7.5" rx="1.2" fill="#0b1430"/><circle cx="12" cy="7" r="1.7" fill="#0b1430"/>'),
+  // power-up items
+  oil: svg('<path d="M12 2.5c3.4 4.4 6.2 7.6 6.2 11.2a6.2 6.2 0 0 1-12.4 0C5.8 10.1 8.6 6.9 12 2.5z" fill="currentColor"/><path d="M8.8 14a3.4 3.4 0 0 0 2.6 3.3" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="1.8" stroke-linecap="round"/>'),
+  wave: svg('<circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-dasharray="9 4.5"/><circle cx="12" cy="12" r="10.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="5 6" opacity=".75"/>'),
 };
 
 export type IconName = keyof typeof ICONS;

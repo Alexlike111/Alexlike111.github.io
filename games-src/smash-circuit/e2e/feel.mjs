@@ -120,6 +120,19 @@ try {
       }
       return r;
     });
+    // game time vs wall time, live on a fresh race (headless renders in software: low fps shows the frame-time clamp)
+    await page.waitForFunction(() => window.__game.sim.race.phase === 'racing', null, { timeout: 60000 });
+    await page.keyboard.down('ArrowUp');
+    report.timing = await page.evaluate(async () => {
+      const sim = window.__game.sim;
+      let frames = 0, run = true; const f = () => { frames++; if (run) requestAnimationFrame(f); }; requestAnimationFrame(f);
+      const w0 = performance.now(), s0 = sim.race.time;
+      await new Promise((res) => setTimeout(res, 3000));
+      run = false;
+      const wall = (performance.now() - w0) / 1000;
+      return { fps: +(frames / wall).toFixed(1), ratio: +((sim.race.time - s0) / wall).toFixed(2), stepMs: +sim.avgStepMs.toFixed(2), kmh: +(sim.cars[0].speed * 3.6).toFixed(0) };
+    });
+    await page.keyboard.up('ArrowUp');
     await ctx.close();
   }
 
@@ -187,21 +200,6 @@ try {
     });
     r.errors = errors.length;
     report.tracks[id] = r;
-    // game time vs wall time once, live (headless renders in software, so this mostly shows the frame-time clamp)
-    if (!report.timing) {
-      await page.evaluate(() => window.__game.resume());
-      await page.keyboard.down('ArrowUp');
-      report.timing = await page.evaluate(async () => {
-        const sim = window.__game.sim;
-        let frames = 0, run = true; const f = () => { frames++; if (run) requestAnimationFrame(f); }; requestAnimationFrame(f);
-        const w0 = performance.now(), s0 = sim.race.time;
-        await new Promise((res) => setTimeout(res, 3000));
-        run = false;
-        const wall = (performance.now() - w0) / 1000;
-        return { fps: +(frames / wall).toFixed(1), ratio: +((sim.race.time - s0) / wall).toFixed(2), stepMs: +sim.avgStepMs.toFixed(2) };
-      });
-      await page.keyboard.up('ArrowUp');
-    }
     await ctx.close();
   }
 } finally {

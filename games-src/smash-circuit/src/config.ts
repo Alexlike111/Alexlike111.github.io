@@ -55,6 +55,8 @@ export const CONFIG = {
     scrapeInterval: 0.06,     // s between scrape events per car
     // ---- arcade feel pass (driving model) ----
     powerFalloff: 0.55,       // engine force at the ceiling = (1 - this) of the standstill force (strong launch, still pulls at the top)
+    lowSpeedGripBoost: 1.0,   // extra lateral grip at standstill (x2), fading out by lowSpeedGripUntil
+    lowSpeedGripUntil: 22,    // m/s
     steerExpo: 0.25,          // 0 = linear steering; > 0 softens small inputs (precision around centre on touch / analog)
     // player-only assist: a gentle steer away from the road edge when the nose points out of the road
     assistLook: 0.75,         // s of travel looked ahead for the road edge
@@ -377,6 +379,7 @@ export const CONFIG = {
     buttonMargin: 0.04,        // fraction of min(screen w,h): gap of touch buttons from the screen edge
     keySteerRise: 12,          // 1/s: how fast keyboard steering ramps to full lock (0.08 s; the car model smooths too)
     keySteerReturn: 14,        // 1/s: and back to centre
+    itemFlickUp: 0.55,         // GAS thumb moved up by this many button sizes = use item (re-arms at half)
     driftButtonSize: 0.17,     // fraction of min(screen w,h): DRIFT button left of GAS (second finger; holds a drift like Space)
   },
   // ---- appended by module F (integration) ----
@@ -417,8 +420,8 @@ export const CONFIG = {
     box: {
       radius: 1.8,                 // m pickup radius
       respawn: 8,                  // s
-      rowEvery: 380,               // m of track per row
-      perRow: 3, lane: 0.3,        // boxes per row, lateral spacing as a fraction of the road width
+      rowEvery: 340,               // m of track per row
+      perRow: 4, lane: 0.22,       // boxes per row, lateral spacing as a fraction of the road width
       calmCurv: 0.004,            // |curvature| allowed within +-calmSpan of a row
       calmSpan: 25,
       search: 60,                  // m a row may slide to find a calm spot
@@ -451,7 +454,7 @@ export const CONFIG = {
       repairHealth: 0.55, repairHealthLow: 0.85,
       oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
       oilMaxPack: 1, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
-      oilCalmBehind: 40, oilCalmAhead: 55, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
+      oilCalmBehind: 40, oilCalmAhead: 100, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
       shockCount: 2, shockRadius: 7, shockSingle: 4, shockCalmCurv: 0.006,
     },
     fx: {
@@ -472,7 +475,9 @@ export const CONFIG = {
     brakeTapMax: 0.3,         // s: only a short brake TAP starts a drift (on release); ordinary braking into a corner never does
     holdSteer: 0.3,           // steer into the turn that keeps an auto / brake-tap drift alive
     keepSpeed: 7,             // m/s: below this the drift ends
-    exitDelay: 0.12,          // s without a drift request before the drift ends (debounce)
+    exitDelay: 0.12,          // s without a drift request before an auto / brake-tap drift ends (debounce of a wobbling thumb)
+    holdExitDelay: 0.02,      // s after Space / DRIFT is released (practically at once: the boost fires on release)
+    autoReentry: 0.35,        // s after any drift before a hard touch steer starts the next one (a hard counter-steer straightens, not flicks)
     counterExit: 0.3,         // s of counter-steer that straightens the car out of the drift
     angleMin: 0.14,           // rad slip angle with full counter-steer (8 deg)
     angleMid: 0.42,           // rad with neutral steer (24 deg)

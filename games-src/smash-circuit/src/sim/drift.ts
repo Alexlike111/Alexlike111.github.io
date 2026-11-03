@@ -88,7 +88,7 @@ export class DriftTracker {
       const as = Math.abs(steer);
       let enter = false, hold = false;
       if (f > 0 && holdReq && as >= 0.2 && v >= D.minSpeed) { enter = true; hold = true; }
-      else if (f > 0 && req === DRIFT_AUTO && as >= D.autoSteer && v >= D.autoSpeed) enter = true;
+      else if (f > 0 && req === DRIFT_AUTO && as >= D.autoSteer && v >= D.autoSpeed && this.sinceExit >= D.autoReentry) enter = true;
       else if (f > 0 && allowBrakeTap && tapped && as >= D.brakeTapSteer && f >= D.brakeTapSpeed) enter = true;
       if (enter) this.start(steer < 0 ? 1 : -1, hold);   // steer + = right = clockwise = dir -1
       return { kick };
@@ -109,7 +109,9 @@ export class DriftTracker {
     while (t < 3 && this.charge >= D.tierTime[t]) t++;
     this.tier = t;
 
-    if (this.noReq > D.exitDelay || this.counterT > D.counterExit || v < D.keepSpeed || f <= 0) kick = this.finish();
+    // a released Space / DRIFT button ends the drift at once (the boost fires on release); auto drifts are debounced
+    const delay = this.hold ? D.holdExitDelay : D.exitDelay;
+    if (this.noReq > delay || this.counterT > D.counterExit || v < D.keepSpeed || f <= 0) kick = this.finish();
     return { kick };
   }
 

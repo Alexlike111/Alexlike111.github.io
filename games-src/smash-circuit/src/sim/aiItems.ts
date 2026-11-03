@@ -37,8 +37,8 @@ export function scanSurroundings(car: CarState, others: CarState[], out: Surroun
     const fwd = dx * ca + dy * sa, side = -dx * sa + dy * ca;
     if (dist < A.shockRadius) out.nearCount++;
     if (Math.abs(fwd) < 2.5 && Math.abs(side) < A.shockSingle && dist > 0.1) out.alongside = true;
-    const closing = dist > 0.1 ? ((car.vx - o.vx) * dx + (car.vy - o.vy) * dy) / dist : 0;   // > 0: we move toward it
-    if (fwd < 0 && dist < A.shieldBehind && -closing > A.shieldClose) out.chaser = true;
+    const closing = dist > 0.1 ? ((car.vx - o.vx) * dx + (car.vy - o.vy) * dy) / dist : 0;   // m/s the gap is shrinking (> 0: closing in)
+    if (fwd < 0 && dist < A.shieldBehind && closing > A.shieldClose) out.chaser = true;
     if (fwd > 0 && fwd < 6 && Math.abs(side) < 2.2) out.blocker = true;
     if (fwd > 0 && fwd < A.nitroFree && Math.abs(side) < 3) out.aheadInLane = true;
     if (fwd < -A.oilBehindMin && fwd > -A.oilBehindMax && Math.abs(side) < A.oilLane) out.behindInLane = true;

@@ -10,6 +10,7 @@ import { DestructibleRenderer } from './destructibles';
 import { Materials } from './materials';
 import { MenuScene } from './menuScene';
 import { PlayerMarker } from './playerMarker';
+import { PowerUpVisuals } from './powerups';
 import { PALETTES, type ThemePalette } from './palette';
 import { wallVisual } from './structures';
 import { buildTrackVisual, type TrackVisual } from './trackBuilder';
@@ -27,6 +28,7 @@ interface RaceScene {
   fleet: CarFleet;
   marker: PlayerMarker;
   ghost: THREE.Mesh;
+  powerups: PowerUpVisuals;
 }
 
 export interface RenderDebug {
@@ -219,6 +221,7 @@ export class GameRenderer {
     this.race.track.dispose();
     this.race.fleet.dispose();
     this.race.marker.dispose();
+    this.race.powerups.dispose();
     this.race = null;
     this.fx.clear();
   }
@@ -245,9 +248,10 @@ export class GameRenderer {
     ghost.frustumCulled = false;
     ghost.renderOrder = 5;
     const marker = new PlayerMarker();
-    group.add(track.group, decor.group, destr.group, destr.rubble, fleet.group, ghost, marker.group);
+    const powerups = new PowerUpVisuals(sim, Math.max(CONFIG.race.cars, sim.cars.length));
+    group.add(track.group, powerups.group, decor.group, destr.group, destr.rubble, fleet.group, ghost, marker.group);
     this.scene.add(group);
-    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost };
+    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost, powerups };
     this.menu.group.visible = false;
     this.mode = 'race';
     this.rig.setMenu(false);
@@ -339,6 +343,11 @@ export class GameRenderer {
 
     // ---- camera (before fx so emission range uses the current view)
     const topSpeed = CONFIG.car.baseTopSpeed;
+    // boost camera: widen the view while a pad / nitro boost runs and kick it on the trigger
+    this.rig.boostTarget = ((player.boostT ?? 0) > 0 || (player.nitroT ?? 0) > 0) ? 1 : 0;
+    for (const ev of events) {
+      if (ev.type === 'boost' && ev.carId === player.id) { this.rig.addPunch(CONFIG.items.fx.punch); this.rig.addTrauma(CONFIG.items.fx.shakePad); }
+    }
     const intro = R.sim.race.phase === 'countdown' ? clamp(R.sim.race.countdown / CONFIG.race.countdown, 0, 1) : 0;
     this.rig.update(dt, pp.x, pp.y, player.vx, player.vy, Math.abs(player.speed) / topSpeed, intro);
     const tgt = this.rig.target;
@@ -352,6 +361,7 @@ export class GameRenderer {
     R.destr.sync(sim.destructibles);
     R.decor.update(tgt.x, tgt.z, this.rig.radius + 8);
     R.fleet.update(this.poses, dt);
+    R.powerups.update(dt, sim, this.poses);
     const gp = sim.ghostPose();
     if (gp) {
       R.ghost.visible = true;

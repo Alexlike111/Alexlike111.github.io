@@ -259,7 +259,8 @@ describe('Sim: player, damage and destruction', () => {
   }, 60000);
 
   it('AI cars get around an idle player and still finish', () => {
-    const sim = new Sim({ track: trackOf('t2'), cars: field({ player: true }), seed: 9 });
+    // steering around an obstacle is under test: no oil / shockwaves thrown around a parked car (power-up races are covered in powerups.test.ts)
+    const sim = new Sim({ track: trackOf('t2'), cars: field({ player: true }), seed: 9, powerUps: false });
     let t = 0;
     while (t < 300 && !sim.cars.slice(1).every((c) => c.finished)) { sim.update(DT); t += DT; }
     sim.drainEvents();
@@ -306,7 +307,7 @@ describe('Sim: ghost', () => {
   /** A bot drives the player car with the same AI code; returns the finished sim. */
   function botRace(ghost?: GhostData, record?: (sim: Sim, t: number) => void): Sim {
     const cars = field({ player: true });
-    const sim = new Sim({ track: trackOf('t1'), cars, seed: 12, ghost });
+    const sim = new Sim({ track: trackOf('t1'), cars, seed: 12, ghost, powerUps: false });   // ghost recording is tested without items
     const bot = new AiDriver({ skill: 0.9, aggression: 0.2, laneOffset: 0, mistakeRate: 0 }, makeRng(77));
     let t = 0;
     while (t < 200 && !sim.race.playerFinished) {

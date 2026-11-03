@@ -66,6 +66,7 @@ export class Game {
   private stuck = new StuckWatch();
   private lastInput: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
   private userPaused = false;
+  private itemHintShown = false;
   private tutorialHold = false;   // first run: the sim waits (countdown included) until the tutorial is dismissed
 
   private raf = 0;
@@ -94,7 +95,7 @@ export class Game {
     this.input = new InputController(uiRoot);
     this.input.setAutoGas(this.save.settings.autoGas);
     this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
-    this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else this.repairNow(); });
+    this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else if (k === 'item') this.useItem(); else this.repairNow(); });
     this.input.onTouchMode((touch) => this.ui.setTouchMode(touch));
     this.ui.setTouchMode(this.input.touchActive);
     this.ui.setSettings(this.save.settings);
@@ -119,6 +120,7 @@ export class Game {
       quit: () => void this.leaveRace(() => this.toMenu()),
       restart: () => void this.leaveRace(() => this.startRace(this.trackId)),
       repair: () => this.repairNow(true),
+      useItem: () => this.useItem(),
       buy: (b) => this.buy(b),
       doubleReward: () => this.doubleReward(),
       settings: (s) => this.setSettings(s),
@@ -230,6 +232,13 @@ export class Game {
     this.ui.setMoney(this.save.money);
     if (!fromUi) { this.audio.ui('buy'); this.ui.toast(t('pause.repair')); }
     void writeSave(this.save);
+  }
+
+  /** E / Shift / flick / HUD button: use the held item (only while the race is live). */
+  private useItem(): void {
+    const sim = this.sim;
+    if (!sim || this.state !== 'racing' || this.hardPaused || this.userPaused || this.tutorialHold) return;
+    sim.useItem();
   }
 
   private buy(b: UpgradeBranch): void {
@@ -433,6 +442,10 @@ export class Game {
   private handleEvents(events: SimEvent[], sim: Sim): void {
     for (const e of events) {
       if (e.type === 'finish' && e.carId === sim.cars[0].id) this.onPlayerFinish({ place: e.place, time: e.time });
+      else if (e.type === 'pickup' && e.carId === sim.cars[0].id && !this.itemHintShown) {
+        this.itemHintShown = true;   // once per session: how to use the item
+        this.ui.toast(t(this.input.touchActive ? 'hud.itemHintTap' : 'hud.itemHintKey'));
+      }
     }
   }
 

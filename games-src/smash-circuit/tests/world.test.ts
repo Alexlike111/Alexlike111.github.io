@@ -86,14 +86,14 @@ describe('PhysicsWorld', () => {
 });
 
 describe('SimCar', () => {
-  it('accelerates under physics and stays near the model targets (0-100 ~4.1 s)', () => {
+  it('accelerates under physics and stays near the model targets (0-100 ~2.5 s)', () => {
     const pw = new PhysicsWorld();
     const car = new SimCar(pw, setup(0), 0, 0, 0);
     const ev: SimEvent[] = [];
     let t = 0;
     while (car.state.speed < 100 / 3.6 && t < 10) { car.setInput({ ...IDLE, throttle: 1 }); tick(pw, [car], ev); t += CONFIG.physics.dt; }
-    expect(t).toBeGreaterThan(3.7);
-    expect(t).toBeLessThan(4.5);
+    expect(t).toBeGreaterThan(2.15);
+    expect(t).toBeLessThan(2.85);
     expect(Math.abs(car.state.y)).toBeLessThan(0.01);
     expect(car.state.rpm).toBeGreaterThan(0.3);
   });

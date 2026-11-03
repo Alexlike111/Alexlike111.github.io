@@ -78,6 +78,7 @@ export class AiDriver {
   private stuckLimit: number;       // s of being stuck before reversing (jittered per driver and attempt: two jammed cars must not reverse in lockstep)
   private reverseTimer = 0;
   private drifting = false;           // holding a drift through a tight corner
+  private reverseExtra = 0;           // s the current reverse was extended because a car still sits right ahead
   private markS = 0;
   private markInit = false;
   private markTime = 0;
@@ -144,7 +145,11 @@ export class AiDriver {
         steer: clamp(headErr * 1.6, -1, 1),
         handbrake: false,
       };
-      if (this.reverseTimer <= 0) { this.stuckTimer = 0; }
+      // still nose to bumper with a car right ahead in our lane: back up a little more, so there is room to steer around it
+      if (this.reverseTimer <= 0 && this.reverseExtra < 1.5 && this.carRightAhead(car, others, track, s, lat)) {
+        this.reverseTimer += 0.25; this.reverseExtra += 0.25;
+      }
+      if (this.reverseTimer <= 0) { this.stuckTimer = 0; this.reverseExtra = 0; }
       return;
     }
     if (this.shedTimer > 0) {
@@ -152,7 +157,8 @@ export class AiDriver {
       this.out = { throttle: 0.45, brake: 0, steer: this.shedDir * 0.75, handbrake: false };
       return;
     }
-    if (av < A.stuckSpeed) this.stuckTimer += h; else if (av > 2.5) this.stuckTimer = 0;
+    // nose to bumper with a stopped car right ahead: waiting does not help, back off sooner
+    if (av < A.stuckSpeed) this.stuckTimer += h * (this.carRightAhead(car, others, track, s, lat) ? 2.5 : 1); else if (av > 2.5) this.stuckTimer = 0;
     else this.stuckTimer = Math.max(0, this.stuckTimer - h);
     if (this.stuckTimer > this.stuckLimit) {
       this.reverseTimer = lerp(A.reverseTime[0], A.reverseTime[1], this.rng());
@@ -231,6 +237,7 @@ export class AiDriver {
     const stubborn = p.aggression > 0.75 ? 0.55 : 1;           // aggressive drivers hold their line more
     const nCar = this.collectNearby(car, others, track, s, av);
     let followCap = Infinity;
+    let blockGap = Infinity;          // gap to the closest car that blocks us (m)
     if (nCar > 0) {
       let bestC = desired, bestCost = Infinity;
       const K = A.candidates;
@@ -255,6 +262,7 @@ export class AiDriver {
         // the line we chose is free but we are still behind it: creep so the car can steer out (never into the bumper)
         if (ovLine < 0.25 && gap > 0.5) cap = Math.max(cap, A.creepSpeed * clamp(gap / 2, 0, 1));
         followCap = Math.min(followCap, cap);
+        blockGap = Math.min(blockGap, gap);
       }
     } else target = desired;
 
@@ -262,6 +270,10 @@ export class AiDriver {
     // (and never faster than a gentle line-change slope, or the car overshoots the new line at speed)
     const rate = Math.min(lerp(A.offsetRate[0], A.offsetRate[1], skill), Math.max(A.lineRateMin, A.lineSlope * av));
     this.offset += clamp(target - this.offset, -rate * h, rate * h);
+
+    // boxed in close behind a slow / stopped car and the free line is to the side: aim much closer so the car actually
+    // moves over before it reaches the bumper (a long look-ahead only drifts it sideways)
+    if (blockGap < 6 && av < 8 && Math.abs(this.offset - lat) > 0.6) look = Math.max(2.5, Math.min(look, 2.5 + blockGap));
 
     // ---------- steering: pure pursuit, exact inverse of the car model's steering (steerForCurvature)
     const tp = track.sampleAt(s + look);
@@ -347,6 +359,19 @@ export class AiDriver {
       if (allowed < v) v = allowed;
     }
     return { vAllowed: v, minRadius: minR };
+  }
+
+  /** A (slow) car within ~5 m ahead in our lane. */
+  private carRightAhead(car: CarState, others: CarState[], track: TrackGeometry, s: number, lat: number): boolean {
+    for (const o of others) {
+      if (o.finished || Math.abs(o.speed) > 3) continue;
+      const dx = o.x - car.x, dy = o.y - car.y;
+      if (dx * dx + dy * dy > 100) continue;
+      const on = track.nearest(o.x, o.y, s);
+      const ds = wrap2(on.s - s, track.length);
+      if (ds > 0 && ds < C.length + 5 && Math.abs(on.lateral - lat) < 2.2) return true;
+    }
+    return false;
   }
 
   /** Fills nearLat/nearDs/nearW/nearSpeed with the cars that matter for the line choice; returns their count. */

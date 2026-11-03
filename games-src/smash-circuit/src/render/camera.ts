@@ -18,6 +18,10 @@ export class CameraRig {
   private lx = 0; private lz = 0;
   private zoom = 1;
   private trauma = 0;
+  /** boost zoom: renderer sets boostTarget (0/1) every frame; boostK follows quickly in, slowly out. punchK = one-shot kick. */
+  boostTarget = 0;
+  private boostK = 0;
+  private punchK = 0;
   private time = 0;
   private menuWidth = 10;
   private menuMinHeight = 9.5;
@@ -36,12 +40,15 @@ export class CameraRig {
     return lerp(v.portrait, v.landscape, t);
   }
 
-  snap(x: number, z: number): void { this.tx = x; this.tz = z; this.lx = 0; this.lz = 0; this.snapped = true; this.zoom = 1; this.trauma = 0; }
+  snap(x: number, z: number): void { this.tx = x; this.tz = z; this.lx = 0; this.lz = 0; this.snapped = true; this.zoom = 1; this.trauma = 0; this.boostK = 0; this.punchK = 0; }
   get snappedOnce(): boolean { return this.snapped; }
   get target(): { x: number; z: number } { return { x: this.tx, z: this.tz }; }
   get radius(): number { return Math.hypot(this.halfW, this.halfH); }
 
   addTrauma(t: number): void { this.trauma = clamp(this.trauma + t, 0, 1); }
+
+  /** Zoom punch (boost pad / nitro): the view widens by `amount` (fraction) and eases back. */
+  addPunch(amount: number): void { this.punchK = Math.min(0.2, this.punchK + amount); }
 
   setMenu(on: boolean): void { this.mode = on ? 'menu' : 'follow'; }
 
@@ -51,7 +58,10 @@ export class CameraRig {
     const aspect = this.aspect;
     const zoomTarget = 1 + CONFIG.render.zoomOutAtSpeed * clamp(speedFrac, 0, 1) + C.introZoom * clamp(intro, 0, 1);
     this.zoom += (zoomTarget - this.zoom) * damp(C.zoomFollow, dt);
-    const halfW = (this.baseWidth() / 2) * this.zoom;
+    const PX = CONFIG.items.fx;
+    this.boostK += (this.boostTarget - this.boostK) * damp(this.boostTarget > this.boostK ? PX.zoomIn : PX.zoomOut, dt);
+    this.punchK = Math.max(0, this.punchK - PX.punchDecay * this.punchK * dt - 0.0001);
+    const halfW = (this.baseWidth() / 2) * this.zoom * (1 + PX.zoomBoost * this.boostK + this.punchK);
     const halfH = halfW / aspect;
     this.halfW = halfW; this.halfH = halfH;
     // smoothed look-ahead

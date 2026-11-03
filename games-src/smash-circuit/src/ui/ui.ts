@@ -6,9 +6,9 @@ import { lang, setLangSetting, t } from '../i18n';
 import { buyUpgrade, canBuy, maxLevel, statsFor, upgradeCost, repairCost as repairPrice } from '../meta/economy';
 import { buildTrackGeometry } from '../track/spline';
 import { TRACKS } from '../track/tracks';
-import type { CarStats, ISim, SaveData, UpgradeBranch, ZoneId } from '../types';
+import type { CarState, CarStats, ISim, ItemType, SaveData, UpgradeBranch, ZoneId } from '../types';
 import { UPGRADE_BRANCHES } from '../config';
-import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon } from './icons';
+import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icons';
 
 export interface UiHandlers {
   start(trackId: string): void;
@@ -17,6 +17,8 @@ export interface UiHandlers {
   quit(): void;
   restart(): void;
   repair(): void;
+  /** Use the held power-up item (HUD item button). */
+  useItem?(): void;
   buy(b: UpgradeBranch): void;
   /** Resolve `false` when the ad did not reward (UI then keeps the button); `true`/void = reward granted. */
   doubleReward(): Promise<boolean | void>;
@@ -33,6 +35,8 @@ export interface ResultsData {
   /** coins from drift points (already included in `reward`) */
   drift?: number;
 }
+
+const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
 
 const esc = (s: string | number): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -100,6 +104,10 @@ export class UI {
   } | null = null;
   /** drift meter: last written key (avoids DOM writes) */
   private driftKey = '';
+  /** power-up item slot: elements + last written state (avoids DOM writes) */
+  private itemUi: { root: HTMLElement; btn: HTMLElement; ic: HTMLElement; name: HTMLElement; bar: HTMLElement; lines: HTMLElement } | null = null;
+  private itemKey = '';
+  private linesLevel = -1;
   private hudLast = { place: -1, total: -1, lap: -1, laps: -1, timer: '', last: '', best: '', speed: -1, cd: '', zones: [] as number[], cost: -1, money: -1, health: -1 };
   private lastLapShown = -1;
 
@@ -198,6 +206,8 @@ export class UI {
       hud.repair.classList.toggle('show', cost > 0);
       hud.repairCost.textContent = String(cost);
     }
+
+    this.updateItem(p);
 
     // countdown / GO
     let cd = '';
@@ -432,6 +442,7 @@ export class UI {
       case 'set': this.changeSetting(el.dataset.k!, el.dataset.v!); break;
       case 'resume': this.sfx('click'); this.h.resume(); break;
       case 'pauseBtn': this.sfx('click'); this.h.pause(); break;
+      case 'item': this.h.useItem?.(); break;
       case 'repair': {
         const hudRepair = this.layers.hud.contains(el);
         const cost = hudRepair ? this.hudLast.cost : this.pauseState.cost;
@@ -710,6 +721,7 @@ export class UI {
     el.hidden = true;
     el.innerHTML = `
       <div class="hud">
+        <div class="speedlines"></div>
         <div class="hud-tl">
           <div class="pos"><span class="plab" data-t="hud.place"></span><b class="pn">1</b><span class="pt">/8</span></div>
           <div class="lapbox"><span class="plab" data-t="hud.lap"></span><b class="lapn">1/3</b></div>
@@ -727,6 +739,10 @@ export class UI {
           <div class="chip money">${icon('coin')}<b class="mn">0</b></div>
         </div>
         <div class="hud-bc"><div class="driftm" hidden><div class="dl"><b class="dlab"></b><span class="dpts"></span></div><div class="dbar"><i></i></div></div><div class="speed"><b class="sp">0</b><small data-t="unit.kmh"></small></div></div>
+        <div class="hud-item" hidden>
+          <button class="item-slot" type="button" data-act="item" data-ta="hud.itemTap" aria-label=""><span class="item-ic"></span><b class="item-key">E</b><i class="item-bar"></i></button>
+          <div class="item-name"></div>
+        </div>
         <div class="countdown" hidden></div>
         <div class="hud-fps"></div>
       </div>`;
@@ -741,7 +757,47 @@ export class UI {
       drift: q('.driftm'), driftLabel: q('.dlab'), driftPts: q('.dpts'), driftBar: q('.dbar i'),
     };
     this.driftKey = '';
+    this.itemKey = '';
+    this.linesLevel = -1;
+    this.itemUi = {
+      root: q('.hud-item'), btn: q('.item-slot'), ic: q('.item-ic'), name: q('.item-name'), bar: q('.item-bar'), lines: q('.speedlines'),
+    };
     this.refreshHudText();
+  }
+
+  /**
+   * Power-up HUD: the held item (icon + name + key hint), a bar for a running shield / nitro, and the speed lines that
+   * show a boost. Writes the DOM only when the quantised state changes.
+   */
+  private updateItem(p: CarState): void {
+    const u = this.itemUi;
+    if (!u) return;
+    const item = p.item ?? null;
+    const I = CONFIG.items;
+    let active = 0;
+    if ((p.shieldT ?? 0) > 0) active = Math.ceil(20 * (p.shieldT ?? 0) / I.shield.time);
+    else if ((p.nitroT ?? 0) > 0) active = Math.ceil(20 * (p.nitroT ?? 0) / I.nitro.time);
+    const key = `${item}|${active}|${this.touchMode ? 1 : 0}`;
+    if (key !== this.itemKey) {
+      this.itemKey = key;
+      const had = u.root.dataset.item ?? '';
+      u.root.dataset.item = item ?? '';
+      u.root.hidden = !item && active === 0 && this.touchMode;
+      u.root.classList.toggle('empty', !item);
+      u.root.classList.toggle('running', active > 0);
+      if ((item ?? '') !== had) {
+        u.ic.innerHTML = item ? icon(ITEM_ICON[item]) : '';
+        u.name.textContent = item ? t('item.' + item) : '';
+        u.btn.setAttribute('aria-label', item ? t('item.' + item) : t('hud.itemTap'));
+        if (item) { u.root.classList.remove('got'); void u.root.offsetWidth; u.root.classList.add('got'); }
+      }
+      u.bar.style.transform = `scaleX(${(active / 20).toFixed(2)})`;
+    }
+    const boosting = ((p.boostT ?? 0) > 0 || (p.nitroT ?? 0) > 0) ? 1 : 0;
+    if (boosting !== this.linesLevel) {
+      this.linesLevel = boosting;
+      u.lines.classList.toggle('on', boosting > 0);
+    }
   }
 
   private refreshHudText(): void {

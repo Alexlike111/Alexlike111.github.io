@@ -355,6 +355,35 @@ export class AudioManager {
         case 'repair':
           if (e.carId === playerId) this.play('buy', 0.8, 1);
           break;
+        // ---- power-ups (placeholder mapping onto the existing samples; give them their own recordings later)
+        case 'boost': {
+          const vol = this.near(e.x, e.y) * (e.carId === playerId ? 0.9 : 0.5);
+          if (vol > 0.04 && this.gate('boost' + e.carId, 0.3)) this.play('go', vol, e.source === 'pad' ? 1.9 : 1.4);
+          break;
+        }
+        case 'pickup':
+          if (e.carId === playerId) this.play('buy', 0.7, 1.6);
+          else { const vol = this.near(e.x, e.y) * 0.3; if (vol > 0.04 && this.gate('pickup', 0.15)) this.play('buy', vol, 1.9); }
+          break;
+        case 'itemUse': {
+          const vol = this.near(e.x, e.y) * (e.carId === playerId ? 1 : 0.6);
+          if (vol <= 0.04) break;
+          if (e.item === 'shockwave') { this.play('impact_heavy_1', vol, 0.55); this.play('crunch_1', vol * 0.6, 0.7); }
+          else if (e.item === 'oil') this.play('debris_1', vol * 0.8, 0.6);
+          else if (e.item === 'shield') this.play('click', vol * 0.9, 0.5);
+          else if (e.item === 'nitro') this.play('go', vol, 1.25);
+          break;
+        }
+        case 'shieldPop': {
+          const vol = this.near(e.x, e.y);
+          if (vol > 0.04) this.play('crunch_1', vol * 0.8, 1.7);
+          break;
+        }
+        case 'oilSpin': {
+          const vol = this.near(e.x, e.y) * (e.carId === playerId ? 1 : 0.5);
+          if (vol > 0.04 && this.gate('oilspin', 0.2)) this.play('debris_1', vol * 0.8, 0.8);
+          break;
+        }
         default:
           break;
       }

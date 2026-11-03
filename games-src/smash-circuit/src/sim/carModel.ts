@@ -176,6 +176,8 @@ export function integrateCar(
 
   // ---- lateral grip: rotate the velocity vector toward the heading axis (speed conserving) with tyre scrub
   let grip = stats.grip * fx.gripMul * surface.gripMul;
+  // tighter at low speed: hairpins and manoeuvring stay precise (tail-out slides belong to the drift mechanic)
+  grip *= 1 + C.lowSpeedGripBoost * clamp(1 - Math.abs(f) / C.lowSpeedGripUntil, 0, 1);
   if (input.handbrake) grip *= C.handbrakeGripMul;
   const v = Math.hypot(f, l);
   if (v > 1e-4) {

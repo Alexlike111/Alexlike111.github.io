@@ -17,10 +17,10 @@ import { CONFIG } from '../config';
 import { DRIFT_AUTO, DRIFT_HOLD, DRIFT_NONE } from '../sim/drift';
 import type { CarInput } from '../types';
 
-type KeyAction = 'pause' | 'repair';
+type KeyAction = 'pause' | 'repair' | 'item';
 type PointerKind = 'gas' | 'brake' | 'steer' | 'drift';
 
-interface Ptr { kind: PointerKind; x: number; y: number; homeX: number; homeY: number; size: number }
+interface Ptr { kind: PointerKind; x: number; y: number; homeX: number; homeY: number; size: number; flicked?: boolean }
 
 const C = CONFIG.controls;
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -62,6 +62,7 @@ export function steerAxis(x: number, homeX: number, screenW: number, onGasButton
 
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyP', 'KeyR',
+  'KeyE', 'ShiftLeft', 'ShiftRight',   // use item
 ]);
 
 export class InputController {
@@ -259,6 +260,7 @@ export class InputController {
     if (e.repeat) return;
     if (e.code === 'KeyP') { this.keyCb?.('pause'); return; }
     if (e.code === 'KeyR') { this.keyCb?.('repair'); return; }
+    if (e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') { if (this.enabled) this.keyCb?.('item'); return; }
     if (this.enabled) this.keys.add(e.code);
   };
 
@@ -298,7 +300,15 @@ export class InputController {
 
   private onMove = (e: PointerEvent): void => {
     const p = this.pointers.get(e.pointerId);
-    if (p) { p.x = e.clientX; p.y = e.clientY; }
+    if (p) {
+      p.x = e.clientX; p.y = e.clientY;
+      // flick the GAS thumb up = use the held item (one-handed play); re-arms when the thumb is back near home
+      if (p.kind === 'gas') {
+        const up = (p.homeY - p.y) / p.size;
+        if (!p.flicked && up > C.itemFlickUp) { p.flicked = true; this.keyCb?.('item'); }
+        else if (p.flicked && up < C.itemFlickUp * 0.5) p.flicked = false;
+      }
+    }
   };
 
   private onUp = (e: PointerEvent): void => {
