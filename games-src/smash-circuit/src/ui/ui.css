@@ -458,8 +458,8 @@
 /* tutorial = a semi-transparent BOTTOM SHEET: the start grid and the track stay visible above it.
    Touch layout keeps clear of the GAS button (bottom-right, 26% of the short side + margin). */
 .ui-root .layer-tutorial { z-index: 6; display: flex; align-items: flex-end; justify-content: center; padding: 0 max(0.7em, var(--sar)) calc(max(0.7em, var(--sab))) max(0.7em, var(--sal)); }
-.ui-root.is-touch .layer-tutorial { padding-bottom: calc(max(0.7em, var(--sab)) + 34vmin); }
-.ui-root .tutorial { width: min(100%, 30em); overflow: hidden; padding: 0.55em 0.8em 0.6em; display: flex; flex-direction: column; gap: 0.35em; pointer-events: none; background: rgba(16, 27, 58, 0.78); animation: pop-in 0.3s cubic-bezier(.2, 1.4, .4, 1) both; }
+.ui-root.is-touch .layer-tutorial { padding-bottom: calc(max(0.7em, var(--sab)) + 44vmin); }
+.ui-root .tutorial { width: min(100%, 30em); overflow: visible; padding: 0.55em 0.8em 0.75em; display: flex; flex-direction: column; gap: 0.35em; pointer-events: none; background: rgba(16, 27, 58, 0.78); animation: pop-in 0.3s cubic-bezier(.2, 1.4, .4, 1) both; }
 .ui-root .tutorial .title { font-size: 1.05em; }
 .ui-root .tutorial .btn { pointer-events: auto; align-self: center; min-width: 11em; }
 .ui-root .tut-steps { display: flex; flex-direction: column; gap: 0.4em; }
@@ -564,7 +564,13 @@
 
 /* Phones (portrait width < 520 px, or landscape height <= 460 px): the tutorial sheet stays under 30% of the height */
 @media (max-width: 519px), (max-height: 460px) {
-  .ui-root .tutorial { max-height: 30vh; }
+  .ui-root .tutorial { max-height: 30vh; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
+  .ui-root .tutorial .title { display: none; }
+  .ui-root .tut-steps { gap: 0.25em; }
+  .ui-root .tut-step { grid-template-columns: 1.4em 3.6em minmax(0, 1fr); padding: 0.1em 0.4em; }
+  .ui-root .tut-ic { height: 1.8em; }
+  .ui-root .tut-ic > * { transform: scale(0.62); }
+  .ui-root .tutorial .btn { padding-top: 0.35em; padding-bottom: 0.35em; }
 }
 /* Square / tablet-portrait windows: the sheet sits bottom-left, beside the GAS button instead of above it */
 @media (max-aspect-ratio: 5/4) and (min-width: 520px) {
