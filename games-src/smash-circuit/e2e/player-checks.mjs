@@ -70,6 +70,66 @@ async function place(page, x, y, a, v) {
   }, [x, y, a, v]);
 }
 
+
+// ---- camera framing: an autopilot lap, sampled every rendered frame ----
+// The autopilot replaces the player's input (pure pursuit along the spline, corner-limited speed) so the lap is real physics.
+// Per frame we project the player car and the track point 1.5 s ahead with the camera that was just rendered (window.__render.camera).
+async function startAutopilot(page, cruise) {
+  await page.evaluate((cruise) => {
+    const sim = window.__game.sim, tr = sim.track, orig = sim.setPlayerInput.bind(sim);
+    const S = (window.__ap = { samples: [], done: false, prog: 0, last: null, t0: sim.race.time, hint: undefined, shots: 0, azMin: 9, azMax: -9, corner: false });
+    sim.setPlayerInput = (inp) => {
+      const c = sim.cars[0];
+      const n = tr.nearest(c.x, c.y, S.hint); S.hint = n.s;
+      const L = 7 + 0.55 * c.speed, tp = tr.sampleAt(n.s + L);
+      let e = Math.atan2(tp.y - c.y, tp.x - c.x) - c.angle; e = Math.atan2(Math.sin(e), Math.cos(e));
+      let kmax = 0; for (let d = 0; d <= 45; d += 5) kmax = Math.max(kmax, Math.abs(tr.sampleAt(n.s + d).curvature));
+      const vT = Math.min(cruise, Math.sqrt(16 / Math.max(kmax, 1e-4)));
+      const err = c.speed - vT;
+      orig({ ...inp, throttle: err < 0 ? 1 : 0, brake: err > 3 ? Math.min(1, err / 10) : 0, steer: Math.max(-1, Math.min(1, -2.2 * e)), handbrake: false, drift: 0 });
+      S.corner = kmax > 0.012;
+    };
+    const L = tr.length;
+    const tick = () => {
+      const c = sim.cars[0], r = window.__render && window.__render.camera;
+      if (!S.done && r && sim.race.phase === 'racing') {
+        const n = tr.nearest(c.x, c.y, S.last === null ? undefined : S.last);
+        if (S.last !== null) { let d = n.s - S.last; if (d < -L / 2) d += L; if (d > L / 2) d -= L; S.prog += d; }
+        S.last = n.s;
+        const car = r.project(c.x, c.y), ah = tr.sampleAt(n.s + 1.5 * c.speed), a = r.project(ah.x, ah.y);
+        const nose = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4);
+        S.azMin = Math.min(S.azMin, r.azimuth); S.azMax = Math.max(S.azMax, r.azimuth);
+        if (sim.race.time - S.t0 > 3.5 && c.speed > 12) S.samples.push([car.x, car.y, a.x, a.y, c.speed, Math.atan2(nose.x - car.x, nose.y - car.y)]);
+        if (S.prog >= L * 0.97) S.done = true;
+      }
+      if (!S.done) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, cruise);
+}
+
+async function cameraLap(page, label, cruise) {
+  await page.evaluate(() => { window.__game.repair && window.__game.repair(); });
+  await startAutopilot(page, cruise);
+  let shot = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 240000) {
+    const st = await page.evaluate(() => ({ done: window.__ap.done, corner: window.__ap.corner, n: window.__ap.samples.length, speed: window.__game.sim.cars[0].speed }));
+    if (st.done) break;
+    if (!shot && st.corner && st.n > 150 && st.speed > 18) { shot = true; await page.screenshot({ path: path.join(OUT, `${label}-corner.png`) }); }
+    await sleep(120);
+  }
+  const r = await page.evaluate(() => { const S = window.__ap; return { done: S.done, prog: S.prog, samples: S.samples, azMin: S.azMin, azMax: S.azMax }; });
+  const n = r.samples.length;
+  const maxCar = Math.max(0, ...r.samples.map((v) => Math.max(Math.abs(v[0]), Math.abs(v[1]))));
+  const offAhead = r.samples.filter((v) => Math.abs(v[2]) > 0.98 || Math.abs(v[3]) > 0.98).length;
+  const meanSpeed = n ? r.samples.reduce((a, v) => a + v[4], 0) / n : 0;
+  check(`[${label}] autopilot completed a lap with camera samples`, r.done && n > 200, `n=${n} progress=${r.prog.toFixed(0)}m mean ${meanSpeed.toFixed(1)} m/s`);
+  check(`[${label}] car stays inside the central 60% of the screen all lap`, maxCar <= 0.6, `max |ndc|=${maxCar.toFixed(2)}`);
+  check(`[${label}] track point 1.5 s ahead is on screen (>= 97% of frames)`, offAhead <= n * 0.03, `off-screen ${offAhead}/${n}`);
+  return r;
+}
+
 try {
   // ---------------- desktop / keyboard ----------------
   {
@@ -142,6 +202,10 @@ try {
       check('[desktop] 90 km/h wall crash knocks a part off', after.p > before.p, `parts ${before.p} -> ${after.p}`);
     }
     await page.keyboard.up('ArrowUp');
+    // ---- camera framing on a real lap (fixed north-up is the desktop default)
+    await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });
+    const lapD = await cameraLap(page, 'desktop', 32);
+    check('[desktop] camera is fixed north-up by default', lapD.azMin === 0 && lapD.azMax === 0, `azimuth ${lapD.azMin.toFixed(2)}..${lapD.azMax.toFixed(2)}`);
     check('[desktop] no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();
   }
@@ -173,6 +237,17 @@ try {
       check('[phone] sliding the GAS finger right turns right', unwrap(a2 - a1b) < -0.15, `dAngle=${unwrap(a2 - a1b).toFixed(2)}`);
       await page.screenshot({ path: path.join(OUT, 'phone-steer.png') });
       await touch('touchEnd', 0, 0);
+      // ---- heading-up camera on a straight: the car points up the screen within 20 degrees
+      await onStraight(page, 20);
+      await touch('touchStart', box.x, box.y);
+      await waitSim(page, 2.5);
+      await touch('touchEnd', 0, 0);
+      const head = await page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); return { az: r.azimuth, ang: Math.atan2(b.x - a.x, (b.y - a.y)) }; });
+      check('[phone] on a straight the car points up the screen (within 20 deg)', Math.abs(head.ang) * 180 / Math.PI < 20, `${(head.ang * 180 / Math.PI).toFixed(1)} deg`);
+      // ---- camera framing on a real lap
+      await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });
+      const lapP = await cameraLap(page, 'phone', 32);
+      check('[phone] camera rotates with the track (portrait, touch default)', lapP.azMax - lapP.azMin > 1, `azimuth ${lapP.azMin.toFixed(2)}..${lapP.azMax.toFixed(2)}`);
     }
     check('[phone] no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();

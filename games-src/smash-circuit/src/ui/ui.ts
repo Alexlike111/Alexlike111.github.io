@@ -17,6 +17,14 @@ export interface UiHandlers {
   quit(): void;
   restart(): void;
   repair(): void;
+  /** HUD repair chip pressed (true) / released (false): in a race the repair is a hold. */
+  repairHold?(on: boolean): void;
+  /** Results: race the same track again (no ad). */
+  retry?(): void;
+  /** Results: start the given (unlocked) next track (no ad). */
+  nextTrack?(id: string): void;
+  /** Menu banner: reload the progress now. */
+  retrySave?(): void;
   /** Use the held power-up item (HUD item button). */
   useItem?(): void;
   buy(b: UpgradeBranch): void;
@@ -34,6 +42,10 @@ export interface ResultsData {
   canDouble: boolean; unlocked: string | null; newBestLap: boolean;
   /** coins from drift points (already included in `reward`) */
   drift?: number;
+  /** place prize / smash money (pieces broken by type) / number of pieces; `reward` is their sum plus drift */
+  prize?: number; smash?: number; smashCount?: number;
+  /** next track id when it is unlocked */
+  nextTrack?: string | null;
 }
 
 const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
@@ -86,7 +98,7 @@ export class UI {
   private h: UiHandlers;
   private layers = {} as Record<Layer, HTMLElement>;
   private save: SaveData | null = null;
-  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false };
+  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' };
   private money = 0;
   private current: { name: string; render: () => void } | null = null;
   private overlayRender: (() => void) | null = null;
@@ -110,6 +122,14 @@ export class UI {
   private linesLevel = -1;
   private hudLast = { place: -1, total: -1, lap: -1, laps: -1, timer: '', last: '', best: '', speed: -1, cd: '', zones: [] as number[], cost: -1, money: -1, health: -1 };
   private lastLapShown = -1;
+  private saveWarn = false;
+  private repairHeld = false;
+  private repairInfo = { left: 99, cd: 0, money: 0 };
+  private repairKey = '';
+  private fx: { pill: HTMLElement; finish: HTMLElement; smash: HTMLElement } | null = null;
+  private pillTimer = 0;
+  private smashTimer = 0;
+  private smashSum = 0;
 
   constructor(root: HTMLElement, h: UiHandlers) {
     this.root = root;
@@ -123,6 +143,16 @@ export class UI {
     }
     root.addEventListener('click', this.onClick);
     this.buildHud();
+    // HUD repair chip: hold the finger (released / cancelled / moved away = abort)
+    root.addEventListener('pointerdown', (e) => {
+      const chip = (e.target as Element | null)?.closest?.('.cardmg.show');
+      if (!chip || !this.layers.hud.contains(chip)) return;
+      this.repairHeld = true;
+      this.h.repairHold?.(true);
+    });
+    const release = (): void => { if (this.repairHeld) { this.repairHeld = false; this.h.repairHold?.(false); } };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
   }
 
   // ------------------------------------------------------------------ public API
@@ -151,8 +181,24 @@ export class UI {
     if (money !== undefined) this.money = money;
     this.layers.hud.hidden = false;
     this.hudLast = { place: -1, total: -1, lap: -1, laps: -1, timer: '', last: '', best: '', speed: -1, cd: '', zones: [], cost: -1, money: -1, health: -1 };
-    this.lastLapShown = -1;
     this.updateMoneyChip();
+  }
+
+  /** New race: forget the final-lap toast, hide leftovers of the previous race. */
+  resetRaceFeedback(): void {
+    this.lastLapShown = -1;
+    this.smashSum = 0;
+    window.clearTimeout(this.pillTimer); window.clearTimeout(this.smashTimer);
+    if (this.fx) { this.fx.pill.hidden = true; this.fx.finish.hidden = true; this.fx.smash.hidden = true; }
+    this.repairKey = '';
+    this.setRepairProgress(0);
+  }
+
+  /** Menu banner: the stored progress could not be read (nothing is saved until it loads). */
+  setSaveWarning(on: boolean): void {
+    if (this.saveWarn === on) return;
+    this.saveWarn = on;
+    if (this.current?.name === 'menu') this.current.render();
   }
 
   updateHud(sim: ISim, fps: number): void {
@@ -176,7 +222,8 @@ export class UI {
       if (lapNo === laps && laps > 1 && this.lastLapShown !== lapNo && sim.race.phase === 'racing') this.toast(t('hud.finalLap'));
       this.lastLapShown = lapNo;
     }
-    const tm = fmtTime(sim.race.phase === 'countdown' ? 0 : sim.race.time);
+    // the timer freezes at the finish line (the sim keeps counting during the 2.5 s finishing delay)
+    const tm = fmtTime(p.finished && p.finishTime > 0 ? p.finishTime : sim.race.phase === 'countdown' ? 0 : sim.race.time);
     if (L.timer !== tm) { L.timer = tm; hud.timer.textContent = tm; }
     const last = p.lastLapTime > 0 ? fmtTime(p.lastLapTime) : '';
     const best = p.bestLapTime > 0 ? fmtTime(p.bestLapTime) : '';
@@ -201,11 +248,8 @@ export class UI {
     const hq = Math.round(p.health * 20);
     if (L.health !== hq) { L.health = hq; hud.car.classList.toggle('crit', p.health < 0.3); }
     const cost = repairPrice(missing);
-    if (L.cost !== cost) {
-      L.cost = cost;
-      hud.repair.classList.toggle('show', cost > 0);
-      hud.repairCost.textContent = String(cost);
-    }
+    if (L.cost !== cost) { L.cost = cost; hud.repairCost.textContent = String(cost); }
+    this.updateRepairChip(p, cost);
 
     this.updateItem(p);
 
@@ -290,16 +334,90 @@ export class UI {
         { ic: `<div class="keys"><kbd class="wide">${esc(t('tut.key.space'))}</kbd></div>`, tx: t('tut.key.drift') },
         { ic: `<div class="keys"><kbd>R</kbd><kbd>P</kbd></div>`, tx: t('tut.key.repair') },
       ];
-    this.root.classList.add('tut-on');   // CSS hides the countdown while the sim is held behind the tutorial
+    this.root.classList.add('tut-on');
     el.innerHTML = `<div class="tutorial panel">
       <h3 class="title sm">${esc(t('tut.title'))}</h3>
       <div class="tut-steps">${steps.map((s, i) => `<div class="tut-step"><span class="n">${i + 1}</span><div class="tut-ic">${s.ic}</div><p>${esc(s.tx)}</p></div>`).join('')}</div>
       <button class="btn green" data-act="tutorialOk">${icon('check')}<span>${esc(t('tut.ok'))}</span></button>
     </div>`;
-    window.clearTimeout(this.tutTimer);
-    this.tutTimer = window.setTimeout(() => this.dismissTutorial(false), CONFIG.ui.tutorialSeconds * 1000 + 4000);
   }
-  private tutTimer = 0;
+
+  /** The game hides the first-run sheet at the first input or GO + CONFIG.ui.tutorialHideAfterGoS (counts as seen). */
+  hideTutorial(): void { this.dismissTutorial(false); }
+
+  /** Lap pill: "LAP 1  1:02.34  -0.45" (purple = new best lap). */
+  lapPill(lap: number, laps: number, time: number, delta: number | null, best: boolean): void {
+    const f = this.fx;
+    if (!f) return;
+    const d = delta === null ? '' : `<i>${delta <= 0 ? '-' : '+'}${Math.abs(delta).toFixed(2)}</i>`;
+    f.pill.innerHTML = `<span>${esc(t('hud.lapDone', { n: lap }))}<small>/${laps}</small></span><b>${fmtTime(time)}</b>${d}`;
+    f.pill.dataset.state = best ? 'best' : delta !== null && delta > 0 ? 'slow' : 'ok';
+    f.pill.hidden = false;
+    f.pill.classList.remove('pop'); void f.pill.offsetWidth; f.pill.classList.add('pop');
+    window.clearTimeout(this.pillTimer);
+    this.pillTimer = window.setTimeout(() => { f.pill.hidden = true; }, CONFIG.ui.lapPillMs);
+  }
+
+  /** FINISH banner with place and time during the finishing delay. */
+  showFinishBanner(place: number, time: number): void {
+    const f = this.fx;
+    if (!f) return;
+    const ord = t('ordinal.' + Math.min(8, Math.max(1, place)));
+    f.finish.innerHTML = `<b>${esc(t('hud.finish'))}</b><span>${esc(ord)} &middot; ${fmtTime(time)}</span>`;
+    f.finish.dataset.pos = place <= 3 ? String(place) : '';
+    f.finish.hidden = false;
+    f.finish.classList.remove('pop'); void f.finish.offsetWidth; f.finish.classList.add('pop');
+    f.pill.hidden = true;
+  }
+
+  /** In-race "+N" float for money from smashed objects; consecutive smashes add up. */
+  smashFloat(money: number): void {
+    const f = this.fx;
+    if (!f || money <= 0) return;
+    this.smashSum = f.smash.hidden ? money : this.smashSum + money;
+    f.smash.innerHTML = `<b>+${this.smashSum}</b><small>${esc(t('hud.smash'))}</small>`;
+    f.smash.hidden = false;
+    f.smash.classList.remove('pop'); void f.smash.offsetWidth; f.smash.classList.add('pop');
+    window.clearTimeout(this.smashTimer);
+    this.smashTimer = window.setTimeout(() => { f.smash.hidden = true; this.smashSum = 0; }, CONFIG.ui.smashFloatMs);
+  }
+
+  /** Repair limits for the HUD chip: repairs left in this race, cooldown seconds, money. */
+  setRepairInfo(info: { left: number; cd: number; money: number }): void {
+    this.repairInfo = info;
+  }
+
+  /** Hold progress 0..1 on the repair chip (0 = idle). */
+  setRepairProgress(f: number): void {
+    const el = this.hud?.repair;
+    if (!el) return;
+    const v = Math.round(Math.max(0, Math.min(1, f)) * 50) / 50;
+    el.style.setProperty('--rp', String(v));
+    el.classList.toggle('holding', v > 0);
+  }
+
+  /**
+   * The repair chip: only when the car is hurt (health below CONFIG.repair.showBelowHealth) and repairs are left; its hint
+   * says what to do now: "Hold" when stopped, "Stop" while moving, the cooldown seconds, greyed when too poor.
+   */
+  private updateRepairChip(p: CarState, cost: number): void {
+    const hud = this.hud;
+    if (!hud) return;
+    const R = CONFIG.repair;
+    const hurt = cost > 0 && p.health < R.showBelowHealth && this.repairInfo.left > 0;
+    const moving = Math.abs(p.speed) > R.raceMaxSpeed;
+    const cd = Math.ceil(this.repairInfo.cd);
+    const poor = this.repairInfo.money < cost;
+    const mode = !hurt ? 'off' : cd > 0 ? 'cd' : poor ? 'poor' : moving ? 'stop' : 'go';
+    const key = `${mode}|${cd}|${this.touchMode ? 1 : 0}|${lang()}`;
+    if (key === this.repairKey) return;
+    this.repairKey = key;
+    hud.repair.classList.toggle('show', hurt);
+    hud.repair.dataset.mode = mode;
+    hud.repair.setAttribute('aria-disabled', String(mode !== 'go'));
+    const rk = hud.repair.querySelector('.rk');
+    if (rk) rk.textContent = mode === 'cd' ? `${cd}s` : mode === 'stop' ? t('hud.repairStop') : this.touchMode ? t('hud.repairHold') : t('hud.repairKey');
+  }
 
   toast(text: string): void {
     const box = this.layers.toasts;
@@ -324,7 +442,6 @@ export class UI {
     this.overlayRender = null;
     this.resultsState = null;
     this.disarm();
-    window.clearTimeout(this.tutTimer);
     this.root.classList.remove('tut-on');
     this.layers.screen.replaceChildren();
     this.layers.overlay.replaceChildren();
@@ -445,6 +562,7 @@ export class UI {
       case 'item': this.h.useItem?.(); break;
       case 'repair': {
         const hudRepair = this.layers.hud.contains(el);
+        if (hudRepair) break;   // the HUD chip is a hold (pointerdown / pointerup below), not a click
         const cost = hudRepair ? this.hudLast.cost : this.pauseState.cost;
         if (cost <= 0) break;
         const money = hudRepair ? this.money : this.pauseState.money;
@@ -468,6 +586,9 @@ export class UI {
       }
       case 'double': void this.doDouble(); break;
       case 'continue': this.sfx('click'); this.h.continueAfterResults(); break;
+      case 'retry': this.sfx('click'); this.h.retry?.(); break;
+      case 'nextTrack': this.sfx('click'); if (el.dataset.id) this.h.nextTrack?.(el.dataset.id); break;
+      case 'retrySave': this.sfx('click'); this.h.retrySave?.(); break;
       case 'tutorialOk': this.sfx('click'); this.dismissTutorial(true); break;
       default: break;
     }
@@ -481,7 +602,6 @@ export class UI {
   }
 
   private dismissTutorial(byUser: boolean): void {
-    window.clearTimeout(this.tutTimer);
     const el = this.layers.tutorial;
     this.root.classList.remove('tut-on');
     if (!el.firstElementChild) return;
@@ -497,6 +617,7 @@ export class UI {
     if (k === 'lang') { s.lang = v as SaveData['settings']['lang']; setLangSetting(s.lang); }
     else if (k === 'quality') s.quality = v as SaveData['settings']['quality'];
     else if (k === 'autoGas') s.autoGas = v === '1';
+    else if (k === 'camera') s.camera = v as SaveData['settings']['camera'];
     else if (k === 'muted') s.muted = v === '1';
     this.sfx('click');
     this.settings = s;
@@ -528,6 +649,7 @@ export class UI {
     const money = this.save?.money ?? 0;
     this.setScreen('menu', `
       <div class="menu-top"><div class="chip">${this.coin(money)}</div></div>
+      ${this.saveWarn ? `<div class="savewarn" role="alert"><span>${esc(t('save.warn'))}</span><button class="btn grey sm" data-act="retrySave">${esc(t('save.retry'))}</button></div>` : ''}
       <div class="menu-main">
         <div class="logo" role="img" aria-label="${esc(CONFIG.title)}">
           <div class="logo-a">SMASH</div>
@@ -639,6 +761,11 @@ export class UI {
       `<button class="${o.v === cur ? 'on' : ''}" data-act="set" data-k="${k}" data-v="${o.v}" aria-pressed="${o.v === cur}"><span>${esc(o.label)}</span></button>`).join('')}</div>`;
   }
 
+  /** 'auto' shows as what it resolves to: rotating on touch devices, fixed north-up elsewhere */
+  private cameraShown(c: SaveData['settings']['camera']): 'rotating' | 'fixed' {
+    return c === 'auto' ? (this.touchMode ? 'rotating' : 'fixed') : c;
+  }
+
   private renderSettings(): void {
     const st = this.settings;
     const row = (ic: string, label: string, ctl: string, hint = ''): string =>
@@ -655,6 +782,9 @@ export class UI {
         ${row(icon('speed'), t('settings.quality'), this.seg('quality', st.quality, [
           { v: 'auto', label: t('settings.auto') }, { v: 'low', label: t('settings.low') }, { v: 'medium', label: t('settings.medium') }, { v: 'high', label: t('settings.high') },
         ]))}
+        ${row(icon('flag'), t('settings.camera'), this.seg('camera', this.cameraShown(st.camera), [
+          { v: 'rotating', label: t('settings.camera.rotating') }, { v: 'fixed', label: t('settings.camera.fixed') },
+        ]), t('settings.camera.hint'))}
         ${row(st.muted ? icon('speakerOff') : icon('speakerOn'), t('settings.sound'), toggle('muted', !st.muted))}
       </div>`);
   }
@@ -704,12 +834,18 @@ export class UI {
         <div class="stats-list">
           <div class="rr"><span>${icon('flag')}${esc(t('results.time'))}</span><b>${fmtTime(r.time)}</b></div>
           <div class="rr"><span>${icon('bolt')}${esc(t('results.bestLap'))}</span><b>${fmtTime(r.bestLap)}${r.newBestLap ? `<em>${esc(t('results.newBest'))}</em>` : ''}</b></div>
-          ${r.drift ? `<div class="rr"><span>${icon('bolt')}${esc(t('results.drift'))}</span><b>+${fmtMoney(r.drift)}</b></div>` : ''}
+          ${r.prize !== undefined ? `<div class="rr sub"><span>${icon('flag')}${esc(t('results.prize'))}</span><b>+${fmtMoney(r.prize)}</b></div>` : ''}
+          ${r.smash ? `<div class="rr sub"><span>${icon('crash')}${esc(t('results.smash', { n: r.smashCount ?? 0 }))}</span><b>+${fmtMoney(r.smash)}</b></div>` : ''}
+          ${r.drift ? `<div class="rr sub"><span>${icon('bolt')}${esc(t('results.drift'))}</span><b>+${fmtMoney(r.drift)}</b></div>` : ''}
           <div class="rr reward${st.doubled ? ' dbl' : ''}"><span>${icon('coin')}${esc(t('results.reward'))}</span><b>+${fmtMoney(reward)}${st.doubled ? `<em>x${mult}</em>` : ''}</b></div>
         </div>
         ${r.unlocked ? `<div class="unlock">${icon('flag')}<span>${esc(t('results.unlocked', { track: unlockName }))}</span></div>` : ''}
         ${dbl}
-        <button class="btn big orange" data-act="continue"><span>${esc(t('results.continue'))}</span>${icon('arrowR')}</button>
+        <button class="btn big orange" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
+        <div class="pair res-pair">
+          ${r.nextTrack ? `<button class="btn green" data-act="nextTrack" data-id="${esc(r.nextTrack)}"><span>${esc(t('results.next'))}</span>${icon('arrowR')}</button>` : ''}
+          <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span>${r.nextTrack ? '' : icon('arrowR')}</button>
+        </div>
       </div>
     </div></div>`;
   }
@@ -725,9 +861,9 @@ export class UI {
         <div class="hud-tl">
           <div class="pos"><span class="plab" data-t="hud.place"></span><b class="pn">1</b><span class="pt">/8</span></div>
           <div class="lapbox"><span class="plab" data-t="hud.lap"></span><b class="lapn">1/3</b></div>
-          <div class="cardmg" data-act="repair" role="button" tabindex="0">
+          <div class="cardmg" data-act="repair" data-ui role="button" tabindex="0">
             <div class="car-wrap">${CAR_ZONES_SVG}</div>
-            <div class="rep"><span class="rk" data-t="hud.repairKey"></span><span class="rc">${icon('coin')}<b class="rcn">0</b></span></div>
+            <div class="rep"><span class="rk"></span><span class="rc">${icon('coin')}<b class="rcn">0</b></span><i class="rbar"></i></div>
           </div>
         </div>
         <div class="hud-tc">
@@ -743,6 +879,9 @@ export class UI {
           <button class="item-slot" type="button" data-act="item" data-ta="hud.itemTap" aria-label=""><span class="item-ic"></span><b class="item-key">E</b><i class="item-bar"></i></button>
           <div class="item-name"></div>
         </div>
+        <div class="lappill" hidden></div>
+        <div class="finishban" hidden></div>
+        <div class="smashfloat" hidden></div>
         <div class="countdown" hidden></div>
         <div class="hud-fps"></div>
       </div>`;
@@ -756,6 +895,7 @@ export class UI {
       car: q('.car-wrap'), fps: showFps || CONFIG.ui.hudFpsDebug ? q('.hud-fps') : null,
       drift: q('.driftm'), driftLabel: q('.dlab'), driftPts: q('.dpts'), driftBar: q('.dbar i'),
     };
+    this.fx = { pill: q('.lappill'), finish: q('.finishban'), smash: q('.smashfloat') };
     this.driftKey = '';
     this.itemKey = '';
     this.linesLevel = -1;
@@ -805,8 +945,7 @@ export class UI {
   private refreshHudText(): void {
     this.layers.hud.querySelectorAll<HTMLElement>('[data-t]').forEach((n) => { n.textContent = t(n.dataset.t!); });
     this.layers.hud.querySelectorAll<HTMLElement>('[data-ta]').forEach((n) => { n.setAttribute('aria-label', t(n.dataset.ta!)); });
-    const repKey = this.layers.hud.querySelector('.rk');
-    if (repKey) repKey.textContent = this.touchMode ? t('hud.repairTap') : t('hud.repairKey');
+    this.repairKey = '';
     this.updateMoneyChip();
     this.root.dispatchEvent(new CustomEvent('ui-lang'));
   }

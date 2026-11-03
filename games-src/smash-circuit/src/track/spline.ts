@@ -10,6 +10,8 @@ const DENSE_PER_METRE = 4;
 const HINT_WINDOW = 24;
 /** If the hinted search ends further than this from the centre line, fall back to a global search. */
 const HINT_FALLBACK_DIST = 30;
+/** ... and also when it ends further than this beyond the road edge (m). */
+const HINT_OFFROAD_MARGIN = 1;
 
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -100,7 +102,10 @@ class TrackGeometryImpl implements TrackGeometry {
       if (h < 0) h += this.length;
       const centre = Math.round(h / this.spacing);
       best = this.search(x, y, centre - HINT_WINDOW, centre + HINT_WINDOW);
-      if (best.d2 > HINT_FALLBACK_DIST * HINT_FALLBACK_DIST) {
+      // off the road (beyond the edge + 1 m) another part of the track can be closer than the hinted one (an infield gap or
+      // a wall breach narrower than the window): check globally and keep the closer answer
+      const off = Math.min(HINT_FALLBACK_DIST, this.def.width / 2 + HINT_OFFROAD_MARGIN);
+      if (best.d2 > off * off) {
         const g = this.search(x, y, 0, this.n - 1);
         if (g.d2 < best.d2) best = g;
       }

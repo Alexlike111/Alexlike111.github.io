@@ -4,9 +4,9 @@ import { CONFIG } from './config';
 import { initLang, lang, t } from './i18n';
 import { AudioManager } from './audio/audio';
 import { InputController } from './input/input';
-import { applyRaceResult, buyUpgrade, raceReward, repairCost, statsFor } from './meta/economy';
+import { applyRaceResult, buyUpgrade, nextTrackId, raceRewardParts, repairCost } from './meta/economy';
 import { makeOpponents, makePlayerSetup } from './meta/opponents';
-import { defaultSave, loadSave, writeSave } from './meta/save';
+import { defaultSave, loadSave, writeSave, type SaveStatus } from './meta/save';
 import { StuckWatch, pickResetPose } from './playerReset';
 import { platform } from './platform/bridge';
 import { GameRenderer } from './render';
@@ -28,6 +28,8 @@ declare global {
       readonly state: GameState;
       readonly sim: Sim | null;
       readonly save: SaveData;
+      /** HUD/UI instance (e2e screenshots of lap pill / finish banner) */
+      readonly ui: UI;
       readonly timeScale: number;
       startRace(trackId: string): void;
       setTimeScale(n: number): void;
@@ -67,7 +69,20 @@ export class Game {
   private lastInput: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
   private userPaused = false;
   private itemHintShown = false;
-  private tutorialHold = false;   // first run: the sim waits (countdown included) until the tutorial is dismissed
+  private tutorialOn = false;     // first run: the hint sheet is up (non-blocking: hides at the first input or GO + N s)
+  // ---- save loading (audit #1)
+  private saveStatus: SaveStatus = 'empty';
+  private reloadTimer = 0;
+  private reloadN = 0;
+  private reloading = false;
+  private pendingLoaded: SaveData | null = null;
+  // ---- lap feedback (audit #5)
+  private bestLapRef = 0;          // best lap time known before the current lap (saved best or this race's best)
+  // ---- in-race repair (audit #21)
+  private repairIntent: 'none' | 'ui' | 'key' = 'none';
+  private repairProgress = 0;
+  private repairsUsed = 0;
+  private lastRepairAt = -999;
 
   private raf = 0;
   private lastT = 0;
@@ -78,14 +93,15 @@ export class Game {
   /** Boot order: (Bridge script already loaded by the page) -> platform.init -> one save load -> language -> mute. */
   async boot(): Promise<void> {
     await platform.init();
-    this.save = await loadSave();
+    const loaded = await loadSave();
+    this.save = loaded.save;
+    this.saveStatus = loaded.status;
     initLang(platform.language(), this.save.settings.lang);
     document.documentElement.lang = lang();
     this.platformAudio = platform.isAudioEnabled();
-    platform.onPause((p) => { this.platformPaused = p; this.syncPause(); });
-    platform.onAudio((on) => { this.platformAudio = on; this.applyMute(); });
-    platform.watchAds((open) => { this.externalAd = open; this.syncPause(); });
 
+    // Everything the platform callbacks touch is created BEFORE they are registered (an ad that is already open
+    // fires watchAds immediately: audit PL3).
     const canvas = document.getElementById('gl') as HTMLCanvasElement;
     const uiRoot = document.getElementById('ui') as HTMLElement;
     this.audio = new AudioManager();
@@ -103,11 +119,64 @@ export class Game {
       if (document.hidden && this.state === 'racing') this.pauseRace();
       this.syncPause();
     });
+    platform.onPause((p) => { this.platformPaused = p; this.syncPause(); });
+    platform.onAudio((on) => { this.platformAudio = on; this.applyMute(); });
+    platform.watchAds((open) => { this.externalAd = open; this.syncPause(); });
+    // A slow Bridge init finished after the boot: now the real language / audio state / saved progress are available.
+    platform.onLateReady(() => this.onLateReady());
 
     this.installDebug();
     this.toMenu();
+    if (this.saveStatus === 'failed') this.scheduleReload(true);
     this.lastT = performance.now();
     this.raf = requestAnimationFrame(this.loop);
+  }
+
+  // ------------------------------------------------------------------ save loading (audit #1)
+
+  private onLateReady(): void {
+    initLang(platform.language(), this.save.settings.lang);
+    document.documentElement.lang = lang();
+    this.platformAudio = platform.isAudioEnabled();
+    this.applyMute();
+    if (this.state === 'menu') this.toMenu();
+    if (this.saveStatus === 'failed') this.scheduleReload(true);
+  }
+
+  /** The stored progress could not be read: retry with backoff (or at once). Writes stay blocked meanwhile. */
+  private scheduleReload(now = false): void {
+    window.clearTimeout(this.reloadTimer);
+    this.ui.setSaveWarning(true);
+    const d = CONFIG.save.retryDelaysMs;
+    const delay = now ? 0 : d[Math.min(this.reloadN, d.length - 1)];
+    this.reloadTimer = window.setTimeout(() => void this.reloadProgress(), delay);
+  }
+
+  private async reloadProgress(): Promise<void> {
+    if (this.reloading || this.saveStatus !== 'failed') return;
+    this.reloading = true;
+    try {
+      await platform.waitReady(CONFIG.save.initWaitMs);
+      const r = await loadSave();
+      if (r.status === 'failed') { this.reloadN++; this.scheduleReload(); return; }
+      this.saveStatus = r.status;
+      this.reloadN = 0;
+      this.pendingLoaded = r.save;
+      this.adoptLoaded();
+    } finally { this.reloading = false; }
+  }
+
+  /** A late successful load replaces the placeholder save, but never in the middle of a race. */
+  private adoptLoaded(): void {
+    if (!this.pendingLoaded) return;
+    if (this.state !== 'menu' && this.state !== 'results') return;
+    this.save = this.pendingLoaded;
+    this.pendingLoaded = null;
+    initLang(platform.language(), this.save.settings.lang);
+    document.documentElement.lang = lang();
+    this.ui.setSaveWarning(false);
+    this.setSettings(this.save.settings);
+    if (this.state === 'menu') { this.toMenu(); this.ui.toast(t('save.restored')); }
   }
 
   // ------------------------------------------------------------------ flow
@@ -120,6 +189,10 @@ export class Game {
       quit: () => void this.leaveRace(() => this.toMenu()),
       restart: () => void this.leaveRace(() => this.startRace(this.trackId)),
       repair: () => this.repairNow(true),
+      repairHold: (on) => this.repairHold(on),
+      retry: () => { if (this.state === 'results') this.startRace(this.trackId); },
+      nextTrack: (id) => { if (this.state === 'results') this.startRace(id); },
+      retrySave: () => { this.reloadN = 0; this.scheduleReload(true); },
       useItem: () => this.useItem(),
       buy: (b) => this.buy(b),
       doubleReward: () => this.doubleReward(),
@@ -138,7 +211,8 @@ export class Game {
     this.userPaused = false;
     this.finish = null;
     this.results = null;
-    this.tutorialHold = false;
+    this.tutorialOn = false;
+    this.repairIntent = 'none';
     this.input?.setEnabled(false);
     this.closeLevel('failed');
     this.renderer.showMenuScene(this.save.carColor);
@@ -148,8 +222,10 @@ export class Game {
     this.state = 'menu';
     this.ui.setSettings(this.save.settings);
     this.ui.showMainMenu(this.save);
+    this.ui.setSaveWarning(this.saveStatus === 'failed');
     this.audio.update(null, 0);
     this.syncPause();
+    if (this.pendingLoaded) this.adoptLoaded();
   }
 
   startRace(trackId: string): void {
@@ -169,6 +245,7 @@ export class Game {
     this.finish = null;
     this.results = null;
     this.userPaused = false;
+    this.applyCamera();
     this.renderer.loadRace(sim);
     this.state = 'racing';
     this.input.setAutoGas(this.save.settings.autoGas);
@@ -176,8 +253,12 @@ export class Game {
     this.ui.setSettings(this.save.settings);
     this.ui.setTouchMode(this.input.touchActive);
     this.ui.showHud(this.save.money);
-    this.tutorialHold = !this.save.settings.tutorialDone;
-    if (this.tutorialHold) this.ui.showTutorial(this.input.touchActive);
+    this.ui.resetRaceFeedback();
+    this.bestLapRef = this.save.bestLap[def.id] ?? 0;
+    this.repairIntent = 'none'; this.repairProgress = 0; this.repairsUsed = 0; this.lastRepairAt = -999;
+    // first run: a hint sheet that never blocks the start (countdown runs; hides at the first input or GO + N s)
+    this.tutorialOn = !this.save.settings.tutorialDone;
+    if (this.tutorialOn) this.ui.showTutorial(this.input.touchActive);
     this.stuck.reset();
     this.closeLevel('failed');   // restarting from the pause menu abandons the previous attempt
     this.levelOpen = true;
@@ -188,7 +269,8 @@ export class Game {
   private pauseRace(): void {
     if (this.state !== 'racing' && this.state !== 'finishing') return;
     this.prevState = this.state;
-    this.tutorialHold = false;   // the pause menu replaces the tutorial panel
+    this.tutorialOn = false;   // the pause menu replaces the tutorial panel
+    this.repairIntent = 'none';
     this.state = 'paused';
     this.userPaused = true;
     this.input.setEnabled(false);
@@ -218,8 +300,74 @@ export class Game {
     return p ? repairCost(missingHp(p.hp, p.zoneMaxHp)) : 0;
   }
 
-  /** R key / pause-menu button / HUD button. `fromUi`: the UI already played its own sound/toast. */
+  /**
+   * Repair is a decision (audit #21). From the pause menu it is instant (`repairInstant`). In a race it needs the car
+   * nearly stopped and a hold of CONFIG.repair.holdS (R key: press once, any movement cancels; HUD chip: hold the finger),
+   * with a cooldown and a per-race cap.
+   */
   private repairNow(fromUi = false): void {
+    if (!this.sim) return;
+    if (this.state === 'paused') { this.repairInstant(fromUi); return; }
+    if (this.state !== 'racing' || this.hardPaused) return;
+    this.beginRepair('key');
+  }
+
+  private repairHold(on: boolean): void {
+    if (!on) { if (this.repairIntent === 'ui') this.cancelRepair(); return; }
+    if (this.state === 'racing' && !this.hardPaused) this.beginRepair('ui');
+  }
+
+  private repairBlock(): string | null {
+    const sim = this.sim;
+    const p = sim?.cars[0];
+    if (!sim || !p || sim.race.phase !== 'racing' || p.finished) return 'x';
+    const R = CONFIG.repair;
+    const cost = this.currentRepairCost();
+    if (cost <= 0) return t('pause.noDamage');
+    if (this.repairsUsed >= R.maxPerRace) return t('repair.cap');
+    const wait = this.lastRepairAt + R.cooldownS - sim.race.time;
+    if (wait > 0) return t('repair.cooldown', { n: Math.ceil(wait) });
+    if (this.save.money < cost) return t('ui.notEnough');
+    if (Math.abs(p.speed) > R.raceMaxSpeed) return t('repair.stop');
+    return null;
+  }
+
+  private beginRepair(src: 'ui' | 'key'): void {
+    if (this.repairIntent !== 'none') return;
+    const why = this.repairBlock();
+    if (why) { if (why !== 'x') { this.audio.ui('error'); this.ui.toast(why); } return; }
+    this.repairIntent = src;
+    this.repairProgress = 0;
+  }
+
+  private cancelRepair(): void {
+    this.repairIntent = 'none';
+    this.repairProgress = 0;
+    this.ui.setRepairProgress(0);
+  }
+
+  private updateRepair(dt: number, sim: Sim): void {
+    const R = CONFIG.repair;
+    const left = Math.max(0, R.maxPerRace - this.repairsUsed);
+    const cd = Math.max(0, this.lastRepairAt + R.cooldownS - sim.race.time);
+    this.ui.setRepairInfo({ left, cd, money: this.save.money });
+    if (this.repairIntent === 'none') return;
+    const p = sim.cars[0];
+    if (sim.race.phase !== 'racing' || p.finished) { this.cancelRepair(); return; }
+    if (Math.abs(p.speed) > R.raceMaxSpeed) { this.cancelRepair(); this.ui.toast(t('repair.stop')); return; }
+    this.repairProgress += dt;
+    this.ui.setRepairProgress(Math.min(1, this.repairProgress / R.holdS));
+    if (this.repairProgress < R.holdS) return;
+    const cost = this.currentRepairCost();
+    this.cancelRepair();
+    if (cost <= 0 || this.save.money < cost) return;
+    this.repairsUsed++;
+    this.lastRepairAt = sim.race.time;
+    this.repairInstant(false);
+  }
+
+  /** Immediate full repair for money (pause menu, debug hook, and the end of a race repair hold). */
+  private repairInstant(fromUi = false): void {
     if (!this.sim || (this.state !== 'racing' && this.state !== 'paused' && this.state !== 'finishing')) return;
     const cost = this.currentRepairCost();
     if (cost <= 0) return;
@@ -237,7 +385,7 @@ export class Game {
   /** E / Shift / flick / HUD button: use the held item (only while the race is live). */
   private useItem(): void {
     const sim = this.sim;
-    if (!sim || this.state !== 'racing' || this.hardPaused || this.userPaused || this.tutorialHold) return;
+    if (!sim || this.state !== 'racing' || this.hardPaused || this.userPaused) return;
     sim.useItem();
   }
 
@@ -252,13 +400,20 @@ export class Game {
 
   private setSettings(s: SaveData['settings']): void {
     this.save = { ...this.save, settings: { ...s } };
-    if (s.tutorialDone) this.tutorialHold = false;
+    if (s.tutorialDone) this.tutorialOn = false;
     this.applyMute();
     this.input.setAutoGas(s.autoGas);
     this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
     this.renderer.setQuality(s.quality);
+    this.applyCamera();
     document.documentElement.lang = lang();
     void writeSave(this.save);
+  }
+
+  /** Camera mode: rotating (heading-up) is the default on touch devices, fixed north-up elsewhere; the setting overrides. */
+  private applyCamera(): void {
+    const c = this.save.settings.camera;
+    this.renderer.setCameraRotating(c === 'rotating' || (c === 'auto' && this.input.touchActive));
   }
 
   private async doubleReward(): Promise<boolean> {
@@ -316,11 +471,13 @@ export class Game {
   private get hardPaused(): boolean { return this.platformPaused || this.adBusy || this.externalAd || document.hidden; }
 
   private syncPause(): void {
+    if (!this.audio) return;
     this.audio.setPaused(this.hardPaused);
     this.audio.setGameplayPaused(this.userPaused);
   }
 
   private applyMute(): void {
+    if (!this.audio) return;
     this.audio.setMuted(this.save.settings.muted || !this.platformAudio);
   }
 
@@ -336,7 +493,8 @@ export class Game {
     const bestLap = p.bestLapTime;
     const newBestLap = bestLap > 0 && (!prevBest || bestLap < prevBest);
     const drift = driftCoins(p.driftScore ?? 0);
-    const reward = raceReward(this.trackId, info.place, sim.brokenByPlayer) + drift;
+    const parts = raceRewardParts(this.trackId, info.place, sim.smashMoney);
+    const reward = parts.total + drift;
     const res = applyRaceResult(this.save, this.trackId, info.place, reward, bestLap);
     this.save = res.save;
     const ghost = sim.bestGhost();
@@ -354,7 +512,11 @@ export class Game {
       place: info.place, time: info.time, bestLap, reward,
       canDouble: platform.isRewardedSupported() && reward > 0,
       unlocked: res.unlocked, newBestLap, drift,
+      prize: parts.prize, smash: parts.smash, smashCount: sim.brokenByPlayer,
+      nextTrack: (() => { const n = nextTrackId(this.trackId); return n && this.save.unlockedTracks.includes(n) ? n : null; })(),
     };
+    this.ui.showFinishBanner(info.place, info.time);
+    this.audio.ui('buy');
     if (this.state === 'racing') this.state = 'finishing';
   }
 
@@ -376,7 +538,7 @@ export class Game {
     this.lastT = now;
     const sim = this.sim;
     const racing = this.state === 'racing' || this.state === 'finishing';
-    const live = racing && !this.hardPaused && !this.userPaused && !this.tutorialHold;
+    const live = racing && !this.hardPaused && !this.userPaused;
 
     if (sim && (racing || this.state === 'paused' || this.state === 'results' || this.state === 'ad')) {
       let events: SimEvent[] = [];
@@ -396,6 +558,14 @@ export class Game {
         }
         this.handleEvents(events, sim);
         this.watchStuck(sim, dt);
+        if (this.state === 'racing') this.updateRepair(dt, sim);
+        if (this.tutorialOn && sim.race.phase === 'racing' && (sim.race.time >= CONFIG.ui.tutorialHideAfterGoS
+          || inp.throttle > 0 || inp.brake > 0 || Math.abs(inp.steer) > 0.2 || inp.handbrake)) {
+          this.tutorialOn = false;
+          this.ui.hideTutorial();
+        }
+        const sm = sim.takeSmashes();
+        if (sm.money > 0) this.ui.smashFloat(sm.money);
         this.audio.onEvents(events, 0);
       }
       this.renderer.frame(sim, events, live ? dt : 0);
@@ -442,6 +612,14 @@ export class Game {
   private handleEvents(events: SimEvent[], sim: Sim): void {
     for (const e of events) {
       if (e.type === 'finish' && e.carId === sim.cars[0].id) this.onPlayerFinish({ place: e.place, time: e.time });
+      else if (e.type === 'lap' && e.carId === sim.cars[0].id && e.lap < sim.race.totalLaps) {
+        // lap pill: time, delta against the best lap known so far (purple = new best), plus a chime
+        const ref = this.bestLapRef;
+        const isBest = ref <= 0 || e.lapTime < ref;
+        this.ui.lapPill(e.lap, sim.race.totalLaps, e.lapTime, ref > 0 ? e.lapTime - ref : null, isBest && ref > 0);
+        this.audio.ui('buy');
+        if (ref <= 0 || e.lapTime < ref) this.bestLapRef = e.lapTime;
+      }
       else if (e.type === 'pickup' && e.carId === sim.cars[0].id && !this.itemHintShown) {
         this.itemHintShown = true;   // once per session: how to use the item
         this.ui.toast(t(this.input.touchActive ? 'hud.itemHintTap' : 'hud.itemHintKey'));
@@ -467,6 +645,7 @@ export class Game {
       get state() { return g.state; },
       get sim() { return g.sim; },
       get save() { return g.save; },
+      get ui() { return g.ui; },
       get timeScale() { return g.timeScale; },
       startRace: (id) => g.startRace(id),
       setTimeScale: (n) => { g.timeScale = Math.max(0.05, Math.min(CONFIG.game.maxTimeScale, n)); },
@@ -481,7 +660,7 @@ export class Game {
       },
       pause: () => g.pauseRace(),
       resume: () => g.resumeRace(),
-      repair: () => g.repairNow(),
+      repair: () => g.repairInstant(),
       menu: () => g.toMenu(),
       model: { ...carModel, DriftTracker },
     };

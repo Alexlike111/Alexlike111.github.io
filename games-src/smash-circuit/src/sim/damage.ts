@@ -12,27 +12,32 @@ export function createZoneHp(max: number = D.zoneMaxHp): ZoneHp {
   return hp;
 }
 
-const WHEELS: { id: ZoneId; x: number; y: number }[] = [
-  { id: 'wheelFL', x: CAR.wheelBase / 2, y: CAR.width / 2 - 0.2 },
-  { id: 'wheelFR', x: CAR.wheelBase / 2, y: -(CAR.width / 2 - 0.2) },
-  { id: 'wheelRL', x: -CAR.wheelBase / 2, y: CAR.width / 2 - 0.2 },
-  { id: 'wheelRR', x: -CAR.wheelBase / 2, y: -(CAR.width / 2 - 0.2) },
-];
+const WHEEL_IDS: ZoneId[] = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'];
+const WHEEL_SX = [1, 1, -1, -1], WHEEL_SY = [1, -1, 1, -1];
 
-/** Car frame: +x nose, +y left. Returns 1-2 zones: [primary body zone, secondary (wheel or engine)]. */
-export function zoneForLocalPoint(lx: number, ly: number): ZoneId[] {
-  const hl = CAR.length / 2, hw = CAR.width / 2;
+/** Hitbox of a car (m). Absent = the reference car. */
+export interface CarDims { length: number; width: number }
+
+/**
+ * Car frame: +x nose, +y left. Returns 1-2 zones: [primary body zone, secondary (wheel or engine)].
+ * `dims`: the car's hitbox; the wheels scale with it (wheelbase ~62% of the length, track = width - 0.4 m).
+ */
+export function zoneForLocalPoint(lx: number, ly: number, dims?: CarDims): ZoneId[] {
+  const L = dims?.length ?? CAR.length, W = dims?.width ?? CAR.width;
+  const hl = L / 2, hw = W / 2;
   const alongX = Math.abs(lx) / hl >= Math.abs(ly) / hw;
   const body: ZoneId = alongX ? (lx >= 0 ? 'front' : 'rear') : (ly >= 0 ? 'left' : 'right');
-  let best = WHEELS[0], bd = Infinity;
-  for (const w of WHEELS) {
-    const d = Math.hypot(lx - w.x, ly - w.y);
-    if (d < bd) { bd = d; best = w; }
+  const wx = (CAR.wheelBase / 2) * (L / CAR.length), wy = W / 2 - 0.2;
+  let best = 0, bd = Infinity;
+  for (let k = 0; k < 4; k++) {
+    const d = Math.hypot(lx - WHEEL_SX[k] * wx, ly - WHEEL_SY[k] * wy);
+    if (d < bd) { bd = d; best = k; }
   }
+  const bestId = WHEEL_IDS[best];
   const nearWheel = bd <= D.wheelRadius;
-  if (body === 'front') return [body, nearWheel ? best.id : 'engine'];
-  if (body === 'rear') return nearWheel ? [body, best.id] : [body];
-  return nearWheel ? [body, best.id] : [body];
+  if (body === 'front') return [body, nearWheel ? bestId : 'engine'];
+  if (body === 'rear') return nearWheel ? [body, bestId] : [body];
+  return nearWheel ? [body, bestId] : [body];
 }
 
 /**
@@ -40,9 +45,9 @@ export function zoneForLocalPoint(lx: number, ly: number): ZoneId[] {
  * `damage` = total hp actually removed. `mul` scales (e.g. car-vs-car). Armor divides.
  */
 export function applyImpulseDamage(
-  hp: ZoneHp, lx: number, ly: number, impulse: number, armor: number, mul = 1,
+  hp: ZoneHp, lx: number, ly: number, impulse: number, armor: number, mul = 1, dims?: CarDims,
 ): { zones: ZoneId[]; damage: number } {
-  const zones = zoneForLocalPoint(lx, ly);
+  const zones = zoneForLocalPoint(lx, ly, dims);
   if (!(impulse > D.impulseThreshold)) return { zones, damage: 0 };
   const total = ((impulse - D.impulseThreshold) * D.impulseToDamage * mul) / Math.max(0.1, armor);
   let removed = 0;

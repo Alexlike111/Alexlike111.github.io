@@ -20,7 +20,7 @@ import type { CarInput } from '../types';
 type KeyAction = 'pause' | 'repair' | 'item';
 type PointerKind = 'gas' | 'brake' | 'steer' | 'drift';
 
-interface Ptr { kind: PointerKind; x: number; y: number; homeX: number; homeY: number; size: number; flicked?: boolean }
+interface Ptr { kind: PointerKind; x: number; y: number; homeX: number; homeY: number; size: number; flicked?: boolean; pullT?: number }
 
 const C = CONFIG.controls;
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -46,24 +46,44 @@ export function gasButtonGeometry(w: number, h: number): { cx: number; cy: numbe
  * Dead zone and full-lock distance are fractions of the screen width (CONFIG.controls). A finger on the GAS button
  * has little room to the right, so its full lock is reached before the screen edge.
  */
-export function steerAxis(x: number, homeX: number, screenW: number, onGasButton: boolean): number {
+export function steerAxis(x: number, homeX: number, screenW: number, onGasButton: boolean, size?: number): number {
   const W = Math.max(1, screenW);
   const dx = (x - homeX) / W;
   let full: number = C.steerFullAt;
+  let dead: number = C.steerDeadZone;
+  if (onGasButton && size) {
+    // GAS finger: home is where the thumb landed; a dead band of ~0.25 button sizes around it (smaller when the
+    // landing is close to the right edge so that side stays reachable)
+    const px = clamp(0.6 * (W - homeX), C.gasDeadBandMin * size, C.gasDeadBand * size);
+    dead = Math.max(dead, px / W);
+  }
   if (onGasButton) {
     // the thumb has little room to the right of the button: full lock comes before the edge, and the same distance
     // to the left (symmetric feel: the same slide gives the same turn either way)
     const room = (W - homeX) / W * 0.8;
-    full = Math.min(full, Math.max(C.steerDeadZone + 0.02, room));
+    full = Math.min(full, Math.max(dead + 0.02, room));
   }
-  const mag = clamp((Math.abs(dx) - C.steerDeadZone) / (full - C.steerDeadZone), 0, 1);
-  return Math.sign(dx) * mag;
+  const mag = clamp((Math.abs(dx) - dead) / (full - dead), 0, 1);
+  return mag === 0 ? 0 : Math.sign(dx) * mag;
 }
 
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyP', 'KeyR',
   'KeyE', 'ShiftLeft', 'ShiftRight',   // use item
 ]);
+
+/**
+ * Auto-gas / steering-finger brake gesture (pure, tested): the finger must stay below the brake line for
+ * `pullHold` seconds; a slow downward creep drags the home Y along and upward moves re-anchor it, so only a
+ * deliberate pull brakes. Returns whether this finger brakes now; mutates `p.homeY` / `p.pullT`.
+ */
+export function stepPull(p: { y: number; homeY: number; size: number; pullT?: number }, dt: number): boolean {
+  if (p.y < p.homeY) p.homeY = p.y;
+  else if (p.y <= brakeThresholdY(p.homeY, p.size)) p.homeY += Math.min(p.y - p.homeY, C.homeYDrift * p.size * dt);
+  if (p.y > brakeThresholdY(p.homeY, p.size)) p.pullT = (p.pullT ?? 0) + dt;
+  else p.pullT = 0;
+  return (p.pullT ?? 0) >= C.pullHold;
+}
 
 export class InputController {
   private root: HTMLElement;
@@ -143,8 +163,8 @@ export class InputController {
       if (p.kind === 'drift') { tDrift = true; continue; }
       if (p.kind === 'gas') {
         if (p.y > brakeThresholdY(p.homeY, p.size)) { tBrake = 1; } else { tThrottle = 1; }
-      } else if (p.y > brakeThresholdY(p.homeY, p.size)) {
-        tBrake = 1;   // any steering finger pulled down from where it landed = brake (auto-gas: the only one-finger brake)
+      } else if (stepPull(p, dt)) {
+        tBrake = 1;   // a steering finger deliberately pulled down from where it landed = brake (auto-gas: the one-finger brake)
       }
       if (p.kind === 'gas' || !steerSet) { tSteer = this.steerFor(p); steerSet = true; }
     }
@@ -218,7 +238,7 @@ export class InputController {
 
   /** Steering from a pointer: horizontal offset from its home position (see `steerAxis`). */
   private steerFor(p: Ptr): number {
-    return steerAxis(p.x, p.homeX, Math.max(1, window.innerWidth), p.kind === 'gas');
+    return steerAxis(p.x, p.homeX, Math.max(1, window.innerWidth), p.kind === 'gas', p.size);
   }
 
   private syncLayer(): void {
@@ -279,7 +299,10 @@ export class InputController {
     if (target?.closest('.gas-btn')) {
       kind = 'gas';
       const r = this.gasEl.getBoundingClientRect();
-      homeX = r.left + r.width / 2; homeY = r.top + r.height / 2; size = r.width;
+      // steering home = where the thumb landed (no jump on touch-down), kept far enough from the right edge to steer
+      size = r.width; homeY = r.top + r.height / 2;
+      const dead = C.gasDeadBand * size;
+      homeX = Math.min(e.clientX, window.innerWidth - dead - 0.2 * size);
     } else if (target?.closest('.brake-btn')) {
       kind = 'brake';
     } else if (target?.closest('.drift-btn')) {

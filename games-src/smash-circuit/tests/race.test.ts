@@ -258,3 +258,112 @@ describe('ghost', () => {
     expect(Math.abs(Math.abs(a) - Math.PI)).toBeLessThan(0.2);
   });
 });
+
+describe('gate-based lap progress (no credit for cuts)', () => {
+  /** A one-car tracker on any track; the car stands 7 m behind the line, countdown over. */
+  function startedOn(ti: number) {
+    const g = buildTrackGeometry(TRACKS[ti]);
+    const c = car(0, true);
+    const place = (s: number, lat = 0) => { const t = g.sampleAt(s); c.x = t.x + t.nx * lat; c.y = t.y + t.ny * lat; c.angle = Math.atan2(t.ty, t.tx); };
+    place(-7);
+    const rt = new RaceTracker(g, 3, 1);
+    const ev: SimEvent[] = [];
+    rt.update([c], 0, ev);
+    for (let t = 0; t < CONFIG.race.countdown + 0.1; t += 0.1) rt.update([c], 0.1, ev);
+    ev.length = 0;
+    const dt = 1 / 120;
+    /** along the road from s0 to s1 at v */
+    const road = (s0: number, s1: number, v: number) => {
+      for (let s = s0; s < s1; s += v * dt) { place(s); c.speed = v; rt.update([c], dt, ev); }
+      place(s1); rt.update([c], dt, ev);
+    };
+    /** straight line from track point sA to track point sB (across the infield / a wall gap) at v */
+    const across = (sA: number, sB: number, v: number) => {
+      const a = g.sampleAt(sA), b = g.sampleAt(sB);
+      const len = Math.hypot(b.x - a.x, b.y - a.y), n = Math.ceil(len / (v * dt));
+      for (let k = 1; k <= n; k++) { c.x = a.x + (b.x - a.x) * k / n; c.y = a.y + (b.y - a.y) * k / n; c.speed = v; rt.update([c], dt, ev); }
+      return len;
+    };
+    return { g, c, rt, ev, place, road, across };
+  }
+
+  it('a t1 open-infield cut (s 21 -> 403) credits nothing for the cut', () => {
+    const { c, road, across } = startedOn(0);
+    road(-7, 21, 40);
+    const before = c.progress;
+    across(21, 403, 40);
+    expect(c.progress - before).toBeLessThanOrEqual(5);
+    road(403, 493, 30);
+    expect(c.progress - before).toBeLessThanOrEqual(90 + 5);    // only the 90 m driven on the road after the cut
+  });
+
+  it('the t3 mouth cut (s 230 -> 502, ~39 m across) credits at most 5 m and costs the lap', () => {
+    const { g, c, rt, ev, road, across } = startedOn(2);
+    road(-7, 230, 35);
+    const before = c.progress;
+    // the along-track distance the car really covers while it is still inside the walls on the way out
+    const a = g.sampleAt(230), b = g.sampleAt(502), half = g.def.width / 2;
+    let legit = 0;
+    for (let k = 0; k <= 200; k++) {
+      const nn = g.nearest(a.x + (b.x - a.x) * k / 200, a.y + (b.y - a.y) * k / 200, 230);
+      if (Math.abs(nn.lateral) > half + CONFIG.race.creditLateral) break;
+      legit = nn.s - 230;
+    }
+    across(230, 502, 30);
+    expect(c.progress - before).toBeLessThanOrEqual(legit + 5);
+    expect(legit).toBeLessThan(10);
+    road(502, g.length + 20, 35);                                // on over the line: a gate was skipped, no lap
+    expect(c.lap).toBe(0);
+    expect(ev.filter((e) => e.type === 'lap').length).toBe(0);
+    expect(rt.nextGate[0]).not.toBe(0);
+    road(20, g.length + 10, 35);                                 // one honest lap later it counts again
+    expect(c.lap).toBe(1);
+  });
+
+  it('a lap needs every gate in order: a lap with a short reset hop counts but is not a clean lap', () => {
+    const { g, c, rt, road } = startedOn(0);
+    road(-7, 300, 40);
+    road(330, g.length + 5, 40);                                 // 30 m hop (a stuck reset puts the car ahead)
+    expect(c.lap).toBe(1);
+    expect(rt.lastLapValid[0]).toBe(false);
+    expect(c.bestLapTime).toBe(0);                               // not a best lap / ghost / leaderboard lap
+    expect(c.lastLapTime).toBeGreaterThan(0);
+    road(5, g.length + 5, 40);                                   // the next clean lap is
+    expect(c.lap).toBe(2);
+    expect(rt.lastLapValid[0]).toBe(true);
+    expect(c.bestLapTime).toBeCloseTo(g.length / 40, 0);
+  });
+
+  it('progress is never credited beyond the next gate, and an honest lap re-syncs it to the line', () => {
+    const { g, c, rt, road, across } = startedOn(2);
+    road(-7, 230, 35);
+    across(230, 502, 30);
+    road(502, g.length - 1, 35);
+    expect(c.progress).toBeLessThanOrEqual(rt.gates[rt.nextGate[0]] + 1e-6);
+    road(g.length - 1, 2 * g.length + 3, 35);
+    expect(c.lap).toBe(1);
+    expect(c.progress).toBeGreaterThan(g.length);
+    expect(c.progress).toBeLessThan(g.length + 5);
+  });
+
+  it('a car beside the road (inside the run-off corridor) still passes the gates', () => {
+    const { g, c, rt, ev, place } = startedOn(0);
+    const half = g.def.width / 2, dt = 1 / 120;
+    for (let s = -7; s < g.length + 5; s += 40 * dt) { place(s, half + 3); c.speed = 40; rt.update([c], dt, ev); }
+    expect(c.lap).toBe(1);
+  });
+});
+
+describe('nearest() off the road', () => {
+  it('a point in the t3 infield gap closer to the other leg resolves to that leg even with a hint', () => {
+    const g = buildTrackGeometry(TRACKS[2]);
+    const a = g.sampleAt(230), b = g.sampleAt(502);
+    // 70% of the way from leg A to leg B: clearly closer to B, but within the hinted window distance of A
+    const x = a.x + (b.x - a.x) * 0.7, y = a.y + (b.y - a.y) * 0.7;
+    const n = g.nearest(x, y, 230);
+    const d = Math.abs(((n.s - 502 + g.length * 1.5) % g.length) - g.length / 2);
+    expect(d).toBeLessThan(15);
+    const ga = g.nearest(x, y);
+    expect(n.s).toBeCloseTo(ga.s, 3);
+  });
+});

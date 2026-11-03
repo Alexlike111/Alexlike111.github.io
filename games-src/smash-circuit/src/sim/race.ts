@@ -1,7 +1,11 @@
-// Race rules: countdown, progress along the spline, laps, finish, places. PURE (works on CarState objects).
-// Progress is an "unwrapped" distance: it grows continuously along the track, so a lap is counted only when the car
-// really covered the whole lap forward (reversing over the line and coming back never counts twice, and a car cannot
-// skip the lap by jumping backwards and forwards at the line).
+// Race rules: countdown, progress along the spline, laps through ordered gates, finish, places. PURE (works on CarState objects).
+//
+// Progress is an "unwrapped" distance that only grows by DRIVING: per update a step of at most CONFIG.race.gateMaxStep metres
+// along the track, inside the walls (|lateral| <= half width + creditLateral). Bigger jumps (the nearest centre-line point
+// switching to another leg across an infield or a wall breach, a teleport) are not credited. A lap needs CONFIG.race.gates
+// ordered gates (gate 0 = the start / finish line, the others evenly spaced along the lap), each crossed forward within
+// half width + gateLateral of the centre line (a car on the run-off behind a breach still passes); crossing the line with every gate passed completes the lap and re-syncs the progress to the line. A lap is VALID
+// (best lap, ghost, leaderboard) only when it was driven: at most CONFIG.race.cutTolerance metres of it were jumped.
 import { CONFIG } from '../config';
 import type { CarState, RaceState, SimEvent, TrackGeometry } from '../types';
 
@@ -9,6 +13,11 @@ function wrapDiff(d: number, L: number): number {
   d = d % L;
   if (d >= L / 2) d -= L; else if (d < -L / 2) d += L;
   return d;
+}
+
+function mod(d: number, L: number): number {
+  d %= L;
+  return d < 0 ? d + L : d;
 }
 
 export class RaceTracker {
@@ -19,6 +28,12 @@ export class RaceTracker {
   readonly laterals: number[];
   /** Race time at which each car's current lap started. */
   readonly lapStart: number[];
+  /** Whether each car's last completed lap was clean (gate-valid and not cut): only those count for best lap / ghost / leaderboard. */
+  readonly lastLapValid: boolean[];
+  /** Index of the gate each car has to cross next (0 = the finish line, after all the others). */
+  readonly nextGate: number[];
+  /** Track positions (s) of the gates; gates[0] = 0 is the start / finish line. */
+  readonly gates: number[];
 
   private readonly track: TrackGeometry;
   private readonly laps: number;
@@ -27,8 +42,7 @@ export class RaceTracker {
   private readonly prevS: number[];
   private readonly lapsDone: number[];
   private readonly rate: number[];          // smoothed progress speed, m/s
-  private readonly pendingS: number[];      // candidate of a rejected big jump
-  private readonly pendingT: number[];
+  private readonly debt: number[];          // metres of the current lap that were jumped, not driven
   private readonly finishOrder: number[] = [];
   private inited = false;
   private lastCountdown = Number.POSITIVE_INFINITY;
@@ -41,12 +55,16 @@ export class RaceTracker {
     this.hints = new Array(carCount).fill(0);
     this.laterals = new Array(carCount).fill(0);
     this.lapStart = new Array(carCount).fill(0);
+    this.lastLapValid = new Array(carCount).fill(false);
+    this.nextGate = new Array(carCount).fill(1);
     this.unwrapped = new Array(carCount).fill(0);
     this.prevS = new Array(carCount).fill(0);
     this.lapsDone = new Array(carCount).fill(0);
     this.rate = new Array(carCount).fill(0);
-    this.pendingS = new Array(carCount).fill(-1);
-    this.pendingT = new Array(carCount).fill(0);
+    this.debt = new Array(carCount).fill(0);
+    const G = Math.max(2, Math.round(CONFIG.race.gates));
+    this.gates = [];
+    for (let g = 0; g < G; g++) this.gates.push((g * track.length) / G);
     this.state = {
       phase: 'countdown', countdown: CONFIG.race.countdown, time: 0, totalLaps: laps,
       playerFinished: false, results: [],
@@ -112,53 +130,89 @@ export class RaceTracker {
     this.rank(cars);
   }
 
+  /** Lap-relative position (m from the line) up to which progress may be credited before gate `g` is crossed. */
+  private gateLimit(g: number): number {
+    return g === 0 ? this.track.length : this.gates[g];
+  }
+
   private trackCars(cars: CarState[], dt: number, events: SimEvent[], racing: boolean): void {
     const L = this.track.length;
     const st = this.state;
     const P = CONFIG.race;
+    const half = this.track.def.width / 2;
+    const corridor = half + P.gateLateral, creditBand = half + P.creditLateral;
     for (let i = 0; i < this.n; i++) {
       const c = cars[i];
       if (c.finished) continue;
       const near = this.track.nearest(c.x, c.y, this.hints[i]);
       this.hints[i] = near.s;
       this.laterals[i] = near.lateral;
-      let delta = wrapDiff(near.s - this.prevS[i], L);
-      if (Math.abs(delta) > P.maxProgressJump) {
-        // far / implausible jump: accept only when the new position stays stable for a while
-        if (this.pendingS[i] >= 0 && Math.abs(wrapDiff(near.s - this.pendingS[i], L)) < 15) {
-          this.pendingT[i] += dt;
-          if (this.pendingT[i] >= P.jumpConfirmTime) { this.pendingS[i] = -1; this.pendingT[i] = 0; } else delta = 0;
-        } else { this.pendingS[i] = near.s; this.pendingT[i] = 0; delta = 0; }
-        if (delta === 0) { c.progress = this.unwrapped[i]; continue; }
-      } else this.pendingS[i] = -1;
+      const prev = this.prevS[i];
+      const delta = wrapDiff(near.s - prev, L);
       this.prevS[i] = near.s;
-      this.unwrapped[i] += delta;
-      if (dt > 0 && Math.abs(delta) <= P.maxProgressJump) this.rate[i] += (delta / dt - this.rate[i]) * Math.min(1, dt * 0.6);
-      c.progress = this.unwrapped[i];
-
-      if (!racing) continue;
-      // lap crossings (the unwrapped distance must really reach the next multiple of L)
-      while (this.unwrapped[i] >= (this.lapsDone[i] + 1) * L && !c.finished) {
-        const over = this.unwrapped[i] - (this.lapsDone[i] + 1) * L;
-        const speed = dt > 0 && delta > 0 ? delta / dt : Math.max(Math.abs(c.speed), 1);
-        const tCross = Math.min(st.time, Math.max(this.lapStart[i], st.time - over / Math.max(speed, 1)));
-        this.lapsDone[i]++;
-        c.lap = this.lapsDone[i];
-        const lapTime = tCross - this.lapStart[i];
-        this.lapStart[i] = tCross;
-        c.lastLapTime = lapTime;
-        if (c.bestLapTime === 0 || lapTime < c.bestLapTime) c.bestLapTime = lapTime;
-        events.push({ type: 'lap', carId: c.id, lap: c.lap, lapTime });
-        if (c.lap >= this.laps) {
-          c.finished = true;
-          c.finishTime = tCross;
-          c.progress = this.laps * L;
-          this.finishOrder.push(i);
-          c.place = this.finishOrder.length;
-          events.push({ type: 'finish', carId: c.id, place: c.place, time: tCross });
-          if (c.isPlayer) st.playerFinished = true;
-        }
+      const aLat = Math.abs(near.lateral);
+      const inside = aLat <= corridor;
+      const small = Math.abs(delta) <= P.gateMaxStep;
+      const driven = small && aLat <= creditBand;
+      // beside the road (a breach, the run-off) the car still passes gates, but that distance is not credited as driven
+      const beside = small && !driven && inside;
+      // a short forward hop (a reset onto the road, a respawn) still passes the gates it skips, but it was not driven
+      const hop = !driven && !beside && inside && delta > 0 && delta <= P.gateJumpTolerance;
+      if (driven) {
+        this.unwrapped[i] += delta;
+        if (dt > 0) this.rate[i] += (delta / dt - this.rate[i]) * Math.min(1, dt * 0.6);
+      } else if (delta < 0 && -delta <= P.gateJumpTolerance) {
+        this.unwrapped[i] += delta;                  // going back never helps: always charged
+      } else if (delta > 0) {
+        this.debt[i] += delta;                       // jumped forward (cut, leg switch, teleport): not credited
       }
+
+      if (racing && (driven || beside || hop) && delta > 0) this.crossGates(c, i, prev, delta, dt, events);
+      // never credited beyond the next gate the car still has to cross (a cut that skipped a gate earns nothing)
+      if (!c.finished) {
+        const cap = this.lapsDone[i] * L + this.gateLimit(this.nextGate[i]);
+        if (this.unwrapped[i] > cap) this.unwrapped[i] = cap;
+        c.progress = this.unwrapped[i];
+      }
+    }
+  }
+
+  /** Forward step prev -> prev + delta: pass the next gate(s) in order; the line completes the lap. */
+  private crossGates(c: CarState, i: number, prev: number, delta: number, dt: number, events: SimEvent[]): void {
+    const L = this.track.length;
+    const st = this.state;
+    const G = this.gates.length;
+    for (let guard = 0; guard < G && !c.finished; guard++) {
+      const g = this.nextGate[i];
+      const d0 = mod(this.gates[g] - prev, L);
+      if (!(d0 > 0 && d0 <= delta)) return;
+      if (g !== 0) { this.nextGate[i] = (g + 1) % G; continue; }
+      // the line with every gate passed: lap
+      const over = delta - d0;
+      const speed = dt > 0 ? delta / dt : Math.max(Math.abs(c.speed), 1);
+      const tCross = Math.min(st.time, Math.max(this.lapStart[i], st.time - over / Math.max(speed, 1)));
+      this.lapsDone[i]++;
+      this.nextGate[i] = 1 % G;
+      this.unwrapped[i] = this.lapsDone[i] * L + over;
+      const valid = this.debt[i] <= CONFIG.race.cutTolerance;
+      this.debt[i] = 0;
+      this.lastLapValid[i] = valid;
+      c.lap = this.lapsDone[i];
+      const lapTime = tCross - this.lapStart[i];
+      this.lapStart[i] = tCross;
+      c.lastLapTime = lapTime;
+      if (valid && (c.bestLapTime === 0 || lapTime < c.bestLapTime)) c.bestLapTime = lapTime;
+      events.push({ type: 'lap', carId: c.id, lap: c.lap, lapTime });
+      if (c.lap >= this.laps) {
+        c.finished = true;
+        c.finishTime = tCross;
+        c.progress = this.laps * L;
+        this.finishOrder.push(i);
+        c.place = this.finishOrder.length;
+        events.push({ type: 'finish', carId: c.id, place: c.place, time: tCross });
+        if (c.isPlayer) st.playerFinished = true;
+      }
+      return;
     }
   }
 

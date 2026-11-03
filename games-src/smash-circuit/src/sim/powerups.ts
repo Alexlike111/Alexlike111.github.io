@@ -95,7 +95,7 @@ export class PowerUpSystem {
           if (align < 0.3) continue;             // driving against the arrows: nothing happens
           this.padCd[slot] = I.pad.cooldown;
           const bf = cars[i].buffs;
-          bf.padT = Math.max(bf.padT, I.pad.time);
+          bf.padT = Math.max(bf.padT, I.pad.time * (cars[i].setup.stats.traits?.boostTimeMul ?? 1));   // trait: longer boosts
           const kick = I.pad.kick * align;
           cars[i].kick(Math.cos(st.angle) * kick, Math.sin(st.angle) * kick);
           events.push({ type: 'boost', carId: st.id, x: st.x, y: st.y, angle: st.angle, source: 'pad' });
@@ -168,7 +168,7 @@ export class PowerUpSystem {
     events.push({ type: 'itemUse', carId: st.id, item, x: st.x, y: st.y, angle: st.angle });
     switch (item) {
       case 'nitro':
-        bf.nitroT = I.nitro.time;
+        bf.nitroT = I.nitro.time * (car.setup.stats.traits?.boostTimeMul ?? 1);
         car.kick(ca * I.nitro.kick, sa * I.nitro.kick);
         events.push({ type: 'boost', carId: st.id, x: st.x, y: st.y, angle: st.angle, source: 'nitro' });
         break;
@@ -223,7 +223,7 @@ export class PowerUpSystem {
       }
       const ux = d > 1e-3 ? dx / d : Math.cos(me.angle), uy = d > 1e-3 ? dy / d : Math.sin(me.angle);
       const fall = 1 - d / S.radius;
-      o.kick(ux * S.push * fall, uy * S.push * fall);
+      if (!o.setup.stats.traits?.shockImmune) o.kick(ux * S.push * fall, uy * S.push * fall);   // a juggernaut is not pushed
       o.buffs.nitroT = 0;                        // cancels Nitro
       const dmg = S.damage * (0.4 + 0.6 * fall);
       o.recordImpact(os.x - ux * 1.0, os.y - uy * 1.0, D.impulseThreshold + dmg / (D.impulseToDamage * D.carVsCarMul), 'car');

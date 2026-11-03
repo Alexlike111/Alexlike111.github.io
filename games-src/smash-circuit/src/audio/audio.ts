@@ -2,7 +2,7 @@
 // PLACEHOLDERS (collision sounds: scripts/make-impacts.mjs, the rest: scripts/make-sfx.sh); see docs/AUDIO.md.
 //
 // Graph:  engine / skid / scrape loops -> loopBus (ducked by impacts) -> sfxGain \
-//         impact voices -> impactBus -> compressor ----------------------> sfxGain -> masterGain -> destination
+//         impact voices -> impactBus (linear) ---------------------------> sfxGain -> masterGain -> limiter -> destination
 //         music -> musicGain -> musicDuck (ducked by impacts) -----------------------> masterGain
 // The AudioContext is created lazily and unlocked by the first pointerdown / keydown / touchend.
 // Every public method is safe to call before unlock or when Web Audio is missing (silent no-op).
@@ -42,7 +42,50 @@ const MIX = {
   duckMusic: 0.35,
   scrapeGain: 0.5,
   scrapeWindow: 0.22,     // s a scrape event keeps the loop alive (events arrive every ~0.06 s)
+  impactsPerFrame: 3,     // collision sounds started per frame: the player's car first, then the strongest hits
+  levelFloor: 0.1,        // level curve of a hit: floor + (1 - floor) * strength^levelExp (about 10 dB from s 0.3 to 1)
+  levelExp: 1.15,
+  limiterThreshold: -2,   // dBFS: master limiter (the impact bus itself stays linear, so strong hits keep their dynamics)
+  loopFadeEdge: 0.006,    // s: fade at both ends of a loop that cannot be crossfaded (music keeps its exact length)
 };
+
+/** Loop-point treatment per loop, baked into the decoded buffer at load (also fixes replacement recordings). */
+const LOOP_SEAM: Record<'engine' | 'skid' | 'music' | 'scrape', { crop: number; xfade: number }> = {
+  engine: { crop: 0, xfade: 0.04 },    // equal-power crossfade tail -> head
+  skid: { crop: 0.055, xfade: 0.05 }, // drop the faded edges first, then crossfade
+  scrape: { crop: 0, xfade: 0 },       // already crossfaded by scripts/make-impacts.mjs
+  music: { crop: 0, xfade: 0 },        // exact bar length: only a few-ms edge fade
+};
+
+/** Loudness of a hit (0..1+) from its strength, before distance: a wide curve so a 100 km/h crash is clearly bigger than a tap. */
+export function impactLevel(strength: number): number {
+  return MIX.levelFloor + (1 - MIX.levelFloor) * Math.pow(clamp01(strength), MIX.levelExp);
+}
+
+/**
+ * Make a looping sample seamless. `crop` seconds are cut from both ends, then the last `xfade` seconds are
+ * equal-power crossfaded into the first ones (the result is `xfade` shorter). With xfade 0 only a tiny edge fade is
+ * applied. Pure: used at load and by tests.
+ */
+export function seamlessLoop(data: Float32Array, sampleRate: number, crop: number, xfade: number): Float32Array {
+  const c = Math.round(crop * sampleRate);
+  const src = c > 0 && data.length > 4 * c ? data.subarray(c, data.length - c) : data;
+  const x = Math.min(Math.round(xfade * sampleRate), Math.floor(src.length / 3));
+  if (x > 1) {
+    const out = new Float32Array(src.length - x);
+    out.set(src.subarray(0, out.length));
+    // out[i] for i < x blends the head (src[i]) with the tail continuation (src[out.length + i])
+    for (let i = 0; i < x; i++) {
+      const a = (i + 0.5) / x * Math.PI / 2;
+      out[i] = src[i] * Math.sin(a) + src[out.length + i] * Math.cos(a);
+    }
+    return out;
+  }
+  const out = Float32Array.from(src);
+  const f = Math.min(Math.round(MIX.loopFadeEdge * sampleRate), Math.floor(out.length / 4));
+  for (let i = 0; i < f; i++) { const g = i / f; out[i] *= g; out[out.length - 1 - i] *= g; }
+  return out;
+}
 
 const A = CONFIG.audio;
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -50,6 +93,7 @@ const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const smooth = (a: number, b: number, v: number): number => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 
 type Ctx = AudioContext;
+interface ImpactCand { x: number; y: number; strength: number; own: boolean; other: 'car' | 'wall' | 'guardrail' | 'curb' | 'road' | 'prop' }
 
 function pickExt(): 'ogg' | 'mp3' {
   try {
@@ -123,13 +167,14 @@ export class AudioManager {
         this.musicDuck = this.ctx.createGain();
         this.loopBus = this.ctx.createGain();
         this.impactBus = this.ctx.createGain();
-        const comp = this.ctx.createDynamicsCompressor();   // glue + safety for stacked impacts
-        comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 5; comp.attack.value = 0.002; comp.release.value = 0.14;
+        // master limiter (near -1 dBFS after its makeup): only catches peaks, it does not squash the impact dynamics
+        const lim = this.ctx.createDynamicsCompressor();
+        lim.threshold.value = MIX.limiterThreshold; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.12;
         this.musicGain.connect(this.musicDuck); this.musicDuck.connect(this.master);
         this.loopBus.connect(this.sfxGain);
-        this.impactBus.connect(comp); comp.connect(this.sfxGain);
+        this.impactBus.connect(this.sfxGain);
         this.sfxGain.connect(this.master);
-        this.master.connect(this.ctx.destination);
+        this.master.connect(lim); lim.connect(this.ctx.destination);
         this.ext = pickExt();
         this.loading = this.loadAll();
       }
@@ -150,13 +195,26 @@ export class AudioManager {
         const res = await fetch(`${base}sfx/${n}.${this.ext}`);
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.arrayBuffer();
-        const buf = await new Promise<AudioBuffer>((resolve, reject) => ctx.decodeAudioData(data, resolve, reject));
+        let buf = await new Promise<AudioBuffer>((resolve, reject) => ctx.decodeAudioData(data, resolve, reject));
+        const seam = LOOP_SEAM[n as keyof typeof LOOP_SEAM];
+        if (seam) buf = this.bakeLoop(buf, seam);
         this.buffers.set(n, buf);
         this.trim.set(n, this.measureTrim(n, buf));
       } catch (e) {
         console.warn('[audio] failed to load', n, e);
       }
     }));
+  }
+
+  private bakeLoop(buf: AudioBuffer, seam: { crop: number; xfade: number }): AudioBuffer {
+    if (!this.ctx || (seam.crop === 0 && seam.xfade === 0 && buf.length < 16)) return buf;
+    try {
+      const chans: Float32Array[] = [];
+      for (let c = 0; c < buf.numberOfChannels; c++) chans.push(seamlessLoop(buf.getChannelData(c), buf.sampleRate, seam.crop, seam.xfade));
+      const out = this.ctx.createBuffer(buf.numberOfChannels, chans[0].length, buf.sampleRate);
+      chans.forEach((d, c) => out.copyToChannel(d as Float32Array<ArrayBuffer>, c));
+      return out;
+    } catch { return buf; }
   }
 
   /** Gain that brings a collision sample to its family's target RMS without clipping (1 for non-collision samples). */
@@ -307,10 +365,11 @@ export class AudioManager {
 
   onEvents(events: SimEvent[], playerId: number): void {
     if (!this.ctx || !this.unlocked || this.hardPaused) return;
+    let impacts: ImpactCand[] | null = null;
     for (const e of events) {
       switch (e.type) {
         case 'impact':
-          this.onImpact(e.x, e.y, e.strength, e.carId === playerId, e.other);
+          (impacts ??= []).push({ x: e.x, y: e.y, strength: e.strength, own: e.carId === playerId, other: e.other });
           break;
         case 'scrape': {
           const own = e.carId === playerId;
@@ -388,6 +447,18 @@ export class AudioManager {
           break;
       }
     }
+    if (impacts) this.playImpacts(impacts);
+  }
+
+  /** The frame's collisions: the player's car first, then the strongest (nearest) hits; at most `impactsPerFrame` start. */
+  private playImpacts(c: ImpactCand[]): void {
+    const rank = (i: ImpactCand): number => (i.own ? 10 : 0) + clamp01(i.strength) * (this.haveListener ? Math.max(0.05, this.near(i.x, i.y)) : 1);
+    if (c.length > 1) c.sort((a, b) => rank(b) - rank(a));
+    let played = 0;
+    for (const i of c) {
+      if (played >= MIX.impactsPerFrame) break;
+      if (this.onImpact(i.x, i.y, i.strength, i.own, i.other)) played++;
+    }
   }
 
   ui(name: 'click' | 'buy' | 'error'): void {
@@ -405,9 +476,9 @@ export class AudioManager {
     return clamp01(1 - d / r);
   }
 
-  private gate(key: string, minInterval: number): boolean {
+  private gate(key: string, minInterval: number, sameFrame = false): boolean {
     const last = this.lastPlay[key];
-    if (last !== undefined && this.clock - last < minInterval) return false;
+    if (last !== undefined && this.clock - last < minInterval && !(sameFrame && last === this.clock)) return false;
     this.lastPlay[key] = this.clock;
     return true;
   }
@@ -415,26 +486,26 @@ export class AudioManager {
   private pick2(): boolean { return Math.random() < 0.5; }
 
   /** Collision with something: choose material sample(s), scale by strength and distance, thin out pile-ups, duck the mix. */
-  private onImpact(x: number, y: number, strength: number, own: boolean, other: 'car' | 'wall' | 'guardrail' | 'curb' | 'road' | 'prop'): void {
+  private onImpact(x: number, y: number, strength: number, own: boolean, other: ImpactCand['other']): boolean {
     const s = clamp01(strength);
     const prox = this.near(x, y);
     const dist = own ? 1 : Math.pow(prox, 1.5) * MIX.aiVolume;     // AI cars: quieter and muffled with distance
-    if (dist <= 0.03) return;
+    if (dist <= 0.03) return false;
     const wallish = other === 'wall' || other === 'guardrail' || other === 'curb';
-    if (wallish && s < 0.35 && this.clock < this.scrapeUntil) return;   // sliding along a wall: the scrape loop covers it
-    if (!this.gate('impact', A.impactMinInterval)) return;
+    if (wallish && s < 0.35 && this.clock < this.scrapeUntil) return false;   // sliding along a wall: the scrape loop covers it
+    if (!this.gate(own ? 'impact:own' : 'impact', A.impactMinInterval, true)) return false;   // own car has its own gate
     const fam: Family = other === 'guardrail' ? 'impact_metal'
       : other === 'wall' || other === 'curb' || other === 'road' ? 'impact_concrete'
       : other === 'prop' ? (this.pick2() ? 'impact_plastic' : 'impact_wood')
       : 'impact_metal';
     const key = `impact:${fam}`;
     const lastS = this.lastStrength[key] ?? -1;
-    if (!this.gate(key, MIX.sameKeyInterval) && s < lastS + 0.25) return;   // same material again: only if clearly stronger
+    if (!this.gate(key + (own ? ':own' : ''), MIX.sameKeyInterval, own) && s < lastS + 0.25) return false;   // same material again: only if clearly stronger
     this.lastStrength[key] = s;
-    const level = dist * (0.3 + 0.7 * Math.pow(s, 0.8));                   // volume by impact strength
+    const level = dist * impactLevel(s);                                    // volume by impact strength (wide curve)
     // leaky energy bucket: a pile-up of hits thins out instead of summing to noise
     const cost = level * (0.5 + s);
-    if (this.bucket + cost > MIX.bucketMax && level < this.bucket * 0.6) return;
+    if (this.bucket + cost > MIX.bucketMax && level < this.bucket * 0.6 && !own) return false;
     this.bucket = Math.min(MIX.bucketMax * 1.5, this.bucket + cost);
 
     const rate = lerp(1.1, 0.86, s) * (0.96 + Math.random() * 0.08);
@@ -445,6 +516,7 @@ export class AudioManager {
     if (s > 0.55 && other !== 'prop') this.hit('crunch', level * 0.55 * s, lerp(1.1, 0.9, s), prox);
     if (s > 0.7) this.hit('debris', level * 0.45, 0.95 + Math.random() * 0.15, prox);
     this.duck(level * s);
+    return true;
   }
 
   private lastStrength: Record<string, number> = {};

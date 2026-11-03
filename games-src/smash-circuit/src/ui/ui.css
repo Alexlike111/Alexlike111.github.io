@@ -390,7 +390,6 @@
   left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; white-space: nowrap;
   font: 900 italic 8em/1 var(--display); color: #fff; -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink), 0 0.12em 0 var(--orange-d);
 }
-.ui-root.tut-on .countdown { visibility: hidden; }
 .ui-root .countdown.go { color: var(--green); font-size: 6.5em; }
 .ui-root .countdown.pop { animation: cd-pop 0.7s cubic-bezier(.2, 1.4, .4, 1) both; }
 @keyframes cd-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0.85; transform: translate(-50%, -50%) scale(0.9); } }
@@ -525,7 +524,10 @@
   .ui-root .tut-step { grid-template-columns: 1fr; justify-items: center; text-align: center; flex: 1; position: relative; padding-top: 0.9em; }
   .ui-root .tut-step .n { position: absolute; top: -0.5em; left: -0.4em; }
   .ui-root .tutorial { width: min(100%, 40em); }
-  .ui-root.is-touch .layer-tutorial { padding-bottom: calc(max(0.7em, var(--sab)) + 0.7em); }
+  /* landscape / desktop: the hint sheet sits at the TOP under the timer, so it never covers the speed readout or the GAS button;
+     the countdown drops below it while it is up */
+  .ui-root .layer-tutorial, .ui-root.is-touch .layer-tutorial { align-items: flex-start; padding: calc(max(0.7em, var(--sat)) + 5.2em) max(0.7em, var(--sar)) 0 max(0.7em, var(--sal)); }
+  .ui-root.tut-on .countdown { top: 66%; }
 }
 
 /* Short screens (landscape phones): tighten vertical rhythm */
@@ -600,7 +602,7 @@
 /* Narrow screens (portrait phones): keep the HUD top row from colliding */
 @media (max-width: 520px) {
   .ui-root .timer { font-size: 1.55em; min-width: 4.8em; }
-  .ui-root .laps span:first-child { display: none; }
+  .ui-root .laps { gap: 0.6em; font-size: 0.8em; }
   .ui-root .pos { padding: 0.15em 0.5em 0.2em; }
   .ui-root .pos .pn { font-size: 2.1em; }
   .ui-root .lapbox { padding: 0.15em 0.5em 0.2em; }
@@ -662,3 +664,53 @@
 .ui-root .speedlines.on { opacity: 0.5; animation: sl-flicker 0.14s steps(2) infinite; }
 @keyframes sl-flicker { 0% { transform: rotate(0deg) scale(1.02); } 100% { transform: rotate(1.6deg) scale(1.05); } }
 @media (prefers-reduced-motion: reduce) { .ui-root .speedlines.on { animation: none; opacity: 0.4; } }
+
+/* ---------------------------------------------------------------- audit #5 / #12 / #21 / #1: feedback, repair hold, save banner */
+.ui-root .lappill, .ui-root .finishban, .ui-root .smashfloat { left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; white-space: nowrap; }
+.ui-root .lappill[hidden], .ui-root .finishban[hidden], .ui-root .smashfloat[hidden] { display: none; }
+.ui-root .lappill {
+  top: 21%; display: flex; align-items: baseline; gap: 0.6em; padding: 0.3em 0.9em 0.35em; border-radius: 1em;
+  background: var(--panel); border: 0.16em solid var(--ink); box-shadow: 0 0.25em 0 rgba(0, 0, 0, 0.35); font-weight: 900;
+}
+.ui-root .lappill span { font: 900 italic 1em/1 var(--display); letter-spacing: 0.04em; }
+.ui-root .lappill small { opacity: 0.7; font-size: 0.8em; }
+.ui-root .lappill b { font: 900 italic 1.6em/1 var(--display); font-variant-numeric: tabular-nums; }
+.ui-root .lappill i { font-style: normal; font-size: 1.05em; font-variant-numeric: tabular-nums; color: var(--green); }
+.ui-root .lappill[data-state="slow"] i { color: #ff8a7a; }
+.ui-root .lappill[data-state="best"] { background: #6b2fd6; border-color: #fff; }
+.ui-root .lappill[data-state="best"] i { color: #fff; }
+.ui-root .lappill.pop, .ui-root .finishban.pop, .ui-root .smashfloat.pop { animation: pill-pop 0.35s cubic-bezier(.2, 1.5, .4, 1) both; }
+@keyframes pill-pop { from { opacity: 0; transform: translateX(-50%) scale(0.7); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+.ui-root .finishban { top: 30%; display: flex; flex-direction: column; align-items: center; gap: 0.15em; }
+.ui-root .finishban b { font: 900 italic 4.4em/1 var(--display); color: #fff; -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink), 0 0.12em 0 var(--orange-d); }
+.ui-root .finishban span { font: 900 italic 1.7em/1 var(--display); padding: 0.15em 0.7em 0.2em; border-radius: 0.8em; background: var(--panel); border: 0.12em solid var(--ink); font-variant-numeric: tabular-nums; }
+.ui-root .finishban[data-pos="1"] span { color: #ffd34d; }
+.ui-root .smashfloat { top: 60%; display: flex; flex-direction: column; align-items: center; opacity: 0.95; }
+.ui-root .smashfloat b { font: 900 italic 2.4em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink); }
+.ui-root .smashfloat small { font: 900 0.8em/1 var(--body); letter-spacing: 0.14em; color: #fff; text-shadow: 0 0.1em 0 var(--ink); }
+
+/* repair chip = a hold; the hint says what to do */
+.ui-root .cardmg .rep { position: relative; overflow: hidden; touch-action: none; user-select: none; }
+.ui-root .cardmg .rbar { position: absolute; left: 0; bottom: 0; height: 0.3em; width: calc(var(--rp, 0) * 100%); background: var(--green); border-radius: 0 0.2em 0.2em 0; }
+.ui-root .cardmg[data-mode="stop"] .rep, .ui-root .cardmg[data-mode="cd"] .rep { background: #c7c1a3; }
+.ui-root .cardmg[data-mode="poor"] .rep { background: #9a9a9a; }
+.ui-root .cardmg[data-mode="go"] .rep { animation: rep-pulse 1.1s ease-in-out infinite alternate; }
+.ui-root .cardmg.holding .rep { animation: none; background: #ffe27a; }
+@keyframes rep-pulse { to { transform: scale(1.06); } }
+
+/* progress could not be loaded */
+.ui-root .savewarn {
+  display: flex; align-items: center; gap: 0.7em; margin: 0 auto; max-width: min(100%, 30em); padding: 0.5em 0.8em; border-radius: 0.9em;
+  background: rgba(120, 28, 20, 0.92); border: 0.14em solid #fff; font-weight: 800; font-size: 0.85em; line-height: 1.2; z-index: 3;
+}
+.ui-root .savewarn .btn { flex: none; min-height: 44px; padding: 0.4em 0.9em; }
+
+/* results: breakdown rows and the three actions */
+.ui-root .rr.sub { padding-top: 0.28em; padding-bottom: 0.28em; background: rgba(0, 0, 0, 0.25); font-size: 0.95em; }
+.ui-root .res-pair { margin-top: 0.1em; }
+.ui-root .res-pair > .btn:only-child { grid-column: 1 / -1; }
+@media (max-height: 460px) {
+  .ui-root .rr.sub { padding-top: 0.15em; padding-bottom: 0.15em; font-size: 0.88em; }
+  .ui-root .finishban b { font-size: 3em; }
+  .ui-root .lappill { top: 20%; }
+}

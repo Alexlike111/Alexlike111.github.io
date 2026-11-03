@@ -174,7 +174,8 @@ export class DestructibleRenderer {
       const cells = new Map<string, number[]>();
       for (const id of ids) {
         const s = states[id];
-        const key = chunk ? `${Math.floor(s.x / CHUNK)},${Math.floor(s.y / CHUNK)}` : 'all';
+        // dynamic props (they roll away from their start) share one never-culled group; everything else culls by chunk
+        const key = s.dynamic ? 'dyn' : chunk ? `${Math.floor(s.x / CHUNK)},${Math.floor(s.y / CHUNK)}` : 'all';
         let l = cells.get(key);
         if (!l) cells.set(key, (l = []));
         l.push(id);
@@ -209,7 +210,7 @@ export class DestructibleRenderer {
     for (const t of types) {
       const ids = states.filter((s) => s.kind === 'prop' && s.propType === t).map((s) => s.id);
       const big = t === 'tree' || t === 'rock' || t === 'hayBale' || t === 'crate' || t === 'tireStack' || t === 'barrel';
-      makeChunked('destr:' + t, propGeometry(t as never, def.theme, pal), mats.toon, ids, big, true, false, (id, g) => { this.owner[id] = g; });
+      makeChunked('destr:' + t, propGeometry(t as never, def.theme, pal), mats.toon, ids, big, true, true, (id, g) => { this.owner[id] = g; });
     }
     const roadIds = byKind('road');
     const rg = roadHoleGeometry(pal);

@@ -52,6 +52,10 @@ export class DriftTracker {
   /** drifts completed cleanly / cancelled (stats, tests) */
   clean = 0;
   cancelled = 0;
+  /** per car (set by SimCar from CarStats): entry speeds x this (< 1 = drifts start slower), charge rate x, exit boost time x */
+  entryMul = 1;
+  chargeMul = 1;
+  boostTimeMul = 1;
 
   private sinceExit = 99;
   private chain = false;           // the last drift ended cleanly (a new one inside comboWindow raises the combo)
@@ -87,9 +91,10 @@ export class DriftTracker {
     if (!this.ctl.active) {
       const as = Math.abs(steer);
       let enter = false, hold = false;
-      if (f > 0 && holdReq && as >= 0.2 && v >= D.minSpeed) { enter = true; hold = true; }
-      else if (f > 0 && req === DRIFT_AUTO && as >= D.autoSteer && v >= D.autoSpeed && this.sinceExit >= D.autoReentry) enter = true;
-      else if (f > 0 && allowBrakeTap && tapped && as >= D.brakeTapSteer && f >= D.brakeTapSpeed) enter = true;
+      const em = this.entryMul;
+      if (f > 0 && holdReq && as >= 0.2 && v >= D.minSpeed * em) { enter = true; hold = true; }
+      else if (f > 0 && req === DRIFT_AUTO && as >= D.autoSteer && v >= D.autoSpeed * em && this.sinceExit >= D.autoReentry) enter = true;
+      else if (f > 0 && allowBrakeTap && tapped && as >= D.brakeTapSteer && f >= D.brakeTapSpeed * em) enter = true;
       if (enter) this.start(steer < 0 ? 1 : -1, hold);   // steer + = right = clockwise = dir -1
       return { kick };
     }
@@ -102,7 +107,7 @@ export class DriftTracker {
     this.noReq = wanted ? 0 : this.noReq + dt;
     this.counterT = into < -0.35 ? this.counterT + dt : 0;
     if (v >= D.keepSpeed) {
-      this.charge += dt * (this.angle >= D.minChargeAngle ? 1 : 0.3);
+      this.charge += dt * (this.angle >= D.minChargeAngle ? 1 : 0.3) * this.chargeMul;
       this.points += dt * D.pointsRate * (v / (100 / 3.6)) * clamp(this.angle / D.angleMax, 0, 1);
     }
     let t = 0;
@@ -156,7 +161,7 @@ export class DriftTracker {
     this.tier = 0; this.charge = 0;
     if (tier <= 0) return 0;
     this.boostTier = tier;
-    this.boostT = D.boostTime[tier - 1];
+    this.boostT = D.boostTime[tier - 1] * this.boostTimeMul;
     return D.boostKick[tier - 1];
   }
 }

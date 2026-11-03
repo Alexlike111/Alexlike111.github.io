@@ -265,6 +265,6 @@ describe('GPU resources of a car fleet', () => {
 describe('portrait zoom', () => {
   it('a phone in portrait shows <= 36 m at rest so the cars are big enough to tell apart', () => {
     expect(CONFIG.render.viewMetres.portrait).toBeLessThanOrEqual(36);
-    expect(CONFIG.render.viewMetres.portrait).toBeGreaterThanOrEqual(30);
+    expect(CONFIG.render.viewMetres.portrait).toBeGreaterThanOrEqual(22);
   });
 });

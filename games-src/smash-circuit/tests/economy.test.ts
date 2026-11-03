@@ -173,7 +173,7 @@ describe('save sanitising', () => {
     expect(s.unlockedTracks).toEqual(['t1', 't2']);
     expect(s.bestPlace).toEqual({ t2: 3 });
     expect(s.bestLap).toEqual({ t1: 70.2 });
-    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false });
+    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' });
     expect(s.carColor).toBe(CONFIG.render.carColors.length - 1);
     expect(s.racesFinished).toBe(4);
   });
@@ -183,5 +183,25 @@ describe('save sanitising', () => {
     const s = sanitizeSave({}, { t1: good, t2: { lapTime: 5, frames: [{ t: 'x' }, { t: 1 }] } });
     expect(s.ghosts.t1).toEqual(good);
     expect(s.ghosts.t2).toBeUndefined();
+  });
+});
+
+describe('smash payoff by object type (audit #12)', () => {
+  it('cones pay nothing, crates/trees/walls pay, curbs pay nothing; unknown props pay the generic rate', async () => {
+    const { smashValue, raceRewardParts } = await import('../src/meta/economy');
+    expect(smashValue('prop', 'cone')).toBe(0);
+    expect(smashValue('prop', 'crate')).toBeGreaterThan(0);
+    expect(smashValue('prop', 'tree')).toBeGreaterThan(smashValue('prop', 'sign'));
+    expect(smashValue('wall')).toBeGreaterThan(0);
+    expect(smashValue('curb')).toBe(0);
+    expect(smashValue('prop', 'mystery')).toBe(CONFIG.economy.smashPay.kind.prop);
+  });
+
+  it('smash money is capped per race and split from the place prize', async () => {
+    const { raceRewardParts } = await import('../src/meta/economy');
+    const r = raceRewardParts('t1', 1, 99999);
+    expect(r.smash).toBe(CONFIG.economy.smashPay.cap);
+    expect(r.total).toBe(r.prize + r.smash);
+    expect(raceRewardParts('t1', 1, -5).smash).toBe(0);
   });
 });

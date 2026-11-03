@@ -29,12 +29,15 @@ interface RaceScene {
   marker: PlayerMarker;
   ghost: THREE.Mesh;
   powerups: PowerUpVisuals;
+  visKey: string;
 }
 
 export interface RenderDebug {
   fps: number; drawCalls: number; debrisActive: number; triangles: number; quality: Quality; particles: number; breaksShown: number;
   /** ms spent in JS preparing a frame (sync, fx, camera) before the draw submit */
   cpuMs: number;
+  /** race camera state for tests: azimuth (0 = north-up), view half size (m), and a ground point (physics x, y) projected to NDC */
+  camera?: { azimuth: number; halfW: number; halfH: number; project(x: number, y: number): { x: number; y: number } };
 }
 
 declare global { interface Window { __render?: RenderDebug } }
@@ -51,6 +54,8 @@ export class GameRenderer {
   private fx: FxManager;
   private menu: MenuScene;
   private race: RaceScene | null = null;
+  /** last race's static visuals (track mesh + decor), kept so a retry on the same track does not rebuild them */
+  private visCache: { key: string; track: TrackVisual; decor: DecorVisual } | null = null;
   private mode: 'menu' | 'race' = 'menu';
   private poses: CarPose[] = [];
   private byId = new Map<number, CarPose>();
@@ -63,6 +68,13 @@ export class GameRenderer {
   private menuRaf = 0;
   private menuLast = 0;
   private disposed = false;
+  /** something visible changed (resize, quality, palette, new scene): the next frame must draw even when the game is frozen */
+  private dirty = true;
+  private ceiling: Quality = 'high';   // highest level auto-quality may climb back to
+  private okFor = 0;                   // s of healthy fps (counts toward a step up)
+  private lastUp = -1e9;               // clock of the last step up
+  private clock = 0;
+  private lastDrop = -1e9;
   private ro: ResizeObserver | null = null;
   private lightDir = new THREE.Vector3(...CONFIG.render.lightDir).normalize();
   private tF = new THREE.Vector3(); private tR = new THREE.Vector3(); private tU = new THREE.Vector3(); private tT = new THREE.Vector3();
@@ -74,9 +86,11 @@ export class GameRenderer {
     this.canvas = canvas;
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', alpha: false, stencil: false });
     this.gl.shadowMap.type = THREE.PCFShadowMap;
+    this.gl.shadowMap.enabled = true;   // never toggled: quality switches flip sun.castShadow only, so no material is invalidated
     this.gl.setClearColor(PALETTES.meadow.background);
     this.requested = quality;
     this.level = quality === 'auto' ? this.guessLevel() : quality;
+    this.ceiling = this.level;
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xaaccaa, 1.3);
     this.sun = new THREE.DirectionalLight(0xffffff, 1.9);
@@ -109,6 +123,9 @@ export class GameRenderer {
 
   // ------------------------------------------------------------------ quality / size
 
+  /** heading-up (rotating) camera on / off; landscape screens stay north-up whatever this says */
+  setCameraRotating(on: boolean): void { this.rig.rotating = on; this.dirty = true; }
+
   get fps(): number { return this.fpsAvg; }
   get quality(): Quality { return this.level; }
   /** seconds of visual hit-stop left after a heavy hit (effects run slowed); the game loop may use it to hold its own presentation too */
@@ -132,15 +149,16 @@ export class GameRenderer {
 
   setQuality(q: Quality | 'auto'): void {
     this.requested = q;
-    this.applyLevel(q === 'auto' ? this.guessLevel() : q, false);
+    const lvl = q === 'auto' ? this.guessLevel() : q;
+    this.ceiling = lvl;
+    this.applyLevel(lvl, false);
   }
 
   private applyLevel(level: Quality, first: boolean): void {
     const q = CONFIG.render.quality[level];
-    const prevShadow = this.gl.shadowMap.enabled;
     this.level = level;
+    this.dirty = true;
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
-    this.gl.shadowMap.enabled = q.shadows;
     this.sun.castShadow = q.shadows;
     if (q.shadows) {
       const size = q.shadowMap || 1024;
@@ -154,13 +172,12 @@ export class GameRenderer {
       c.left = -e; c.right = e; c.top = e; c.bottom = -e;
       c.updateProjectionMatrix();
     }
-    if (prevShadow !== q.shadows) this.mats.refresh();
     this.fx.setQuality(level);
     this.race?.decor.setDensity(CONFIG.render.decorDensity[level]);
     this.race?.destr.setWallShadows(level === 'high');
     this.race?.fleet.setBlobShadows(!q.shadows);
     this.menu.fleet.setBlobShadows(!q.shadows);
-    this.sinceChange = 0; this.lowFor = 0;
+    this.sinceChange = 0; this.lowFor = 0; this.okFor = 0;
     this.debug.quality = level;
     if (!first) this.resize();
   }
@@ -171,7 +188,9 @@ export class GameRenderer {
     const h = Math.max(1, this.canvas.clientHeight || this.canvas.height || 1);
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, CONFIG.render.quality[this.level].pixelRatio));
     this.gl.setSize(w, h, false);
+    this.dirty = true;
     this.rig.setAspect(w / h);
+    this.rig.setViewport(w, h);
     if (this.mode === 'menu') this.rig.update(0, 0, 0, 0, 0, 0, 0);
   }
 
@@ -180,12 +199,26 @@ export class GameRenderer {
     const inst = 1 / dt;
     this.fpsAvg += (inst - this.fpsAvg) * Math.min(1, dt * 2.5);
     this.sinceChange += dt;
+    this.clock += dt;
     if (this.requested !== 'auto' || this.sinceChange < 2) return;
-    if (this.fpsAvg < CONFIG.render.autoQualityFpsDown) this.lowFor += dt; else this.lowFor = Math.max(0, this.lowFor - dt * 2);
-    if (this.lowFor >= CONFIG.render.autoQualityWindow) {
+    const R = CONFIG.render;
+    if (this.fpsAvg < R.autoQualityFpsDown) this.lowFor += dt; else this.lowFor = Math.max(0, this.lowFor - dt * 2);
+    if (this.lowFor >= R.autoQualityWindow) {
       const i = QUALITY_ORDER.indexOf(this.level);
+      // dropped again soon after a step up: that level does not hold, stop climbing back to it
+      if (this.clock - this.lastUp < R.autoQualityUpCooldown && i > 0) this.ceiling = QUALITY_ORDER[i - 1];
       if (i > 0) this.applyLevel(QUALITY_ORDER[i - 1], false);
+      this.lastDrop = this.clock;
       this.lowFor = 0; this.sinceChange = 0;
+      return;
+    }
+    // healthy for a long stretch (a transient spike dropped us): climb back one level, with a cooldown
+    if (this.fpsAvg >= R.autoQualityFpsUp && this.lowFor === 0) this.okFor += dt; else this.okFor = 0;
+    const i = QUALITY_ORDER.indexOf(this.level);
+    if (this.okFor >= R.autoQualityUpWindow && i < QUALITY_ORDER.indexOf(this.ceiling) && this.clock - this.lastDrop >= R.autoQualityUpCooldown) {
+      this.applyLevel(QUALITY_ORDER[i + 1], false);
+      this.lastUp = this.clock;
+      this.okFor = 0;
     }
   }
 
@@ -217,13 +250,20 @@ export class GameRenderer {
     if (!this.race) return;
     this.scene.remove(this.race.group);
     this.race.destr.dispose();
-    this.race.decor.dispose();
-    this.race.track.dispose();
+    this.dropVisCache();
+    this.visCache = { key: this.race.visKey, track: this.race.track, decor: this.race.decor };
     this.race.fleet.dispose();
     this.race.marker.dispose();
     this.race.powerups.dispose();
     this.race = null;
     this.fx.clear();
+  }
+
+  private dropVisCache(): void {
+    if (!this.visCache) return;
+    this.visCache.decor.dispose();
+    this.visCache.track.dispose();
+    this.visCache = null;
   }
 
   loadRace(sim: ISim): void {
@@ -232,9 +272,19 @@ export class GameRenderer {
     const def = sim.track.def;
     const pal = PALETTES[def.theme];
     this.applyPalette(pal);
+    this.dirty = true;
     const group = new THREE.Group();
-    const track = buildTrackVisual(sim.track, pal, this.mats);
-    const decor = buildDecor(sim.track, pal, this.mats, track.exclusions, CONFIG.render.decorDensity[this.level]);
+    const visKey = JSON.stringify(def);
+    let track: TrackVisual, decor: DecorVisual;
+    if (this.visCache && this.visCache.key === visKey) {
+      ({ track, decor } = this.visCache);   // same track again (retry / restart): reuse the built meshes
+      this.visCache = null;
+      decor.setDensity(CONFIG.render.decorDensity[this.level]);
+    } else {
+      this.dropVisCache();
+      track = buildTrackVisual(sim.track, pal, this.mats);
+      decor = buildDecor(sim.track, pal, this.mats, track.exclusions, CONFIG.render.decorDensity[this.level]);
+    }
     const destr = new DestructibleRenderer(sim.destructibles, def, pal, this.mats);
     destr.setWallShadows(this.level === 'high');
     const fleet = new CarFleet(this.geos, this.mats, Math.max(CONFIG.race.cars, sim.cars.length));
@@ -251,7 +301,7 @@ export class GameRenderer {
     const powerups = new PowerUpVisuals(sim, Math.max(CONFIG.race.cars, sim.cars.length));
     group.add(track.group, powerups.group, decor.group, destr.group, destr.rubble, fleet.group, ghost, marker.group);
     this.scene.add(group);
-    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost, powerups };
+    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost, powerups, visKey };
     this.menu.group.visible = false;
     this.mode = 'race';
     this.rig.setMenu(false);
@@ -262,6 +312,7 @@ export class GameRenderer {
     for (const p of this.poses) this.byId.set(p.state.id, p);
     destr.sync(sim.destructibles);
     const player = sim.cars.find((c) => c.isPlayer) ?? sim.cars[0];
+    this.rig.track = sim.track;
     this.rig.snap(player.x, player.y);
     this.resize();
     this.rig.update(0, player.x, player.y, 0, 0, 0, 1);
@@ -269,10 +320,23 @@ export class GameRenderer {
     fleet.update(this.poses, 0);
     marker.update(0, player.x, player.y, player.angle, true, this.metresPerPixel());
     this.placeSun(player.x, player.y);
-    this.gl.compile(this.scene, this.rig.camera);
+    this.precompile();
+  }
+
+  /**
+   * Compile the shaders for the current shadow state and for the opposite one (programs link in parallel with
+   * KHR_parallel_shader_compile), so a later auto-quality drop or step up never stalls on a shader compile.
+   */
+  private precompile(): void {
+    const cam = this.rig.camera;
+    this.gl.compile(this.scene, cam);
+    const sh = this.sun.castShadow;
+    this.sun.castShadow = !sh;
+    try { this.gl.compile(this.scene, cam); } finally { this.sun.castShadow = sh; }
   }
 
   showMenuScene(colorIndex: number): void {
+    this.dirty = true;
     this.unloadRace();
     this.mode = 'menu';
     this.applyPalette(PALETTES.meadow);
@@ -309,6 +373,7 @@ export class GameRenderer {
     this.placeSun(0, 0);
     this.fx.update(dt, this.rig.camera);
     this.gl.render(this.scene, this.rig.camera);
+    this.dirty = false;
     this.publish();
   }
 
@@ -322,6 +387,8 @@ export class GameRenderer {
     if (this.mode === 'menu' && !this.race) { this.renderMenuFrame(dt); return; }
     if (!this.race || this.race.sim !== sim) this.loadRace(sim);
     const R = this.race!;
+    // frozen (pause, results, ads, tutorial hold) and nothing changed since the last drawn frame: skip the whole frame
+    if (frameDt <= 0 && !this.dirty && events.length === 0) { this.publish(); return; }
     this.trackFps(frameDt);
 
     // ---- interpolated car poses
@@ -381,6 +448,7 @@ export class GameRenderer {
     this.placeSun(tgt.x, tgt.z);
     this.debug.cpuMs += (performance.now() - t0 - this.debug.cpuMs) * 0.1;
     this.gl.render(this.scene, this.rig.camera);
+    this.dirty = false;
     this.publish();
   }
 
@@ -411,6 +479,8 @@ export class GameRenderer {
     d.particles = this.fx.smoke.active + this.fx.sparks.active;
     d.breaksShown = this.race?.destr.brokenShown ?? 0;
     d.quality = this.level;
+    const rig = this.rig;
+    d.camera = { azimuth: rig.viewAz, halfW: rig.halfW, halfH: rig.halfH, project: (x, y) => rig.project(x, y) };
   }
 
   dispose(): void {
@@ -420,6 +490,7 @@ export class GameRenderer {
     this.ro?.disconnect();
     this.canvas.removeEventListener('webglcontextlost', this.onLost);
     this.unloadRace();
+    this.dropVisCache();
     this.fx.dispose();
     this.menu.dispose();
     this.mats.dispose();

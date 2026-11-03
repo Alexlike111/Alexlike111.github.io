@@ -15,7 +15,7 @@ const out = path.join(here, 'out');
 fs.mkdirSync(out, { recursive: true });
 const args = process.argv.slice(2);
 const only = (args.find((a) => a.startsWith('--only=')) ?? '').slice(7);
-const PORT = 4173;
+const PORT = Number(process.env.E2E_PORT) || 4173;
 const URL = `http://localhost:${PORT}/`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -397,10 +397,10 @@ async function auditLayout() {
     const tut = await page.evaluate(() => {
       const t = document.querySelector('.tutorial'); const cd = document.querySelector('.countdown');
       const r = t.getBoundingClientRect();
-      return { h: r.height, vh: innerHeight, countdownHidden: !cd || getComputedStyle(cd).visibility === 'hidden' || cd.hidden, okBtn: !!t.querySelector('[data-act=tutorialOk]') && t.querySelector('[data-act=tutorialOk]').getBoundingClientRect().bottom <= r.bottom + 1 };
+      return { h: r.height, vh: innerHeight, countdownOverlap: !!cd && !cd.hidden && (() => { const c = cd.getBoundingClientRect(); return c.width > 0 && !(c.right < r.left || c.left > r.right || c.bottom < r.top || c.top > r.bottom); })(), okBtn: !!t.querySelector('[data-act=tutorialOk]') && t.querySelector('[data-act=tutorialOk]').getBoundingClientRect().bottom <= r.bottom + 1 };
     });
     if (touch && Math.min(w, h) < 520 && tut.h > tut.vh * 0.3 + 1) problems.push(`${key} tutorial: ${Math.round(tut.h)}px is more than 30% of ${tut.vh}px`);
-    if (!tut.countdownHidden) problems.push(`${key} tutorial: countdown visible behind the tutorial`);
+    if (tut.countdownOverlap) problems.push(`${key} tutorial: the hint sheet overlaps the countdown`);
     if (!tut.okBtn) problems.push(`${key} tutorial: "Got it" button is clipped`);
     await page.click('[data-act=tutorialOk]'); await sleep(2200);
     // damage -> tap-to-repair widget shown

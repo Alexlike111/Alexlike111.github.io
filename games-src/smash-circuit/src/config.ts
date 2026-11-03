@@ -1,6 +1,6 @@
 // ALL tunable numbers live here (balance, physics, economy, render quality).
 // Modules read from CONFIG; never hard-code balance values elsewhere.
-import type { UpgradeBranch, ZoneId } from './types';
+import type { CarTraits, RivalMode, UpgradeBranch, ZoneId } from './types';
 
 export const CONFIG = {
   title: 'Smash Circuit',
@@ -141,6 +141,14 @@ export const CONFIG = {
       tree:      { shape: 'circle', w: 1.6, h: 1.6, mass: 0,  hp: 220, threshold: 5000, dmgMul: 0.6 },
       rock:      { shape: 'circle', w: 2.2, h: 2.2, mass: 0,  hp: 450, threshold: 7000, dmgMul: 0.6 },
     } as const,
+    // ---- appended: anti-shortcut walls (audit #8, X1) ----
+    // a wall / guardrail with a centre-line point more than `arc` m away along the lap within `dist` m on its outer side
+    // faces another part of the track: it is indestructible (breaking it would open a shortcut)
+    lock: { dist: 45, arc: 100 },
+    // ---- appended: proximity scrape wear (audit #20, X3) ----
+    // each step, a car corner within `gap` m of a wall / guardrail face sliding along it at >= scrape.minSpeed wears the
+    // piece by scrape[kind] hp per metre (and makes sparks); independent of the solver impulse
+    scrapeGap: 0.15,
   },
   race: {
     cars: 8,                   // [3.3]
@@ -152,10 +160,17 @@ export const CONFIG = {
     finishGrace: 6,            // s the race goes on after the player finishes, then unfinished cars get estimated times (<= 15)
     playerGridSlot: 5,         // 0-based grid slot of the player (0 = pole)
     gridSideFraction: 0.2,     // grid column offset as fraction of road width
-    maxProgressJump: 25,       // m of along-track change per update accepted at once
-    jumpConfirmTime: 1.0,      // s a bigger jump must be stable to be accepted
+    maxProgressJump: 25,       // (legacy, no longer read: progress is credited only by driving, see gateMaxStep)
+    jumpConfirmTime: 1.0,      // (legacy, no longer read)
     ghostMinLap: 1,            // ghost recording starts after this many completed laps (flying start)
     ghostHold: 2,              // s the ghost waits at the line after its lap
+    // ---- appended: gate-based lap progress (audit #8, R1/R2) ----
+    gates: 4,                  // ordered gates per lap (gate 0 = start / finish line); every gate must be crossed forward for a lap
+    gateMaxStep: 3,            // m of along-track change per update credited as driving; bigger = a jump (cut / leg switch), not credited
+    gateLateral: 8,            // m beyond the road edge inside which a gate crossing still counts (past the walls, on the run-off)
+    creditLateral: 2,          // m beyond the road edge inside which driven distance is credited as progress (the walls stand at ~2.2)
+    gateJumpTolerance: 40,     // m: a forward hop up to this (stuck reset, respawn) still passes the gates in it, but the lap is not clean
+    cutTolerance: 6,           // m of a lap that may be jumped instead of driven and still be a clean lap (best lap, ghost, leaderboard)
   },
   ai: {
     lookAhead: 14,             // metres base
@@ -214,7 +229,7 @@ export const CONFIG = {
     // cost per next level (index = current level)
     cost: [250, 600, 1200, 2200, 3800],
     engine: { powerPerLevel: 0.07, topSpeedPerLevel: 0.04 },
-    grip: { gripPerLevel: 0.07 },
+    grip: { gripPerLevel: 0.07, latPerLevel: 0.04 },   // tyres: grip rate and the cornering limit (car roster)
     armor: { armorPerLevel: 0.18 },
   } as const,
   economy: {
@@ -226,12 +241,26 @@ export const CONFIG = {
     repairMinCost: 20,
     rewardedMultiplier: 2,     // doubled reward [6.5]
     unlockPlace: 3,            // finish top-3 to unlock next track
+    // ---- audit #12: smash payoff by object type (money per piece broken by the player; curbs pay nothing) ----
+    smashPay: {
+      kind: { wall: 6, guardrail: 6, road: 8, prop: 3, curb: 0 } as Record<string, number>,
+      prop: { cone: 0, barrel: 3, crate: 4, tireStack: 5, sign: 2, tree: 8, rock: 8, hayBale: 3 } as Record<string, number>,
+      cap: 150,                // max smash money per race
+    },
+  },
+  // ---- audit #21: repair is a decision ----
+  repair: {
+    showBelowHealth: 0.75,     // the HUD repair chip appears only below this health (0..1)
+    raceMaxSpeed: 3,           // m/s: in a race the car must be nearly stopped to repair
+    holdS: 1.8,                // s the hold must last while stopped
+    cooldownS: 20,             // s of race time between two repairs
+    maxPerRace: 2,
   },
   render: {
     carColors: [0xff5a36, 0x2f8cff, 0xffc93c, 0x3ccf6e, 0xb26bff, 0xff7ac6, 0x2fd6d6, 0xf2f2f2],
     cameraHeight: 80,
     cameraTilt: 0.32,          // rad from vertical (slight 3/4 look, still top-down ortho)
-    viewMetres: { portrait: 35, landscape: 56 }, // visible width at rest (portrait 35 m: the car is ~50 px long on a 390 px wide phone)
+    viewMetres: { portrait: 26, landscape: 56 }, // visible width at rest (portrait 26 m: the car is ~60 px long on a 390 px wide phone)
     zoomOutAtSpeed: 0.42,      // +42% view at top speed (the faster car needs to see further ahead)
     lookAhead: 0.6,            // seconds of velocity
     quality: {
@@ -244,16 +273,20 @@ export const CONFIG = {
     },
     autoQualityFpsDown: 50,    // drop a level when avg FPS under this for 3 s
     // ---- appended by module D (render & fx) ----
+    autoQualityFpsUp: 57,      // avg FPS at/above this for autoQualityUpWindow s lets auto-quality climb one level back
+    autoQualityUpWindow: 12,
+    autoQualityUpCooldown: 45, // s after a drop before a step up (and a drop within it after a step up caps the level)
     autoQualityWindow: 3,      // s of low FPS before the level drops
     decorDensity: { low: 0.4, medium: 0.75, high: 1 },          // share of decor instances shown (trees, flowers, ...)
     skidCapacity: { low: 160, medium: 420, high: 800 },         // skid mark quads
     particleCapacity: 900,     // smoke/dust/confetti pool at particles = 1
     sparkCapacity: 420,        // additive pool (sparks, fire) at particles = 1
-    shadowExtent: 52,          // half-size (m) of the shadow frustum around the camera target
+    shadowExtent: 58,          // half-size (m) of the shadow frustum around the camera target
     lightDir: [-0.5, 1.0, -0.42] as [number, number, number],   // direction TO the sun (x, up, z)
     camera: {
       follow: 16,              // 1/s position smoothing (7 lagged ~8 m behind the car at 200 km/h and ate the look-ahead)
-      zoomFollow: 2.2,         // 1/s zoom smoothing
+      zoomFollow: 2.2,         // 1/s zoom smoothing (zooming back in)
+      zoomOutFollow: 4,        // 1/s ... zooming out is quicker so the road ahead never waits for the zoom
       lookAheadMaxX: 0.42,     // max look-ahead as fraction of half view width
       lookAheadMaxY: 0.5,      // ... of half view height
       lookAheadSmooth: 2.5,    // 1/s smoothing of the velocity used for look-ahead
@@ -263,6 +296,26 @@ export const CONFIG = {
       shakeFromImpact: 1.4,    // trauma added at impact strength 1 (player)
       portraitAspect: 0.8,     // aspect <= this uses the portrait view width
       landscapeAspect: 1.35,   // aspect >= this uses the landscape view width
+      // ---- framing (track-aware look-ahead, rotating camera) ----
+      lookTime: 1.5,           // s of road ahead the view must show (also the look-ahead distance per m/s)
+      lookMin: 12,             // m of road ahead used for framing at rest (the grid)
+      needMin: 3,              // m added to speed * lookTime for the "must be visible" point
+      lookGain: 0.6,           // view centre moves this fraction of the way to the road ahead (before the clamp)
+      maxShift: 0.46,          // the view centre may sit at most this fraction of half the view away from the car
+      safeEdge: 0.56,          // hard limit: the car never leaves the central 56% box (the follow lag fits in the gap to maxShift)
+      aheadFit: 1.4,           // the road point lookTime ahead must fit within this many half views from the car
+      shiftSmooth: 3,          // 1/s smoothing of the look-ahead shift (screen space)
+      speedSmooth: 4,          // 1/s smoothing of the speed that sets the look-ahead distance (crashes do not jerk the view)
+      zoomMax: 2,              // upper bound of the zoom factor (the forward-visibility rule may ask for more)
+      minPxPerMetre: 8,        // zoom never goes out past this many CSS px per metre (the car stays >= ~36 px long)
+      maxRadius: 60,           // m, upper bound of the view half diagonal (keeps decor / shadow coverage)
+      rotFollow: 6,            // 1/s azimuth following the track tangent
+      rotMaxRate: 1.6,         // rad/s cap of the azimuth rate
+      rotLook: 0.35,           // the tangent is read this fraction of the look distance ahead of the car
+      rotAspectFrom: 0.95,     // the rotating camera fades out between these aspects (landscape stays north-up)
+      rotAspectTo: 1.3,
+      glideTime: 0.9,          // s of slow follow after a teleport (respawn / reset): the view glides instead of jumping
+      glideFollow: 5,          // 1/s position smoothing during the glide
     },
     car: {
       wheelRadius: 0.46, wheelWidth: 0.42, wheelX: 1.3, wheelZ: 0.82,
@@ -368,6 +421,10 @@ export const CONFIG = {
     tutorialSeconds: 6,
     hudFpsDebug: false,
     countdownPopMs: 700,
+    // ---- audit #5 / #16 ----
+    tutorialHideAfterGoS: 3,   // the first-run hint sheet hides this long after GO (or at the first input)
+    lapPillMs: 2200,           // lap time pill duration
+    smashFloatMs: 1100,        // in-race "+N" smash float
   },
   controls: {
     gasButtonSize: 0.26,       // fraction of min(screen w,h)
@@ -381,6 +438,11 @@ export const CONFIG = {
     keySteerReturn: 14,        // 1/s: and back to centre
     itemFlickUp: 0.55,         // GAS thumb moved up by this many button sizes = use item (re-arms at half)
     driftButtonSize: 0.17,     // fraction of min(screen w,h): DRIFT button left of GAS (second finger; holds a drift like Space)
+    // ---- audit #4 / #15 ----
+    gasDeadBand: 0.25,         // GAS finger: dead band around its landing x, in button sizes (no steering jump on touch-down)
+    gasDeadBandMin: 0.1,       // ... but never smaller than this (landing near the right screen edge has little room)
+    pullHold: 0.15,            // s a steering finger must stay below the brake line before auto-gas brakes
+    homeYDrift: 0.35,          // button sizes per second the steering finger's home Y follows a slow downward creep
   },
   // ---- appended by module F (integration) ----
   game: {
@@ -399,6 +461,9 @@ export const CONFIG = {
   },
   save: {
     maxGhostChars: 240000,     // total size of the ghost storage record; thinned above this
+    // ---- audit #1 (save loading) ----
+    retryDelaysMs: [1500, 3000, 6000, 12000, 30000] as number[],   // backoff between reload attempts after a failed load (the last delay repeats)
+    initWaitMs: 8000,          // how long one load attempt waits for a slow Bridge init
   },
   // ---- appended by power-ups (boost pads, item boxes, items) ----
   items: {
@@ -508,7 +573,58 @@ export const CONFIG = {
     aiMinSpeed: 15,           // m/s ... when going at least this fast
     aiSkill: 0.55,            // ... and its skill is at least this
   },
+  // ---- appended by the car roster (src/meta/cars.ts, render/carModels.ts): 10 cars, every one selectable ----
+  // Each car: stock stats (upgrades multiply them, see `upgrades`), hitbox L x W (m), drift ease and ONE trait (numeric hooks,
+  // see CarTraits in types.ts). 'scrapper' is the reference car: exactly the CONFIG.car numbers.
+  // `pace` = measured AI lap time relative to the scrapper (skill 1, t1-t3, tests/carRoster.test.ts prints it); the rival field
+  // uses it so an AI car of any model is as fast as the player's model (fair with any combination).
+  cars: {
+    starter: 'scrapper',
+    order: ['scrapper', 'gravel', 'sandhopper', 'brawler', 'glint', 'scorcher', 'needle', 'bruiser', 'brick', 'mammoth'] as string[],
+    defs: {
+      scrapper:   { power: 13.0, top: 60, grip: 12, lat: 25.0, brake: 14, mass: 1000, armor: 1.0, length: 4.2, width: 2.0, drift: 1.0, pace: 1,
+        traits: { regen: { delay: 3, perSec: 2.5, cap: 0.75 } } },
+      gravel:     { power: 13.6, top: 57.5, grip: 11.5, lat: 24.5, brake: 14, mass: 950, armor: 0.9, length: 4.0, width: 1.95, drift: 1.45, pace: 1,
+        traits: { driftCharge: 1.7 } },
+      sandhopper: { power: 15.0, top: 55, grip: 12.5, lat: 24.0, brake: 14.5, mass: 760, armor: 0.8, length: 3.7, width: 2.0, drift: 1.25, pace: 1,
+        traits: { offroadDragMul: 0.3, offroadGripMul: 1.45 } },
+      brawler:    { power: 14.2, top: 64, grip: 10.5, lat: 23.0, brake: 12.5, mass: 1300, armor: 1.2, length: 4.6, width: 2.05, drift: 1.3, pace: 1,
+        traits: { launch: { mul: 1.45, until: 24 } } },
+      glint:      { power: 14.0, top: 63, grip: 12.5, lat: 25.5, brake: 15, mass: 980, armor: 0.85, length: 4.4, width: 1.95, drift: 1.05, pace: 1,
+        traits: { draft: { range: 18, power: 0.3, ceil: 0.08 } } },
+      scorcher:   { power: 16.5, top: 62, grip: 11, lat: 23.0, brake: 12, mass: 1150, armor: 1.0, length: 4.4, width: 1.9, drift: 1.15, pace: 1,
+        traits: { boostTimeMul: 1.6 } },
+      needle:     { power: 14.5, top: 67, grip: 13.5, lat: 27.5, brake: 16.5, mass: 800, armor: 0.7, length: 4.6, width: 1.85, drift: 0.7, pace: 1,
+        traits: { downforce: 0.15 } },
+      bruiser:    { power: 13.5, top: 59, grip: 11.5, lat: 23.8, brake: 13, mass: 1450, armor: 1.4, length: 4.7, width: 2.15, drift: 0.9, pace: 1,
+        traits: { ramDealMul: 1.8, ramFrontOnly: true, frontTakenMul: 0.45 } },
+      brick:      { power: 11.4, top: 55, grip: 11, lat: 22.5, brake: 12, mass: 1650, armor: 1.75, length: 4.9, width: 2.25, drift: 0.75, pace: 1,
+        traits: { ramDealMul: 1.7 } },
+      mammoth:    { power: 13.5, top: 56, grip: 11.5, lat: 23.0, brake: 12.5, mass: 2000, armor: 2.1, length: 5.0, width: 2.5, drift: 0.7, pace: 1,
+        traits: { plowKeep: 0.9, shockImmune: true } },
+    } as Record<string, CarDefConfig>,
+    // damage is computed from the impulse normalised to this mass (impulse / mass * massRef = a velocity change): in a car-vs-car hit
+    // both cars get the same impulse, so the lighter car takes more damage; a heavy car hitting a wall is not punished for its mass
+    massRef: 1000,
+    // drift ease (CarStats.drift) d: entry speeds / d^entryPow, slide drag / d, boost charge x d^chargePow
+    driftEntryPow: 0.5, driftChargePow: 0.6,
+    // garage bars: 1..10 across the roster; the race-pace number is shown as is
+    bars: 10,
+    // cosmetic badges per car (never a lock): races driven for 1 / 2 stars, wins for 3 stars
+    badge: { races1: 1, races2: 5, wins3: 3 },
+  },
+  rivals: {
+    default: 'mixed' as RivalMode,
+    // a rival car's speed is scaled by its pace relative to the player's model, clamped here (fairness with any combination)
+    paceClamp: [0.9, 1.1] as [number, number],
+  },
 } as const;
+
+/** One car of the roster in CONFIG.cars.defs (stock values before upgrades). */
+export interface CarDefConfig {
+  power: number; top: number; grip: number; lat: number; brake: number; mass: number; armor: number;
+  length: number; width: number; drift: number; pace: number; traits: CarTraits;
+}
 
 export const UPGRADE_BRANCHES: UpgradeBranch[] = ['engine', 'grip', 'armor'];
 export const FRONT_ZONES: ZoneId[] = ['front', 'wheelFL', 'wheelFR'];

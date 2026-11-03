@@ -65,6 +65,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 const INIT_TIMEOUT_MS = 8000;
+const STORAGE_TIMEOUT_MS = 8000;   // one storage.get / storage.set may not hang the save queue longer than this
 // Ad watchdogs. The Bridge reports loading -> opened -> closed | failed. If it silently skips an ad
 // (minimum delay, no fill) and emits nothing, the game must not hang, so:
 //  - nothing at all within AD_OPEN_WAIT_MS            -> treat as "not shown", resolve;
@@ -97,19 +98,65 @@ function sendMessage(msg: string, opts?: unknown): void {
   } catch { /* ignore */ }
 }
 
+/** Callbacks that need a really initialised Bridge: run now when ready, otherwise when initialize() finally resolves. */
+const whenReadyQueue: Array<() => void> = [];
+const lateInitListeners: Array<() => void> = [];
+let initPromise: Promise<boolean> | null = null;
+let initFor: BridgeLike | null = null;
+
+function runWhenReady(fn: () => void): void {
+  if (ready) fn(); else whenReadyQueue.push(fn);
+}
+
+function markReady(): void {
+  if (ready) return;
+  ready = true;
+  for (const fn of whenReadyQueue.splice(0)) { try { fn(); } catch { /* ignore */ } }
+  for (const fn of lateInitListeners) { try { fn(); } catch { /* ignore */ } }
+}
+
+export type LoadStatus = 'ok' | 'empty' | 'failed';
+export interface LoadResult { status: LoadStatus; values: Record<string, unknown> }
+
 export const platform = {
+  /**
+   * Starts Bridge initialisation and waits for it up to INIT_TIMEOUT_MS. `ready` becomes true ONLY when initialize()
+   * really resolved (never on timeout): language / storage / ads are not touched before that. A slow init that finishes
+   * later flips `ready` then and fires the `onReady` listeners (late language, late listeners, save retry).
+   * No Bridge at all (unit tests, plain hosting) = local mode: ready stays false, `hasBridge()` is false.
+   */
   async init(): Promise<void> {
     const b = B();
     if (!b) return;
-    try {
-      // A REJECTED initialize() means the Bridge is unusable: stay "not ready" (language 'en', no storage/ads).
-      // A slow one (timeout) is still used: it may finish later and its calls are safe either way.
-      if (!b.isInitialized) ready = await withTimeout(b.initialize().then(() => true, () => false), INIT_TIMEOUT_MS, true);
-      else ready = true;
-    } catch (e) {
-      console.warn('[platform] bridge init failed', e);
+    if (initFor !== b) { initFor = b; initPromise = null; ready = false; }   // a different Bridge object (tests): start over
+    if (!initPromise) {
+      initPromise = (async () => {
+        try {
+          if (!b.isInitialized) await b.initialize();
+          markReady();
+          return true;
+        } catch (e) {
+          console.warn('[platform] bridge init failed', e);
+          return false;
+        }
+      })();
     }
+    await withTimeout(initPromise, INIT_TIMEOUT_MS, false);
   },
+
+  /** A Bridge object exists (false = unit tests / plain static hosting: no storage, no ads, nothing to wait for). */
+  hasBridge(): boolean { return B() !== null; },
+  isReady(): boolean { return ready; },
+
+  /** Waits until the Bridge is really initialised (true) or `ms` passed / init failed (false). */
+  async waitReady(ms: number): Promise<boolean> {
+    if (ready) return true;
+    if (!B() || !initPromise) return false;
+    return withTimeout(initPromise.then((ok) => ok && ready), ms, false);
+  },
+
+  /** Fires once when the Bridge becomes ready AFTER `init()` already returned (slow initialize). */
+  onLateReady(cb: () => void): void { lateInitListeners.push(cb); },
 
   /**
    * Raw platform language tag (e.g. "ru", "en", "pt"). Playgama 3.4.2: never derived from the browser by the game
@@ -125,30 +172,38 @@ export const platform = {
   },
 
   onPause(cb: (paused: boolean) => void): void {
-    const p = B()?.platform;
-    if (p && ready) p.on(evName('pause'), (v) => cb(!!v));
+    runWhenReady(() => { const p = B()?.platform; if (p) p.on(evName('pause'), (v) => cb(!!v)); });
   },
 
   onAudio(cb: (enabled: boolean) => void): void {
-    const p = B()?.platform;
-    if (p && ready) p.on(evName('audio'), (v) => cb(!!v));
+    runWhenReady(() => { const p = B()?.platform; if (p) p.on(evName('audio'), (v) => cb(!!v)); });
   },
 
-  /** One storage.get for all keys. Missing keys -> null. Never throws. */
-  async load(keys: string[]): Promise<Record<string, unknown>> {
+  /**
+   * One storage.get for all keys. Reports what really happened:
+   *  - 'ok'     at least one key holds data;
+   *  - 'empty'  the read worked and every key is genuinely absent (new player), or there is no Bridge at all (local mode);
+   *  - 'failed' not initialised, rejected or timed out: the stored progress is UNKNOWN, callers must not write defaults.
+   * Never throws.
+   */
+  async load(keys: string[]): Promise<LoadResult> {
     const out: Record<string, unknown> = {};
     for (const k of keys) out[k] = null;
     const b = B();
-    if (!b?.storage || !ready) return out;
+    if (!b) return { status: 'empty', values: out };
+    if (!b.storage || !ready) return { status: 'failed', values: out };
     try {
-      const res = await withTimeout(b.storage.get(keys, true), INIT_TIMEOUT_MS, null as unknown);
+      const FAIL = Symbol('timeout');
+      const res = await withTimeout(b.storage.get(keys, true) as Promise<unknown>, STORAGE_TIMEOUT_MS, FAIL as unknown);
+      if (res === FAIL) return { status: 'failed', values: out };
       if (Array.isArray(res)) keys.forEach((k, i) => { out[k] = res[i] ?? null; });
       else if (res && typeof res === 'object') for (const k of keys) out[k] = (res as Record<string, unknown>)[k] ?? null;
       else if (keys.length === 1 && res != null) out[keys[0]] = res;
+      return { status: keys.some((k) => out[k] != null) ? 'ok' : 'empty', values: out };
     } catch (e) {
       console.warn('[platform] storage.get failed', e);
+      return { status: 'failed', values: out };
     }
-    return out;
   },
 
   /** One storage.set with every changed key. Never throws. */
@@ -157,8 +212,8 @@ export const platform = {
     const keys = Object.keys(data);
     if (!b?.storage || !ready || keys.length === 0) return false;
     try {
-      await b.storage.set(keys, keys.map((k) => data[k]));
-      return true;
+      const ok = await withTimeout(b.storage.set(keys, keys.map((k) => data[k])).then(() => true, () => false), STORAGE_TIMEOUT_MS, false);
+      return ok;
     } catch (e) {
       console.warn('[platform] storage.set failed', e);
       return false;
@@ -198,12 +253,17 @@ export const platform = {
    * `onChange(open)` also fires for ads that were not requested by the game (platform-driven ads).
    */
   watchAds(onChange: (open: boolean) => void): void {
+    runWhenReady(() => platform.watchAdsNow(onChange));
+  },
+
+  /** @internal */
+  watchAdsNow(onChange: (open: boolean) => void): void {
     const ad = B()?.advertisement;
     if (!ad || !ready) return;
     let interstitial = ad.interstitialState === 'opened';
     let rewarded = ad.rewardedState === 'opened';
     const push = () => onChange(interstitial || rewarded);
-    if (interstitial || rewarded) push();
+    if (interstitial || rewarded) queueMicrotask(push);   // never synchronously: the caller may still be booting
     const track = (which: 'i' | 'r') => (...a: unknown[]) => {
       const open = a[0] === 'opened';
       const closed = a[0] === 'closed' || a[0] === 'failed';

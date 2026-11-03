@@ -403,3 +403,48 @@ describe('performance', () => {
     expect((performance.now() - t0) / 120).toBeLessThan(CONFIG.physics.stepBudgetMs);
   });
 });
+
+describe('no shortcut through walls facing another part of the track (audit X1)', () => {
+  for (const def of TRACKS) {
+    it(`${def.id}: between any two legs < ${D.lock.dist} m apart (> ${D.lock.arc} m of lap between them) one wall is indestructible`, () => {
+      const { g, ds } = setup(def);
+      const S = g.samples, n = S.length, L = g.length, half = g.def.width / 2;
+      let pairs = 0;
+      for (let i = 0; i < n; i += 3) {
+        for (let j = 0; j < n; j += 3) {
+          const ahead = (((S[j].s - S[i].s) % L) + L) % L;
+          const edge = D.lock.arc + 2 * D.guardrail.segmentLength;   // the rule works per wall segment: skip the fuzzy boundary
+          if (ahead < edge || ahead > L - edge) continue;
+          const dx = S[j].x - S[i].x, dy = S[j].y - S[i].y;
+          const d = Math.hypot(dx, dy);
+          if (d > D.lock.dist) continue;
+          // the walls the straight line from leg i to leg j passes through: at least one of them must be indestructible
+          const crossed = new Set<number>();
+          for (let k = 0; k <= 120; k++) {
+            const nn = g.nearest(S[i].x + dx * k / 120, S[i].y + dy * k / 120);
+            const a = Math.abs(nn.lateral) - (half + D.wallOffset);
+            if (Math.abs(a) <= D.wall.thickness / 2 + 0.3) crossed.add(ds.wallAt(nn.s, nn.lateral > 0 ? 1 : -1));
+          }
+          pairs++;
+          expect(crossed.size).toBeGreaterThan(0);
+          expect([...crossed].some((w) => ds.isLocked(w)), `${def.id} s ${S[i].s.toFixed(0)} <-> ${S[j].s.toFixed(0)} (${d.toFixed(1)} m)`).toBe(true);
+        }
+      }
+      if (def.id === 't3') expect(pairs).toBeGreaterThan(0);
+    });
+  }
+
+  it('a locked wall takes no damage from any hit; the other side of the same gap stays breakable', () => {
+    const { ds } = setup(TRACKS[2]);
+    const locked = ds.states.find((s) => (s.kind === 'wall' || s.kind === 'guardrail') && ds.isLocked(s.id))!;
+    expect(locked).toBeDefined();
+    ds.recordHit(locked.id, 1e7, locked.x, locked.y, 30, 0);
+    ds.recordScrape(locked.id, 40, 1, 30, 0);
+    const ev: SimEvent[] = [];
+    ds.flush(ev);
+    expect(locked.hp).toBe(locked.maxHp);
+    expect(locked.broken).toBe(false);
+    const walls = ds.states.filter((s) => s.kind === 'wall' || s.kind === 'guardrail');
+    expect(walls.filter((s) => ds.isLocked(s.id)).length).toBeLessThan(walls.length * 0.3);
+  });
+});

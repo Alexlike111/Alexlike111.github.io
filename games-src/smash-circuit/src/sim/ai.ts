@@ -1,8 +1,8 @@
 // AI driver: follows the spline with a racing-line bias, brakes by upcoming curvature, avoids and passes cars,
 // makes small human mistakes and recovers when stuck. PURE (no physics, no DOM). Deterministic given the rng.
 import { CONFIG } from '../config';
-import type { AiPersonality, CarInput, CarState, OilSlick, TrackGeometry } from '../types';
-import { driftSteerForCurvature, steerForCurvature } from './carModel';
+import type { AiPersonality, CarInput, CarState, CarStats, OilSlick, TrackGeometry } from '../types';
+import { driftSteerForCurvature, latLimit, steerForCurvature } from './carModel';
 import { DRIFT_HOLD, DRIFT_NONE } from './drift';
 
 const A = CONFIG.ai;
@@ -45,6 +45,8 @@ export class AiDriver {
   readonly personality: AiPersonality;
   /** Oil slicks on the road (set by the Sim): treated as obstacles to steer around, never as cars to follow. */
   hazards: OilSlick[] | null = null;
+  /** The driver's own car (set by the Sim): cornering limit, downforce, brakes, size. null = the reference car. */
+  car: CarStats | null = null;
 
   private readonly rng: () => number;
   private out: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
@@ -62,7 +64,8 @@ export class AiDriver {
   private readonly nearDs: number[] = [];
   private readonly nearW: number[] = [];
   private readonly nearSpeed: number[] = [];
-  private readonly nearExtra: number[] = [];   // extra clearance (m) on top of the car-to-car clearance (oil slicks)
+  private readonly nearExtra: number[] = [];   // extra clearance (m) on top of the car-to-car clearance (oil slicks, wide cars)
+  private readonly nearLen: number[] = [];     // half length sum (m) of us and that car (follow gap)
 
   // errors
   private mistake: Mistake | null = null;
@@ -171,8 +174,11 @@ export class AiDriver {
     let gripFactor = clamp(fx.gripMul, 0.35, 1);
     if (car.offRoad) gripFactor *= 0.7; else if (car.onCurb) gripFactor *= 0.92;
     const skillScale = lerp(A.skillSpeedRange[0], A.skillSpeedRange[1], skill) * (A.trackSpeed[track.def.id] ?? 1);
-    let aLat = A.maxLatAccel * gripFactor;
-    let aBrake = C.brakeDecel * (0.6 + 0.4 * fx.gripMul) * A.brakeSafety;
+    const cs = this.car;
+    // the planning limit keeps the reference ratio (A.maxLatAccel / car.maxLatAccel) for every car's own cornering limit
+    const carLat = cs?.latAccel ?? C.maxLatAccel;
+    let aLat = A.maxLatAccel * (carLat / C.maxLatAccel) * gripFactor;
+    let aBrake = (cs?.brakeDecel ?? C.brakeDecel) * (0.6 + 0.4 * fx.gripMul) * A.brakeSafety;
 
     // ---------- mistakes
     this.updateMistakes(h, p);
@@ -216,7 +222,8 @@ export class AiDriver {
     const lookNominal = A.lookAhead * clamp(0.35 + av / 20, 0.35, 1) + A.lookAheadPerSpeed * av;   // short when crawling: sharp corrections
     // slow "form" wobble (a driver has good and bad minutes) so the order shuffles even between equal cars
     const form = 1 + A.formAmp * (1.3 - skill) * (0.65 * Math.sin(this.time * 0.23 + this.phase[2]) + 0.35 * Math.sin(this.time * 0.61 + this.phase[3]));
-    const scan = this.scan(track, s, clamp(lat, -half, half), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal);
+    const scan = this.scan(track, s, clamp(lat, -half, half), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal,
+      cs?.traits?.downforce ?? 0, cs?.topSpeed ?? C.baseTopSpeed);
     let look = Math.min(lookNominal, Math.max(6, scan.minRadius * 0.9 + 2));
     if (this.lookCur === 0) this.lookCur = look;
     this.lookCur += (look - this.lookCur) * Math.min(1, h * (look < this.lookCur ? 8 : 3));
@@ -256,7 +263,7 @@ export class AiDriver {
         const ovLine = overlap(target, this.nearLat[j], clear + this.nearExtra[j]);
         const ovNow = ds < A.closeFollow ? overlap(lat, this.nearLat[j], (clear + this.nearExtra[j]) * 0.9) : 0;
         if (Math.max(ovLine, ovNow) < 0.25) continue;
-        const gap = ds - C.length;
+        const gap = ds - this.nearLen[j];
         const want = A.followGap + A.followGapPerSpeed * av * (1 - 0.5 * p.aggression);
         let cap = Math.max(0, this.nearSpeed[j] + (gap - want) * 0.8);
         // the line we chose is free but we are still behind it: creep so the car can steer out (never into the bumper)
@@ -290,7 +297,8 @@ export class AiDriver {
       steer = -Math.sign(alpha);
     } else {
       const kappa = (2 * Math.sin(alpha)) / dist;
-      steer = car.driftActive ? driftSteerForCurvature(kappa, sp2, car.driftDir ?? 1, gripFactor) : steerForCurvature(kappa, Math.max(av, 1), gripFactor);
+      steer = car.driftActive ? driftSteerForCurvature(kappa, sp2, car.driftDir ?? 1, gripFactor, carLat)
+        : steerForCurvature(kappa, Math.max(av, 1), gripFactor, cs ? latLimit(cs, av) : C.maxLatAccel);
     }
     // damage steering pull is added by the car model: counter it (feed-forward) so a bent car still tracks the line
     steer = clamp(steer - fx.steerPull + steerTwitch, -1, 1);
@@ -338,7 +346,7 @@ export class AiDriver {
   /** Walks the road ahead and returns the speed that is safe now plus the tightest radius close by. */
   private scan(
     track: TrackGeometry, s: number, lat: number, aLat: number, aBrake: number,
-    scale: number, horizon: number, closeDist: number,
+    scale: number, horizon: number, closeDist: number, downforce = 0, top = 1,
   ): Scan {
     const S = track.samples, n = S.length, sp = track.length / n;
     const i0 = Math.floor((((s % track.length) + track.length) % track.length) / sp);
@@ -354,7 +362,11 @@ export class AiDriver {
       // a line inside a bend is tighter; being wide does not buy speed (the car still has to turn)
       const rEff = Math.max(4, R - Math.max(0, Math.sign(smp.curvature) * lat));
       if (d <= closeDist && rEff < minR) minR = rEff;
-      const vc = Math.sqrt(aLat * rEff) * scale * A.cornerSpeedK;
+      let vc = Math.sqrt(aLat * rEff) * scale * A.cornerSpeedK;
+      if (downforce > 0) {
+        // downforce (trait): more grip the faster the corner is taken; two fixed-point passes are plenty
+        for (let it = 0; it < 2; it++) vc = Math.sqrt(aLat * (1 + downforce * clamp((vc / top - 0.5) / 0.5, 0, 1)) * rEff) * scale * A.cornerSpeedK;
+      }
       const allowed = Math.sqrt(vc * vc + 2 * aBrake * Math.max(0, d - 1));
       if (allowed < v) v = allowed;
     }
@@ -369,7 +381,7 @@ export class AiDriver {
       if (dx * dx + dy * dy > 100) continue;
       const on = track.nearest(o.x, o.y, s);
       const ds = wrap2(on.s - s, track.length);
-      if (ds > 0 && ds < C.length + 5 && Math.abs(on.lateral - lat) < 2.2) return true;
+      if (ds > 0 && ds < ((car.length ?? C.length) + (o.length ?? C.length)) / 2 + 5 && Math.abs(on.lateral - lat) < 2.2) return true;
     }
     return false;
   }
@@ -393,7 +405,9 @@ export class AiDriver {
       this.nearDs[n] = ds;
       this.nearW[n] = w;
       this.nearSpeed[n] = o.speed;
-      this.nearExtra[n] = 0;
+      // wider cars need more room to pass (the clearance is tuned for two reference-width cars)
+      this.nearExtra[n] = ((car.width ?? C.width) + (o.width ?? C.width)) / 2 - C.width;
+      this.nearLen[n] = ((car.length ?? C.length) + (o.length ?? C.length)) / 2;
       n++;
     }
     const oils = this.hazards;
@@ -411,6 +425,7 @@ export class AiDriver {
         this.nearW[n] = 1;
         this.nearSpeed[n] = 99;               // never a speed cap: steer around it
         this.nearExtra[n] = o.radius - 0.9;
+        this.nearLen[n] = C.length;
         n++;
       }
     }

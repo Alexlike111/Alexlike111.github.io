@@ -40,6 +40,42 @@ export interface CarStats {   // final stats after upgrades, used by car model
   grip: number;         // lateral grip rate, 1/s (GRIP = 8 default)
   armor: number;        // damage multiplier divisor (1 = base, 2 = takes half damage)
   mass: number;         // kg
+  // ---- per-car model (car roster, src/meta/cars.ts). Optional: absent = the reference car (CONFIG.car)
+  modelId?: string;     // roster id ('scrapper', 'mammoth', ...)
+  latAccel?: number;    // m/s^2 cornering limit on healthy road (CONFIG.car.maxLatAccel)
+  brakeDecel?: number;  // m/s^2 (CONFIG.car.brakeDecel)
+  length?: number;      // m hitbox (CONFIG.car.length)
+  width?: number;       // m hitbox (CONFIG.car.width)
+  drift?: number;       // drift ease: > 1 enters drifts at lower speed, slides with less drag, charges the boost faster
+  traits?: CarTraits;   // the car's one special trait, as numeric hooks (1 / absent = neutral)
+}
+
+/** Numeric trait hooks; each is read at exactly one code point of the sim. */
+export interface CarTraits {
+  /** self-repair: after `delay` s without damage every zone regains `perSec` hp/s up to `cap` (fraction of max) */
+  regen?: { delay: number; perSec: number; cap: number };
+  /** drift boost charges this much faster */
+  driftCharge?: number;
+  /** damage dealt to other cars in car-vs-car contacts (any side, or only with the nose when `ramFrontOnly`) */
+  ramDealMul?: number;
+  ramFrontOnly?: boolean;
+  /** damage the front zone takes */
+  frontTakenMul?: number;
+  /** off-road (grass, torn road): extra drag multiplier and grip multiplier */
+  offroadDragMul?: number;
+  offroadGripMul?: number;
+  /** extra engine power at low speed: `mul` at standstill fading to 1 at `until` m/s */
+  launch?: { mul: number; until: number };
+  /** slipstream: within `range` m behind another car: engine x(1 + power), ceiling x(1 + ceil) */
+  draft?: { range: number; power: number; ceil: number };
+  /** boost pads, Nitro and drift exit boosts last this much longer */
+  boostTimeMul?: number;
+  /** extra cornering at speed: latAccel x(1 + downforce) at top speed, from 50% of top speed */
+  downforce?: number;
+  /** speed kept when plowing through a wall / static prop that breaks (global CONFIG.destruction.plowKeep) */
+  plowKeep?: number;
+  /** a Shockwave does not push this car */
+  shockImmune?: boolean;
 }
 
 export interface CarSetup {
@@ -47,7 +83,7 @@ export interface CarSetup {
   isPlayer: boolean;
   name: string;         // driver display name (not translated, short)
   colorIndex: number;   // 0..7 index into CONFIG.render.carColors
-  stats: CarStats;
+  stats: CarStats;      // stats.modelId = which car of the roster (render picks the model from it)
   ai?: AiPersonality;
   startDamage?: Partial<ZoneHp>;
 }
@@ -64,6 +100,9 @@ export interface CarState {
   isPlayer: boolean;
   colorIndex: number;
   name: string;
+  /** roster car id (absent on hand-built states = the reference car 'scrapper') and its hitbox size */
+  modelId?: string;
+  length?: number; width?: number;
   x: number; y: number; angle: number;
   vx: number; vy: number;
   angularVel: number;
@@ -206,14 +245,28 @@ export interface GhostData { trackId: string; lapTime: number; frames: GhostFram
 
 // ---------- Save data ----------
 export type UpgradeBranch = 'engine' | 'grip' | 'armor';
+export type UpgradeLevels = Record<UpgradeBranch, number>;
+/** Which cars the 7 rivals drive: the player's model, all different models, random models, or one picked model. */
+export type RivalMode = 'same' | 'mixed' | 'random' | 'pick';
 export interface SaveData {
-  version: 1;
+  version: 2;
   money: number;
-  upgrades: Record<UpgradeBranch, number>;   // level 0..max
+  /** selected roster car id */
+  car: string;
+  /** upgrade levels per car id (level 0..max); v1 saves had one global record -> migrated to the starter car */
+  carUpgrades: Record<string, UpgradeLevels>;
+  /** races finished / won per car id (badges only; every car is always selectable) */
+  carRaces: Record<string, number>;
+  carWins: Record<string, number>;
   unlockedTracks: string[];                  // track ids
   bestPlace: Record<string, number>;         // trackId -> best place (1..8)
   bestLap: Record<string, number>;           // trackId -> seconds
-  settings: { lang: 'en' | 'ru' | 'auto'; autoGas: boolean; quality: 'auto' | 'low' | 'medium' | 'high'; muted: boolean; tutorialDone: boolean };
+  settings: { lang: 'en' | 'ru' | 'auto'; autoGas: boolean; quality: 'auto' | 'low' | 'medium' | 'high'; muted: boolean; tutorialDone: boolean; camera: 'auto' | 'rotating' | 'fixed';
+    /** rival field (pre-race screen and settings); absent = 'mixed' */
+    rivals?: RivalMode;
+    /** model for RivalMode 'pick' */
+    rivalCar?: string;
+  };
   ghosts: Record<string, GhostData>;
   carColor: number;
   racesFinished: number;

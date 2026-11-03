@@ -56,6 +56,11 @@ export class DestructionSystem {
   private next: Int32Array = new Int32Array(0);
   private dynamicIds: number[] = [];
   private minPropThreshold = Infinity;
+  /** 1 = this wall / guardrail faces another, nearby part of the track: it never takes damage (no shortcut through it) */
+  private lockedFlag: Uint8Array = new Uint8Array(0);
+  /** wall / guardrail ids per side ([left, right]) in track order, segment length wallSeg (proximity scraping) */
+  private wallIds: number[][] = [];
+  private wallSeg = 1;
 
   // road chunk grid
   private roadFirst = 0;
@@ -142,6 +147,9 @@ export class DestructionSystem {
       }
       idsPerSide.push(ids);
     }
+    this.wallIds = idsPerSide;
+    this.wallSeg = seg;
+    this.lockFacingWalls(idsPerSide, seg, half);
     // neighbour links (cyclic) for splash damage
     const total = this.states.length;
     this.prev = new Int32Array(total).fill(-1);
@@ -153,6 +161,52 @@ export class DestructionSystem {
       }
     }
   }
+
+  /**
+   * A wall that faces another part of the track close by (two legs of a hairpin, the t3 mouth) would open a shortcut once
+   * broken: it is made indestructible. Rule: a centre-line point more than lock.arc metres (and less than half a lap) ahead
+   * along the lap lies within lock.dist metres of this wall (or of its centre-line point), beyond the wall (its outer side).
+   */
+  private lockFacingWalls(idsPerSide: number[][], seg: number, half: number): void {
+    const g = this.track, S = g.samples, ns = S.length, L = g.length;
+    const K = D.lock;
+    this.lockedFlag = new Uint8Array(this.states.length);
+    const d2max = K.dist * K.dist;
+    const sides = [1, -1];
+    for (let k = 0; k < idsPerSide.length; k++) {
+      const side = sides[k];
+      const ids = idsPerSide[k];
+      for (let j = 0; j < ids.length; j++) {
+        const sm = (j + 0.5) * seg;
+        const m = g.sampleAt(sm);
+        const onx = m.nx * side, ony = m.ny * side;              // outward normal of this wall
+        const wx = m.x + onx * (half + D.wallOffset), wy = m.y + ony * (half + D.wallOffset);
+        for (let i = 0; i < ns; i++) {
+          const q = S[i];
+          // only the part BEHIND the other one is locked: any crossing between the two legs passes one of its walls,
+          // so one locked side already closes the shortcut and the other side stays breakable
+          const ahead = (((q.s - sm) % L) + L) % L;
+          if (ahead < K.arc || ahead > L / 2) continue;
+          const cx = q.x - m.x, cy = q.y - m.y, dx = q.x - wx, dy = q.y - wy;
+          if (Math.min(cx * cx + cy * cy, dx * dx + dy * dy) > d2max || dx * onx + dy * ony <= 0) continue;
+          this.lockedFlag[ids[j]] = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  /** Id of the wall / guardrail segment at track position s on `side` (+1 = left of the travel direction, -1 = right). */
+  wallAt(s: number, side: number): number {
+    const ids = this.wallIds[side >= 0 ? 0 : 1];
+    if (!ids || !ids.length) return -1;
+    const L = this.track.length;
+    const j = Math.floor((((s % L) + L) % L) / this.wallSeg) % ids.length;
+    return ids[j];
+  }
+
+  /** True when the wall / guardrail `id` is indestructible because it faces a nearby part of the track. */
+  isLocked(id: number): boolean { return this.lockedFlag[id] === 1; }
 
   private buildCurbs(): void {
     const g = this.track;
@@ -328,7 +382,7 @@ export class DestructionSystem {
 
   private damage(id: number, dmg: number, vx: number, vy: number): void {
     const st = this.states[id];
-    if (st.broken || dmg <= 0) return;
+    if (st.broken || dmg <= 0 || this.lockedFlag[id] === 1) return;
     st.hp -= dmg;
     if (st.hp < 0) st.hp = 0;
     st.crack = 1 - st.hp / st.maxHp;

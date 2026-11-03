@@ -14,6 +14,7 @@ export const SURFACE_HOLE: Surface = { gripMul: C.holeGripMul, drag: C.holeDrag,
 
 export const NO_DAMAGE: DamageEffects = { powerMul: 1, topSpeedMul: 1, gripMul: 1, steerPull: 0, smoke: 0, sparks: 0 };
 
+/** Stats of the reference car (the roster's 'scrapper', stock). */
 export function baseStats(): CarStats {
   return {
     enginePower: C.baseEnginePower,
@@ -22,6 +23,15 @@ export function baseStats(): CarStats {
     armor: 1,
     mass: C.mass,
   };
+}
+
+/** Cornering limit (m/s^2) of a car at forward speed f: its own limit, plus downforce at speed (trait). */
+export function latLimit(stats: CarStats, f: number): number {
+  const base = stats.latAccel ?? C.maxLatAccel;
+  const df = stats.traits?.downforce;
+  if (!df) return base;
+  const r = Math.abs(f) / Math.max(1, stats.topSpeed);
+  return base * (1 + df * clamp((r - 0.5) / 0.5, 0, 1));
 }
 
 export function forwardSpeed(k: CarKinematics): number {
@@ -50,14 +60,16 @@ const D = CONFIG.drift;
 export function enginePush(f: number, vmax: number, stats: CarStats, fx: DamageEffects): number {
   const r = f > 0 ? clamp(f / Math.max(1, vmax), 0, 1) : 0;
   const taper = f >= 0 ? clamp((vmax - f) / (0.1 * vmax), 0, 1) : 1;
-  return stats.enginePower * fx.powerMul * (1 - C.powerFalloff * r) * taper;
+  const ln = stats.traits?.launch;
+  const launch = ln ? 1 + (ln.mul - 1) * clamp(1 - Math.abs(f) / ln.until, 0, 1) : 1;   // trait: extra pull off the line / out of hairpins
+  return stats.enginePower * fx.powerMul * (1 - C.powerFalloff * r) * taper * launch;
 }
 
 /** Best yaw rate (rad/s) at forward speed f: low-speed steering geometry, the lateral grip limit at speed, the absolute cap. */
-export function turnRateCap(f: number, gripMul = 1): number {
+export function turnRateCap(f: number, gripMul = 1, latAccel: number = C.maxLatAccel): number {
   const af = Math.abs(f);
   const geo = (af * Math.tan(C.maxSteerAngle)) / C.wheelBase;
-  return Math.min(C.maxYawRate, geo, (C.maxLatAccel * gripMul) / Math.max(af, 1));
+  return Math.min(C.maxYawRate, geo, (latAccel * gripMul) / Math.max(af, 1));
 }
 
 /** Soft centre: small inputs are a bit gentler, full input stays full (precision with a thumb). */
@@ -67,8 +79,8 @@ export function shapeSteer(s: number): number {
 }
 
 /** Inverse of the steering: the input that makes a car at forward speed f follow a path of curvature kappa (1/m, + = left). */
-export function steerForCurvature(kappa: number, f: number, gripMul = 1): number {
-  const cap = turnRateCap(Math.max(Math.abs(f), 0.5), gripMul);
+export function steerForCurvature(kappa: number, f: number, gripMul = 1, latAccel: number = C.maxLatAccel): number {
+  const cap = turnRateCap(Math.max(Math.abs(f), 0.5), gripMul, latAccel);
   const want = clamp((kappa * Math.max(Math.abs(f), 0.5)) / Math.max(cap, 1e-6), -1, 1);   // shaped steer magnitude
   const a = Math.abs(want), e = C.steerExpo;
   // invert a*(1-e) + a^2*e = want
@@ -77,10 +89,10 @@ export function steerForCurvature(kappa: number, f: number, gripMul = 1): number
 }
 
 /** Inverse of the drift steering: the input that makes a drifting car (dir +1 = left drift) follow curvature kappa. */
-export function driftSteerForCurvature(kappa: number, v: number, dir: number, gripMul = 1): number {
+export function driftSteerForCurvature(kappa: number, v: number, dir: number, gripMul = 1, latAccel: number = C.maxLatAccel): number {
   const d = dir >= 0 ? 1 : -1;
   const grip = clamp(gripMul, 0.3, 1);
-  const frac = (kappa * d * Math.max(v, 4) * Math.max(v, 4)) / (D.latAccel * grip);   // wanted share of the drift path accel
+  const frac = (kappa * d * Math.max(v, 4) * Math.max(v, 4)) / (D.latAccel * (latAccel / C.maxLatAccel) * grip);   // wanted share of the drift path accel
   const into = frac >= D.pathMid ? (frac - D.pathMid) / (1 - D.pathMid) : (frac - D.pathMid) / (D.pathMid - D.pathMin);
   return -clamp(into, -1, 1) * d;
 }
@@ -102,15 +114,16 @@ function integrateDrift(
   const pick = (lo: number, mid: number, hi: number): number => (into >= 0 ? mid + (hi - mid) * into : mid + (mid - lo) * into);
   const betaT = dir * pick(D.angleMin, D.angleMid, D.angleMax);
   const grip = clamp(fx.gripMul * surface.gripMul, 0.3, 1);
-  const pathRate = dir * Math.min(C.maxYawRate, (D.latAccel * grip * pick(D.pathMin, D.pathMid, 1)) / Math.max(v, 4));
+  const dLat = D.latAccel * ((stats.latAccel ?? C.maxLatAccel) / C.maxLatAccel);   // a car that corners harder also drifts tighter
+  const pathRate = dir * Math.min(C.maxYawRate, (dLat * grip * pick(D.pathMin, D.pathMid, 1)) / Math.max(v, 4));
 
   // speed along the travel direction
   let a = 0;
   const throttle = clamp(input.throttle, 0, 1), brake = clamp(input.brake, 0, 1);
   if (throttle > 0) a += enginePush(v, vmax, stats, fx) * D.powerMul * throttle * surfGrip;
-  if (brake > 0) a -= C.brakeDecel * D.brakeMul * brake * surfGrip;
+  if (brake > 0) a -= (stats.brakeDecel ?? C.brakeDecel) * D.brakeMul * brake * surfGrip;
   if (v > vmax) a -= (v - vmax) * 2;
-  let drag = C.rollingDrag + C.airDrag * v * v + D.angleDrag * clamp(Math.abs(beta) / D.angleMax, 0, 1.5);
+  let drag = C.rollingDrag + C.airDrag * v * v + (D.angleDrag / (stats.drift ?? 1)) * clamp(Math.abs(beta) / D.angleMax, 0, 1.5);
   if (surface.drag > 0) drag += surface.drag * (0.4 + 0.08 * v);
   v = Math.max(0, v + (a - drag) * dt);
 
@@ -158,7 +171,7 @@ export function integrateCar(
   if (throttle > 0) a += enginePush(f, vmax, stats, fx) * throttle * surfGrip;
   if (brake > 0) {
     if (f > 0.6) {
-      a -= C.brakeDecel * brake * (0.6 + 0.4 * fx.gripMul) * surfGrip;
+      a -= (stats.brakeDecel ?? C.brakeDecel) * brake * (0.6 + 0.4 * fx.gripMul) * surfGrip;
     } else {
       const rtaper = clamp((C.reverseMax + f) / (0.2 * C.reverseMax), 0, 1);
       a -= C.reversePower * fx.powerMul * brake * rtaper;
@@ -194,7 +207,7 @@ export function integrateCar(
   // speed, the lateral-acceleration limit at speed), so half stick is half the turn at every speed (no saturation),
   // blended in by angularVel damping (which is also the stability control: any yaw kick dies within ~0.15 s)
   const hb = input.handbrake ? C.handbrakeYawMul : 1;
-  const wCap = turnRateCap(f, fx.gripMul * surface.gripMul) * hb;
+  const wCap = turnRateCap(f, fx.gripMul * surface.gripMul, latLimit(stats, f)) * hb;
   let w = -shapeSteer(steerEff) * wCap * (f < 0 ? -1 : 1);
   // standstill stability: yaw authority fades below a few m/s
   w *= clamp(Math.abs(f) / C.lowSpeedSteerFade, 0, 1);

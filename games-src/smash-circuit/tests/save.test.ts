@@ -7,7 +7,7 @@ vi.mock('../src/platform/bridge', () => {
   let n = 0;
   return {
     platform: {
-      load: async (keys: string[]) => Object.fromEntries(keys.map((k) => [k, null])),
+      load: vi.fn(async (keys: string[]) => ({ status: 'empty', values: Object.fromEntries(keys.map((k) => [k, null])) })),
       save: vi.fn(async (data: Record<string, unknown>) => {
         const order = n++;
         await new Promise<void>((r) => { release.push(r); });
@@ -22,7 +22,7 @@ vi.mock('../src/platform/bridge', () => {
 });
 
 import * as bridge from '../src/platform/bridge';
-import { SAVE_KEY_CORE, SAVE_KEY_GHOSTS, defaultSave, flushSave, sanitizeSave, serializeGhosts, writeSave } from '../src/meta/save';
+import { SAVE_KEY_CORE, SAVE_KEY_CORRUPT, SAVE_KEY_GHOSTS, SAVE_KEY_PREV, canWrite, defaultSave, flushSave, loadSave, sanitizeSave, serializeGhosts, writeSave } from '../src/meta/save';
 
 const mock = bridge as unknown as { __calls: { data: Record<string, unknown>; order: number }[]; __release: () => void; __reset: () => void };
 
@@ -63,8 +63,82 @@ describe('save ghosts', () => {
   });
 });
 
+const loadMock = () => bridge.platform.load as unknown as ReturnType<typeof vi.fn>;
+type LoadRes = { status: string; values: Record<string, unknown> };
+const stored = (core: unknown, ghosts: unknown = null): LoadRes => ({ status: 'ok', values: { [SAVE_KEY_CORE]: core, [SAVE_KEY_GHOSTS]: ghosts } });
+
+describe('loadSave status (audit #1)', () => {
+  beforeEach(() => { mock.__reset(); loadMock().mockReset(); });
+
+  it('loaded: reads the stored record, enables writes and keeps the old record as sc_core_prev with the first write', async () => {
+    const raw = JSON.stringify({ ...defaultSave(), money: 5000 });
+    loadMock().mockResolvedValue(stored(raw));
+    const r = await loadSave();
+    expect(r.status).toBe('loaded');
+    expect(r.save.money).toBe(5000);
+    expect(canWrite()).toBe(true);
+    const p = writeSave({ ...r.save, money: 5100 });
+    await new Promise((x) => setTimeout(x, 0));
+    mock.__release(); await p; await flushSave();
+    expect(mock.__calls[0].data[SAVE_KEY_PREV]).toBe(raw);
+    // only the FIRST write of the session carries the backup
+    const p2 = writeSave({ ...r.save, money: 5200 });
+    await new Promise((x) => setTimeout(x, 0));
+    mock.__release(); await p2;
+    expect(SAVE_KEY_PREV in mock.__calls[1].data).toBe(false);
+  });
+
+  it('empty: a genuinely absent record = new player with defaults, writes enabled', async () => {
+    loadMock().mockResolvedValue({ status: 'empty', values: { [SAVE_KEY_CORE]: null, [SAVE_KEY_GHOSTS]: null } });
+    const r = await loadSave();
+    expect(r.status).toBe('empty');
+    expect(r.save.money).toBe(defaultSave().money);
+    expect(canWrite()).toBe(true);
+  });
+
+  it('failed: a throwing / failed read gives defaults but BLOCKS every write (the stored save must survive)', async () => {
+    loadMock().mockResolvedValue({ status: 'failed', values: {} });
+    const r = await loadSave();
+    expect(r.status).toBe('failed');
+    expect(canWrite()).toBe(false);
+    await writeSave({ ...defaultSave(), money: 1 });
+    await flushSave();
+    expect(bridge.platform.save).not.toHaveBeenCalled();
+    loadMock().mockRejectedValue(new Error('boom'));
+    expect((await loadSave()).status).toBe('failed');
+    expect(canWrite()).toBe(false);
+  });
+
+  it('a later successful retry re-enables writes', async () => {
+    loadMock().mockResolvedValueOnce({ status: 'failed', values: {} });
+    await loadSave();
+    expect(canWrite()).toBe(false);
+    loadMock().mockResolvedValueOnce(stored(JSON.stringify({ ...defaultSave(), money: 77 })));
+    const r = await loadSave();
+    expect(r.status).toBe('loaded');
+    expect(canWrite()).toBe(true);
+  });
+
+  it('corrupt: an unparseable core record gives defaults and is backed up to sc_core_corrupt (not lost)', async () => {
+    loadMock().mockResolvedValue(stored('{not json'));
+    const r = await loadSave();
+    expect(r.status).toBe('corrupt');
+    expect(r.save.money).toBe(defaultSave().money);
+    expect(canWrite()).toBe(true);
+    const p = writeSave(r.save);
+    await new Promise((x) => setTimeout(x, 0));
+    mock.__release(); await p; await flushSave();
+    expect(mock.__calls[0].data[SAVE_KEY_CORRUPT]).toBe('{not json');
+  });
+});
+
 describe('writeSave queue', () => {
-  beforeEach(() => mock.__reset());
+  beforeEach(async () => {
+    mock.__reset();
+    loadMock().mockReset();
+    loadMock().mockResolvedValue({ status: 'empty', values: { [SAVE_KEY_CORE]: null, [SAVE_KEY_GHOSTS]: null } });
+    await loadSave();   // writes enabled
+  });
 
   it('serialises writes: the second storage.set starts only after the first finished, in call order', async () => {
     const a = { ...defaultSave(), money: 111 };

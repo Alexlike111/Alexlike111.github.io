@@ -21,7 +21,9 @@ vi.mock('../src/platform/bridge', () => ({
     onPause: (cb: (p: boolean) => void) => { h.pauseCb = cb; },
     onAudio: () => {},
     watchAds: (cb: (o: boolean) => void) => { h.adCb = cb; },
-    load: async (keys: string[]) => Object.fromEntries(keys.map((k) => [k, null])),
+    onLateReady: () => {},
+    waitReady: async () => true,
+    load: async (keys: string[]) => ({ status: 'empty', values: Object.fromEntries(keys.map((k) => [k, null])) }),
     save: async () => true,
     showInterstitial: () => {
       const st = { resolve: () => {}, calls: (h.interstitial?.calls ?? 0) + 1, pending: true };
@@ -38,7 +40,7 @@ vi.mock('../src/platform/bridge', () => ({
 }));
 
 vi.mock('../src/render', () => ({
-  GameRenderer: class { fps = 60; loadRace() {} frame() {} showMenuScene() {} setQuality() {} },
+  GameRenderer: class { fps = 60; loadRace() {} frame() {} showMenuScene() {} setQuality() {} setCameraRotating() {} },
 }));
 
 vi.mock('../src/audio/audio', () => ({
@@ -109,7 +111,7 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
-const settings = (over: object = {}) => ({ lang: 'en', autoGas: false, quality: 'auto', muted: false, tutorialDone: true, ...over });
+const settings = (over: object = {}) => ({ lang: 'en', autoGas: false, quality: 'auto', muted: false, tutorialDone: true, camera: 'auto', ...over });
 
 describe('game flow', () => {
   it('boots into the menu', () => {
@@ -117,15 +119,25 @@ describe('game flow', () => {
     expect(h.ui!.calls.showMainMenu?.length).toBe(1);
   });
 
-  it('first run: the sim is held (countdown too) until the tutorial is dismissed', () => {
+  it('first run: the tutorial is non-blocking - the countdown runs, the sheet hides at the first input after GO', () => {
     G().startRace('t1');
     expect(G().state).toBe('racing');
     expect(h.ui!.calls.showTutorial?.length).toBe(1);
     run(1);
-    expect(G().sim!.race.countdown).toBeCloseTo(CONFIG.race.countdown, 1);
-    h.ui!.handlers.settings(settings({ tutorialDone: true }));
+    expect(G().sim!.race.countdown).toBeLessThan(CONFIG.race.countdown - 0.5);   // not frozen behind the sheet
+    expect(h.ui!.calls.hideTutorial).toBeUndefined();
+    run(CONFIG.race.countdown + 0.3);
+    h.input = { throttle: 1, brake: 0, steer: 0, handbrake: false };
+    run(0.2);
+    expect(h.ui!.calls.hideTutorial?.length).toBe(1);
+  });
+
+  it('first run: with no input the sheet hides at GO + tutorialHideAfterGoS', () => {
+    G().startRace('t1');
+    run(CONFIG.race.countdown + CONFIG.ui.tutorialHideAfterGoS - 0.5);
+    expect(h.ui!.calls.hideTutorial).toBeUndefined();
     run(1);
-    expect(G().sim!.race.countdown).toBeLessThan(CONFIG.race.countdown - 0.5);
+    expect(h.ui!.calls.hideTutorial?.length).toBe(1);
   });
 
   it('pause freezes the sim, resume continues; level messages follow', () => {
@@ -248,6 +260,46 @@ describe('game flow', () => {
     expect(G().sim).not.toBe(first);
     expect(G().sim!.race.phase).toBe('countdown');
     expect(h.levels).toEqual(['started', 'paused', 'failed', 'started']);
+  });
+
+  it('results: Race again starts the same track with NO interstitial; Next track starts the unlocked one', async () => {
+    h.ui!.handlers.settings(settings());
+    G().startRace('t1');
+    run(0.5);
+    G().forceFinish();
+    expect(G().state).toBe('results');
+    const res = h.ui!.calls.showResults![0][0] as { nextTrack?: string | null };
+    h.ui!.handlers.retry();
+    await flush();
+    expect(h.interstitial).toBeNull();
+    expect(G().state).toBe('racing');
+    const len1 = G().sim!.track.length;
+    // top-3 unlocks t2 -> Next track
+    G().save.unlockedTracks.push('t2');
+    G().forceFinish();
+    h.ui!.handlers.nextTrack('t2');
+    await flush();
+    expect(h.interstitial).toBeNull();
+    expect(G().sim!.track.length).not.toBe(len1);
+    expect(res).toBeDefined();
+  });
+
+  it('retry is ignored outside the results screen', () => {
+    h.ui!.handlers.retry();
+    expect(G().state).toBe('menu');
+  });
+
+  it('boot with an ad already open does not crash (watchAds fires synchronously)', async () => {
+    h.adCb = null;
+    const mod = await import('../src/platform/bridge');
+    const p = mod.platform as unknown as { watchAds: (cb: (o: boolean) => void) => void };
+    const orig = p.watchAds;
+    p.watchAds = (cb) => { cb(true); h.adCb = cb; };
+    try {
+      const g = await bootGame();
+      expect(g).toBeDefined();
+      h.adCb!(false);
+    } finally { p.watchAds = orig; }
   });
 
   it('locked tracks cannot be started', () => {

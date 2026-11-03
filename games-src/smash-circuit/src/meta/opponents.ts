@@ -1,7 +1,7 @@
 // Builds the 7 AI opponents (and the player's CarSetup). PURE; deterministic for a given seed.
 import { CONFIG } from '../config';
-import type { AiPersonality, CarSetup, CarStats, SaveData } from '../types';
-import { statsFor } from './economy';
+import type { AiPersonality, CarSetup, CarStats, RivalMode, SaveData } from '../types';
+import { carIdOr, carStats, levelsOf, paceFactor, rivalModeOr, rivalModels } from './cars';
 
 /** Display names are proper nouns: deliberately not translated. */
 export const DRIVER_NAMES = [
@@ -30,14 +30,26 @@ function shuffled<T>(arr: T[], r: () => number): T[] {
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 export function makePlayerSetup(save: SaveData, name: string): CarSetup {
-  return { id: 0, isPlayer: true, name, colorIndex: save.carColor, stats: statsFor(save.upgrades) };
+  const car = carIdOr(save.car);
+  return { id: 0, isPlayer: true, name, colorIndex: save.carColor, stats: carStats(car, levelsOf(save, car)) };
+}
+
+/** Which cars the rivals drive (pre-race screen / settings). */
+export interface RivalChoice { mode: RivalMode; car?: string }
+
+/** Rival choice stored in the settings (defaults filled in). */
+export function rivalChoiceOf(save: SaveData): RivalChoice {
+  return { mode: rivalModeOr(save.settings.rivals), car: save.settings.rivalCar };
 }
 
 /**
  * 7 AI opponents (ids 1..7). Difficulty rises with the track index; the AI also mirrors a share of the player's
  * upgrade advantage so a fully upgraded car is still challenged. Colours never clash with `playerColor`.
+ * Rival models follow `rivals` (no choice given: every rival drives the player's model; the game passes the saved choice). Fairness: a rival car's speeds are scaled by its model's measured
+ * pace relative to the player's model (paceFactor), so the field is equally strong whatever cars are on the grid; the model
+ * keeps its handling, size, mass, armor and trait.
  */
-export function makeOpponents(trackIndex: number, playerStats: CarStats, seed: number, playerColor = 0): CarSetup[] {
+export function makeOpponents(trackIndex: number, playerStats: CarStats, seed: number, playerColor = 0, rivals?: RivalChoice): CarSetup[] {
   const O = CONFIG.meta.opponents;
   const ti = Math.max(0, Math.min(O.skill.length - 1, Math.floor(trackIndex) || 0));
   const r = rng((seed ^ 0x9e3779b9) + ti * 7919);
@@ -48,11 +60,16 @@ export function makeOpponents(trackIndex: number, playerStats: CarStats, seed: n
   const [skillLo, skillHi] = O.skill[ti];
   const [scaleLo, scaleHi] = O.statScale[ti];
 
-  const base = statsFor({ engine: 0, grip: 0, armor: 0 });
+  // the player's upgrade advantage is measured against the stock version of the player's own model
+  const playerModel = carIdOr(playerStats.modelId);
+  const base = carStats(playerModel);
   const powerAdv = playerStats.enginePower / base.enginePower - 1;
   const gripAdv = playerStats.grip / base.grip - 1;
   const armorAdv = playerStats.armor / base.armor - 1;
+  const topAdv = playerStats.topSpeed / base.topSpeed - 1;
   const follow = O.followPlayer;
+  // separate stream, so the model choice never shifts names / skills of a given seed
+  const models = rivalModels(rivals ? rivalModeOr(rivals.mode) : 'same', playerModel, count, rng((seed ^ 0x2c1b3c6d) + ti * 104729), rivals?.car);
 
   // Strength rank of each car is a seeded permutation: the car id says nothing about how fast the driver is,
   // and the order changes from race to race (same seed -> same field).
@@ -69,17 +86,21 @@ export function makeOpponents(trackIndex: number, playerStats: CarStats, seed: n
       laneOffset: (r() * 2 - 1) * O.laneSpread,
       mistakeRate: Math.min(1, (1 - skill) * O.mistakeBase),
     };
+    const m = carStats(models[i]);
+    const f = paceFactor(models[i], playerModel);
     out.push({
       id: i + 1,
       isPlayer: false,
       name: names[i],
       colorIndex: colours[i % colours.length],
       stats: {
-        enginePower: base.enginePower * scale * (1 + powerAdv * follow),
-        topSpeed: base.topSpeed * lerp(0.96, 1.0, t) * (1 + (playerStats.topSpeed / base.topSpeed - 1) * follow),
-        grip: base.grip * scale * (1 + gripAdv * follow),
-        armor: base.armor * (1 + armorAdv * follow),
-        mass: base.mass,
+        ...m,
+        enginePower: m.enginePower * f * f * scale * (1 + powerAdv * follow),
+        topSpeed: m.topSpeed * f * lerp(0.96, 1.0, t) * (1 + topAdv * follow),
+        grip: m.grip * f * scale * (1 + gripAdv * follow),
+        latAccel: (m.latAccel ?? CONFIG.car.maxLatAccel) * f * f * (1 + gripAdv * follow * 0.5),
+        brakeDecel: (m.brakeDecel ?? CONFIG.car.brakeDecel) * f * f,
+        armor: m.armor * (1 + armorAdv * follow),
       },
       ai,
     });

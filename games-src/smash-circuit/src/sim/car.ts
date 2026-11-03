@@ -8,7 +8,7 @@ import { ZONES } from '../types';
 import { engineRpm, integrateCar, lateralSpeed, forwardSpeed, wrapAngle, type CarKinematics, type Surface, SURFACE_ROAD } from './carModel';
 import { DriftTracker } from './drift';
 import {
-  PART_OFFSET, applyImpulseDamage, computeEffects, createZoneHp, partsKnockedOff, partsToDetach, totalHealth,
+  PART_OFFSET, applyImpulseDamage, computeEffects, createZoneHp, partsKnockedOff, partsToDetach, totalHealth, zoneForLocalPoint, type CarDims,
 } from './damage';
 import { CarBuffs } from './buffs';
 import { makeRng } from './rng';
@@ -45,6 +45,17 @@ export class SimCar {
   private preW = 0;
   /** biggest single hit (N*s) per body side in the step being flushed: front, rear, left, right */
   private knock = new Float64Array(4);
+  /** hitbox (m) of this model */
+  readonly dims: CarDims;
+  /** impulse -> damage normalisation: massRef / mass (a light car takes more damage from the same impulse) */
+  private readonly massNorm: number;
+  /** slipstream level 0..1 (trait 'draft'; set by the Sim each step) */
+  draft = 0;
+  /** s since this car last took damage (trait 'regen') */
+  private sinceHit = 0;
+  private regenAcc = 0;
+  /** off-road surface with the car's off-road trait applied (reused) */
+  private readonly offSurf: Surface = { gripMul: 1, drag: 0, shake: 0 };
 
   constructor(pw: PhysicsWorld, setup: CarSetup, x: number, y: number, angle: number) {
     this.setup = setup;
@@ -54,13 +65,21 @@ export class SimCar {
       type: 'dynamic', position: { x, y }, angle, bullet: C.bullet,
       allowSleep: false, linearDamping: 0, angularDamping: 0,
     });
+    const st = setup.stats;
+    const L = st.length ?? C.length, W = st.width ?? C.width;
+    this.dims = { length: L, width: W };
+    this.massNorm = CONFIG.cars.massRef / Math.max(100, st.mass);
     this.body.createFixture({
-      shape: new planck.Box(C.length / 2, C.width / 2),
-      density: setup.stats.mass / (C.length * C.width),
+      shape: new planck.Box(L / 2, W / 2),
+      density: st.mass / (L * W),
       friction: 0.25, restitution: 0.2,
       userData: { kind: 'car', carId: setup.id },
     });
-    this.baseDensity = setup.stats.mass / (C.length * C.width);
+    this.baseDensity = st.mass / (L * W);
+    const ease = st.drift ?? 1;
+    this.drift.entryMul = 1 / Math.pow(ease, CONFIG.cars.driftEntryPow);
+    this.drift.chargeMul = Math.pow(ease, CONFIG.cars.driftChargePow) * (st.traits?.driftCharge ?? 1);
+    this.drift.boostTimeMul = st.traits?.boostTimeMul ?? 1;
     this.kin = { x, y, angle, vx: 0, vy: 0, angularVel: 0, steer: 0 };
 
     const hp = createZoneHp(CONFIG.damage.zoneMaxHp);
@@ -72,6 +91,7 @@ export class SimCar {
     }
     this.state = {
       id: setup.id, isPlayer: setup.isPlayer, colorIndex: setup.colorIndex, name: setup.name,
+      modelId: st.modelId ?? CONFIG.cars.starter, length: L, width: W,
       x, y, angle, vx: 0, vy: 0, angularVel: 0, speed: 0, steer: 0,
       throttle: 0, brake: 0, handbrake: false, rpm: CONFIG.car.idleRpm,
       drifting: false, slip: 0,
@@ -116,6 +136,15 @@ export class SimCar {
     if (this.buffs.spinT > 0 && dr.active) dr.cancel();             // oil spin: no drift
     const pre = dr.pre(this.input, fwd, sp, beta, this.setup.isPlayer, dt);
     if (pre.kick > 0) { k.vx += Math.cos(k.angle) * pre.kick; k.vy += Math.sin(k.angle) * pre.kick; }
+    const tr = this.setup.stats.traits;
+    if (tr && (tr.offroadDragMul !== undefined || tr.offroadGripMul !== undefined) && surface.drag > 0 && !(surface.shake > 0 && surface.gripMul > 0.7)) {
+      // trait 'off-road king': grass and torn road barely slow it (curbs are left as they are)
+      const o = this.offSurf;
+      o.drag = surface.drag * (tr.offroadDragMul ?? 1);
+      o.gripMul = Math.min(1, surface.gripMul * (tr.offroadGripMul ?? 1));
+      o.shake = surface.shake;
+      surface = o;
+    }
     const out = integrateCar(k, this.input, this.statsNow(), this.state.effects, surface, dt, dr.ctl);
     k.steer = out.steer;
     // oil slick: the car spins whatever the driver does (the model would damp a kick within a few steps)
@@ -133,13 +162,16 @@ export class SimCar {
     const a = this.assist > 0.001 ? this.assist : 0;
     const bf = this.buffs;
     const db = this.drift.boostT > 0;
-    if (a === 0 && !bf.active && !db) return this.setup.stats;
+    const dr = this.draft > 0.001 ? this.draft : 0;
+    if (a === 0 && !bf.active && !db && dr === 0) return this.setup.stats;
     const b = this.boosted ?? (this.boosted = { ...this.setup.stats });
     const base = this.setup.stats;
     const caps = CONFIG.items.caps;
-    // drift exit boost stacks with pads / nitro under the same caps
-    const pm = db ? Math.min(caps.power, bf.powerMul * CONFIG.drift.boostPowerMul) : bf.powerMul;
-    const cm = db ? Math.min(caps.ceil, bf.ceilMul * CONFIG.drift.boostCeilMul) : bf.ceilMul;
+    // drift exit boost and slipstream (trait) stack with pads / nitro under the same caps
+    const dt = base.traits?.draft;
+    const dp = dt && dr > 0 ? 1 + dt.power * dr : 1, dc = dt && dr > 0 ? 1 + dt.ceil * dr : 1;
+    const pm = Math.min(caps.power, (db ? bf.powerMul * CONFIG.drift.boostPowerMul : bf.powerMul) * dp);
+    const cm = Math.min(caps.ceil, (db ? bf.ceilMul * CONFIG.drift.boostCeilMul : bf.ceilMul) * dc);
     b.enginePower = base.enginePower * (1 + CONFIG.ai.rubberPower * a) * pm;
     b.topSpeed = base.topSpeed * (1 + CONFIG.ai.rubberTop * a) * cm;
     b.grip = base.grip * bf.gripMul;
@@ -239,19 +271,26 @@ export class SimCar {
       this.repaired = false;
       events.push({ type: 'repair', carId: s.id });
     }
-    if (this.queue.length === 0) return;
+    if (this.queue.length === 0) { this.regen(CONFIG.physics.dt); return; }
     const q = this.queue;
     this.queue = [];
 
     let biggest: QueuedImpact | null = null;
     const knock = this.knock;
     knock.fill(0);
+    const tr = this.setup.stats.traits;
+    const mn = this.massNorm;
     for (const e of q) {
-      const mul = (e.other === 'car' ? D.carVsCarMul : 1) * (this.buffs.shieldT > 0 ? CONFIG.items.shield.damageTaken : 1);
-      const hit = applyImpulseDamage(s.hp, e.lx, e.ly, e.impulse, this.setup.stats.armor, mul);
+      let mul = (e.other === 'car' ? D.carVsCarMul : 1) * (this.buffs.shieldT > 0 ? CONFIG.items.shield.damageTaken : 1);
+      // trait 'bull bar': the nose shrugs hits off
+      if (tr?.frontTakenMul !== undefined && zoneForLocalPoint(e.lx, e.ly, this.dims)[0] === 'front') mul *= tr.frontTakenMul;
+      // mass normalisation: the same impulse is a bigger velocity change (more damage) for a lighter car; the no-damage
+      // threshold applies to the normalised impulse, so a heavy car is not punished for its mass on walls
+      const hit = applyImpulseDamage(s.hp, e.lx, e.ly, e.impulse * mn, this.setup.stats.armor, mul, this.dims);
+      if (hit.damage > 0) this.sinceHit = 0;
       // the bang (solver impulse, before plow-through softening) decides what is knocked off; armor makes parts stick better
       const k = KNOCK_SIDES.indexOf(hit.zones[0]);
-      if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mul) / Math.max(1, this.setup.stats.armor));
+      if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mn * mul) / Math.max(1, this.setup.stats.armor));
       if (!biggest || e.raw > biggest.raw) biggest = e;   // the bang is as loud as the solver's hit (plow-through only softens the damage)
       // a hard hit ends the drift with nothing banked (car taps need twice the impulse)
       if (e.raw >= CONFIG.drift.cancelImpulse * (e.other === 'car' ? 2 : 1)) this.drift.cancel();
@@ -275,6 +314,30 @@ export class SimCar {
     this.refreshDamageState();
     this.detachParts(events);
     if (s.wrecked && !wasWrecked) events.push({ type: 'wrecked', carId: s.id });
+    this.regen(CONFIG.physics.dt);
+  }
+
+  /** Trait 'regen' (self-repair): after a quiet spell every zone below the cap slowly heals. Parts stay off. */
+  private regen(dt: number): void {
+    const rg = this.setup.stats.traits?.regen;
+    if (!rg) return;
+    this.sinceHit += dt;
+    if (this.sinceHit < rg.delay) return;
+    this.regenAcc += dt;
+    if (this.regenAcc < 0.1) return;            // 10 Hz is plenty (and keeps computeEffects off the hot path)
+    const step = this.regenAcc;
+    this.regenAcc = 0;
+    const s = this.state;
+    const cap = s.zoneMaxHp * rg.cap;
+    let changed = false;
+    for (const z of ZONES) {
+      if (s.hp[z] >= cap) continue;
+      s.hp[z] = Math.min(cap, s.hp[z] + rg.perSec * step);
+      changed = true;
+    }
+    if (!changed) return;
+    this.refreshDamageState();
+    if (s.wrecked && s.health > CONFIG.damage.wreckedBelow * 2) { s.wrecked = false; this.refreshDamageState(); }
   }
 
   repair(): void {
@@ -313,7 +376,8 @@ export class SimCar {
     const s = this.state;
     const c = Math.cos(s.angle), sn = Math.sin(s.angle);
     s.detachedParts.push(part);
-    const o = PART_OFFSET[part];
+    const o0 = PART_OFFSET[part];
+    const o = { x: o0.x * (this.dims.length / CONFIG.car.length), y: o0.y * (this.dims.width / CONFIG.car.width) };
     const kick = CONFIG.damage.partKick * (0.6 + 0.8 * this.rng());
     const side = Math.hypot(o.x, o.y) || 1;
     const dirx = (o.x / side) * c - (o.y / side) * sn;

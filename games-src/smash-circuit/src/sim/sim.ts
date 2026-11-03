@@ -2,6 +2,7 @@
 // Fixed-step accumulator; contact callbacks only RECORD impulses, everything is applied after the world step.
 import type * as planck from 'planck';
 import { CONFIG } from '../config';
+import { smashValue } from '../meta/economy';
 import { buildTrackGeometry } from '../track/spline';
 import type {
   BoostPad, CarInput, CarSetup, CarState, DestructibleKind, DestructibleState, GhostData, ISim, ItemBox, OilSlick, RaceState, SimEvent,
@@ -12,6 +13,7 @@ import { AiItemUser } from './aiItems';
 import { PowerUpSystem } from './powerups';
 import { assistedInput } from './assist';
 import { SimCar } from './car';
+import { zoneForLocalPoint } from './damage';
 import { DestructionSystem } from './destruction';
 import { GhostRecorder, ghostPoseAt } from './ghost';
 import { RaceTracker } from './race';
@@ -41,6 +43,11 @@ export class Sim implements ISim {
   avgStepMs = 0;
   /** Destructibles (walls, guardrails, props, road chunks) the player has broken: money bonus input. */
   brokenByPlayer = 0;
+  /** money value of the pieces the player smashed (by object type, see CONFIG.economy.smashPay); curbs pay nothing */
+  smashMoney = 0;
+  /** smashes since the last `takeSmashes()` (HUD "+N" float) */
+  private smashPending = 0;
+  private smashPendingCount = 0;
   /** How many times a stuck AI car was put back on the road (should stay 0 in normal races). */
   respawns = 0;
   readonly physics: PhysicsWorld;
@@ -104,6 +111,7 @@ export class Sim implements ISim {
       if (!setups[i].isPlayer) {
         const personality = setups[i].ai ?? DEFAULT_PERSONALITY;
         this.drivers[i] = new AiDriver(personality, makeRng(Math.floor(rng() * 4294967296) ^ (setups[i].id * 2654435761)));
+        this.drivers[i]!.car = setups[i].stats;   // plans with its own car: cornering limit, brakes, ceiling, size
       }
     }
     this.others = this.cars.map((c) => this.cars.filter((o) => o !== c));
@@ -243,8 +251,9 @@ export class Sim implements ISim {
     const p = contactPoint(contact);
     if (da.kind === 'car' && db.kind === 'car') {
       const a = this.byId.get(da.carId), b = this.byId.get(db.carId);
-      const dealA = a && a.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1;   // a ram shield multiplies the damage the OTHER car takes
-      const dealB = b && b.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1;
+      // a ram shield (and the rammer traits) multiply the damage the OTHER car takes
+      const dealA = a ? (a.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1) * this.ramMul(a, p.x, p.y) : 1;
+      const dealB = b ? (b.buffs.shieldT > 0 ? CONFIG.items.shield.dealMul : 1) * this.ramMul(b, p.x, p.y) : 1;
       if (a) a.recordImpact(p.x, p.y, total, 'car', -1, dealB);
       if (b) b.recordImpact(p.x, p.y, total, 'car', -1, dealA);
       if (a) this.crashes.push({ x: p.x, y: p.y, impulse: total, carId: da.carId });
@@ -272,6 +281,39 @@ export class Sim implements ISim {
     }
     if (other.id >= 0 && other.id < this.lastHitBy.length) this.lastHitBy[other.id] = st.id;
     if (other.kind !== 'road') this.crashes.push({ x: p.x, y: p.y, impulse: total, carId: st.id });
+  }
+
+  /** Trait 'ram': damage this car deals to another car at contact point (x, y); 'front only' rammers need their nose on it. */
+  private ramMul(car: SimCar, x: number, y: number): number {
+    const tr = car.setup.stats.traits;
+    if (!tr || tr.ramDealMul === undefined) return 1;
+    if (!tr.ramFrontOnly) return tr.ramDealMul;
+    const st = car.state;
+    const dx = x - st.x, dy = y - st.y, c = Math.cos(st.angle), sn = Math.sin(st.angle);
+    return zoneForLocalPoint(dx * c + dy * sn, -dx * sn + dy * c, car.dims)[0] === 'front' ? tr.ramDealMul : 1;
+  }
+
+  /** Trait 'draft' (slipstream): a car close behind another one, lined up, gets a tow (0..1, smoothed). */
+  private updateDrafts(dt: number): void {
+    const n = this.cars.length;
+    for (let i = 0; i < n; i++) {
+      const car = this.simCars[i];
+      const d = car.setup.stats.traits?.draft;
+      if (!d) continue;
+      const st = car.state;
+      let want = 0;
+      if (st.speed > 12) {
+        const c = Math.cos(st.angle), sn = Math.sin(st.angle);
+        for (let j = 0; j < n; j++) {
+          if (j === i) continue;
+          const o = this.cars[j];
+          const dx = o.x - st.x, dy = o.y - st.y;
+          const along = dx * c + dy * sn, lat = -dx * sn + dy * c;
+          if (along > 3 && along < d.range && Math.abs(lat) < 2.4 && o.speed > 8) { want = Math.max(want, 1 - (along - 3) / (d.range - 3) * 0.4); }
+        }
+      }
+      car.draft += (want - car.draft) * Math.min(1, dt * (want > car.draft ? 3 : 1.5));
+    }
   }
 
   /**
@@ -344,6 +386,7 @@ export class Sim implements ISim {
     }
 
     // ---- surface + car model
+    if (racing) this.updateDrafts(dt);
     for (let i = 0; i < n; i++) {
       const car = this.simCars[i];
       const pp = this.prevPoses[i];
@@ -397,7 +440,8 @@ export class Sim implements ISim {
     for (const h of list) {
       const st = this.destructibles[h.id];
       if (!st.broken) continue;
-      const keep = st.maxHp <= D.plowSoftHp ? D.plowSoftKeep : D.plowKeep;   // a sign hardly slows the car
+      // a sign hardly slows the car; a juggernaut (trait) barely notices a wall
+      const keep = st.maxHp <= D.plowSoftHp ? Math.max(D.plowSoftKeep, h.car.setup.stats.traits?.plowKeep ?? 0) : (h.car.setup.stats.traits?.plowKeep ?? D.plowKeep);
       h.car.plowThrough(h.id, h.nx, h.ny, keep, this.destruction.breakImpulse(h.id) * D.plowDamageCap);
     }
   }
@@ -408,8 +452,20 @@ export class Sim implements ISim {
       const e = ev[i];
       if (e.type !== 'break') continue;
       const by = e.kind === 'road' ? this.lastRoadHitBy : (e.id >= 0 && e.id < this.lastHitBy.length ? this.lastHitBy[e.id] : -1);
-      if (by >= 0 && this.byId.get(by)?.state.isPlayer && e.kind !== 'curb') this.brokenByPlayer++;
+      if (by >= 0 && this.byId.get(by)?.state.isPlayer && e.kind !== 'curb') {
+        this.brokenByPlayer++;
+        const pay = smashValue(e.kind, e.propType);
+        if (pay > 0) { this.smashMoney += pay; this.smashPending += pay; }
+        this.smashPendingCount++;
+      }
     }
+  }
+
+  /** HUD: money and piece count smashed by the player since the last call. */
+  takeSmashes(): { money: number; count: number } {
+    const r = { money: this.smashPending, count: this.smashPendingCount };
+    this.smashPending = 0; this.smashPendingCount = 0;
+    return r;
   }
 
   private afterRaceEvents(from: number): void {
@@ -431,7 +487,11 @@ export class Sim implements ISim {
     const p = this.cars[this.playerIndex];
     const cross = this.tracker.lapStart[this.playerIndex];
     if (lap === CONFIG.race.ghostMinLap) this.recorder.start(cross);
-    else if (lap > CONFIG.race.ghostMinLap) this.recorder.finishLap(cross, lapTime, p.x, p.y, p.angle);
+    else if (lap > CONFIG.race.ghostMinLap) {
+      // only a clean (gate-valid, not cut) lap may become the ghost; a cut lap is dropped and the next one recorded
+      if (this.tracker.lastLapValid[this.playerIndex]) this.recorder.finishLap(cross, lapTime, p.x, p.y, p.angle);
+      else this.recorder.start(cross);
+    }
   }
 
   private recordGhost(): void {

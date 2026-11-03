@@ -70,6 +70,8 @@ describe('watchAds', () => {
     await platform.init();
     const seen: boolean[] = [];
     platform.watchAds((o) => seen.push(o));
+    expect(seen).toEqual([]);          // never synchronously: the caller may still be booting (audit PL3)
+    await Promise.resolve();
     expect(seen).toEqual([true]);
     m.emit('interstitial_state_changed', 'closed');
     expect(seen).toEqual([true, false]);

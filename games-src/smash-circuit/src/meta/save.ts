@@ -2,20 +2,24 @@
 // Two keys: a small core record and the (bigger) ghost record, so changing settings does not rewrite ghosts.
 import { CONFIG } from '../config';
 import { platform } from '../platform/bridge';
-import type { GhostData, GhostFrame, SaveData } from '../types';
+import type { GhostData, GhostFrame, SaveData, UpgradeLevels } from '../types';
+import { CAR_IDS, carIdOr, isCarId, rivalModeOr } from './cars';
 
 export const SAVE_KEY_CORE = 'sc_core';
 export const SAVE_KEY_GHOSTS = 'sc_ghosts';
 
 export function defaultSave(): SaveData {
   return {
-    version: 1,
+    version: 2,
     money: CONFIG.economy.startMoney,
-    upgrades: { engine: 0, grip: 0, armor: 0 },
+    car: CONFIG.cars.starter,
+    carUpgrades: {},
+    carRaces: {},
+    carWins: {},
     unlockedTracks: [CONFIG.meta.trackOrder[0]],
     bestPlace: {},
     bestLap: {},
-    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false },
+    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' },
     ghosts: {},
     carColor: 0,
     racesFinished: 0,
@@ -82,7 +86,15 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
   const trackIds = CONFIG.meta.trackOrder;
   const maxL = CONFIG.upgrades.maxLevel;
   const lvl = (v: unknown): number => Math.floor(num(v, 0, 0, maxL));
-  const up = isObj(c.upgrades) ? c.upgrades : {};
+  const levels = (v: unknown): UpgradeLevels | null => {
+    if (!isObj(v)) return null;
+    const l = { engine: lvl(v.engine), grip: lvl(v.grip), armor: lvl(v.armor) };
+    return l.engine + l.grip + l.armor > 0 ? l : null;
+  };
+  // per-car upgrades (v2); a v1 save had one global record for its only car -> it becomes the starter car's levels
+  const carUpgrades: Record<string, UpgradeLevels> = {};
+  if (isObj(c.carUpgrades)) for (const id of CAR_IDS) { const l = levels(c.carUpgrades[id]); if (l) carUpgrades[id] = l; }
+  else { const l = levels(c.upgrades); if (l) carUpgrades[CONFIG.cars.starter] = l; }
   const st = isObj(c.settings) ? c.settings : {};
   const q = st.quality;
   const lang = st.lang;
@@ -93,10 +105,13 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
   const g: Record<string, GhostData> = {};
   if (isObj(ghosts)) for (const id of trackIds) { const gd = sanitizeGhost(id, ghosts[id]); if (gd) g[id] = gd; }
 
-  return {
-    version: 1,
+  const out: SaveData = {
+    version: 2,
     money: Math.floor(num(c.money, d.money, 0, 1e9)),
-    upgrades: { engine: lvl(up.engine), grip: lvl(up.grip), armor: lvl(up.armor) },
+    car: carIdOr(c.car),
+    carUpgrades,
+    carRaces: numberMap(c.carRaces, 1, 1e9, CAR_IDS as string[]),
+    carWins: numberMap(c.carWins, 1, 1e9, CAR_IDS as string[]),
     unlockedTracks: unlocked,
     bestPlace: numberMap(c.bestPlace, 1, CONFIG.race.cars, trackIds),
     bestLap: numberMap(c.bestLap, 1, 3600, trackIds),
@@ -106,25 +121,77 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
       quality: q === 'auto' || q === 'low' || q === 'medium' || q === 'high' ? q : d.settings.quality,
       muted: st.muted === true,
       tutorialDone: st.tutorialDone === true,
+      camera: st.camera === 'rotating' || st.camera === 'fixed' || st.camera === 'auto' ? st.camera : d.settings.camera,
     },
     ghosts: g,
     carColor: Math.floor(num(c.carColor, 0, 0, CONFIG.render.carColors.length - 1)),
     racesFinished: Math.floor(num(c.racesFinished, 0, 0, 1e9)),
   };
+  // rival field: only stored values are kept (absent = the default, see rivalModeOr)
+  if (st.rivals !== undefined && rivalModeOr(st.rivals) === st.rivals) out.settings.rivals = st.rivals as SaveData['settings']['rivals'];
+  if (isCarId(st.rivalCar)) out.settings.rivalCar = st.rivalCar;
+  // v1 counted races only globally: they were all driven in the starter car
+  if (!isObj(c.carRaces) && out.racesFinished > 0) out.carRaces[CONFIG.cars.starter] = out.racesFinished;
+  for (const k of Object.keys(out.carRaces)) out.carRaces[k] = Math.floor(out.carRaces[k]);
+  for (const k of Object.keys(out.carWins)) out.carWins[k] = Math.floor(out.carWins[k]);
+  return out;
 }
 
-/** Load everything with ONE storage.get. Never throws; falls back to defaults. */
-export async function loadSave(): Promise<SaveData> {
+export type SaveStatus = 'loaded' | 'empty' | 'failed' | 'corrupt';
+export interface LoadedSave { status: SaveStatus; save: SaveData }
+
+export const SAVE_KEY_PREV = 'sc_core_prev';
+export const SAVE_KEY_CORRUPT = 'sc_core_corrupt';
+
+/**
+ * Writes are blocked until the stored progress is KNOWN (loaded / genuinely empty / corrupt-and-backed-up).
+ * A failed read must never let the next write replace a real save with defaults (audit M1).
+ */
+let writable = false;
+/** Raw core record to keep as `sc_core_prev` (set once per session, written with the first save) and a corrupt record to keep. */
+let pendingPrev: string | null = null;
+let pendingCorrupt: string | null = null;
+
+export function canWrite(): boolean { return writable; }
+
+/**
+ * Load everything with ONE storage.get and report what happened. Never throws.
+ *  - loaded:  stored data parsed (merged over defaults, invalid fields dropped); writes are enabled
+ *  - empty:   nothing stored yet (new player, or no Bridge): defaults, writes enabled
+ *  - corrupt: the core record is unreadable: defaults, the raw text is backed up to `sc_core_corrupt` with the first write
+ *  - failed:  the storage could not be read (timeout / rejection / Bridge not ready): defaults, writes stay BLOCKED
+ */
+export async function loadSave(): Promise<LoadedSave> {
+  let res;
   try {
-    const raw = await platform.load([SAVE_KEY_CORE, SAVE_KEY_GHOSTS]);
-    const core = parseMaybeJson(raw[SAVE_KEY_CORE]);
-    const ghosts = parseMaybeJson(raw[SAVE_KEY_GHOSTS]);
-    lastGhosts = typeof raw[SAVE_KEY_GHOSTS] === 'string' ? (raw[SAVE_KEY_GHOSTS] as string) : null;
-    return sanitizeSave(core, ghosts);
+    res = await platform.load([SAVE_KEY_CORE, SAVE_KEY_GHOSTS]);
   } catch {
-    return defaultSave();
+    res = { status: 'failed' as const, values: {} as Record<string, unknown> };
+  }
+  if (res.status === 'failed') { writable = false; return { status: 'failed', save: defaultSave() }; }
+  try {
+    const rawCore = res.values[SAVE_KEY_CORE];
+    lastGhosts = typeof res.values[SAVE_KEY_GHOSTS] === 'string' ? (res.values[SAVE_KEY_GHOSTS] as string) : null;
+    if (rawCore == null) {
+      writable = true;
+      return { status: 'empty', save: sanitizeSave(null, parseMaybeJson(res.values[SAVE_KEY_GHOSTS])) };
+    }
+    const core = parseMaybeJson(rawCore);
+    if (!isObj(core)) {
+      writable = true;
+      pendingCorrupt = typeof rawCore === 'string' ? rawCore : safeStringify(rawCore);
+      return { status: 'corrupt', save: defaultSave() };
+    }
+    writable = true;
+    pendingPrev = typeof rawCore === 'string' ? rawCore : safeStringify(rawCore);
+    return { status: 'loaded', save: sanitizeSave(core, parseMaybeJson(res.values[SAVE_KEY_GHOSTS])) };
+  } catch {
+    writable = false;
+    return { status: 'failed', save: defaultSave() };
   }
 }
+
+function safeStringify(v: unknown): string | null { try { return JSON.stringify(v); } catch { return null; } }
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
@@ -168,13 +235,22 @@ let queue: Promise<void> = Promise.resolve();
  * write is a snapshot taken at call time, so later mutations of `s` cannot leak into an earlier write.
  */
 export function writeSave(s: SaveData): Promise<void> {
+  if (!writable) return queue;   // progress not loaded: never overwrite it with defaults
   const { ghosts, ...rest } = s;
   const core = JSON.stringify(rest);
   const g = serializeGhosts(ghosts);
   const job = queue.then(async () => {
     const data: Record<string, unknown> = { [SAVE_KEY_CORE]: core };
     if (g !== lastGhosts) data[SAVE_KEY_GHOSTS] = g;
-    if (await platform.save(data) && SAVE_KEY_GHOSTS in data) lastGhosts = g;
+    // one-time backups ride along with the first write of the session
+    const prev = pendingPrev, corrupt = pendingCorrupt;
+    if (prev !== null) data[SAVE_KEY_PREV] = prev;
+    if (corrupt !== null) data[SAVE_KEY_CORRUPT] = corrupt;
+    if (await platform.save(data)) {
+      if (SAVE_KEY_GHOSTS in data) lastGhosts = g;
+      if (pendingPrev === prev) pendingPrev = null;
+      if (pendingCorrupt === corrupt) pendingCorrupt = null;
+    }
   }).catch(() => { /* platform.save never throws; keep the queue alive regardless */ });
   queue = job;
   return job;
