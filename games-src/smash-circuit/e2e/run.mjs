@@ -124,7 +124,7 @@ async function runProfile(prof) {
   await shot('race-start');
   // dismiss tutorial when present
   const tut = await page.$('[data-act=tutorialOk]');
-  if (tut) { await tut.click(); await sleep(200); }
+  if (tut) { await tut.click({ timeout: 2000 }).catch(() => {}); await sleep(200); }   // the hint sheet may close itself first
 
   // wait for GO
   const t0 = Date.now();
@@ -188,9 +188,9 @@ async function runProfile(prof) {
     await sleep(400);
     const braking = await page.evaluate(() => window.__game.sim.cars[0].brake);
     await drv.pull(0);   // BRAKE released
-    await sleep(300);
+    await sleep(700);
     const gassing = await page.evaluate(() => window.__game.sim.cars[0].throttle);
-    R.notes.brakeGesture = { braking, gassing };
+    R.notes.brakeGesture = { braking, gassing, pointers: await page.evaluate(() => [...window.__game.input.pointers.keys()].length), touch: await page.evaluate(() => window.__game.input.touchActive), speed: await page.evaluate(() => window.__game.sim.cars[0].speed) };
     R.checks.brakeButton = braking > 0.5 && gassing > 0.5;
   }
 
@@ -311,11 +311,16 @@ async function runProfile(prof) {
 function makeDriver(page, cdp, prof) {
   if (prof.touch) {
     const pos = {};
+    let winStart = 0, winV = 0;
     const down = new Map();
     const send = (type) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: [...down].map(([id, p]) => ({ x: p.x, y: p.y, id })) });
     const set = async (id, on) => {
       if (on === down.has(id)) return;
-      if (on) { down.set(id, pos[id]); await send('touchStart'); } else { down.delete(id); await send('touchEnd'); }
+      if (on) { down.set(id, pos[id]); await send('touchStart'); return; }
+      // CDP releases the points missing from the list reliably only when it is empty: lift everything, press the rest again
+      down.delete(id);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      if (down.size) await send('touchStart');
     };
     return {
       async start() {
@@ -325,8 +330,12 @@ function makeDriver(page, cdp, prof) {
         });
         Object.assign(pos, box);   // auto gas: the car drives without any finger down
       },
+      /** Digital buttons: pulse-width approximation of the analog pursuit steer. Presses are >= 100 ms (the game samples input per frame, ~12 fps in headless). */
       async steer(v) {
-        await set(1, v < -0.2); await set(2, v > 0.2);
+        const now = Date.now();
+        if (now - winStart >= 200) { winStart = now; winV = v; }
+        const press = Math.abs(winV) * 200 >= 100 && now - winStart < Math.abs(winV) * 200 + 1;
+        await set(1, press && winV < 0); await set(2, press && winV > 0);
       },
       /** Hold the BRAKE button (f > 0) or let go (f = 0): brake / reverse. */
       async pull(f) { await set(3, f > 0); },
@@ -430,7 +439,7 @@ async function auditLayout() {
     }
     if (tut.countdownOverlap) problems.push(`${key} tutorial: the hint sheet overlaps the countdown`);
     if (!tut.okBtn) problems.push(`${key} tutorial: "Got it" button is clipped`);
-    await page.click('[data-act=tutorialOk]'); await sleep(2200);
+    await page.click('[data-act=tutorialOk]', { timeout: 3000 }).catch(() => {}); await sleep(2200);   // the hint sheet may already have closed itself
     // damage -> tap-to-repair widget shown
     await page.evaluate(() => { const c = window.__game.sim.cars[0]; for (const k of Object.keys(c.hp)) c.hp[k] = 30; });
     await sleep(3500);
