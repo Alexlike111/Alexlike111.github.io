@@ -145,8 +145,20 @@ export class AiDriver {
     const wallLine = half + CONFIG.destruction.wallOffset;
     if (Math.abs(lat) <= half) { this.roadS = s; this.exitSide = 0; }
     else if (this.exitSide === 0 && Math.abs(lat) > wallLine) { this.exitS = s; this.exitSide = lat > 0 ? 1 : -1; }
-    // through a wall gap (beyond the wall line): drive back through the gap it left by instead of into the wall from behind
+    // through a wall gap (beyond the wall line): drive back through the gap it left by instead of into the wall from behind.
+    // Two stages: line up just outside the gap, then straight through it back onto the road.
     const recovering = Math.abs(lat) > half + A.recoverBeyond;
+    let recX = 0, recY = 0;
+    if (recovering) {
+      const side = this.exitSide !== 0 ? this.exitSide : (lat > 0 ? 1 : -1);
+      const gs = this.exitSide !== 0 ? this.exitS : this.roadS;
+      const o = track.sampleAt(gs);
+      recX = o.x + o.nx * side * (wallLine + A.recoverOut); recY = o.y + o.ny * side * (wallLine + A.recoverOut);
+      if (!(Math.abs(lat) > wallLine + 1 && Math.hypot(recX - car.x, recY - car.y) > 2.5)) {
+        const q = track.sampleAt(gs + A.recoverAhead);
+        recX = q.x + q.nx * side * (half - 1.5); recY = q.y + q.ny * side * (half - 1.5);
+      }
+    }
     // progress watchdog: along the track, or (while finding the way back) any 6 m of movement
     const moved = recovering ? Math.hypot(car.x - this.markX, car.y - this.markY) : wrap2(s - this.markS, L);
     if (moved > 6 || moved < -40) { this.markS = s; this.markX = car.x; this.markY = car.y; this.markTime = 0; } else this.markTime += h;
@@ -158,7 +170,7 @@ export class AiDriver {
       this.out = {
         throttle: 0, brake: 1,
         // reversing flips the sense of steering: steer toward the side we want the nose to go
-        steer: clamp(headErr * 1.6, -1, 1),
+        steer: clamp((recovering ? wrap(Math.atan2(recY - car.y, recX - car.x) - car.angle) : headErr) * 1.6, -1, 1),
         handbrake: false,
       };
       // still nose to bumper with a car right ahead in our lane: back up a little more, so there is room to steer around it
@@ -297,18 +309,9 @@ export class AiDriver {
     if (blockGap < 6 && av < 8 && Math.abs(this.offset - lat) > 0.6) look = Math.max(2.5, Math.min(look, 2.5 + blockGap));
 
     // ---------- steering: pure pursuit, exact inverse of the car model's steering (steerForCurvature)
-    let tp = track.sampleAt(s + look);
-    let off = this.offset;
-    if (recovering) {
-      // two stages: line up just outside the gap, then drive straight through it back onto the road
-      const side = this.exitSide !== 0 ? this.exitSide : (lat > 0 ? 1 : -1);
-      const gs = this.exitSide !== 0 ? this.exitS : this.roadS;
-      const outside = track.sampleAt(gs);
-      const ox = outside.x + outside.nx * side * (wallLine + A.recoverOut), oy = outside.y + outside.ny * side * (wallLine + A.recoverOut);
-      if (Math.abs(lat) > wallLine + 1 && Math.hypot(ox - car.x, oy - car.y) > 2.5) { tp = outside; off = side * (wallLine + A.recoverOut); }
-      else { tp = track.sampleAt(gs + A.recoverAhead); off = side * (half - 1.5); }
-    }
-    const tx = tp.x + tp.nx * off, ty = tp.y + tp.ny * off;
+    const tp = track.sampleAt(s + look);
+    const off = this.offset;
+    const tx = recovering ? recX : tp.x + tp.nx * off, ty = recovering ? recY : tp.y + tp.ny * off;
     const dx = tx - car.x, dy = ty - car.y;
     const dist = Math.max(Math.hypot(dx, dy), 2);
     // in a drift the nose points into the bend: pursue relative to where the car is actually going

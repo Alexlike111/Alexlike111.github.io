@@ -188,12 +188,15 @@ async function runProfile(prof) {
 
   // crash into the wall: full lock
   const before = await snap();
+  // lowest health during the crash window: the starter car repairs itself after a quiet spell (car trait), so the end value alone can be higher
+  await page.evaluate(() => { window.__minHealth = 1; window.__minHealthT = setInterval(() => { const c = window.__game.sim?.cars[0]; if (c) window.__minHealth = Math.min(window.__minHealth, c.health); }, 40); });
   await drive(5000, 'crash');
   const after = await snap();
+  const minHealth = await page.evaluate(() => { clearInterval(window.__minHealthT); return window.__minHealth; });
   await sleep(200);
   await shot('crash');
-  R.notes.crash = { before, after };
-  R.checks.crashDamaged = !!(before && after && (after.health < before.health - 0.001 || after.broken > before.broken));
+  R.notes.crash = { before, after, minHealth };
+  R.checks.crashDamaged = !!(before && after && (Math.min(after.health, minHealth) < before.health - 0.001 || after.broken > before.broken));
   await drv.release();
 
   // repair by key (desktop) - with money

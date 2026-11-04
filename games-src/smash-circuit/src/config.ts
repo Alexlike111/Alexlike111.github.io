@@ -73,11 +73,14 @@ export const CONFIG = {
       minDw: 0.8,             // rad/s: a step's spin change from contacts at least this big goes to the impact spin
       spinDecay: 3,           // 1/s decay of the impact spin (yaw damping used to kill it in ~0.15 s; a hard hit now turns the car ~20-40 deg)
       spinMax: 3.5,           // rad/s cap of the impact spin
+      slideFull: 8000,        // N*s: a hit this hard keeps its whole sideways shove in the impact layer (a light touch: a share)
+      spinFull: 20000,        // N*s (~60 km/h square): a hit this hard keeps its whole spin (a glancing touch hardly turns the car)
       lowSpeed: [0.5, 1.5] as [number, number], // m/s forward speed band below which the model only damps sideways speed (never turns it into forward / reverse)
       crashImpulse: 12000,    // N*s of one solver hit (~36 km/h square into a wall) that starts the crash state (car-car x crashCarMul)
       crashCarMul: 1.5,
       crashTime: [0.25, 0.4] as [number, number], // s of crash state, from crashImpulse to 2x crashImpulse
-      crashGripMul: 0.5,      // grip (re-alignment of the velocity onto the nose) during the crash state; steering is suspended
+      crashGripMul: 0.5,      // grip (re-alignment of the velocity onto the nose) during the crash state
+      crashSteerMul: 0.3,     // share of the steering input that still acts during the crash state
     },
   },
   damage: {

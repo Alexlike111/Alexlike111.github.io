@@ -1,12 +1,11 @@
 // Garage car browser, rival picker and the car silhouettes used by both. HTML strings only; the UI class owns the state
 // and the click handling. Every car is always selectable (badges are cosmetic, nothing is locked).
 import './garage.css';
-import { CONFIG } from '../config';
+import { CONFIG, UPGRADE_BRANCHES } from '../config';
 import { t } from '../i18n';
 import { BAR_KEYS, CAR_IDS, badgeStars, bars, carIdOr, carStats, levelsOf, settledTopSpeed, zeroTo100, type BarKey } from '../meta/cars';
 import { maxLevel, upgradeCost } from '../meta/economy';
 import type { RivalMode, SaveData, UpgradeBranch } from '../types';
-import { UPGRADE_BRANCHES } from '../config';
 import { icon } from './icons';
 
 const esc = (s: string | number): string =>

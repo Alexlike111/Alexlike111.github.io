@@ -47,6 +47,8 @@ export class SimCar {
   private impVx = 0;
   private impVy = 0;
   private impW = 0;
+  /** biggest solver impulse (N*s) on this car in the last flushed step: how much of that step's velocity change is an impact */
+  private hitRaw = 0;
   /** s left of the crash state after a heavy hit: steering and grip re-alignment suspended */
   private crashT = 0;
   private crashStats: CarStats | null = null;
@@ -151,10 +153,13 @@ export class SimCar {
     {
       const ca = Math.cos(k.angle), sa = Math.sin(k.angle);
       const dvx = v.x - this.preVx, dvy = v.y - this.preVy;
+      // a light touch is the tyres' business; the harder the hit, the more of it the car keeps (full at slideFull / spinFull)
+      const sv = Math.min(1, this.hitRaw / IM.slideFull), sw = Math.min(1, this.hitRaw / IM.spinFull);
+      this.hitRaw = 0;
       const dl = -dvx * sa + dvy * ca;
-      if (Math.abs(dl) >= IM.minDv) { this.impVx -= sa * dl; this.impVy += ca * dl; }
+      if (Math.abs(dl) >= IM.minDv) { this.impVx -= sa * dl * sv; this.impVy += ca * dl * sv; }
       const dw = bw - this.preW;
-      if (Math.abs(dw) >= IM.minDw) this.impW += dw;
+      if (Math.abs(dw) >= IM.minDw) this.impW += dw * sw;
       const kv = Math.exp(-IM.decay * dt), kw = Math.exp(-IM.spinDecay * dt);
       this.impVx *= kv; this.impVy *= kv; this.impW *= kw;
       const lim = IM.maxFrac * Math.hypot(v.x, v.y), im = Math.hypot(this.impVx, this.impVy);
@@ -180,12 +185,12 @@ export class SimCar {
       o.shake = surface.shake;
       surface = o;
     }
-    // crash state after a heavy hit: no steering, (almost) no re-alignment of the slide onto the nose
+    // crash state after a heavy hit: little steering, less re-alignment of the slide onto the nose
     let input = this.input, stats = this.statsNow();
     if (this.crashT > 0) {
       this.crashT -= dt;
       const ci = this.crashInput;
-      ci.throttle = input.throttle; ci.brake = input.brake; ci.handbrake = input.handbrake; ci.drift = 0; ci.steer = 0;
+      ci.throttle = input.throttle; ci.brake = input.brake; ci.handbrake = input.handbrake; ci.drift = 0; ci.steer = input.steer * IM.crashSteerMul;
       input = ci;
       const cs = this.crashStats ?? (this.crashStats = { ...stats });
       Object.assign(cs, stats);
@@ -233,7 +238,8 @@ export class SimCar {
   kick(dvx: number, dvy: number, asImpact = false): void {
     const v = this.body.getLinearVelocity();
     this.body.setLinearVelocity({ x: v.x + dvx, y: v.y + dvy });
-    if (!asImpact) { this.preVx += dvx; this.preVy += dvy; }
+    this.preVx += dvx; this.preVy += dvy;               // not seen as a solver change at the next preStep ...
+    if (asImpact) { this.impVx += dvx; this.impVy += dvy; }   // ... a hit goes straight to the impact layer
   }
 
   /** Ram shield on/off: a shielded car is heavier in collisions (mass x CONFIG.items.shield.massMul). */
@@ -333,6 +339,7 @@ export class SimCar {
       this.repaired = false;
       events.push({ type: 'repair', carId: s.id });
     }
+    this.hitRaw = 0;
     // age the per-piece hit windows
     const win = this.windows;
     for (let i = win.length - 1; i >= 0; i--) {
@@ -383,6 +390,7 @@ export class SimCar {
       // the bang (solver impulse, before plow-through softening) decides what is knocked off; armor makes parts stick better
       const k = KNOCK_SIDES.indexOf(hit.zones[0]);
       if (k >= 0) knock[k] = Math.max(knock[k], (e.raw * mn * mul) / Math.max(1, this.setup.stats.armor));
+      if (e.raw > this.hitRaw) this.hitRaw = e.raw;
       if (!biggest || e.raw > biggest.raw) biggest = e;   // the bang is as loud as the solver's hit (plow-through only softens the damage)
       // a hard hit ends the drift with nothing banked (car taps need twice the impulse)
       if (e.raw >= CONFIG.drift.cancelImpulse * (e.other === 'car' ? 2 : 1)) this.drift.cancel();
