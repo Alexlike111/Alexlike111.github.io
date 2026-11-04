@@ -9,6 +9,7 @@ import { TRACKS } from '../track/tracks';
 import type { CarState, ISim, ItemType, RivalMode, SaveData, UpgradeBranch, ZoneId } from '../types';
 import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icons';
 import { carGrid, carSvg, garageHtml, rivalLabel, rivalsSheetHtml, RIVAL_MODES, type GarageTab } from './garage';
+import { CONTROL_SCHEMES, controlsOr, sensOr, type ControlScheme } from '../input/schemes';
 import { CAR_IDS, carIdOr, levelsOf, rivalModeOr } from '../meta/cars';
 
 export interface UiHandlers {
@@ -18,6 +19,8 @@ export interface UiHandlers {
   quit(): void;
   restart(): void;
   repair(): void;
+  /** Pause menu: recenter the Tilt scheme. */
+  recenter?(): void;
   /** HUD repair chip pressed (true) / released (false): in a race the repair is a hold. */
   repairHold?(on: boolean): void;
   /** Results: race the same track again (no ad). */
@@ -55,6 +58,8 @@ export interface ResultsData {
 }
 
 const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
+
+const CTL_ICON: Record<ControlScheme, IconName> = { buttons: 'ctlButtons', slide: 'ctlSlide', finger: 'ctlFinger', joystick: 'ctlJoystick', tilt: 'ctlTilt', tap: 'ctlTap' };
 
 const esc = (s: string | number): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -103,7 +108,7 @@ export class UI {
   private h: UiHandlers;
   private layers = {} as Record<Layer, HTMLElement>;
   private save: SaveData | null = null;
-  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' };
+  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false };
   private money = 0;
   private current: { name: string; render: () => void } | null = null;
   private overlayRender: (() => void) | null = null;
@@ -134,6 +139,9 @@ export class UI {
   private repairHeld = false;
   private repairInfo = { left: 99, cd: 0, money: 0 };
   private repairKey = '';
+  private pickDone: (() => void) | null = null;
+  private pickSelect: ((v: ControlScheme) => void) | null = null;
+  private pickCommit: ((skip: boolean) => void) | null = null;
   private fx: { pill: HTMLElement; finish: HTMLElement; smash: HTMLElement } | null = null;
   private pillTimer = 0;
   private smashTimer = 0;
@@ -150,6 +158,8 @@ export class UI {
       this.layers[name] = el;
     }
     root.addEventListener('click', this.onClick);
+    root.addEventListener('input', this.onRange);
+    root.addEventListener('change', this.onRange);
     this.buildHud();
     // HUD repair chip: hold the finger (released / cancelled / moved away = abort)
     root.addEventListener('pointerdown', (e) => {
@@ -174,6 +184,41 @@ export class UI {
 
   /** Latest settings (the UI keeps a copy for mute toggles etc.). */
   setSettings(s: SaveData['settings']): void { this.settings = { ...s }; }
+
+  /** Re-draw the screen / pause menu that shows the settings (the game changed a setting by itself, e.g. Tilt fallback). */
+  refreshSettingsView(): void { this.rerender(); }
+
+  /**
+   * First-run controls picker (before the first race on a touch device): cards with a picture and a line each, Buttons
+   * highlighted. `done` runs after Play / Skip (the choice is already stored via the settings handler).
+   */
+  showControlsPicker(done: () => void): void {
+    let sel: ControlScheme = controlsOr(this.settings.controls);
+    this.pickDone = done;
+    const draw = (): void => {
+      this.layers.overlay.innerHTML = `<div class="dim"><div class="ctlpick panel">
+        <h2 class="title sm">${esc(t('ctl.pickTitle'))}</h2>
+        <p class="sub">${esc(t('ctl.pickSub'))}</p>
+        ${this.ctlCards(sel, 'ctlPickSel')}
+        <div class="pair"><button class="btn grey" data-act="ctlPickSkip"><span>${esc(t('ctl.pickSkip'))}</span></button>
+        <button class="btn big green" data-act="ctlPickOk">${icon('play')}<span>${esc(t('ctl.pickOk'))}</span></button></div>
+      </div></div>`;
+    };
+    this.pickSelect = (v) => { sel = v; draw(); };
+    this.pickCommit = (skip) => {
+      this.layers.overlay.replaceChildren();
+      this.overlayRender = null;
+      this.pickSelect = null; this.pickCommit = null;
+      const s = { ...this.settings, controls: skip ? controlsOr(this.settings.controls) : sel, controlsPicked: true };
+      this.settings = s;
+      if (this.save) this.save = { ...this.save, settings: s };
+      this.h.settings({ ...s });
+      const cb = this.pickDone; this.pickDone = null;
+      cb?.();
+    };
+    this.overlayRender = draw;
+    draw();
+  }
 
   /** Money shown in the HUD chip. */
   setMoney(m: number): void { this.money = m; this.updateMoneyChip(); }
@@ -333,13 +378,30 @@ export class UI {
   showTutorial(isTouch: boolean): void {
     this.touchMode = isTouch;
     const el = this.layers.tutorial;
+    const sc = controlsOr(this.settings.controls);
+    const steerIc: Record<ControlScheme, string> = {
+      buttons: `<div class="tut-steer">${icon('arrowL')}${icon('arrowR')}</div>`,
+      slide: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`,
+      finger: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`,
+      joystick: `<div class="tut-ic1">${icon('ctlJoystick')}</div>`,
+      tilt: `<div class="tut-ic1">${icon('ctlTilt')}</div>`,
+      tap: `<div class="tut-ic1">${icon('ctlTap')}</div>`,
+    };
+    const brakeTx = sc === 'joystick' ? 'tut.brake.joystick' : sc === 'tap' ? 'tut.brake.tap' : 'tut.brake.btn';
     const steps = isTouch
-      ? [
-        { ic: `<div class="tut-gas">${icon('finger')}<i></i></div>`, tx: t('tut.touch.gas') },
-        { ic: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`, tx: t('tut.touch.steer') },
-        { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.drift') },
-        { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
-      ]
+      ? sc === 'finger'
+        ? [
+          { ic: `<div class="tut-gas">${icon('finger')}<i></i></div>`, tx: t('tut.touch.gas') },
+          { ic: steerIc.finger, tx: t('tut.touch.steer') },
+          { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.drift') },
+          { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
+        ]
+        : [
+          { ic: steerIc[sc], tx: t(`tut.${sc}.steer`) },
+          { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.driftBtn') },
+          { ic: `<div class="tut-brake"><i></i></div>`, tx: t(brakeTx) },
+          { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
+        ]
       : [
         { ic: `<div class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></div><div class="keys sub"><kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></div>`, tx: t('tut.key.drive') },
         { ic: `<div class="keys"><kbd class="wide">${esc(t('tut.key.space'))}</kbd></div>`, tx: t('tut.key.drift') },
@@ -634,6 +696,10 @@ export class UI {
       case 'retry': this.sfx('click'); this.h.retry?.(); break;
       case 'nextTrack': this.sfx('click'); if (el.dataset.id) this.h.nextTrack?.(el.dataset.id); break;
       case 'retrySave': this.sfx('click'); this.h.retrySave?.(); break;
+      case 'ctlPickSel': this.sfx('click'); this.pickSelect?.(controlsOr(el.dataset.v)); break;
+      case 'ctlPickOk': this.sfx('click'); this.pickCommit?.(false); break;
+      case 'ctlPickSkip': this.sfx('click'); this.pickCommit?.(true); break;
+      case 'recenter': this.sfx('click'); this.h.recenter?.(); this.toast(t('ctl.recentered')); break;
       case 'tutorialOk': this.sfx('click'); this.dismissTutorial(true); break;
       default: break;
     }
@@ -657,11 +723,49 @@ export class UI {
     }
   }
 
+  /** Steering sensitivity slider (settings screen and pause menu): the label follows live, the value is stored on release. */
+  private onRange = (e: Event): void => {
+    const el = e.target instanceof HTMLInputElement ? e.target : null;
+    if (!el || el.dataset.range !== 'steerSens') return;
+    const v = sensOr(Number(el.value) / 100);
+    this.settings = { ...this.settings, steerSens: v };
+    el.closest('.sens')?.querySelector('b')?.replaceChildren(`${Math.round(v * 100)}%`);
+    if (e.type === 'change') {
+      if (this.save) this.save = { ...this.save, settings: this.settings };
+      this.h.settings({ ...this.settings });
+    }
+  };
+
+  /** Cards with a picture, the name and one line per control scheme (settings screen, first-run picker). */
+  private ctlCards(cur: ControlScheme, act: string): string {
+    return `<div class="ctlgrid" role="group">${CONTROL_SCHEMES.map((v) =>
+      `<button class="ctl-card${v === cur ? ' on' : ''}" data-act="${act}" data-k="controls" data-v="${v}" aria-pressed="${v === cur}">
+        <span class="ctl-pic">${icon(CTL_ICON[v])}</span><b>${esc(t('ctl.' + v))}</b><small>${esc(t('ctl.' + v + '.d'))}</small></button>`).join('')}</div>`;
+  }
+
+  private sensRow(): string {
+    const pct = Math.round(sensOr(this.settings.steerSens) * 100);
+    return `<label class="sens"><span>${esc(t('ctl.sens'))}</span><input type="range" min="${Math.round(CONFIG.controls.sensMin * 100)}" max="${Math.round(CONFIG.controls.sensMax * 100)}" step="10" value="${pct}" data-range="steerSens" aria-label="${esc(t('ctl.sens'))}"><b>${pct}%</b></label>`;
+  }
+
+  /** Compact controls block of the pause menu: one icon per scheme, the chosen one described, sensitivity, tilt recenter. */
+  private pauseControls(): string {
+    const cur = controlsOr(this.settings.controls);
+    return `<div class="ctlpause">
+      <div class="ctlrow" role="group" aria-label="${esc(t('settings.controls'))}">${CONTROL_SCHEMES.map((v) =>
+        `<button class="ctl-ic${v === cur ? ' on' : ''}" data-act="set" data-k="controls" data-v="${v}" aria-pressed="${v === cur}" aria-label="${esc(t('ctl.' + v))}">${icon(CTL_ICON[v])}</button>`).join('')}</div>
+      <p class="ctl-desc"><b>${esc(t('ctl.' + cur))}</b> ${esc(t('ctl.' + cur + '.d'))}</p>
+      ${this.sensRow()}
+      ${cur === 'tilt' ? `<button class="btn blue" data-act="recenter"><span>${esc(t('ctl.recenter'))}</span></button>` : ''}
+    </div>`;
+  }
+
   private changeSetting(k: string, v: string): void {
     const s = { ...this.settings };
     if (k === 'lang') { s.lang = v as SaveData['settings']['lang']; setLangSetting(s.lang); }
     else if (k === 'quality') s.quality = v as SaveData['settings']['quality'];
     else if (k === 'autoGas') s.autoGas = v === '1';
+    else if (k === 'controls') { s.controls = controlsOr(v); s.controlsPicked = true; }
     else if (k === 'camera') s.camera = v as SaveData['settings']['camera'];
     else if (k === 'muted') s.muted = v === '1';
     else if (k === 'rivals') { s.rivals = rivalModeOr(v); if (s.rivals === 'pick' && !s.rivalCar) s.rivalCar = carIdOr(this.save?.car); }
@@ -816,7 +920,9 @@ export class UI {
         ${row(icon('flag'), t('settings.language'), this.seg('lang', st.lang, [
           { v: 'en', label: 'English' }, { v: 'ru', label: 'Русский' }, { v: 'auto', label: t('settings.auto') },
         ]))}
-        ${row(icon('bolt'), t('settings.autoGas'), toggle('autoGas', st.autoGas), t('settings.autoGas.hint'))}
+        <div class="srow s-ctl"><div class="sl2"><span class="sic">${icon('finger')}</span><div><b>${esc(t('settings.controls'))}</b></div></div>
+          ${this.ctlCards(controlsOr(st.controls), 'set')}${this.sensRow()}</div>
+        ${controlsOr(st.controls) === 'finger' ? row(icon('bolt'), t('settings.autoGas'), toggle('autoGas', st.autoGas), t('settings.autoGas.hint')) : ''}
         ${row(icon('speed'), t('settings.quality'), this.seg('quality', st.quality, [
           { v: 'auto', label: t('settings.auto') }, { v: 'low', label: t('settings.low') }, { v: 'medium', label: t('settings.medium') }, { v: 'high', label: t('settings.high') },
         ]))}
@@ -844,7 +950,8 @@ export class UI {
         <button class="btn blue${confirmArmed('restart')}" data-act="restart">${icon('restart')}<span>${esc(t('pause.restart'))}</span></button>
         <button class="btn red${confirmArmed('quit')}" data-act="quit">${icon('exit')}<span>${esc(t('pause.quit'))}</span></button>
       </div>
-      <div class="drift-hint">${icon('bolt')}<span>${esc(t(this.touchMode ? 'pause.driftTouch' : 'pause.driftKeys'))}</span></div>
+      ${this.touchMode ? this.pauseControls() : ''}
+      <div class="drift-hint">${icon('bolt')}<span>${esc(t(this.touchMode ? (controlsOr(this.settings.controls) === 'finger' ? 'pause.driftTouch' : 'pause.driftBtn') : 'pause.driftKeys'))}</span></div>
       <div class="pc-foot"><span>${icon('coin')}<b>${fmtMoney(money)}</b></span><span class="keyhint">${esc(this.touchMode ? '' : t('pause.keys'))}</span></div>
     </div></div>`;
   }

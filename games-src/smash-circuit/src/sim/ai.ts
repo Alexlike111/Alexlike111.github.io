@@ -64,6 +64,7 @@ export class AiDriver {
   private readonly nearDs: number[] = [];
   private readonly nearW: number[] = [];
   private readonly nearSpeed: number[] = [];
+  private turnDir = 0;                        // latched turn-round direction of the off-road recovery (0 = none)
   private readonly nearExtra: number[] = [];   // extra clearance (m) on top of the car-to-car clearance (oil slicks, wide cars)
   private readonly nearLen: number[] = [];     // half length sum (m) of us and that car (follow gap)
 
@@ -322,14 +323,21 @@ export class AiDriver {
     const course = car.driftActive && sp2 > 3 ? Math.atan2(car.vy, car.vx) : car.angle;
     const alpha = wrap(Math.atan2(dy, dx) - course);
     let steer: number;
+    if (Math.abs(alpha) < 1.1 || !recovering) this.turnDir = 0;
     if (Math.abs(alpha) > 1.3) {
       steer = -Math.sign(alpha);
       if (recovering) {
         // the way back is behind: turn round on the open side, away from the road and the wall in between
-        const toRoad = this.exitSide !== 0 ? -this.exitSide : (lat > 0 ? -1 : 1);   // lateral direction of the road from here
-        const rx = tan.nx * toRoad, ry = tan.ny * toRoad;
-        const cross = Math.cos(car.angle) * ry - Math.sin(car.angle) * rx;          // > 0: the road is on our left
-        steer = cross > 0 ? 1 : -1;
+        // The direction is chosen once and kept until the nose is round: re-deciding every tick has a stable fixed point
+        // when the car stands square to the road (the sign of `cross` flips around it), so the car used to roll away
+        // dead straight at 90 degrees, steering back and forth, until the respawn timer caught it.
+        if (this.turnDir === 0) {
+          const toRoad = this.exitSide !== 0 ? -this.exitSide : (lat > 0 ? -1 : 1);   // lateral direction of the road from here
+          const rx = tan.nx * toRoad, ry = tan.ny * toRoad;
+          const cross = Math.cos(car.angle) * ry - Math.sin(car.angle) * rx;          // > 0: the road is on our left
+          this.turnDir = Math.abs(cross) > 0.35 ? (cross > 0 ? 1 : -1) : (alpha > 0 ? -1 : 1);   // square to the road: the short way round
+        }
+        steer = this.turnDir;
       }
     } else {
       const kappa = (2 * Math.sin(alpha)) / dist;
@@ -345,7 +353,7 @@ export class AiDriver {
     if (car.offRoad && Math.abs(lat) > half) vT = Math.min(vT, A.offroadSpeedCap);
     if (recovering) {
       vT = Math.min(vT, A.recoverSpeed + dist * 0.4);   // creep back through the gap
-      if (Math.abs(alpha) > 1.5 && av > 4) vT = 0;       // the road is behind: stop, then turn round
+      if (Math.abs(alpha) > 1.5) vT = av > 4 ? 0 : Math.min(vT, 2.5);       // the road is behind: slow right down and turn round (never roll away at full recover speed)
     } else if (Math.abs(headErr) > 1.5 && av > 4) vT = 0;       // facing the wrong way: stop first
     // tight corner side by side: the car on the outside lifts instead of being squeezed into the wall
     if (nCar > 0 && !recovering) {

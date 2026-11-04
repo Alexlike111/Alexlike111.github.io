@@ -110,8 +110,9 @@ export class Game {
     this.renderer = new GameRenderer(canvas, this.save.settings.quality);
     this.ui = new UI(uiRoot, this.handlers());
     this.input = new InputController(uiRoot);
-    this.input.setAutoGas(this.save.settings.autoGas);
+    this.applyControls();
     this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
+    this.input.onTiltStatus((st) => this.onTiltStatus(st));
     this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else if (k === 'item') this.useItem(); else this.repairNow(); });
     this.input.onTouchMode((touch) => this.ui.setTouchMode(touch));
     this.ui.setTouchMode(this.input.touchActive);
@@ -190,6 +191,7 @@ export class Game {
       quit: () => void this.leaveRace(() => this.toMenu()),
       restart: () => void this.leaveRace(() => this.startRace(this.trackId)),
       repair: () => this.repairNow(true),
+      recenter: () => this.input.recenter(),
       repairHold: (on) => this.repairHold(on),
       retry: () => { if (this.state === 'results') this.startRace(this.trackId); },
       nextTrack: (id) => { if (this.state === 'results') this.startRace(id); },
@@ -239,6 +241,13 @@ export class Game {
     if (this.state === 'ad' || this.continuing) return;
     const def = trackById(trackId);
     if (!def || !this.save.unlockedTracks.includes(def.id)) return;
+    // first race on a touch device: a one-time, skippable controls picker (Buttons highlighted)
+    if (this.input.touchActive && !this.save.settings.controlsPicked && !this.pickerOpen) {
+      this.pickerOpen = true;
+      this.ui.setSettings(this.save.settings);
+      this.ui.showControlsPicker(() => { this.pickerOpen = false; this.startRace(trackId); });
+      return;
+    }
     const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(def.id));
     const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
     const player = makePlayerSetup(this.save, 'Player');
@@ -252,10 +261,11 @@ export class Game {
     this.finish = null;
     this.results = null;
     this.userPaused = false;
+    this.wasGo = false;
     this.applyCamera();
     this.renderer.loadRace(sim);
     this.state = 'racing';
-    this.input.setAutoGas(this.save.settings.autoGas);
+    this.applyControls();
     this.input.setEnabled(true);
     this.ui.setSettings(this.save.settings);
     this.ui.setTouchMode(this.input.touchActive);
@@ -286,6 +296,8 @@ export class Game {
     this.syncPause();
   }
   private prevState: GameState = 'racing';
+  private pickerOpen = false;
+  private wasGo = false;
 
   private resumeRace(): void {
     if (this.state !== 'paused') return;
@@ -409,12 +421,28 @@ export class Game {
     this.save = { ...this.save, settings: { ...s } };
     if (s.tutorialDone) this.tutorialOn = false;
     this.applyMute();
-    this.input.setAutoGas(s.autoGas);
+    this.applyControls();
     this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
     this.renderer.setQuality(s.quality);
     this.applyCamera();
     document.documentElement.lang = lang();
     void writeSave(this.save);
+  }
+
+  private applyControls(): void {
+    const s = this.save.settings;
+    this.input.setAutoGas(s.autoGas);
+    this.input.setSensitivity(s.steerSens);
+    this.input.setScheme(s.controls);
+  }
+
+  /** Tilt was chosen but the phone gives no orientation (or the player denied it): back to the Buttons scheme. */
+  private onTiltStatus(st: 'ok' | 'denied' | 'unavailable'): void {
+    if (st === 'ok' || this.save.settings.controls !== 'tilt') return;
+    this.ui.toast(t(st === 'denied' ? 'ctl.tiltDenied' : 'ctl.tiltFail'));
+    this.setSettings({ ...this.save.settings, controls: 'buttons' });
+    this.ui.setSettings(this.save.settings);
+    this.ui.refreshSettingsView();
   }
 
   /** Camera mode: rotating (heading-up) is the default on touch devices, fixed north-up elsewhere; the setting overrides. */
@@ -566,6 +594,7 @@ export class Game {
         this.handleEvents(events, sim);
         this.watchStuck(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
+        if (!this.wasGo && sim.race.phase === 'racing') { this.wasGo = true; this.input.recenter(); }
         if (this.tutorialOn && sim.race.phase === 'racing' && (sim.race.time >= CONFIG.ui.tutorialHideAfterGoS
           || inp.throttle > 0 || inp.brake > 0 || Math.abs(inp.steer) > 0.2 || inp.handbrake)) {
           this.tutorialOn = false;

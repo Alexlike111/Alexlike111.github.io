@@ -4,6 +4,7 @@ import { CONFIG } from '../config';
 import { platform } from '../platform/bridge';
 import type { GhostData, GhostFrame, SaveData, UpgradeLevels } from '../types';
 import { CAR_IDS, carIdOr, isCarId, rivalModeOr } from './cars';
+import { controlsOr, sensOr } from '../input/schemes';
 
 export const SAVE_KEY_CORE = 'sc_core';
 export const SAVE_KEY_GHOSTS = 'sc_ghosts';
@@ -19,7 +20,7 @@ export function defaultSave(): SaveData {
     unlockedTracks: [CONFIG.meta.trackOrder[0]],
     bestPlace: {},
     bestLap: {},
-    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' },
+    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false },
     ghosts: {},
     carColor: 0,
     racesFinished: 0,
@@ -121,6 +122,9 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
       quality: q === 'auto' || q === 'low' || q === 'medium' || q === 'high' ? q : d.settings.quality,
       muted: st.muted === true,
       tutorialDone: st.tutorialDone === true,
+      controls: controlsOr(st.controls),
+      steerSens: sensOr(st.steerSens),
+      controlsPicked: st.controlsPicked === true,
       camera: st.camera === 'rotating' || st.camera === 'fixed' || st.camera === 'auto' ? st.camera : d.settings.camera,
     },
     ghosts: g,

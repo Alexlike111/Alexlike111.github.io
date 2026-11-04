@@ -481,6 +481,21 @@ export const CONFIG = {
     gasDeadBand: 0.25,         // GAS finger: dead band around its landing x, in button sizes (no steering jump on touch-down)
     gasDeadBandMin: 0.1,       // ... but never smaller than this (landing near the right screen edge has little room)
     pullHold: 0.15,            // s a steering finger must stay below the brake line before auto-gas brakes
+    // ---- control schemes (src/input/schemes.ts) ----
+    buttonSteerRise: 10,       // 1/s: steer buttons ramp to full lock in 0.1 s
+    buttonSteerReturn: 14,     // 1/s: and back to centre
+    slideFull: 0.15,           // Slide: finger offset (fraction of screen width) for full lock
+    slideDead: 0.012,          // Slide: dead band (fraction of screen width)
+    slideCurve: 0.8,           // Slide / Joystick response exponent
+    joyRadius: 0.16,           // Joystick ring radius, fraction of min(screen w,h)
+    joyDead: 0.1,              // Joystick dead band, fraction of the radius
+    joyBrakePull: 1.6,         // Joystick: pulling down this far (0.4 x radius x this) brakes
+    tiltFullDeg: 20,           // Tilt: wheel angle for full lock
+    tiltDeadDeg: 2,            // Tilt: dead band
+    tiltCurve: 0.9,
+    tiltSmooth: 22,            // 1/s smoothing of the tilt steering
+    tiltCheckMs: 1500,         // no orientation event within this long after choosing Tilt = unavailable
+    sensMin: 0.5, sensMax: 1.5,   // steering sensitivity slider
     homeYDrift: 0.35,          // button sizes per second the steering finger's home Y follows a slow downward creep
   },
   // ---- appended by module F (integration) ----
@@ -537,7 +552,7 @@ export const CONFIG = {
     repair: { frac: 0.5, minHp: 25 },
     oil: {
       time: 9, maxHits: 2, radius: 2.3, dropBack: 3.4, max: 16, ownerImmune: 1.0,
-      spinTime: 0.9, spinTurns: 1, gripMul: 0.3, gripTime: 1.15, cooldown: 2.5,   // one full spin-out (the nose ends up pointing the way it started, so the car keeps going)
+      spinTime: 0.9, spinTurns: 1, gripMul: 0.06, gripTime: 1.15, cooldown: 2.5,   // one full spin-out (the nose ends up pointing the way it started, so the car keeps going)
     },
     shock: { radius: 9, push: 5.5, damage: 12, propRadius: 6, propMul: 1.4 },
     // Item roll weights by race position: [nitro, shield, repair, oil, shockwave]. Trailing cars get the stronger tools (catch-up).
@@ -557,7 +572,7 @@ export const CONFIG = {
       shieldBehind: 10, shieldClose: 4, shieldHealth: 0.4,
       repairHealth: 0.55, repairHealthLow: 0.85,
       oilBehindMin: 4, oilBehindMax: 22, oilLane: 3,
-      oilMaxPack: 1, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
+      oilMaxSpeed: 36, oilMaxPack: 1, oilNoStack: 90,                      // at most this many rivals behind; no new slick within this many metres of an old one
       oilCalmBehind: 40, oilCalmAhead: 100, oilCalmCurv: 0.003,           // m of road behind that must be straight, and what counts as straight
       shockCount: 2, shockRadius: 7, shockSingle: 4, shockCalmCurv: 0.006,
     },

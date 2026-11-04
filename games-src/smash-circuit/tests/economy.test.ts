@@ -177,7 +177,7 @@ describe('save sanitising', () => {
     expect(s.unlockedTracks).toEqual(['t1', 't2']);
     expect(s.bestPlace).toEqual({ t2: 3 });
     expect(s.bestLap).toEqual({ t1: 70.2 });
-    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto' });
+    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false });
     expect(s.carColor).toBe(CONFIG.render.carColors.length - 1);
     expect(s.racesFinished).toBe(4);
   });

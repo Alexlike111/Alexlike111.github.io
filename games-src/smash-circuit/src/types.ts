@@ -3,6 +3,8 @@
 // Render mapping: physics (x, y) -> three.js (x, height, y). Ground is the XZ plane, Y is up.
 // Angle 0 = car nose points to +x; positive angle = counter-clockwise in physics coords.
 
+import type { ControlScheme } from './input/schemes';
+
 export interface Vec2 { x: number; y: number }
 
 // ---------- Input ----------
@@ -262,6 +264,8 @@ export interface SaveData {
   bestPlace: Record<string, number>;         // trackId -> best place (1..8)
   bestLap: Record<string, number>;           // trackId -> seconds
   settings: { lang: 'en' | 'ru' | 'auto'; autoGas: boolean; quality: 'auto' | 'low' | 'medium' | 'high'; muted: boolean; tutorialDone: boolean; camera: 'auto' | 'rotating' | 'fixed';
+    /** phone control scheme (default 'buttons'), steering sensitivity (0.5..1.5) and whether the first-run picker was shown */
+    controls: ControlScheme; steerSens: number; controlsPicked: boolean;
     /** rival field (pre-race screen and settings); absent = 'mixed' */
     rivals?: RivalMode;
     /** model for RivalMode 'pick' */

@@ -78,13 +78,16 @@ export class AiItemUser {
     const overdue = this.held > A.maxHold;
     switch (item) {
       case 'nitro': {
+        // never into a bend: even a careless driver waits for open road (a nitro burst mid-corner ends in the wall and blocks the road)
+        if (car.speed < 8) return this.held > A.maxHold + 4;
+        const s = track.nearest(car.x, car.y, hintS).s;
+        const reach = Math.max(30, Math.abs(car.speed) * (clever ? A.nitroLook : A.nitroLook * 0.6));
+        let calm = true;
+        for (let d = -8; d <= reach; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.nitroCurv) { calm = false; break; }
+        if (!calm) return this.held > A.maxHold + 4;
         if (overdue) return true;
         if (!clever) return this.rng() < 0.06;
-        if (sur.aheadInLane || car.speed < 8) return false;
-        const s = track.nearest(car.x, car.y, hintS).s;
-        const reach = Math.max(30, Math.abs(car.speed) * A.nitroLook);
-        for (let d = 0; d <= reach; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.nitroCurv) return false;
-        return true;
+        return !sur.aheadInLane;
       }
       case 'shield':
         return overdue || sur.chaser || (car.health < A.shieldHealth && sur.nearCount > 0) || (clever && sur.blocker && car.speed > 12);
@@ -94,6 +97,7 @@ export class AiItemUser {
         // a slick only helps on a straight: in a bend the victim leaves the road and the whole pack piles up behind it
         if (!sur.behindInLane && !overdue) return false;
         if (sur.behindCount > A.oilMaxPack) return false;
+        if (car.speed > A.oilMaxSpeed) return false;     // at full tilt a spin-out ends in the guardrail and a 6 s walk home
         const s = track.nearest(car.x, car.y, hintS).s;
         if (this.oils) for (const o of this.oils) if (o.active && Math.hypot(o.x - car.x, o.y - car.y) < A.oilNoStack) return false;
         for (let d = -A.oilCalmBehind; d <= A.oilCalmAhead; d += 8) if (Math.abs(track.sampleAt(s + d).curvature) > A.oilCalmCurv) return false;

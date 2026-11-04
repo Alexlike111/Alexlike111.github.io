@@ -453,11 +453,85 @@
 .ui-root .touch-layer .drift-btn svg { width: 40%; height: 40%; }
 .ui-root .touch-layer .down { transform: scale(0.94) translateY(0.1em); filter: brightness(1.2); }
 
+/* ---- control schemes (positions are set inline by InputController.layout from src/input/schemes.ts) ---- */
+.ui-root .touch-layer [hidden] { display: none !important; }
+.ui-root .touch-layer .steer-btn {
+  position: absolute; display: grid; place-items: center; border-radius: 26%; pointer-events: auto; touch-action: none; color: #fff;
+  background: linear-gradient(160deg, rgba(86, 140, 235, 0.62), rgba(26, 52, 128, 0.7)); border: 0.16em solid rgba(11, 20, 48, 0.85);
+  box-shadow: 0 0.28em 0 rgba(11, 20, 48, 0.8), inset 0 0.18em 0 rgba(255, 255, 255, 0.28);
+  font-size: calc(var(--steer, 90px) * 0.1); transition: transform 0.06s, filter 0.1s, background 0.1s; user-select: none; -webkit-user-select: none;
+}
+.ui-root .touch-layer .steer-btn svg { width: 46%; height: 46%; filter: drop-shadow(0 0.08em 0 rgba(0, 0, 0, 0.35)); }
+.ui-root .touch-layer .steer-btn.down { background: linear-gradient(160deg, rgba(255, 214, 80, 0.92), rgba(255, 150, 30, 0.9)); color: #23140a; }
+.ui-root.sch-new .touch-layer .drift-btn, .ui-root.sch-new .touch-layer .brake-btn { opacity: 0.82; }
+.ui-root.sch-new .touch-layer .drift-btn.down, .ui-root.sch-new .touch-layer .brake-btn.down { opacity: 1; }
+.ui-root.sch-new .touch-layer .brake-btn { background: radial-gradient(circle at 35% 28%, #ff8f8f, #e03a3a 55%, #8e1c1c); }
+.ui-root.sch-new .touch-layer .drift-btn { font-size: calc(var(--drift, 66px) * 0.17); }
+.ui-root.sch-new .touch-layer .brake-btn { font-size: calc(var(--brake, 66px) * 0.17); }
+/* floating stick / slide track */
+.ui-root .touch-layer .stick { position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 50%; transition: opacity 0.15s;
+  border: 0.22em solid rgba(255, 255, 255, 0.7); background: rgba(16, 27, 58, 0.32); box-shadow: 0 0 0 0.18em rgba(11, 20, 48, 0.5); }
+.ui-root .touch-layer .stick.slide { height: 52px; border-radius: 26px; }
+.ui-root .touch-layer .stick.idle { opacity: 0.45; border-style: dashed; }
+.ui-root .touch-layer .stick-knob { position: absolute; left: 50%; top: 50%; width: 46%; aspect-ratio: 1; margin: -23% 0 0 -23%; border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe27a, #ff9d1e 60%, #c4600a); border: 0.16em solid rgba(11, 20, 48, 0.85); }
+.ui-root .touch-layer .stick.slide .stick-knob { width: 36px; margin: -18px 0 0 -18px; }
+/* two-side tap zones */
+.ui-root .touch-layer .tap-zone { position: absolute; bottom: 0; width: 50%; height: 26%; pointer-events: none; display: flex; align-items: center; color: #fff; opacity: 0.8;
+  transition: background 0.08s; }
+.ui-root .touch-layer .tap-zone.l { left: 0; justify-content: flex-start; background: linear-gradient(to top, rgba(16, 27, 58, 0.32), transparent); padding-left: 22%; }
+.ui-root .touch-layer .tap-zone.r { right: 0; justify-content: flex-end; background: linear-gradient(to top, rgba(16, 27, 58, 0.32), transparent); padding-right: 22%; }
+.ui-root .touch-layer .tap-zone svg { width: min(16vmin, 80px); height: min(16vmin, 80px); filter: drop-shadow(0 0.1em 0 rgba(0, 0, 0, 0.4)); opacity: 0.7; }
+.ui-root .touch-layer .tap-zone.down { background: linear-gradient(to top, rgba(255, 200, 60, 0.4), transparent); }
+.ui-root .touch-layer .tap-zone.down svg { opacity: 1; color: #ffe27a; }
+/* the item slot follows the scheme (variables set by InputController.layout on the UI root) */
+.ui-root.is-touch.sch-new .hud-item {
+  --isz: var(--it-s, 60px);
+  right: calc(var(--it-off, 20px) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--it-b, 120px) + env(safe-area-inset-bottom, 0px));
+}
+.ui-root.is-touch.sch-new .hud-item .item-slot { opacity: 0.9; }
+
+/* ---- controls picker (settings, pause, first-run) ---- */
+.ui-root .s-ctl { flex-direction: column; align-items: stretch; }
+.ui-root .ctlgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45em; width: 100%; }
+.ui-root .ctl-card {
+  display: grid; grid-template-columns: 2.4em minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 0.55em; align-items: center; text-align: left; padding: 0.45em 0.55em;
+  color: #cdd6ee; background: rgba(0, 0, 0, 0.36); border: 0.14em solid var(--ink); border-radius: 0.9em; touch-action: manipulation; min-height: 44px;
+}
+.ui-root .ctl-card .ctl-pic { grid-row: 1 / span 2; width: 2.4em; height: 2.4em; display: grid; place-items: center; border-radius: 0.6em; background: rgba(255, 255, 255, 0.1); }
+.ui-root .ctl-card .ctl-pic svg { width: 78%; height: 78%; }
+.ui-root .ctl-card b { font: 900 italic 0.9em/1.1 var(--display); text-transform: uppercase; color: #fff; }
+.ui-root .ctl-card small { font-size: 0.68em; line-height: 1.15; opacity: 0.85; }
+.ui-root .ctl-card.on { background: linear-gradient(#3f8ff0, #2268d6); border-color: #fff; box-shadow: 0 0.14em 0 var(--ink), inset 0 0.1em 0 rgba(255, 255, 255, 0.3); color: #fff; }
+.ui-root .sens { display: grid; grid-template-columns: auto minmax(5em, 1fr) 3em; align-items: center; gap: 0.6em; width: 100%; margin-top: 0.5em; font-size: 0.85em; }
+.ui-root .sens input[type=range] { width: 100%; min-height: 44px; accent-color: var(--yellow); touch-action: pan-y; }
+.ui-root .sens b { text-align: right; font-family: var(--display); }
+.ui-root .ctlpause { display: flex; flex-direction: column; gap: 0.3em; }
+.ui-root .ctlrow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.25em; }
+.ui-root .ctl-ic { min-height: 44px; display: grid; place-items: center; color: #cdd6ee; background: rgba(0, 0, 0, 0.36); border: 0.14em solid var(--ink); border-radius: 0.7em; touch-action: manipulation; }
+.ui-root .ctl-ic svg { width: 1.7em; height: 1.7em; }
+.ui-root .ctl-ic.on { background: linear-gradient(#3f8ff0, #2268d6); border-color: #fff; color: #fff; }
+.ui-root .ctl-desc { font-size: 0.74em; line-height: 1.15; opacity: 0.92; }
+.ui-root .ctl-desc b { color: var(--yellow); text-transform: uppercase; font-family: var(--display); }
+.ui-root .ctlpause .sens { margin-top: 0; font-size: 0.8em; }
+.ui-root .ctlpause .btn { min-height: 44px; }
+.ui-root .ctlpick { width: min(100%, 40em); max-height: 100%; overflow-y: auto; padding: 0.8em; display: flex; flex-direction: column; gap: 0.5em; animation: pop-in 0.25s cubic-bezier(.2, 1.4, .4, 1) both; }
+.ui-root .ctlpick .sub { font-size: 0.8em; opacity: 0.85; text-align: center; }
+.ui-root .ctlpick .pair { display: flex; gap: 0.5em; }
+.ui-root .ctlpick .pair .btn { flex: 1; }
+.ui-root .tut-ic1 svg { width: 2.4em; height: 2.4em; color: #fff; }
+.ui-root .tut-brake i { display: block; width: 2.4em; height: 2.4em; border-radius: 50%; background: radial-gradient(circle at 35% 28%, #ff8f8f, #e03a3a 60%, #8e1c1c); border: 0.13em solid var(--ink); }
+@media (min-width: 640px) { .ui-root .ctlgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 519px) { .ui-root .ctl-card small { font-size: 0.62em; } .ui-root .ctl-card { padding: 0.35em 0.45em; } }
+@media (max-height: 460px) { .ui-root .pausecard { max-height: 100%; overflow-y: auto; } .ui-root .ctlgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
 /* ---------------------------------------------------------------- tutorial + toasts */
 /* tutorial = a semi-transparent BOTTOM SHEET: the start grid and the track stay visible above it.
    Touch layout keeps clear of the GAS button (bottom-right, 26% of the short side + margin). */
 .ui-root .layer-tutorial { z-index: 6; display: flex; align-items: flex-end; justify-content: center; padding: 0 max(0.7em, var(--sar)) calc(max(0.7em, var(--sab))) max(0.7em, var(--sal)); }
 .ui-root.is-touch .layer-tutorial { padding-bottom: calc(max(0.7em, var(--sab)) + 44vmin); }
+.ui-root.is-touch.sch-new .layer-tutorial { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--tut-pad, 44vmin)); }
 .ui-root .tutorial { width: min(100%, 30em); overflow: visible; padding: 0.55em 0.8em 0.75em; display: flex; flex-direction: column; gap: 0.35em; pointer-events: none; background: rgba(16, 27, 58, 0.78); animation: pop-in 0.3s cubic-bezier(.2, 1.4, .4, 1) both; }
 .ui-root .tutorial .title { font-size: 1.05em; }
 .ui-root .tutorial .btn { pointer-events: auto; align-self: center; min-width: 11em; }
