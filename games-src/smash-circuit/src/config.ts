@@ -40,7 +40,7 @@ export const CONFIG = {
     maxLatAccel: 40,          // m/s^2 arcade cornering on healthy road with no speed loss (real cars ~10): up to ~70% stick at any speed
     fullLockLatMul: 1.4,      // full lock turns harder than that (56 m/s^2) and pays for it with tyre scrub (fullLockScrub): the car goes where it is
                               // pointed and sheds the speed it needs (lifting is only needed for hairpins)
-    fullLockScrub: 0.5,       // m/s^2 of deceleration per m/s^2 of cornering beyond maxLatAccel
+    fullLockScrub: 0.6,       // m/s^2 of deceleration per m/s^2 of cornering beyond maxLatAccel
     maxYawRate: 3.2,          // rad/s absolute cap
     handbrakeYawMul: 1.35,    // yaw authority multiplier while handbrake held (rear steps out)
     handbrakeDecel: 3.2,      // m/s^2 extra forward drag while handbrake held
@@ -588,6 +588,7 @@ export const CONFIG = {
     angleMax: 0.62,           // rad with full steer into the turn (36 deg)
     angleRate: 6,             // 1/s: how fast the slip angle follows the target (no spin: it can never overshoot)
     latAccel: 64,             // m/s^2 path curvature at full steer (tighter than grip at full lock, 56, without its scrub: drifting is the hairpin tool)
+    maxPathRate: 2.4,         // rad/s cap of the drift path's turn rate (a full-lock touch drift at 60-80 km/h is a slide, never a spin round)
     pathMin: 0.25,            // fraction of latAccel with full counter-steer
     pathMid: 0.6,             // ... with neutral steer
     powerMul: 0.8,            // engine power while sliding

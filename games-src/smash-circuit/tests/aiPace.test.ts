@@ -17,8 +17,9 @@ const DT = 1 / 60;
 
 /** Best lap (s) a clean car can drive per track with these physics, measured from the fastest clear AI (trackSpeed 1.15). */
 // (arcade feel pass: faster car, 25 m/s^2 grip, drifting AI in hairpins, no power-ups; was 26.1 / 30.2 / 33.0;
-// the top AI measured 22.0 / 24.7 / 26.3)
-const OPTIMAL_LAP: Record<string, number> = { t1: 21.6, t2: 24.2, t3: 25.9 };
+// the top AI measured 22.0 / 24.7 / 26.3. Steering retune: 40 m/s^2 grip + full-lock over-turn, was 21.6 / 24.2 / 25.9;
+// the top AI measured 18.6 / 21.7 / 22.3)
+const OPTIMAL_LAP: Record<string, number> = { t1: 18.0, t2: 21.4, t3: 22.2 };
 
 function soloLap(ti: number, skill: number): { lap: number; respawns: number; health: number } {
   const sim = new Sim({

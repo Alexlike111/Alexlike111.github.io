@@ -124,7 +124,7 @@ function integrateDrift(
   const betaT = dir * pick(D.angleMin, D.angleMid, D.angleMax);
   const grip = clamp(fx.gripMul * surface.gripMul, 0.3, 1);
   const dLat = D.latAccel * ((stats.latAccel ?? C.maxLatAccel) / C.maxLatAccel);   // a car that corners harder also drifts tighter
-  const pathRate = dir * Math.min(C.maxYawRate, (dLat * grip * pick(D.pathMin, D.pathMid, 1)) / Math.max(v, 4));
+  const pathRate = dir * Math.min(D.maxPathRate, (dLat * grip * pick(D.pathMin, D.pathMid, 1)) / Math.max(v, 4));
 
   // speed along the travel direction
   let a = 0;

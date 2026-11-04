@@ -130,9 +130,9 @@ describe('drift control (no spin-outs, small speed loss)', () => {
 
   it('a drift turns tighter than grip cornering at the same speed, and keeps the speed grip full lock scrubs off (it pays in hairpins)', () => {
     // curvature of the travelled path (velocity heading change per metre) after settling, drift vs grip at full steer;
-    // `hold`: the speed is held (cruise), so both are compared at 80 km/h
+    // `hold`: the speed is held (cruise), so both are compared at 100 km/h
     const curv = (i: CarInput, tr: DriftTracker | null, hold: boolean): { c: number; v: number } => {
-      let k = start(80);
+      let k = start(100);
       const v0 = Math.hypot(k.vx, k.vy);
       const t = tr ?? new DriftTracker();
       const st = (): void => {
