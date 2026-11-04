@@ -128,7 +128,7 @@ describe('AiDriver decisions', () => {
 
   it('brakes before a hairpin when too fast and accelerates on the straight when slow', () => {
     const d = new AiDriver(PERSONA, makeRng(1));
-    const fast = state(g, hairpinS - 45, 0, 38);
+    const fast = state(g, hairpinS - 45, 0, 44);   // (arcade grip: 40 m/s^2 cornering, so "too fast" is ~160 km/h here)
     const out = decide(d, fast, [], g, fast.progress);
     expect(out.brake).toBeGreaterThan(0.6);
     expect(out.throttle).toBe(0);

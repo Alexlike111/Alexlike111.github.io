@@ -64,7 +64,8 @@ export function steerAxis(x: number, homeX: number, screenW: number, onGasButton
     full = Math.min(full, Math.max(dead + 0.02, room));
   }
   const mag = clamp((Math.abs(dx) - dead) / (full - dead), 0, 1);
-  return mag === 0 ? 0 : Math.sign(dx) * mag;
+  // response curve: more authority at small finger offsets (one-finger play), full lock stays at the same distance
+  return mag === 0 ? 0 : Math.sign(dx) * Math.pow(mag, C.touchSteerCurve);
 }
 
 const GAME_KEYS = new Set([

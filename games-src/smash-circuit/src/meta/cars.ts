@@ -35,15 +35,18 @@ export const NO_UPGRADES: UpgradeLevels = Object.freeze({ engine: 0, grip: 0, ar
 export function carStats(id: CarId, levels: UpgradeLevels = NO_UPGRADES): CarStats {
   const mid = carIdOr(id);
   const d = CC.defs[mid];
+  // grip and cornering of a def are in the reference car's units: CONFIG.car (baseGrip, maxLatAccel) is the base they scale
+  // (a global handling retune moves the whole roster and keeps every car's character)
+  const ref = CC.defs[CC.starter];
   const e = clampLevel(levels.engine), g = clampLevel(levels.grip), a = clampLevel(levels.armor);
   return {
     enginePower: d.power * (1 + U.engine.powerPerLevel * e),
     topSpeed: d.top * (1 + U.engine.topSpeedPerLevel * e),
-    grip: d.grip * (1 + U.grip.gripPerLevel * g),
+    grip: CONFIG.car.baseGrip * (d.grip / ref.grip) * (1 + U.grip.gripPerLevel * g),
     armor: d.armor * (1 + U.armor.armorPerLevel * a),
     mass: d.mass,
     modelId: mid,
-    latAccel: d.lat * (1 + U.grip.latPerLevel * g),
+    latAccel: CONFIG.car.maxLatAccel * (d.lat / ref.lat) * (1 + U.grip.latPerLevel * g),
     brakeDecel: d.brake,
     length: d.length,
     width: d.width,

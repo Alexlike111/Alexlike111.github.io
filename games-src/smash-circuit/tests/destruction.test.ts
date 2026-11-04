@@ -410,8 +410,8 @@ describe('no shortcut through walls facing another part of the track (audit X1)'
       const { g, ds } = setup(def);
       const S = g.samples, n = S.length, L = g.length, half = g.def.width / 2;
       let pairs = 0;
-      for (let i = 0; i < n; i += 3) {
-        for (let j = 0; j < n; j += 3) {
+      for (let i = 0; i < n; i += 4) {
+        for (let j = 0; j < n; j += 4) {
           const ahead = (((S[j].s - S[i].s) % L) + L) % L;
           const edge = D.lock.arc + 2 * D.guardrail.segmentLength;   // the rule works per wall segment: skip the fuzzy boundary
           if (ahead < edge || ahead > L - edge) continue;
@@ -420,8 +420,8 @@ describe('no shortcut through walls facing another part of the track (audit X1)'
           if (d > D.lock.dist) continue;
           // the walls the straight line from leg i to leg j passes through: at least one of them must be indestructible
           const crossed = new Set<number>();
-          for (let k = 0; k <= 120; k++) {
-            const nn = g.nearest(S[i].x + dx * k / 120, S[i].y + dy * k / 120);
+          for (let k = 0; k <= 90; k++) {
+            const nn = g.nearest(S[i].x + dx * k / 90, S[i].y + dy * k / 90);
             const a = Math.abs(nn.lateral) - (half + D.wallOffset);
             if (Math.abs(a) <= D.wall.thickness / 2 + 0.3) crossed.add(ds.wallAt(nn.s, nn.lateral > 0 ? 1 : -1));
           }

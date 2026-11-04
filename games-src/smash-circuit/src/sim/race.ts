@@ -44,6 +44,8 @@ export class RaceTracker {
   private readonly rate: number[];          // smoothed progress speed, m/s
   private readonly debt: number[];          // metres of the current lap that were jumped, not driven
   private readonly finishOrder: number[] = [];
+  /** cars that crossed the finish line in the current update (placed by their exact crossing time once all are known) */
+  private readonly finishing: { i: number; t: number }[] = [];
   private inited = false;
   private lastCountdown = Number.POSITIVE_INFINITY;
   private grace = -1;
@@ -177,6 +179,18 @@ export class RaceTracker {
         c.progress = this.unwrapped[i];
       }
     }
+    // two cars over the line in the same step: the earlier crossing gets the better place
+    const fin = this.finishing;
+    if (fin.length) {
+      fin.sort((a, b) => a.t - b.t || a.i - b.i);
+      for (const f of fin) {
+        const c = cars[f.i];
+        this.finishOrder.push(f.i);
+        c.place = this.finishOrder.length;
+        events.push({ type: 'finish', carId: c.id, place: c.place, time: f.t });
+      }
+      fin.length = 0;
+    }
   }
 
   /** Forward step prev -> prev + delta: pass the next gate(s) in order; the line completes the lap. */
@@ -209,9 +223,7 @@ export class RaceTracker {
         c.finished = true;
         c.finishTime = tCross;
         c.progress = this.laps * L;
-        this.finishOrder.push(i);
-        c.place = this.finishOrder.length;
-        events.push({ type: 'finish', carId: c.id, place: c.place, time: tCross });
+        this.finishing.push({ i, t: tCross });
         if (c.isPlayer) st.playerFinished = true;
       }
       return;

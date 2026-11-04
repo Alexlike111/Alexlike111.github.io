@@ -89,8 +89,9 @@ export class AiDriver {
   private roadS = 0;
   private exitS = 0;
   private exitSide = 0;
-  private markX = 0;
-  private markY = 0;
+  /** distance (m) to the recovery target when the watchdog mark was set (off-road recovery must get closer to count) */
+  private markDist = 0;
+  private markRec = false;
   private markTime = 0;
 
   constructor(p: AiPersonality, rng: () => number) {
@@ -159,9 +160,11 @@ export class AiDriver {
         recX = q.x + q.nx * side * (half - 1.5); recY = q.y + q.ny * side * (half - 1.5);
       }
     }
-    // progress watchdog: along the track, or (while finding the way back) any 6 m of movement
-    const moved = recovering ? Math.hypot(car.x - this.markX, car.y - this.markY) : wrap2(s - this.markS, L);
-    if (moved > 6 || moved < -40) { this.markS = s; this.markX = car.x; this.markY = car.y; this.markTime = 0; } else this.markTime += h;
+    // progress watchdog: 6 m along the track, or (while finding the way back) 4 m closer to the gap
+    const recDist = recovering ? Math.hypot(recX - car.x, recY - car.y) : 0;
+    if (recovering !== this.markRec) { this.markRec = recovering; this.markS = s; this.markDist = recDist; }   // new mode, new mark
+    const moved = recovering ? (this.markDist - recDist >= 4 ? 7 : 0) : wrap2(s - this.markS, L);
+    if (moved > 6 || moved < -40) { this.markS = s; this.markDist = recDist; this.markTime = 0; } else this.markTime += h;
     if (this.markTime > A.respawnAfter) this.wantsRespawn = true;
 
     // ---------- stuck / reverse recovery
@@ -321,6 +324,13 @@ export class AiDriver {
     let steer: number;
     if (Math.abs(alpha) > 1.3) {
       steer = -Math.sign(alpha);
+      if (recovering) {
+        // the way back is behind: turn round on the open side, away from the road and the wall in between
+        const toRoad = this.exitSide !== 0 ? -this.exitSide : (lat > 0 ? -1 : 1);   // lateral direction of the road from here
+        const rx = tan.nx * toRoad, ry = tan.ny * toRoad;
+        const cross = Math.cos(car.angle) * ry - Math.sin(car.angle) * rx;          // > 0: the road is on our left
+        steer = cross > 0 ? 1 : -1;
+      }
     } else {
       const kappa = (2 * Math.sin(alpha)) / dist;
       steer = car.driftActive ? driftSteerForCurvature(kappa, sp2, car.driftDir ?? 1, gripFactor, carLat)

@@ -16,7 +16,7 @@ export const CONFIG = {
     mass: 1000,
     baseEnginePower: 13.0,    // m/s^2 at full throttle from standstill (arcade: 0-100 km/h ~2.5 s, 0-120 ~3.2 s); falls off with speed (powerFalloff)
     baseTopSpeed: 60,         // m/s: start of the speed ceiling; the last 10% tapers and air drag settles the base car at ~57 m/s (~205 km/h) on a long straight
-    baseGrip: 12,             // 1/s: how fast the velocity swings back onto the nose (high = planted, arcade)
+    baseGrip: 18,             // 1/s: how fast the velocity swings back onto the nose (high = planted, arcade; 18: full-lock slip stays ~6 deg at 120 km/h)
     handbrakeGripMul: 0.25,   // grip while handbrake held -> drift
     brakeDecel: 14,           // m/s^2 -> 80-0 km/h in ~17 m, 200-0 in ~1/4 of a long straight (arcade brakes match the higher speeds)
     reverseMax: 8,            // m/s
@@ -26,8 +26,9 @@ export const CONFIG = {
     maxSteerAngle: 0.6,       // rad of front wheels at low speed (sets the low-speed turn radius)
     minSteerAngleAtTop: 0.16, // (legacy, no longer read: at speed the steering is a linear fraction of the grip-limited turn rate, see carModel)
     wheelBase: 2.6,
-    steerSpeed: 11,           // how fast steering input follows target, 1/s (0.09 s to full lock)
-    yawDamping: 16,           // angular velocity correction toward the steering target, 1/s (also the stability control: spins die in ~0.15 s)
+    steerSpeed: 20,           // how fast steering input follows target, 1/s (0.05 s to full lock: light, immediate steering)
+    yawDamping: 28,           // angular velocity correction toward the steering target, 1/s (also the stability control: spins die in ~0.1 s);
+                              // with steerSpeed: a key press reaches 90% of the full turn rate in ~0.11 s
     driftSlipThreshold: 3.5,  // m/s lateral speed -> drifting flag (smoke) outside the drift mechanic
     curbSlowdown: 0.985,      // speed multiplier per step*120 on curbs (applied as per-second factor ^dt)
     curbShake: 0.6,
@@ -36,11 +37,14 @@ export const CONFIG = {
     holeDrag: 4.0,            // torn road chunk
     bullet: true,             // CCD [4.14]
     // --- appended by module A (physics & car) ---
-    maxLatAccel: 25,          // m/s^2 lateral acceleration limit on healthy road: full lock at any speed = this much cornering
+    maxLatAccel: 40,          // m/s^2 arcade cornering on healthy road with no speed loss (real cars ~10): up to ~70% stick at any speed
+    fullLockLatMul: 1.4,      // full lock turns harder than that (56 m/s^2) and pays for it with tyre scrub (fullLockScrub): the car goes where it is
+                              // pointed and sheds the speed it needs (lifting is only needed for hairpins)
+    fullLockScrub: 0.5,       // m/s^2 of deceleration per m/s^2 of cornering beyond maxLatAccel
     maxYawRate: 3.2,          // rad/s absolute cap
     handbrakeYawMul: 1.35,    // yaw authority multiplier while handbrake held (rear steps out)
     handbrakeDecel: 3.2,      // m/s^2 extra forward drag while handbrake held
-    cornerScrub: 0.12,        // fraction of slip speed bled per grip correction (tyre scrub; low = corners keep the speed)
+    cornerScrub: 0.08,        // fraction of slip speed bled per grip correction (tyre scrub ~0.08 x lateral accel; low = corners keep the speed)
     curbDrag: 1.2,            // m/s^2 (reference) on curb: mild (rubbing a curb costs ~15 km/h per second at 100 km/h), grass (offRoadDrag) is the real penalty
     curbGripMul: 0.9,
     holeGripMul: 0.4,
@@ -57,11 +61,11 @@ export const CONFIG = {
     powerFalloff: 0.55,       // engine force at the ceiling = (1 - this) of the standstill force (strong launch, still pulls at the top)
     lowSpeedGripBoost: 1.0,   // extra lateral grip at standstill (x2), fading out by lowSpeedGripUntil
     lowSpeedGripUntil: 22,    // m/s
-    steerExpo: 0.25,          // 0 = linear steering; > 0 softens small inputs (precision around centre on touch / analog)
+    steerExpo: 0,             // 0 = linear steering; > 0 softens small inputs (touch has its own curve: controls.touchSteerCurve)
     // player-only assist: a gentle steer away from the road edge when the nose points out of the road
     assistLook: 0.75,         // s of travel looked ahead for the road edge
     assistMargin: 1.2,        // m inside the edge where the assist starts
-    assistMax: 0.3,           // max steer added
+    assistMax: 0.2,           // max steer added (only ever adds to the player's steering, never takes turn-in away)
     assistMaxAngle: 0.6,      // rad: heading error above which the assist stays out (deliberate smashes, U-turns)
     // ---- appended: impact layer (audit #13, P1/P2) ----
     // what a collision does to the car is kept apart from the arcade model, so grip and yaw damping cannot erase it at once:
@@ -201,7 +205,7 @@ export const CONFIG = {
     lookAhead: 14,             // metres base
     lookAheadPerSpeed: 0.55,   // extra metres per m/s
     cornerSpeedK: 1.0,         // v_max = sqrt(latAccel / curvature)
-    maxLatAccel: 24,           // m/s^2 the AI plans cornering with: the car sustains 25 on healthy road (car.maxLatAccel); the top AI nearly matches it
+    maxLatAccel: 38,           // m/s^2 the AI plans cornering with: the car sustains 40 on healthy road (car.maxLatAccel); the top AI nearly matches it
     avoidRadius: 7,
     overtakeOffset: 0.55,      // fraction of half width
     rubberBand: 0.08,          // mild catch-up (fraction of speed) for cars far behind / ahead
@@ -467,8 +471,10 @@ export const CONFIG = {
     brakePull: 0.4,            // GAS finger this many button-sizes below the button centre = brake / reverse (must stay < (0.5 + buttonMargin/gasButtonSize) so it is reachable before the screen edge)
     brakeButtonSize: 0.17,     // fraction of min(screen w,h): optional BRAKE button (bottom-left, second finger)
     buttonMargin: 0.04,        // fraction of min(screen w,h): gap of touch buttons from the screen edge
-    keySteerRise: 12,          // 1/s: how fast keyboard steering ramps to full lock (0.08 s; the car model smooths too)
-    keySteerReturn: 14,        // 1/s: and back to centre
+    keySteerRise: 25,          // 1/s: how fast keyboard steering ramps to full lock (0.04 s; the car model smooths too)
+    keySteerReturn: 28,        // 1/s: and back to centre
+    touchSteerCurve: 0.6,      // touch steer = offset^this (offset 0..1 between dead zone and full lock): more authority at small finger offsets
+                               // (one-finger play: 10% of the full-lock distance already gives 25% steer, half the distance 66%)
     itemFlickUp: 0.55,         // GAS thumb moved up by this many button sizes = use item (re-arms at half)
     driftButtonSize: 0.17,     // fraction of min(screen w,h): DRIFT button left of GAS (second finger; holds a drift like Space)
     // ---- audit #4 / #15 ----
@@ -567,7 +573,7 @@ export const CONFIG = {
   drift: {
     minSpeed: 11,             // m/s (~40 km/h): a held drift (Space / DRIFT button) starts above this
     autoSpeed: 16.7,          // m/s (~60 km/h): a hard touch steer starts a drift above this
-    autoSteer: 0.92,          // |steer| that counts as a hard touch steer (finger past the full-lock distance)
+    autoSteer: 0.95,          // |steer| that counts as a hard touch steer (finger at ~92% of the full-lock distance, after controls.touchSteerCurve)
     brakeTapSpeed: 15,        // m/s: brake + hard steer at speed starts a drift (player, keyboard)
     brakeTapSteer: 0.6,
     brakeTapMax: 0.3,         // s: only a short brake TAP starts a drift (on release); ordinary braking into a corner never does
@@ -581,7 +587,7 @@ export const CONFIG = {
     angleMid: 0.42,           // rad with neutral steer (24 deg)
     angleMax: 0.62,           // rad with full steer into the turn (36 deg)
     angleRate: 6,             // 1/s: how fast the slip angle follows the target (no spin: it can never overshoot)
-    latAccel: 30,             // m/s^2 path curvature at full steer (tighter than grip: drifting is the hairpin tool)
+    latAccel: 64,             // m/s^2 path curvature at full steer (tighter than grip at full lock, 56, without its scrub: drifting is the hairpin tool)
     pathMin: 0.25,            // fraction of latAccel with full counter-steer
     pathMid: 0.6,             // ... with neutral steer
     powerMul: 0.8,            // engine power while sliding

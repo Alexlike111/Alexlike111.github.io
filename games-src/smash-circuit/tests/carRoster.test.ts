@@ -69,8 +69,10 @@ describe('roster: 10 distinct cars', () => {
       expect(m.t100, m.id).toBeLessThan(3.6);
       expect(m.top * 3.6, m.id).toBeGreaterThan(175);
       expect(m.top * 3.6, m.id).toBeLessThan(240);
-      expect(m.corner, m.id).toBeGreaterThan(20);
-      expect(m.corner, m.id).toBeLessThan(31);
+      // full lock = the car's cornering limit x fullLockLatMul (arcade grip, CONFIG.car is the reference)
+      const ref = CONFIG.car.maxLatAccel * CONFIG.car.fullLockLatMul;
+      expect(m.corner, m.id).toBeGreaterThan(ref * 0.8);
+      expect(m.corner, m.id).toBeLessThan(ref * 1.24);
       // the garage shows the pure estimate: within 6% of the real model
       expect(Math.abs(zeroTo100(m.s) / m.t100 - 1), m.id).toBeLessThan(0.06);
       expect(Math.abs(settledTopSpeed(m.s) / m.top - 1), m.id).toBeLessThan(0.03);

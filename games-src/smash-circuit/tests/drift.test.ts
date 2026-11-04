@@ -128,20 +128,26 @@ describe('drift control (no spin-outs, small speed loss)', () => {
     expect(Math.abs(slip(kc))).toBeLessThan(0.08);         // grip takes over again
   });
 
-  it('a drift turns tighter than grip cornering (it pays in hairpins)', () => {
-    // curvature of the travelled path (velocity heading change per metre) after settling, drift vs grip at full steer
-    const curv = (i: CarInput, tr: DriftTracker | null): number => {
+  it('a drift turns tighter than grip cornering at the same speed, and keeps the speed grip full lock scrubs off (it pays in hairpins)', () => {
+    // curvature of the travelled path (velocity heading change per metre) after settling, drift vs grip at full steer;
+    // `hold`: the speed is held (cruise), so both are compared at 80 km/h
+    const curv = (i: CarInput, tr: DriftTracker | null, hold: boolean): { c: number; v: number } => {
       let k = start(80);
+      const v0 = Math.hypot(k.vx, k.vy);
       const t = tr ?? new DriftTracker();
-      for (let n = 0; n < 120; n++) k = step(k, i, t).k;
+      const st = (): void => {
+        k = step(k, i, t).k;
+        if (hold) { const sc = v0 / Math.hypot(k.vx, k.vy); k = { ...k, vx: k.vx * sc, vy: k.vy * sc }; }
+      };
+      for (let n = 0; n < 120; n++) st();
       const h0 = Math.atan2(k.vy, k.vx);
       let dist = 0;
-      for (let n = 0; n < 24; n++) { k = step(k, i, t).k; dist += Math.hypot(k.vx, k.vy) * dt; }
-      return Math.abs(wrapAngle(Math.atan2(k.vy, k.vx) - h0)) / dist;
+      for (let n = 0; n < 24; n++) { st(); dist += Math.hypot(k.vx, k.vy) * dt; }
+      return { c: Math.abs(wrapAngle(Math.atan2(k.vy, k.vx) - h0)) / dist, v: Math.hypot(k.vx, k.vy) };
     };
-    const drift = curv({ ...IDLE, throttle: 0.5, steer: 1, handbrake: true }, new DriftTracker());
-    const grip = curv({ ...IDLE, throttle: 0.5, steer: 1 }, null);
-    expect(drift).toBeGreaterThan(grip * 1.05);
+    const dIn = { ...IDLE, throttle: 0.5, steer: 1, handbrake: true }, gIn = { ...IDLE, throttle: 0.5, steer: 1 };
+    expect(curv(dIn, new DriftTracker(), true).c).toBeGreaterThan(curv(gIn, null, true).c * 1.05);
+    expect(curv(dIn, new DriftTracker(), false).v).toBeGreaterThan(curv(gIn, null, false).v * 1.2);
   });
 });
 
@@ -223,32 +229,34 @@ describe('drift exit: tiers, boost, points, combo, cancel', () => {
 });
 
 describe('arcade steering', () => {
-  it('half stick is about half the turn at every speed (no saturation at speed)', () => {
+  // (speed held: full lock scrubs speed, which would raise the turn rate and blur the comparison)
+  const cruise = (kmh: number, s: number, n: number, ws?: number[]): CarKinematics => {
+    let k = start(kmh);
+    const v0 = kmh / 3.6;
+    for (let i = 0; i < n; i++) {
+      const o = integrateCar(k, { ...IDLE, throttle: 0.6, steer: s }, baseStats(), NO_DAMAGE, SURFACE_ROAD, dt);
+      const sc = v0 / Math.hypot(o.vx, o.vy);
+      k = { ...o, vx: o.vx * sc, vy: o.vy * sc, x: o.x + o.vx * dt, y: o.y + o.vy * dt, angle: o.angle + o.angularVel * dt };
+      ws?.push(Math.abs(k.angularVel));
+    }
+    return k;
+  };
+
+  it('half stick is about half the turn at every speed (linear: no saturation at speed)', () => {
     for (const kmh of [60, 120, 190]) {
-      const yaw = (s: number): number => {
-        let k = start(kmh);
-        for (let i = 0; i < 180; i++) {
-          const o = integrateCar(k, { ...IDLE, throttle: 0.6, steer: s }, baseStats(), NO_DAMAGE, SURFACE_ROAD, dt);
-          k = { ...o, x: o.x + o.vx * dt, y: o.y + o.vy * dt, angle: o.angle + o.angularVel * dt };
-        }
-        return Math.abs(k.angularVel);
-      };
-      const r = yaw(0.5) / yaw(1);
-      expect(r).toBeGreaterThan(0.35);
+      const r = Math.abs(cruise(kmh, 0.5, 180).angularVel) / Math.abs(cruise(kmh, 1, 180).angularVel);
+      expect(r).toBeGreaterThan(0.4);
       expect(r).toBeLessThan(0.6);
     }
   });
 
-  it('responds within ~0.25 s at speed (yaw reaches 90% of steady state)', () => {
-    let k = start(120);
-    const ws: number[] = [];
-    for (let i = 0; i < 240; i++) {
-      const o = integrateCar(k, { ...IDLE, throttle: 0.6, steer: 1 }, baseStats(), NO_DAMAGE, SURFACE_ROAD, dt);
-      k = { ...o, x: o.x + o.vx * dt, y: o.y + o.vy * dt, angle: o.angle + o.angularVel * dt };
-      ws.push(Math.abs(k.angularVel));
+  it('responds within 0.12 s at speed (yaw reaches 90% of steady state)', () => {
+    for (const kmh of [60, 120, 190]) {
+      const ws: number[] = [];
+      cruise(kmh, 1, 240, ws);
+      const i90 = ws.findIndex((w) => w >= 0.9 * ws[ws.length - 1]);
+      expect((i90 + 1) * dt, `${kmh} km/h`).toBeLessThanOrEqual(0.12);
     }
-    const i90 = ws.findIndex((w) => w >= 0.9 * ws[ws.length - 1]);
-    expect(i90 * dt).toBeLessThan(0.25);
   });
 
   it('steerForCurvature / driftSteerForCurvature invert the model (the AI drives with them)', () => {

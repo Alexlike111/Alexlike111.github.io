@@ -148,7 +148,7 @@ describe('handling', () => {
     let k = start(20);
     k = step(k, { ...IDLE, steer: 1 });
     expect(k.steer).toBeGreaterThan(0);
-    expect(k.steer).toBeLessThan(0.1);
+    expect(k.steer).toBeLessThan(0.25);   // light and quick (full lock in ~0.05 s), but never a jump
     for (let i = 0; i < 120; i++) k = step(k, { ...IDLE, steer: 1 });
     expect(k.steer).toBeCloseTo(1, 3);
     for (let i = 0; i < 120; i++) k = step(k, IDLE);

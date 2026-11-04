@@ -65,11 +65,20 @@ export function enginePush(f: number, vmax: number, stats: CarStats, fx: DamageE
   return stats.enginePower * fx.powerMul * (1 - C.powerFalloff * r) * taper * launch;
 }
 
-/** Best yaw rate (rad/s) at forward speed f: low-speed steering geometry, the lateral grip limit at speed, the absolute cap. */
+/**
+ * Full-lock yaw rate (rad/s) at forward speed f: low-speed steering geometry, the absolute cap, and at speed the cornering
+ * limit x fullLockLatMul (full lock turns harder than the no-loss limit and scrubs speed for it, see integrateCar).
+ */
 export function turnRateCap(f: number, gripMul = 1, latAccel: number = C.maxLatAccel): number {
   const af = Math.abs(f);
   const geo = (af * Math.tan(C.maxSteerAngle)) / C.wheelBase;
-  return Math.min(C.maxYawRate, geo, (latAccel * gripMul) / Math.max(af, 1));
+  return Math.min(C.maxYawRate, geo, (latAccel * gripMul * C.fullLockLatMul) / Math.max(af, 1));
+}
+
+/** Turning radius (m) at full lock and forward speed f (m/s) on healthy road. */
+export function fullLockRadius(f: number, stats?: CarStats): number {
+  const af = Math.max(Math.abs(f), 0.5);
+  return af / turnRateCap(af, 1, stats ? latLimit(stats, af) : C.maxLatAccel);
 }
 
 /** Soft centre: small inputs are a bit gentler, full input stays full (precision with a thumb). */
@@ -212,12 +221,22 @@ export function integrateCar(
   // speed, the lateral-acceleration limit at speed), so half stick is half the turn at every speed (no saturation),
   // blended in by angularVel damping (which is also the stability control: any yaw kick dies within ~0.15 s)
   const hb = input.handbrake ? C.handbrakeYawMul : 1;
-  const wCap = turnRateCap(f, fx.gripMul * surface.gripMul, latLimit(stats, f)) * hb;
+  const gm = fx.gripMul * surface.gripMul;
+  const aGrip = latLimit(stats, f) * gm;
+  const wCap = turnRateCap(f, gm, latLimit(stats, f)) * hb;
   let w = -shapeSteer(steerEff) * wCap * (f < 0 ? -1 : 1);
   // standstill stability: yaw authority fades below a few m/s
   w *= clamp(Math.abs(f) / C.lowSpeedSteerFade, 0, 1);
   const blend = 1 - Math.exp(-C.yawDamping * dt);
   let av = k.angularVel + (w - k.angularVel) * blend;
+
+  // ---- full-lock scrub: cornering beyond the no-loss limit (only the last ~30% of the stick) costs speed, so a car that
+  // is pointed into a bend too fast slows itself onto the line instead of running wide
+  const aEx = Math.abs(av * f) - aGrip;
+  if (aEx > 0 && Math.abs(f) > 1) {
+    const dv = Math.min(Math.abs(f) - 1, C.fullLockScrub * aEx * dt);
+    f -= Math.sign(f) * dv;
+  }
 
   // ---- surface shake (deterministic pseudo-noise from position)
   if (surface.shake > 0) {

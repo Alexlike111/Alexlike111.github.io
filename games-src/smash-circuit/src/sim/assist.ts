@@ -1,6 +1,7 @@
 // Player driving assist, PURE: a gentle steer back toward the road when the car is about to run off the edge.
 // It never acts on a deliberate move (nose far off the track direction: smashing a wall, a U-turn), while drifting,
-// off-road or when slow, and it is weak against a player who steers the other way.
+// off-road or when slow, and it NEVER takes steering away from the player: it only adds turn in its own direction
+// (a player steering the other way, e.g. turning in toward an apex at the inside edge, is left alone).
 import { CONFIG } from '../config';
 import type { CarInput, CarState, TrackGeometry } from '../types';
 
@@ -29,8 +30,7 @@ export function assistedInput(input: CarInput, st: CarState, track: TrackGeometr
   const d = edgeAssist(st, track, hintS);
   if (d === 0) return input;
   const s = input.steer;
-  let steer: number;
-  if (s === 0 || Math.sign(s) === Math.sign(d)) steer = Math.sign(d) * Math.max(Math.abs(s), Math.abs(d));
-  else steer = s + d * (1 - 0.7 * Math.abs(s));
-  return { ...input, steer: clamp(steer, -1, 1) };
+  // the player steers the other way: their call (the assist must never reduce the turn-in they ask for)
+  if (s !== 0 && Math.sign(s) !== Math.sign(d)) return input;
+  return { ...input, steer: clamp(Math.sign(d) * Math.max(Math.abs(s), Math.abs(d)), -1, 1) };
 }
