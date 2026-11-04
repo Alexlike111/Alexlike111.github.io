@@ -650,6 +650,18 @@
   .ui-root .tut-ic > * { transform: scale(0.62); }
   .ui-root .tutorial .btn { padding-top: 0.35em; padding-bottom: 0.35em; }
 }
+/* Square / tablet-portrait touch windows with the button schemes: the buttons fill the bottom, so the compact hint sheet sits at the top */
+@media (min-width: 520px) and (max-aspect-ratio: 5/4) {
+  .ui-root.is-touch.sch-new .layer-tutorial { justify-content: center; align-items: flex-start; padding: calc(max(0.7em, var(--sat)) + 7.6em) max(0.7em, var(--sar)) 0 max(0.7em, var(--sal)); }
+  .ui-root.is-touch.sch-new.tut-on .countdown { top: 62%; }
+  .ui-root.is-touch.sch-new .tutorial { width: min(100%, 36em); max-width: none; max-height: 30vh; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
+  .ui-root.is-touch.sch-new .tutorial .title { display: none; }
+  .ui-root.is-touch.sch-new .tut-steps { gap: 0.25em; }
+  .ui-root.is-touch.sch-new .tut-step { grid-template-columns: 1.4em 3.6em minmax(0, 1fr); padding: 0.1em 0.4em; }
+  .ui-root.is-touch.sch-new .tut-ic { height: 1.8em; }
+  .ui-root.is-touch.sch-new .tut-ic > * { transform: scale(0.62); }
+  .ui-root.is-touch.sch-new .tutorial .btn { padding-top: 0.35em; padding-bottom: 0.35em; }
+}
 /* Square / tablet-portrait windows: the sheet sits bottom-left, beside the GAS button instead of above it */
 @media (max-aspect-ratio: 5/4) and (min-width: 520px) {
   .ui-root .layer-tutorial { justify-content: flex-start; }
