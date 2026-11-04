@@ -661,7 +661,7 @@ export class Game {
       }
       else if (e.type === 'pickup' && e.carId === sim.cars[0].id && !this.itemHintShown) {
         this.itemHintShown = true;   // once per session: how to use the item
-        this.ui.toast(t(this.input.touchActive ? 'hud.itemHintTap' : 'hud.itemHintKey'));
+        this.ui.toast(t(this.input.touchActive ? (this.save.settings.controls === 'finger' ? 'hud.itemHintTap' : 'hud.itemHintBtn') : 'hud.itemHintKey'));
       }
     }
   }

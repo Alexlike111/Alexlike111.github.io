@@ -654,7 +654,7 @@
 @media (min-width: 520px) and (max-aspect-ratio: 5/4) {
   .ui-root.is-touch.sch-new .layer-tutorial { justify-content: center; align-items: flex-start; padding: calc(max(0.7em, var(--sat)) + 7.6em) max(0.7em, var(--sar)) 0 max(0.7em, var(--sal)); }
   .ui-root.is-touch.sch-new.tut-on .countdown { top: 62%; }
-  .ui-root.is-touch.sch-new .tutorial { width: min(100%, 36em); max-width: none; max-height: 30vh; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
+  .ui-root.is-touch.sch-new .tutorial { width: min(100%, 36em); max-width: none; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
   .ui-root.is-touch.sch-new .tutorial .title { display: none; }
   .ui-root.is-touch.sch-new .tut-steps { gap: 0.25em; }
   .ui-root.is-touch.sch-new .tut-step { grid-template-columns: 1.4em 3.6em minmax(0, 1fr); padding: 0.1em 0.4em; }

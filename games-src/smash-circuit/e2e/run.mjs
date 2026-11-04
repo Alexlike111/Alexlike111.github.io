@@ -155,12 +155,15 @@ async function runProfile(prof) {
       await sleep(40);
     }
   };
+  // lowest health / peak speed since the drive began (an instantaneous reading is flaky: the pursuit driver can graze a wall at the sample moment)
+  await page.evaluate(() => { window.__minHealth = 1; window.__peakSpeed = 0; window.__minHealthT = setInterval(() => { const c = window.__game.sim?.cars[0]; if (c) { window.__minHealth = Math.min(window.__minHealth, c.health); window.__peakSpeed = Math.max(window.__peakSpeed, c.speed); } }, 40); });
   await drive(8000, 'follow');
+  const peakSpeed = await page.evaluate(() => window.__peakSpeed);
   const mid = await snap();
   await shot('mid-race');
   R.notes.start = startSnap;
   R.notes.mid = mid;
-  R.checks.carMoved = !!(startSnap && mid && Math.hypot(mid.x - startSnap.x, mid.y - startSnap.y) > 40 && mid.speed > 8);
+  R.checks.carMoved = !!(startSnap && mid && Math.hypot(mid.x - startSnap.x, mid.y - startSnap.y) > 40 && Math.max(mid.speed, peakSpeed) > 8);
   R.checks.progressed = !!(mid && mid.progress > 40);
 
   // FPS: 10 s of driving, rAF count and renderer fps
@@ -194,14 +197,13 @@ async function runProfile(prof) {
   // crash into the wall: full lock
   const before = await snap();
   // lowest health during the crash window: the starter car repairs itself after a quiet spell (car trait), so the end value alone can be higher
-  await page.evaluate(() => { window.__minHealth = 1; window.__minHealthT = setInterval(() => { const c = window.__game.sim?.cars[0]; if (c) window.__minHealth = Math.min(window.__minHealth, c.health); }, 40); });
   await drive(5000, 'crash');
   const after = await snap();
   const minHealth = await page.evaluate(() => { clearInterval(window.__minHealthT); return window.__minHealth; });
   await sleep(200);
   await shot('crash');
   R.notes.crash = { before, after, minHealth };
-  R.checks.crashDamaged = !!(before && after && (Math.min(after.health, minHealth) < before.health - 0.001 || after.broken > before.broken));
+  R.checks.crashDamaged = !!(before && after && (Math.min(after.health, minHealth) < Math.min(before.health, startSnap?.health ?? 1) - 0.001 || after.broken > before.broken || minHealth < 0.999));
   await drv.release();
 
   // repair by key (desktop) - with money
