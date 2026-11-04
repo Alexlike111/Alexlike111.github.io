@@ -84,8 +84,13 @@ export class AiDriver {
   private reverseExtra = 0;           // s the current reverse was extended because a car still sits right ahead
   private markS = 0;
   private markInit = false;
-  /** last track position at which the car was on the road (off-road recovery heads back there: that is where the gap is) */
+  /** last track position at which the car was on the road, and where / on which side it crossed the wall line on its way out
+   * (off-road recovery heads back through that gap) */
   private roadS = 0;
+  private exitS = 0;
+  private exitSide = 0;
+  private markX = 0;
+  private markY = 0;
   private markTime = 0;
 
   constructor(p: AiPersonality, rng: () => number) {
@@ -136,12 +141,15 @@ export class AiDriver {
     const maxOff = Math.max(0.5, half - A.laneMargin);
 
     // ---------- progress watchdog
-    if (!this.markInit) { this.markInit = true; this.markS = s; this.markTime = 0; this.roadS = s; }
-    if (Math.abs(lat) <= half) this.roadS = s;
-    // through a wall gap (beyond the wall line): drive back to the road where it left it instead of into the wall from behind
+    if (!this.markInit) { this.markInit = true; this.markS = s; this.markTime = 0; this.roadS = s; this.exitS = s; this.exitSide = 0; }
+    const wallLine = half + CONFIG.destruction.wallOffset;
+    if (Math.abs(lat) <= half) { this.roadS = s; this.exitSide = 0; }
+    else if (this.exitSide === 0 && Math.abs(lat) > wallLine) { this.exitS = s; this.exitSide = lat > 0 ? 1 : -1; }
+    // through a wall gap (beyond the wall line): drive back through the gap it left by instead of into the wall from behind
     const recovering = Math.abs(lat) > half + A.recoverBeyond;
-    const moved = wrap2(s - this.markS, L);
-    if (moved > 6 || moved < -40) { this.markS = s; this.markTime = 0; } else this.markTime += h;
+    // progress watchdog: along the track, or (while finding the way back) any 6 m of movement
+    const moved = recovering ? Math.hypot(car.x - this.markX, car.y - this.markY) : wrap2(s - this.markS, L);
+    if (moved > 6 || moved < -40) { this.markS = s; this.markX = car.x; this.markY = car.y; this.markTime = 0; } else this.markTime += h;
     if (this.markTime > A.respawnAfter) this.wantsRespawn = true;
 
     // ---------- stuck / reverse recovery
@@ -228,7 +236,7 @@ export class AiDriver {
     const lookNominal = A.lookAhead * clamp(0.35 + av / 20, 0.35, 1) + A.lookAheadPerSpeed * av;   // short when crawling: sharp corrections
     // slow "form" wobble (a driver has good and bad minutes) so the order shuffles even between equal cars
     const form = 1 + A.formAmp * (1.3 - skill) * (0.65 * Math.sin(this.time * 0.23 + this.phase[2]) + 0.35 * Math.sin(this.time * 0.61 + this.phase[3]));
-    const scan = this.scan(track, s, clamp(this.offset, -maxOff, maxOff), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal,
+    const scan = this.scan(track, s, clamp(lat, -half, half), aLat * speedMul * rubber * rubber, aBrake, skillScale * form, horizon, lookNominal,
       cs?.traits?.downforce ?? 0, cs?.topSpeed ?? C.baseTopSpeed);
     let look = Math.min(lookNominal, Math.max(6, scan.minRadius * 0.9 + 2));
     if (this.lookCur === 0) this.lookCur = look;
@@ -289,8 +297,17 @@ export class AiDriver {
     if (blockGap < 6 && av < 8 && Math.abs(this.offset - lat) > 0.6) look = Math.max(2.5, Math.min(look, 2.5 + blockGap));
 
     // ---------- steering: pure pursuit, exact inverse of the car model's steering (steerForCurvature)
-    const tp = recovering ? track.sampleAt(this.roadS + A.recoverAhead) : track.sampleAt(s + look);
-    const off = recovering ? 0 : this.offset;
+    let tp = track.sampleAt(s + look);
+    let off = this.offset;
+    if (recovering) {
+      // two stages: line up just outside the gap, then drive straight through it back onto the road
+      const side = this.exitSide !== 0 ? this.exitSide : (lat > 0 ? 1 : -1);
+      const gs = this.exitSide !== 0 ? this.exitS : this.roadS;
+      const outside = track.sampleAt(gs);
+      const ox = outside.x + outside.nx * side * (wallLine + A.recoverOut), oy = outside.y + outside.ny * side * (wallLine + A.recoverOut);
+      if (Math.abs(lat) > wallLine + 1 && Math.hypot(ox - car.x, oy - car.y) > 2.5) { tp = outside; off = side * (wallLine + A.recoverOut); }
+      else { tp = track.sampleAt(gs + A.recoverAhead); off = side * (half - 1.5); }
+    }
     const tx = tp.x + tp.nx * off, ty = tp.y + tp.ny * off;
     const dx = tx - car.x, dy = ty - car.y;
     const dist = Math.max(Math.hypot(dx, dy), 2);

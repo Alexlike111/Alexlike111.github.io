@@ -29,7 +29,7 @@ const SIL: Record<string, R[]> = {
     [0, 0, 3.7, 1.72, 'p', 0.3], [-0.4, 0, 2.05, 1.5, 'g', 0.25], [-0.3, 0, 1.55, 1.12, 'w', 0.15], [0.2, 0, 0.5, 0.5, 'd'],
     [1.55, 0, 0.3, 1.2, 'y', 0.1], [-1.82, 0, 0.62, 2.1, 'p', 0.08]],
   sandhopper: [...wheels(1.18, -1.15, 0.78, 0.92, 0.42, 0.56, 0.32, 0.56),
-    [0.95, 0, 1.0, 0.7, 'p', 0.2], [-0.35, 0, 1.6, 1.2, 'p', 0.2], [-0.4, 0, 0.6, 0.8, 'r'],
+    [0.95, 0, 1.1, 0.8, 'p', 0.2], [-0.35, 0, 1.8, 1.3, 'p', 0.2], [-0.4, 0, 0.6, 0.8, 'r'],
     [-0.46, 0, 1.6, 0.12, 's'], [0.03, 0, 0.1, 1.24, 's'], [-0.95, 0, 0.1, 1.24, 's'], [-0.38, 0.58, 1.3, 0.1, 's'], [-0.38, -0.58, 1.3, 0.1, 's'],
     [-1.72, 0, 0.3, 0.8, 'd', 0.1]],
   brawler: [...wheels(1.5, -1.42, 0.84, 0.86, 0.47, 0.52, 0.42, 0.56),
@@ -169,13 +169,13 @@ export function garageHtml(v: GarageView): string {
   return `${v.header}
     <div class="g-strip" role="group" aria-label="${esc(t('garage.cars'))}">${strip}</div>
     <div class="g-title">
-      <button class="btn round grey g-arrow" data-act="gstep" data-d="-1" aria-label="${esc(t('garage.prev'))}">${icon('back')}</button>
+      <button class="btn round g-arrow" data-act="gstep" data-d="-1" aria-label="${esc(t('garage.prev'))}">${icon('arrowL')}</button>
       <div class="g-name">
         <h3>${esc(t('car.' + id))}</h3>
         <div class="g-sub"><span class="g-class">${esc(t('class.' + id))}</span>${starsHtml(badgeStars(s, id))}<span class="g-count">${idx + 1}/${CAR_IDS.length}</span></div>
         <div class="g-rec">${esc(t('garage.record', { races, wins }))}</div>
       </div>
-      <button class="btn round grey g-arrow next" data-act="gstep" data-d="1" aria-label="${esc(t('garage.next'))}">${icon('back')}</button>
+      <button class="btn round g-arrow next" data-act="gstep" data-d="1" aria-label="${esc(t('garage.next'))}">${icon('arrowR')}</button>
     </div>
     <div class="g-view" aria-hidden="true"></div>
     <div class="g-sheet panel">

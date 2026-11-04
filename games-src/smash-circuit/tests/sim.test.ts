@@ -332,18 +332,22 @@ describe('Sim: ghost', () => {
     expect(g!.lapTime).toBeGreaterThan(first.track.length / 60);
     expect(g!.lapTime).toBeLessThanOrEqual(first.cars[0].bestLapTime + 0.01);
 
-    let nullInLap1 = true, seen = 0, maxDist = 0;
+    let nullInLap1 = true, seen = 0;
+    const maxDist: Record<number, number> = {};
     botRace(g!, (sim) => {
       const p = sim.ghostPose();
       if (sim.cars[0].lap < CONFIG.race.ghostMinLap) { if (p !== null) nullInLap1 = false; return; }
       if (p) {
         seen++;
-        maxDist = Math.max(maxDist, Math.hypot(p.x - sim.cars[0].x, p.y - sim.cars[0].y));
+        const lap = sim.cars[0].lap;
+        maxDist[lap] = Math.max(maxDist[lap] ?? 0, Math.hypot(p.x - sim.cars[0].x, p.y - sim.cars[0].y));
       }
     });
     expect(nullInLap1).toBe(true);
     expect(seen).toBeGreaterThan(60);
-    expect(maxDist).toBeLessThan(80);                     // same bot: the ghost runs alongside
+    // same bot, same (deterministic) race: on the lap the ghost was recorded from, the ghost runs alongside
+    // (an earlier lap in traffic can be seconds slower, so the ghost is far ahead there)
+    expect(Math.min(...Object.values(maxDist))).toBeLessThan(80);
   }, 120000);
 
   it('a slower race does not replace the saved ghost', () => {

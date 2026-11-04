@@ -67,17 +67,17 @@ export const CONFIG = {
     // what a collision does to the car is kept apart from the arcade model, so grip and yaw damping cannot erase it at once:
     // the sideways part of the solver's velocity change (car frame) and its spin decay on their own
     impact: {
-      minDv: 0.5,             // m/s: a step's sideways velocity change from contacts at least this big goes to the impact layer
-      decay: 3.5,             // 1/s decay of the impact velocity (a 10 m/s shove slides ~3 m)
+      minDv: 2,               // m/s: a step's sideways velocity change from contacts at least this big (a real hit, not a rub) goes to the impact layer
+      decay: 6,               // 1/s decay of the impact velocity (a 10 m/s shove slides ~1.7 m before the tyres bite)
       maxFrac: 0.6,           // |impact velocity| <= this x the car's speed
-      minDw: 0.25,            // rad/s: a step's spin change from contacts at least this big goes to the impact spin
-      spinDecay: 1.5,         // 1/s decay of the impact spin (a hard hit can spin the car out)
+      minDw: 0.8,             // rad/s: a step's spin change from contacts at least this big goes to the impact spin
+      spinDecay: 3,           // 1/s decay of the impact spin (yaw damping used to kill it in ~0.15 s; a hard hit now turns the car ~20-40 deg)
       spinMax: 3.5,           // rad/s cap of the impact spin
       lowSpeed: [0.5, 1.5] as [number, number], // m/s forward speed band below which the model only damps sideways speed (never turns it into forward / reverse)
       crashImpulse: 12000,    // N*s of one solver hit (~36 km/h square into a wall) that starts the crash state (car-car x crashCarMul)
       crashCarMul: 1.5,
       crashTime: [0.25, 0.4] as [number, number], // s of crash state, from crashImpulse to 2x crashImpulse
-      crashGripMul: 0.15,     // grip (re-alignment of the velocity onto the nose) during the crash state; steering is suspended
+      crashGripMul: 0.5,      // grip (re-alignment of the velocity onto the nose) during the crash state; steering is suspended
     },
   },
   damage: {
@@ -250,7 +250,8 @@ export const CONFIG = {
     tightRadius: 25,           // m: bends tighter than this make the outer of two cars side by side lift ...
     outerLift: 0.9,            // ... to this fraction of its target speed instead of being squeezed into the wall
     recoverBeyond: 1.7,        // m beyond the road edge (past the wall line: through a gap) from which the car drives back to where it left the road
-    recoverAhead: 3,           // m past that point it aims for
+    recoverAhead: 3,           // m past the gap it aims for on the way back in
+    recoverOut: 2.5,           // m outside the wall line it first lines up at, in front of the gap
     recoverSpeed: 5,           // m/s base speed when driving back through the gap (+0.4 per m of distance)
   },
   upgrades: {
@@ -625,9 +626,9 @@ export const CONFIG = {
         traits: { boostTimeMul: 1.6 } },
       needle:     { power: 13.8, top: 64.5, grip: 13.5, lat: 25.8, brake: 16.5, mass: 800, armor: 0.7, length: 4.6, width: 1.85, drift: 0.7, pace: 0.967,
         traits: { downforce: 0.15 } },
-      bruiser:    { power: 13.5, top: 59, grip: 11.5, lat: 23.8, brake: 13, mass: 1450, armor: 1.5, length: 4.7, width: 2.15, drift: 0.9, pace: 1.016,
+      bruiser:    { power: 13.5, top: 59, grip: 11.5, lat: 23.8, brake: 13, mass: 1450, armor: 1.75, length: 4.7, width: 2.15, drift: 0.9, pace: 1.016,
         traits: { ramDealMul: 1.8, ramFrontOnly: true, frontTakenMul: 0.45 } },
-      brick:      { power: 12.4, top: 57, grip: 11, lat: 23.3, brake: 12, mass: 1650, armor: 1.75, length: 4.9, width: 2.25, drift: 0.75, pace: 1.039,
+      brick:      { power: 12.4, top: 57, grip: 11, lat: 23.3, brake: 12, mass: 1700, armor: 1.6, length: 4.9, width: 2.25, drift: 0.75, pace: 1.039,
         traits: { ramDealMul: 1.7 } },
       mammoth:    { power: 13.8, top: 57, grip: 11.5, lat: 23.3, brake: 12.5, mass: 2000, armor: 2.1, length: 5.0, width: 2.5, drift: 0.7, pace: 1.025,
         traits: { plowKeep: 0.9, shockImmune: true } },

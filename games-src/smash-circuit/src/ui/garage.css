@@ -19,12 +19,12 @@
 .ui-root .g-chip {
   pointer-events: auto; appearance: none; cursor: pointer; position: relative; flex: none;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
-  width: 5.2em; min-height: max(3.5em, 44px); padding: 0.25em 0.2em 0.2em;
+  width: 7.6em; min-height: max(3.5em, 44px); padding: 0.3em 0.2em 0.25em;
   background: rgba(16, 27, 58, 0.88); border: 0.14em solid var(--ink); border-radius: 0.8em;
   box-shadow: 0 0.18em 0 rgba(0, 0, 0, 0.35); color: #dfe6f8; touch-action: manipulation;
-  font: 900 italic 0.66em/1 var(--display); text-transform: uppercase; letter-spacing: 0.01em;
+  font: 900 italic 0.6em/1 var(--display); text-transform: uppercase; letter-spacing: 0;
 }
-.ui-root .g-chip .car-svg { width: 6.2em; height: 3.1em; display: block; }
+.ui-root .g-chip .car-svg { width: 7em; height: 3.5em; display: block; }
 .ui-root .g-chip span { display: block; white-space: nowrap; }
 .ui-root .g-chip.on { background: linear-gradient(#2b4fa6, #1a2f6c); border-color: var(--yellow); color: #fff; box-shadow: 0 0 0 0.12em var(--ink), 0 0.18em 0 rgba(0, 0, 0, 0.35); }
 .ui-root .g-chip .g-tick {
@@ -35,7 +35,7 @@
 
 /* name row with prev / next */
 .ui-root .g-title { grid-area: title; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5em; }
-.ui-root .g-arrow.next .ic { transform: scaleX(-1); }
+.ui-root .g-arrow { --c1: #55a7ff; --c2: #2371e0; width: max(2.8em, 44px); height: max(2.8em, 44px); }
 .ui-root .g-name { text-align: center; min-width: 0; pointer-events: none; }
 .ui-root .g-name h3 {
   font: 900 italic 1.65em/1 var(--display); text-transform: uppercase; color: var(--yellow);
@@ -95,18 +95,19 @@
   .ui-root .screen.garage {
     grid-template-columns: minmax(0, 24em) minmax(0, 1fr);
     grid-template-rows: auto auto auto minmax(0, 1fr);
-    grid-template-areas: "bar bar" "strip strip" "sheet title" "sheet view";
+    grid-template-areas: "bar bar" "strip strip" "title view" "sheet view";
   }
   .ui-root .g-strip { justify-content: safe center; }
-  .ui-root .g-title { width: min(100%, 26em); justify-self: center; }
-  .ui-root .g-sheet { align-self: stretch; }
+  /* name + arrows above the sheet in the left column: the 3D car in the screen centre stays uncovered */
+  .ui-root .g-title { padding: 0.35em 0.4em; border-radius: 1em; background: rgba(11, 20, 48, 0.72); }
+  .ui-root .g-sheet { align-self: start; max-height: 100%; }
   .ui-root .g-pane .swatches { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
 }
 /* short landscape phones: compact everything */
 @media (min-aspect-ratio: 5/4) and (max-height: 460px) {
   .ui-root .screen.garage { grid-template-columns: minmax(0, 21em) minmax(0, 1fr); gap: 0.35em; }
-  .ui-root .g-chip { width: 4.7em; min-height: 44px; padding-top: 0.15em; }
-  .ui-root .g-chip .car-svg { width: 5.4em; height: 2.7em; }
+  .ui-root .g-chip { width: 7em; min-height: 44px; padding-top: 0.15em; }
+  .ui-root .g-chip .car-svg { width: 6em; height: 3em; }
   .ui-root .g-name h3 { font-size: 1.35em; }
   .ui-root .g-rec { display: none; }
   .ui-root .g-trait { padding-bottom: 0.25em; }
@@ -126,8 +127,8 @@
 }
 .ui-root .pr-btn:active { transform: translateY(0.15em); box-shadow: 0 0.1em 0 var(--ink); }
 .ui-root .pr-btn small { grid-column: 1 / -1; font: 900 italic 0.68em/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--yellow); }
-.ui-root .pr-btn .car-svg { width: 3.6em; height: 1.8em; }
-.ui-root .pr-btn b { font: 900 italic 0.95em/1.1 var(--display); text-transform: uppercase; overflow-wrap: anywhere; }
+.ui-root .pr-btn .car-svg { width: 3.4em; height: 1.7em; }
+.ui-root .pr-btn b { font: 900 italic 0.9em/1.1 var(--display); text-transform: uppercase; white-space: nowrap; min-width: 0; }
 .ui-root .pr-btn > .ic { width: 1.6em; height: 1.6em; color: var(--yellow); justify-self: center; }
 
 /* ------------------------------------------------------------ rivals sheet */
@@ -157,3 +158,18 @@
 .ui-root .car-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.2em, 1fr)); gap: 0.35em; }
 .ui-root .car-grid .g-chip { width: auto; }
 .ui-root .s-cars { display: block; }
+
+/* landscape / desktop: compact centred pre-race bar, two-column rival options */
+@media (min-aspect-ratio: 5/4) {
+  .ui-root .prerace { width: min(100%, 38em); align-self: center; }
+  .ui-root .rv-sheet { width: min(100%, 46em); }
+  .ui-root .rv-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ui-root .rv-sheet .car-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-aspect-ratio: 5/4) and (max-height: 460px) {
+  .ui-root .rv-sheet { padding: 0.5em 0.7em; gap: 0.4em; }
+  .ui-root .rv-opt { min-height: 44px; padding: 0.25em 0.5em; }
+  .ui-root .rv-txt small { display: none; }
+  .ui-root .rv-fair { display: none; }
+  .ui-root .rv-head .btn.round { width: 44px; height: 44px; }
+}

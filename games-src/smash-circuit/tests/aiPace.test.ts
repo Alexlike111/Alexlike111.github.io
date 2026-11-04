@@ -153,10 +153,16 @@ describe('rubber band: chase a runaway human', () => {
       powerUps: false,
     });
     while (sim.race.phase === 'countdown') sim.update(DT);
-    // the human is placed 400 m down the road (the tracker confirms such a jump after CONFIG.race.jumpConfirmTime)
-    const t = sim.track.sampleAt(400);
+    // the human drives away while the AI field is held at the line (a teleport is never credited as progress: gates)
+    const drivers = (sim as unknown as { drivers: (AiDriver | null)[] }).drivers;
+    for (const d of drivers) if (d) d.speedCap = 0;
+    const t = sim.track.sampleAt(4);                        // out of the parked grid, just past the line
     sim.simCars[0].reset(t.x, t.y, Math.atan2(t.ty, t.tx));
-    for (let i = 0; i < 60 * 3; i++) sim.update(DT);
+    const bot = new AiDriver({ skill: 1, aggression: 0, laneOffset: 0, mistakeRate: 0 }, makeRng(5));
+    for (let i = 0; i < 60 * 15 && sim.cars[0].progress < 300; i++) {
+      sim.setPlayerInput(bot.think(sim.cars[0], sim.cars.slice(1), sim.track, DT, sim.tracker.hints[0]));
+      sim.update(DT);
+    }
     expect(sim.cars[0].progress).toBeGreaterThan(300);
     const assists = sim.simCars.slice(1).map((c) => c.assist);
     expect(Math.max(...assists)).toBeGreaterThan(0);
