@@ -21,6 +21,8 @@ const qParam = (params.get('q') ?? 'high') as Quality | 'auto';
 const mode = params.get('mode') ?? 'race';
 const freeze = params.get('freeze') === '1';
 const s0 = Number(params.get('s0') ?? 30);
+/** models=<n>: the 8 preview cars are roster cars n.. n+7 (default 0: one of each of the first 8 models) */
+const modelOffset = Number(params.get('models') ?? 0) || 0;
 
 function fullHp(): Record<ZoneId, number> {
   return Object.fromEntries(ZONES.map((z) => [z, CONFIG.damage.zoneMaxHp])) as Record<ZoneId, number>;
@@ -52,7 +54,7 @@ class PreviewSim implements ISim {
     this.race = { phase: 'racing', countdown: 0, time: 0, totalLaps: 3, playerFinished: false, results: [] };
     for (let i = 0; i < 8; i++) {
       this.cars.push({
-        id: i, isPlayer: i === 0, colorIndex: i, name: 'Car' + i, x: 0, y: 0, angle: 0, vx: 0, vy: 0, angularVel: 0, speed: 0, steer: 0,
+        id: i, isPlayer: i === 0, colorIndex: i, name: 'Car' + i, modelId: CONFIG.cars.order[(i + modelOffset) % CONFIG.cars.order.length], x: 0, y: 0, angle: 0, vx: 0, vy: 0, angularVel: 0, speed: 0, steer: 0,
         throttle: 1, brake: 0, handbrake: false, rpm: 0.6, drifting: false, slip: 0, hp: fullHp(), zoneMaxHp: CONFIG.damage.zoneMaxHp,
         health: 1, effects: { powerMul: 1, topSpeedMul: 1, gripMul: 1, steerPull: 0, smoke: 0, sparks: 0 }, detachedParts: [], wrecked: false,
         lap: 0, progress: 0, place: i + 1, finished: false, finishTime: 0, lastLapTime: 0, bestLapTime: 0, onCurb: false, offRoad: false,
@@ -208,7 +210,7 @@ async function main(): Promise<void> {
     }
   };
 
-  if (mode === 'menu') renderer.showMenuScene(Number(params.get('color') ?? 0));
+  if (mode === 'menu') renderer.showMenuScene(Number(params.get('color') ?? 0), params.get('car') ?? undefined);
   else { renderer.loadRace(sim); }
 
   const api = {
@@ -220,7 +222,7 @@ async function main(): Promise<void> {
     stress: () => { if (!real) { fake.breakNear(10); fake.partOff(); fake.sparks(); } },
     inspect: () => renderer.inspect(),
     stats: () => ({ ...(window.__render ?? {}) }),
-    menu: (c = 0) => renderer.showMenuScene(c),
+    menu: (c = 0, car?: string) => renderer.showMenuScene(c, car),
     race: () => renderer.loadRace(sim),
   };
   (window as unknown as { __preview: typeof api }).__preview = api;

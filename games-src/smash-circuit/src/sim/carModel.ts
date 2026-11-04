@@ -199,8 +199,13 @@ export function integrateCar(
     const keep = Math.exp(-grip * dt);
     const alpha2 = alpha * keep;
     const v2 = v * (1 - C.cornerScrub * Math.abs(Math.sin(alpha)) * (1 - keep));
-    f = s * v2 * Math.cos(alpha2);
-    l = s * v2 * Math.sin(alpha2);
+    // (nearly) standing: a sideways slide is only damped, never swung onto the nose as forward / reverse speed (audit P1);
+    // blended over the impact.lowSpeed band of forward speed
+    const lo = C.impact.lowSpeed;
+    const wr = clamp((Math.abs(f) - lo[0]) / (lo[1] - lo[0]), 0, 1);
+    const fr = s * v2 * Math.cos(alpha2), lr = s * v2 * Math.sin(alpha2);
+    f = f + (fr - f) * wr;
+    l = l * keep + (lr - l * keep) * wr;
   }
 
   // ---- yaw: steering is a LINEAR fraction of the best turn rate the car has at this speed (bicycle geometry at low

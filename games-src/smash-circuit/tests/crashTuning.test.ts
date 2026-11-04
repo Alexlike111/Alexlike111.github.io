@@ -106,6 +106,30 @@ describe('wall / guardrail destruction is reachable in normal play', () => {
     }
   });
 
+  it('a physical 2 s graze at 40 m/s and 4 deg wears the barrier by proximity (>= 40 hp) and throws sparks (audit X3)', () => {
+    const sim = solo();
+    sim.playerAssist = false;
+    const s = straightS(sim, 60);
+    const half = sim.track.def.width / 2;
+    place(sim, s, half - 0.2, 4 * Math.PI / 180, 40);
+    const barrier = () => sim.destructibles.filter((d) => d.kind === 'guardrail' || d.kind === 'wall').reduce((q, d) => q + d.hp, 0);
+    const hp0 = barrier();
+    let sparks = 0;
+    for (let i = 0; i < Math.round(2 / DT); i++) {
+      sim.setPlayerInput({ ...IDLE, throttle: 1, steer: -0.05 });
+      sim.update(DT);
+      for (const e of sim.drainEvents()) if (e.type === 'scrape' && e.carId === 0) sparks++;
+    }
+    expect(hp0 - barrier()).toBeGreaterThanOrEqual(40);
+    expect(sparks).toBeGreaterThan(5);
+    // driving down the middle of the road wears nothing
+    place(sim, s, 0, 0, 40);
+    const hp1 = barrier();
+    for (let i = 0; i < Math.round(1 / DT); i++) { sim.setPlayerInput({ ...IDLE, throttle: 1 }); sim.update(DT); }
+    sim.drainEvents();
+    expect(barrier()).toBeCloseTo(hp1, 6);
+  });
+
   it('a car pinned along a wall at speed (glancing, 25 deg, 140 km/h) leaves damage on the rail', () => {
     const sim = solo();
     place(sim, straightS(sim), sim.track.def.width / 2 - 1, (25 * Math.PI) / 180, 140 / 3.6);

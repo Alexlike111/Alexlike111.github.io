@@ -72,6 +72,43 @@ describe('plow-through of broken static pieces', () => {
     expect(r.minAlong).toBeLessThan(0);
   });
 
+  it('no damage cliff at the break threshold: damage never falls as the speed rises from 20 to 150 km/h (audit D1)', () => {
+    for (const kind of ['guardrail', 'wall'] as const) {
+      let prev = 1, brokeAt = -1;
+      for (let kmh = 20; kmh <= 150; kmh += 10) {
+        const r = wallHit(kind, kmh);
+        if (r.broke && brokeAt < 0) brokeAt = kmh;
+        expect(r.health, `${kind} ${kmh} km/h`).toBeLessThanOrEqual(prev + 1e-6);
+        prev = r.health;
+      }
+      expect(brokeAt).toBeGreaterThan(0);
+    }
+  }, 120000);
+
+  it('a glancing hit is charged as one hit, not per solver step (audit D2)', () => {
+    const sim = solo(TRACKS[0]);
+    // a straight stretch: 140 km/h at 10 degrees into the guardrail
+    const S = sim.track.samples;
+    let s0 = -1;
+    for (let i = 0; i < S.length && s0 < 0; i++) {
+      let ok = true;
+      for (let k = 0; k < 60 && ok; k++) if (Math.abs(S[(i + k) % S.length].curvature) > 0.002) ok = false;
+      if (ok) s0 = S[(i + 10) % S.length].s;
+    }
+    const t = sim.track.sampleAt(s0), half = sim.track.def.width / 2;
+    const a = Math.atan2(t.ty, t.tx) + 10 * Math.PI / 180, v = 140 / 3.6;
+    sim.simCars[0].reset(t.x + t.nx * (half - 2), t.y + t.ny * (half - 2), a);
+    sim.simCars[0].body.setLinearVelocity({ x: Math.cos(a) * v, y: Math.sin(a) * v });
+    sim.playerAssist = false;
+    sim.setPlayerInput(IDLE);
+    for (let i = 0; i < 240; i++) sim.update(DT);
+    const st = sim.cars[0];
+    let lost = 0;
+    for (const z of Object.keys(st.hp) as (keyof typeof st.hp)[]) lost += st.zoneMaxHp - st.hp[z];
+    expect(lost).toBeGreaterThan(5);        // per-step thresholds charged ~1.5 hp (the steps were each just above / below 2500 N*s)
+    expect(lost).toBeLessThan(30);
+  });
+
   it('a harder break costs more damage than a gentler one (damage is still monotonic)', () => {
     const slow = wallHit('guardrail', 60), fast = wallHit('guardrail', 130);
     expect(fast.health).toBeLessThanOrEqual(slow.health);

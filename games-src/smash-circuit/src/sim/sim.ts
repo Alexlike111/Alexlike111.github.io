@@ -273,10 +273,7 @@ export class Sim implements ISim {
         // planck normals point from fixture A to fixture B: flip so that n points from the piece into the car
         if (other.id >= 0 && this.destructibles[other.id].dynamic) this.propKicks.push({ car, id: other.id });
         if (other.id >= 0 && !this.destructibles[other.id].dynamic) this.staticHits.push({ car, id: other.id, nx: da.kind === 'car' ? -nx : nx, ny: da.kind === 'car' ? -ny : ny });
-        if (other.kind !== 'prop') {
-          const vn = st.vx * nx + st.vy * ny;
-          this.destruction.recordScrape(other.id, Math.hypot(st.vx - vn * nx, st.vy - vn * ny), CONFIG.physics.dt, st.vx, st.vy);
-        }
+        // (scrape wear of walls / guardrails is measured by proximity after the step: see grazeWalls)
       }
     }
     if (other.id >= 0 && other.id < this.lastHitBy.length) this.lastHitBy[other.id] = st.id;
@@ -415,6 +412,7 @@ export class Sim implements ISim {
     this.plowThrough();
     this.countBreaks(evStart);
     for (let i = 0; i < n; i++) this.simCars[i].postStep();
+    this.grazeWalls(dt, events);
     for (let i = 0; i < n; i++) this.simCars[i].flushDamage(events);
 
     // ---- race rules, ghost
@@ -443,6 +441,21 @@ export class Sim implements ISim {
       // a sign hardly slows the car; a juggernaut (trait) barely notices a wall
       const keep = st.maxHp <= D.plowSoftHp ? Math.max(D.plowSoftKeep, h.car.setup.stats.traits?.plowKeep ?? 0) : (h.car.setup.stats.traits?.plowKeep ?? D.plowKeep);
       h.car.plowThrough(h.id, h.nx, h.ny, keep, this.destruction.breakImpulse(h.id) * D.plowDamageCap);
+    }
+  }
+
+  /**
+   * Scrape wear by proximity (audit X3): a car corner within CONFIG.destruction.scrapeGap of a wall / guardrail face, sliding
+   * along it at >= scrape.minSpeed, wears that piece per metre whatever the (often tiny) solver impulse; sparks use the same gate.
+   */
+  private grazeWalls(dt: number, events: SimEvent[]): void {
+    const n = this.cars.length;
+    for (let i = 0; i < n; i++) {
+      const st = this.cars[i];
+      if (st.finished && this.drivers[i]) continue;              // a finished AI car is a ghost (no contacts)
+      const car = this.simCars[i];
+      const g = this.destruction.graze(st.x, st.y, st.angle, car.dims.length, car.dims.width, st.vx, st.vy, this.tracker.hints[i], this.tracker.laterals[i], dt);
+      if (g) car.scrapeSpark(g.x, g.y, g.speed, events);
     }
   }
 

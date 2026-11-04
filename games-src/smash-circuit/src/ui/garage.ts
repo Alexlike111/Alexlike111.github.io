@@ -28,7 +28,7 @@ const SIL: Record<string, R[]> = {
   gravel: [...wheels(1.22, -1.24, 0.84, 0.84, 0.45, 0.45, 0.44, 0.44),
     [0, 0, 3.7, 1.72, 'p', 0.3], [-0.4, 0, 2.05, 1.5, 'g', 0.25], [-0.3, 0, 1.55, 1.12, 'w', 0.15], [0.2, 0, 0.5, 0.5, 'd'],
     [1.55, 0, 0.3, 1.2, 'y', 0.1], [-1.82, 0, 0.62, 2.1, 'p', 0.08]],
-  sandhopper: [...wheels(1.18, -1.15, 0.78, 0.92, 0.42, 0.56, 0.32, 0.56),
+  sandhopper: [...wheels(1.18, -1.15, 0.78, 0.86, 0.42, 0.56, 0.32, 0.54),
     [0.95, 0, 1.1, 0.8, 'p', 0.2], [-0.35, 0, 1.8, 1.3, 'p', 0.2], [-0.4, 0, 0.6, 0.8, 'r'],
     [-0.46, 0, 1.6, 0.12, 's'], [0.03, 0, 0.1, 1.24, 's'], [-0.95, 0, 0.1, 1.24, 's'], [-0.38, 0.58, 1.3, 0.1, 's'], [-0.38, -0.58, 1.3, 0.1, 's'],
     [-1.72, 0, 0.3, 0.8, 'd', 0.1]],
@@ -39,7 +39,7 @@ const SIL: Record<string, R[]> = {
   glint: [...wheels(1.42, -1.38, 0.8, 0.82, 0.42, 0.46, 0.38, 0.46),
     [-0.8, 0, 2.2, 1.84, 'p', 0.25], [1.25, 0, 1.9, 1.2, 'p', 0.5], [2.05, 0, 0.35, 0.8, 'd', 0.2],
     [-0.45, 0, 1.7, 1.2, 'g', 0.5], [-1.95, 0, 0.5, 2.0, 'p', 0.06]],
-  scorcher: [...wheels(1.5, -1.3, 0.8, 0.92, 0.38, 0.6, 0.24, 0.56),
+  scorcher: [...wheels(1.5, -1.3, 0.8, 0.86, 0.38, 0.6, 0.24, 0.52),
     [1.5, 0, 0.12, 1.5, 'c'], [-1.0, 0, 1.9, 1.4, 'p', 0.2], [0.9, 0, 1.9, 0.9, 'p', 0.15],
     [0.75, 0, 1.05, 0.66, 'c', 0.1], [0.85, 0, 0.5, 0.4, 's'], [2.0, 0, 0.3, 0.8, 'c', 0.1],
     [-1.25, 0, 1.05, 1.3, 'g', 0.2], [-1.3, 0, 0.68, 1.0, 'p', 0.1], [-0.8, 0.72, 0.9, 0.12, 'y'], [-0.8, -0.72, 0.9, 0.12, 'y']],
@@ -194,8 +194,8 @@ export function rivalLabel(mode: RivalMode, car?: string): string {
 }
 
 /** Car picker grid (rival model for 'pick'). */
-export function carGrid(act: string, current: string | undefined, color: number): string {
-  return `<div class="car-grid">${CAR_IDS.map((c) =>
+export function carGrid(act: string, current: string | undefined, color: number, cls = 'car-grid'): string {
+  return `<div class="${cls}">${CAR_IDS.map((c) =>
     `<button class="g-chip${c === current ? ' on' : ''}" data-act="${act}" data-id="${c}" aria-pressed="${c === current}" aria-label="${esc(t('car.' + c))}">${carSvg(c, color)}<span>${esc(t('car.' + c))}</span></button>`).join('')}</div>`;
 }
 

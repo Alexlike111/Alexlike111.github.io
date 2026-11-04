@@ -173,3 +173,22 @@
   .ui-root .rv-fair { display: none; }
   .ui-root .rv-head .btn.round { width: 44px; height: 44px; }
 }
+@media (min-aspect-ratio: 5/4) and (max-height: 460px) {
+  .ui-root .g-title { padding: 0.15em 0.3em; gap: 0.3em; }
+  .ui-root .g-name h3 { font-size: 1.2em; }
+  .ui-root .g-sub { margin-top: 0.1em; flex-wrap: nowrap; }
+  .ui-root .g-count { display: none; }
+  .ui-root .g-arrow { width: 44px; height: 44px; min-height: 44px; }
+  .ui-root .g-bars { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.15em 0.5em; }
+  .ui-root .g-bar .gl { font-size: 0.7em; }
+  .ui-root .g-bar .gv { font-size: 0.72em; }
+  .ui-root .g-bar .gi { display: none; }
+  .ui-root .g-bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "gl gv" "bar bar"; }
+}
+/* settings: the list scrolls when the rival model strip makes it taller than a short screen */
+.ui-root .settings .s-panel { overflow-y: auto; min-height: 0; max-height: 100%; overscroll-behavior: contain; }
+.ui-root .s-cars .g-strip { margin: 0 -0.2em; }
+@media (min-aspect-ratio: 5/4) and (max-height: 460px) {
+  .ui-root .g-bar .gv small { display: none; }
+  .ui-root .g-bar .gl { font-size: 0.66em; }
+}

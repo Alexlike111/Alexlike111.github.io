@@ -281,6 +281,13 @@ export class SimCar {
     s.rpm = engineRpm(s.speed, this.setup.stats.topSpeed * s.effects.topSpeedMul, this.input.throttle, s.rpm, CONFIG.physics.dt);
   }
 
+  /** A graze along a wall (proximity scrape, see Sim.grazeWalls): sparks, on the same cooldown as contact scrapes. */
+  scrapeSpark(x: number, y: number, slideSpeed: number, events: SimEvent[]): void {
+    if (this.scrapeCooldown > 0) return;
+    this.scrapeCooldown = CONFIG.car.scrapeInterval;
+    events.push({ type: 'scrape', x, y, carId: this.state.id, strength: Math.min(1, 0.25 + slideSpeed / 50) });
+  }
+
   /** Queued: applied in flushDamage (called after the world step, outside contact callbacks). */
   recordImpact(worldX: number, worldY: number, impulse: number, other: 'car' | DestructibleKind, otherId = -1, dealMul = 1): void {
     if (impulse < CONFIG.car.scrapeMin) return;
@@ -350,8 +357,9 @@ export class SimCar {
       // threshold applies to the normalised impulse, so a heavy car is not punished for its mass on walls
       let imp = e.impulse * mn;
       if (e.other !== 'car') {
-        // one hit on a piece is a few solver steps (a glancing hit: 3-4 small ones): sum them, the threshold applies once
-        const key = e.otherId >= 0 ? e.otherId : -2;
+        // one hit is a few solver steps (a glancing hit: 3-4 small ones, often on neighbouring segments of the same barrier):
+        // sum them, the threshold applies once. Walls and guardrails are one barrier, props count one by one.
+        const key = e.other === 'wall' || e.other === 'guardrail' || e.otherId < 0 ? -2 : e.otherId;
         let w = win.find((x) => x.key === key);
         if (!w) { w = { key, t: 0, sum: 0 }; win.push(w); }
         const thr = D.impulseThreshold;

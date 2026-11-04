@@ -149,7 +149,7 @@ function gravel(): ModelGeo {
 // ------------------------------------------------------------------------------------------------ 3 sandhopper: dune buggy
 // minimal tub in a dark roll cage (an X from above), seat visible, narrow nose, huge rear wheels outside the body
 function sandhopper(): ModelGeo {
-  const W = wheels4(1.18, -1.15, 0.78, 0.92, 0.42, 0.56, 0.32, 0.56);
+  const W = wheels4(1.18, -1.15, 0.78, 0.86, 0.42, 0.56, 0.32, 0.54);
   const b = g();
   b.box(3.0, 0.14, 1.0, { pos: [-0.1, 0.44, 0], color: DARK });
   // tub: narrow at the nose, wider at the seats
@@ -283,7 +283,7 @@ function glint(): ModelGeo {
 // ------------------------------------------------------------------------------------------------ 6 scorcher: hot rod
 // narrow nose with an exposed chrome engine and exhaust stacks, tiny cabin at the rear, giant rear wheels, thin front wheels
 function scorcher(): ModelGeo {
-  const W = wheels4(1.5, -1.3, 0.8, 0.92, 0.38, 0.6, 0.24, 0.56);
+  const W = wheels4(1.5, -1.3, 0.8, 0.86, 0.38, 0.6, 0.24, 0.52);
   const b = g();
   b.box(3.8, 0.14, 0.8, { pos: [0, 0.4, 0], color: DARK });                                 // frame rails
   b.box(1.9, 0.5, 1.4, { pos: [-1.0, 0.7, 0], color: 0xffffff, paint: P, vgrad: [0.4, 0.95, 0.8, 1], seg: [6, 2, 4], noBottom: true });

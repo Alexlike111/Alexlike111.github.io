@@ -245,3 +245,36 @@ describe('AiDriver decisions', () => {
     expect(pulled.steer).toBeCloseTo(healthy.steer - 0.2, 1);
   });
 });
+
+describe('AI mistakes and recovery (audit #10 / #22)', () => {
+  /** Speed target of a driver approaching the sharpest bend of t1 from `dist` m out at `speed`, optionally mid-lateBrake. */
+  function targetAt(lateBrake: boolean, dist: number, speed: number): number {
+    const g = GEOMS[0];
+    let bs = 0, bk = 0;
+    for (const smp of g.samples) if (Math.abs(smp.curvature) > bk) { bk = Math.abs(smp.curvature); bs = smp.s; }
+    const d = new AiDriver({ skill: 1, aggression: 0, laneOffset: 0, mistakeRate: 0 }, makeRng(3));
+    if (lateBrake) (d as unknown as { mistake: unknown }).mistake = { kind: 'lateBrake', timer: 5, dir: 1 };
+    const car = state(g, bs - dist, 0, speed);
+    decide(d, car, [], g, bs - dist);
+    return d.targetSpeed;
+  }
+
+  it('a lateBrake mistake brakes LATER (higher speed allowed far out) and buys no corner speed at the apex', () => {
+    expect(targetAt(true, 60, 50)).toBeGreaterThan(targetAt(false, 60, 50) + 1);
+    expect(targetAt(true, 0, 15)).toBeLessThanOrEqual(targetAt(false, 0, 15) + 1e-6);
+  });
+
+  it('a car beyond the wall line drives back toward the gap it left by, not along the road behind the wall', () => {
+    const g = GEOMS[0];
+    const half = g.def.width / 2;
+    const d = new AiDriver({ skill: 0.8, aggression: 0, laneOffset: 0, mistakeRate: 0 }, makeRng(4));
+    // on the road at s 100, then out through a gap there, then 15 m further along outside the wall
+    decide(d, state(g, 100, 0, 15), [], g, 100);
+    decide(d, state(g, 102, half + CONFIG.destruction.wallOffset + 0.5, 15), [], g, 102);
+    const out = state(g, 117, half + CONFIG.destruction.wallOffset + 2, 10);
+    const inp = decide(d, out, [], g, 117);
+    // the gap is behind on the left (the car faces along the track): it must steer hard round / slow, not drive on
+    expect(d.targetSpeed).toBeLessThan(10);
+    expect(Math.abs(inp.steer)).toBeGreaterThan(0.5);
+  });
+});

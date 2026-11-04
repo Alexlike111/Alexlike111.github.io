@@ -107,7 +107,7 @@ export const CONFIG = {
     maxWheelsOff: 2,          // a car never loses more wheels than this (it must still read as a car)
     // ---- appended: fair damage (audit #14 / #19) ----
     gripFloor: 0.3,           // effects.gripMul never drops below this (a battered car still steers)
-    hitWindow: 0.08,          // s: contact impulses of one car on one piece (wall, guardrail, prop) are summed over this window and
+    hitWindow: 0.1,           // s: contact impulses of one car on one barrier (walls + guardrails) or one prop are summed over this window and
                               // the no-damage threshold applies once per window (a glancing hit's 3-4 solver steps count as one hit)
                               // plow-through (see destruction.plowKeep): the impulse that breaks the piece is charged in full and
                               // only the part of the hit above it is softened, so a harder hit never costs less (no cliff)
@@ -616,13 +616,13 @@ export const CONFIG = {
         traits: { regen: { delay: 3, perSec: 2.5, cap: 0.75 } } },
       gravel:     { power: 13.6, top: 57.5, grip: 11.5, lat: 24.5, brake: 14, mass: 950, armor: 0.9, length: 4.0, width: 1.95, drift: 1.45, pace: 0.998,
         traits: { driftCharge: 1.7 } },
-      sandhopper: { power: 15.6, top: 56.5, grip: 12.5, lat: 24.0, brake: 14.5, mass: 760, armor: 0.8, length: 3.7, width: 2.0, drift: 1.25, pace: 0.995,
+      sandhopper: { power: 15.6, top: 56.5, grip: 12.5, lat: 24.0, brake: 14.5, mass: 760, armor: 0.8, length: 3.7, width: 2.15, drift: 1.25, pace: 0.995,
         traits: { offroadDragMul: 0.3, offroadGripMul: 1.45 } },
       brawler:    { power: 14.2, top: 64, grip: 10.5, lat: 23.5, brake: 12.5, mass: 1300, armor: 1.2, length: 4.6, width: 2.05, drift: 1.3, pace: 1.009,
         traits: { launch: { mul: 1.45, until: 24 } } },
       glint:      { power: 13.8, top: 62.5, grip: 12.5, lat: 24.8, brake: 15, mass: 980, armor: 0.85, length: 4.4, width: 1.95, drift: 1.05, pace: 0.987,
         traits: { draft: { range: 18, power: 0.3, ceil: 0.08 } } },
-      scorcher:   { power: 16.5, top: 62, grip: 11, lat: 23.0, brake: 12, mass: 1150, armor: 1.0, length: 4.4, width: 1.9, drift: 1.15, pace: 1.004,
+      scorcher:   { power: 16.5, top: 62, grip: 11, lat: 23.0, brake: 12, mass: 1150, armor: 1.0, length: 4.4, width: 2.1, drift: 1.15, pace: 1.004,
         traits: { boostTimeMul: 1.6 } },
       needle:     { power: 13.8, top: 64.5, grip: 13.5, lat: 25.8, brake: 16.5, mass: 800, armor: 0.7, length: 4.6, width: 1.85, drift: 0.7, pace: 0.967,
         traits: { downforce: 0.15 } },

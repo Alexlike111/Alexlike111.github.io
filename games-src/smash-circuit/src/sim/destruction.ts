@@ -329,6 +329,46 @@ export class DestructionSystem {
     this.scrapes.push({ id, dmg: tangentSpeed * dt * D.scrape[st.kind], vx, vy });
   }
 
+  /**
+   * Proximity scraping (called by the Sim after each step): a car (centre x, y, heading, size) whose corner is within
+   * CONFIG.destruction.scrapeGap of a wall / guardrail face and slides along it at >= scrape.minSpeed wears that piece by
+   * scrape[kind] hp per metre. Returns the contact point and sliding speed of the strongest graze (for sparks), or null.
+   */
+  graze(x: number, y: number, angle: number, length: number, width: number, vx: number, vy: number,
+    s: number, lateral: number, dt: number): { x: number; y: number; speed: number } | null {
+    const half = this.track.def.width / 2;
+    const reach = Math.hypot(length, width) / 2 + D.wall.thickness / 2 + D.scrapeGap;
+    if (Math.abs(lateral) < half + D.wallOffset - reach) return null;   // nowhere near a wall
+    const side = lateral >= 0 ? 1 : -1;
+    const c = Math.cos(angle), sn = Math.sin(angle);
+    const hl = length / 2, hw = width / 2;
+    let best: { x: number; y: number; speed: number } | null = null;
+    let lastId = -1;
+    for (let dj = -1; dj <= 1; dj++) {
+      const id = this.wallAt(s + dj * this.wallSeg, side);
+      if (id < 0 || id === lastId) continue;
+      lastId = id;
+      const st = this.states[id];
+      if (st.broken) continue;
+      const ux = Math.cos(st.angle), uy = Math.sin(st.angle);
+      const pl = st.w / 2, ph = st.h / 2 + D.scrapeGap;
+      let hit = false, hx = 0, hy = 0;
+      for (let k = 0; k < 4 && !hit; k++) {
+        const ax = (k & 1 ? hl : -hl), ay = (k & 2 ? hw : -hw);
+        const px = x + ax * c - ay * sn, py = y + ax * sn + ay * c;
+        const rx = px - st.x, ry = py - st.y;
+        const u = rx * ux + ry * uy, v = -rx * uy + ry * ux;
+        if (Math.abs(u) <= pl && Math.abs(v) <= ph) { hit = true; hx = px; hy = py; }
+      }
+      if (!hit) continue;
+      const tangent = Math.abs(vx * ux + vy * uy);
+      if (tangent < D.scrape.minSpeed) continue;
+      this.recordScrape(id, tangent, dt, vx, vy);
+      if (!best || tangent > best.speed) best = { x: hx, y: hy, speed: tangent };
+    }
+    return best;
+  }
+
   /** Queue a heavy impact near the road: tears the road chunk under the point (needs impulse > road threshold). */
   hitRoad(x: number, y: number, impulse: number): void {
     if (!(impulse > D.road.threshold)) return;

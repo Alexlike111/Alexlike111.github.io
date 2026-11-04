@@ -303,6 +303,24 @@ describe('Sim: AI recovers from a smashed wall', () => {
   }, 60000);
 });
 
+describe('Sim: respawn', () => {
+  it('a respawn puts the car at its nearest road point or behind it, never ahead (audit #22)', () => {
+    const sim = new Sim({ track: trackOf('t1'), cars: field({ player: false }), seed: 2 });
+    for (let k = 0; k < 60 * 7; k++) sim.update(DT);
+    sim.drainEvents();
+    const L = sim.track.length;
+    for (const i of [2, 5]) {
+      const c = sim.cars[i];
+      const before = sim.track.nearest(c.x, c.y).s;
+      (sim as unknown as { respawn(i: number): void }).respawn(i);
+      let d = (sim.track.nearest(c.x, c.y).s - before) % L;
+      if (d > L / 2) d -= L; else if (d < -L / 2) d += L;
+      expect(d).toBeLessThanOrEqual(0.5);
+      expect(d).toBeGreaterThan(-40);
+    }
+  });
+});
+
 describe('Sim: ghost', () => {
   /** A bot drives the player car with the same AI code; returns the finished sim. */
   function botRace(ghost?: GhostData, record?: (sim: Sim, t: number) => void): Sim {

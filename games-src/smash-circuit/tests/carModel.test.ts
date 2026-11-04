@@ -216,3 +216,14 @@ describe('engine rpm', () => {
     expect(drops).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('impact layer (audit P1 / P2): collisions are not erased by grip and yaw damping', () => {
+  it('pure model: a (nearly) standing car sliding sideways is only damped, never swung into forward or reverse speed', () => {
+    for (const f0 of [0, 0.3, -0.3]) {
+      let k: CarKinematics = { x: 0, y: 0, angle: 0, vx: f0, vy: 5, angularVel: 0, steer: 0 };
+      for (let i = 0; i < 120; i++) k = step(k, IDLE);
+      expect(Math.abs(forwardSpeed(k))).toBeLessThan(0.2 * 5);
+      expect(Math.abs(lateralSpeed(k))).toBeLessThan(0.5);
+    }
+  });
+});

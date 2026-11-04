@@ -825,7 +825,7 @@ export class UI {
         ]), t('settings.camera.hint'))}
         ${row(st.muted ? icon('speakerOff') : icon('speakerOn'), t('settings.sound'), toggle('muted', !st.muted))}
         ${row(icon('trophy'), t('rivals.title'), this.seg('rivals', rivalModeOr(st.rivals), RIVAL_MODES.map((m) => ({ v: m, label: t('rivals.short.' + m) }))), t('rivals.' + rivalModeOr(st.rivals) + '.hint'))}
-        ${rivalModeOr(st.rivals) === 'pick' ? `<div class="srow s-cars">${carGrid('rivalCar', carIdOr(st.rivalCar ?? this.save?.car), CONFIG.render.carColors[2])}</div>` : ''}
+        ${rivalModeOr(st.rivals) === 'pick' ? `<div class="srow s-cars">${carGrid('rivalCar', carIdOr(st.rivalCar ?? this.save?.car), CONFIG.render.carColors[2], 'g-strip')}</div>` : ''}
       </div>`);
   }
 
