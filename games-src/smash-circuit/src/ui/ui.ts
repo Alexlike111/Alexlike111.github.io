@@ -59,7 +59,7 @@ export interface ResultsData {
 
 const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
 
-const CTL_ICON: Record<ControlScheme, IconName> = { buttons: 'ctlButtons', slide: 'ctlSlide', finger: 'ctlFinger', joystick: 'ctlJoystick', tilt: 'ctlTilt', tap: 'ctlTap' };
+const CTL_ICON: Record<ControlScheme, IconName> = { buttons: 'ctlButtons', slide: 'ctlSlide', joystick: 'ctlJoystick', tilt: 'ctlTilt', tap: 'ctlTap' };
 
 const esc = (s: string | number): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -382,23 +382,15 @@ export class UI {
     const steerIc: Record<ControlScheme, string> = {
       buttons: `<div class="tut-steer">${icon('arrowL')}${icon('arrowR')}</div>`,
       slide: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`,
-      finger: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`,
       joystick: `<div class="tut-ic1">${icon('ctlJoystick')}</div>`,
       tilt: `<div class="tut-ic1">${icon('ctlTilt')}</div>`,
       tap: `<div class="tut-ic1">${icon('ctlTap')}</div>`,
     };
     const brakeTx = sc === 'joystick' ? 'tut.brake.joystick' : sc === 'tap' ? 'tut.brake.tap' : 'tut.brake.btn';
     const steps = isTouch
-      ? sc === 'finger'
-        ? [
-          { ic: `<div class="tut-gas">${icon('finger')}<i></i></div>`, tx: t('tut.touch.gas') },
-          { ic: steerIc.finger, tx: t('tut.touch.steer') },
-          { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.drift') },
-          { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
-        ]
-        : [
+      ? [
           { ic: steerIc[sc], tx: t(`tut.${sc}.steer`) },
-          { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.driftBtn') },
+          { ic: `<div class="tut-drift">${icon('bolt')}</div>`, tx: t('tut.touch.drift') },
           { ic: `<div class="tut-brake"><i></i></div>`, tx: t(brakeTx) },
           { ic: `<div class="tut-smash">${icon('crash')}</div>`, tx: t('tut.smash') },
         ]
@@ -922,7 +914,6 @@ export class UI {
         ]))}
         <div class="srow s-ctl"><div class="sl2"><span class="sic">${icon('finger')}</span><div><b>${esc(t('settings.controls'))}</b></div></div>
           ${this.ctlCards(controlsOr(st.controls), 'set')}${this.sensRow()}</div>
-        ${controlsOr(st.controls) === 'finger' ? row(icon('bolt'), t('settings.autoGas'), toggle('autoGas', st.autoGas), t('settings.autoGas.hint')) : ''}
         ${row(icon('speed'), t('settings.quality'), this.seg('quality', st.quality, [
           { v: 'auto', label: t('settings.auto') }, { v: 'low', label: t('settings.low') }, { v: 'medium', label: t('settings.medium') }, { v: 'high', label: t('settings.high') },
         ]))}
@@ -951,7 +942,7 @@ export class UI {
         <button class="btn red${confirmArmed('quit')}" data-act="quit">${icon('exit')}<span>${esc(t('pause.quit'))}</span></button>
       </div>
       ${this.touchMode ? this.pauseControls() : ''}
-      <div class="drift-hint">${icon('bolt')}<span>${esc(t(this.touchMode ? (controlsOr(this.settings.controls) === 'finger' ? 'pause.driftTouch' : 'pause.driftBtn') : 'pause.driftKeys'))}</span></div>
+      <div class="drift-hint">${icon('bolt')}<span>${esc(t(this.touchMode ? 'pause.driftTouch' : 'pause.driftKeys'))}</span></div>
       <div class="pc-foot"><span>${icon('coin')}<b>${fmtMoney(money)}</b></span><span class="keyhint">${esc(this.touchMode ? '' : t('pause.keys'))}</span></div>
     </div></div>`;
   }

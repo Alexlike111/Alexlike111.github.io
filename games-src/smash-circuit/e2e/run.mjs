@@ -112,8 +112,8 @@ async function runProfile(prof) {
   await page.click('[data-act=play]');
   await sleep(700);
   await shot('tracks');
-  // start t1 (touch: the one-time controls picker comes first; the legacy One finger scheme drives this profile)
-  if (prof.touch) await page.evaluate(() => { const g = window.__game; g.setSettings({ ...g.save.settings, controls: 'finger', controlsPicked: false }); });
+  // start t1 (touch: the one-time controls picker comes first; the Buttons scheme drives this profile)
+  if (prof.touch) await page.evaluate(() => { const g = window.__game; g.setSettings({ ...g.save.settings, controls: 'buttons', controlsPicked: false }); });
   await page.click('[data-act=track][data-id=t1]');
   if (prof.touch) {
     R.checks.controlsPicker = !!(await page.waitForSelector('.ctlpick', { timeout: 5000 }).catch(() => null));
@@ -182,16 +182,16 @@ async function runProfile(prof) {
   R.notes.fps = fps;
   await shot('race-fast');
 
-  // one-finger brake: pulling the GAS finger down must brake (touch only)
+  // BRAKE button: holding it must brake and cancel the auto gas, letting go must accelerate again (touch only)
   if (prof.touch) {
     await drv.pull(0.5);
     await sleep(400);
     const braking = await page.evaluate(() => window.__game.sim.cars[0].brake);
-    await drv.steer(0);   // finger back to the GAS button height
+    await drv.pull(0);   // BRAKE released
     await sleep(300);
     const gassing = await page.evaluate(() => window.__game.sim.cars[0].throttle);
     R.notes.brakeGesture = { braking, gassing };
-    R.checks.oneFingerBrake = braking > 0.5 && gassing > 0.5;
+    R.checks.brakeButton = braking > 0.5 && gassing > 0.5;
   }
 
   // crash into the wall: full lock
@@ -307,35 +307,33 @@ async function runProfile(prof) {
   return R;
 }
 
-/** Input driver: touch via CDP (GAS button + finger slide) on phone, keyboard on desktop. */
+/** Input driver: touch via CDP (Buttons scheme: left / right arrows + BRAKE) on phone, keyboard on desktop. */
 function makeDriver(page, cdp, prof) {
   if (prof.touch) {
-    let cx = 0, cy = 0, size = 0, full = 0, down = false, lastX = 0;
+    const pos = {};
+    const down = new Map();
+    const send = (type) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: [...down].map(([id, p]) => ({ x: p.x, y: p.y, id })) });
+    const set = async (id, on) => {
+      if (on === down.has(id)) return;
+      if (on) { down.set(id, pos[id]); await send('touchStart'); } else { down.delete(id); await send('touchEnd'); }
+    };
     return {
       async start() {
         const box = await page.evaluate(() => {
-          const b = document.querySelector('.gas-btn').getBoundingClientRect();
-          return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: innerWidth, s: b.width };
+          const c = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+          return { 1: c('.steer-btn.left'), 2: c('.steer-btn.right'), 3: c('.brake-btn') };
         });
-        cx = box.x; cy = box.y; size = box.s; full = box.w * 0.22; lastX = cx;
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy, id: 1 }] });
-        down = true;
+        Object.assign(pos, box);   // auto gas: the car drives without any finger down
       },
       async steer(v) {
-        if (!down) return;
-        lastX = cx + v * full;
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: lastX, y: cy, id: 1 }] });
+        await set(1, v < -0.2); await set(2, v > 0.2);
       },
-      /** Slide the GAS finger straight down by `f` button sizes (clamped to the screen): brake / reverse. */
-      async pull(f) {
-        if (!down) return;
-        const y = await page.evaluate((yy) => Math.min(innerHeight - 1, yy), cy + f * size);
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: lastX, y, id: 1 }] });
-      },
+      /** Hold the BRAKE button (f > 0) or let go (f = 0): brake / reverse. */
+      async pull(f) { await set(3, f > 0); },
       async release() {
-        if (!down) return;
+        if (!down.size) return;
+        down.clear();
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        down = false;
       },
     };
   }

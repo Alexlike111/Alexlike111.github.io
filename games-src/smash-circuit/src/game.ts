@@ -114,7 +114,7 @@ export class Game {
     this.ui = new UI(uiRoot, this.handlers());
     this.input = new InputController(uiRoot);
     this.applyControls();
-    this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
+    this.input.setLabels(t('input.brake'));
     this.input.onTiltStatus((st) => this.onTiltStatus(st));
     this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else if (k === 'item') this.useItem(); else this.repairNow(); });
     this.input.onTouchMode((touch) => this.ui.setTouchMode(touch));
@@ -425,7 +425,7 @@ export class Game {
     if (s.tutorialDone) this.tutorialOn = false;
     this.applyMute();
     this.applyControls();
-    this.input.setLabels(t('input.gas'), t('input.brake'), t('input.drift'));
+    this.input.setLabels(t('input.brake'));
     this.renderer.setQuality(s.quality);
     this.applyCamera();
     document.documentElement.lang = lang();
@@ -434,7 +434,6 @@ export class Game {
 
   private applyControls(): void {
     const s = this.save.settings;
-    this.input.setAutoGas(s.autoGas);
     this.input.setSensitivity(s.steerSens);
     this.input.setScheme(s.controls);
   }
@@ -661,7 +660,7 @@ export class Game {
       }
       else if (e.type === 'pickup' && e.carId === sim.cars[0].id && !this.itemHintShown) {
         this.itemHintShown = true;   // once per session: how to use the item
-        this.ui.toast(t(this.input.touchActive ? (this.save.settings.controls === 'finger' ? 'hud.itemHintTap' : 'hud.itemHintBtn') : 'hud.itemHintKey'));
+        this.ui.toast(t(this.input.touchActive ? 'hud.itemHintBtn' : 'hud.itemHintKey'));
       }
     }
   }

@@ -417,20 +417,13 @@
 
 /* touch buttons (created by InputController) */
 .ui-root .touch-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-.ui-root .touch-layer .gas-btn, .ui-root .touch-layer .brake-btn {
+.ui-root .touch-layer .brake-btn {
   position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
   border-radius: 50%; pointer-events: auto; touch-action: none; color: #fff;
   font: 900 italic calc(var(--gas, 100px) * 0.17)/1 var(--display); text-transform: uppercase; letter-spacing: 0.04em;
   border: 0.18em solid var(--ink); text-shadow: 0 0.08em 0 rgba(0, 0, 0, 0.35);
   transition: transform 0.06s, filter 0.1s;
 }
-.ui-root .touch-layer .gas-btn {
-  right: calc(var(--gap, 16px) + env(safe-area-inset-right, 0px)); bottom: calc(var(--gap, 16px) + env(safe-area-inset-bottom, 0px));
-  width: var(--gas, 100px); height: var(--gas, 100px);
-  background: radial-gradient(circle at 35% 28%, #ff9a6a, #ff4d2e 55%, #b81f12);
-  box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.4), 0 0 0 0.35em rgba(255, 90, 54, 0.28);
-}
-.ui-root .touch-layer .gas-btn svg { width: 38%; height: 38%; }
 .ui-root .touch-layer .brake-btn {
   left: calc(var(--gap, 16px) + env(safe-area-inset-left, 0px)); bottom: calc(var(--gap, 16px) + env(safe-area-inset-bottom, 0px));
   width: var(--brake, 66px); height: var(--brake, 66px); font-size: calc(var(--brake, 66px) * 0.19);
@@ -438,19 +431,6 @@
   box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.35);
 }
 .ui-root .touch-layer .brake-btn svg { width: 38%; height: 38%; }
-.ui-root .touch-layer .drift-btn {
-  position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
-  border-radius: 50%; pointer-events: auto; touch-action: none; color: #fff; border: 0.18em solid var(--ink);
-  font: 900 italic calc(var(--drift, 66px) * 0.18)/1 var(--display); text-transform: uppercase; letter-spacing: 0.03em;
-  text-shadow: 0 0.08em 0 rgba(0, 0, 0, 0.35); transition: transform 0.06s, filter 0.1s;
-  /* left of GAS, lifted a little so the thumb sliding left to steer does not land on it */
-  right: calc(var(--gap, 16px) * 1.6 + var(--gas, 100px) + env(safe-area-inset-right, 0px));
-  bottom: calc(var(--gap, 16px) + var(--gas, 100px) * 0.95 + env(safe-area-inset-bottom, 0px));
-  width: var(--drift, 66px); height: var(--drift, 66px);
-  background: radial-gradient(circle at 35% 28%, #d39bff, #8a3cf0 55%, #4e1a9e);
-  box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.35);
-}
-.ui-root .touch-layer .drift-btn svg { width: 40%; height: 40%; }
 .ui-root .touch-layer .down { transform: scale(0.94) translateY(0.1em); filter: brightness(1.2); }
 
 /* ---- control schemes (positions are set inline by InputController.layout from src/input/schemes.ts) ---- */
@@ -463,16 +443,26 @@
 }
 .ui-root .touch-layer .steer-btn svg { width: 46%; height: 46%; filter: drop-shadow(0 0.08em 0 rgba(0, 0, 0, 0.35)); }
 .ui-root .touch-layer .steer-btn.down { background: linear-gradient(160deg, rgba(255, 214, 80, 0.92), rgba(255, 150, 30, 0.9)); color: #23140a; }
-.ui-root.sch-new .touch-layer .drift-btn, .ui-root.sch-new .touch-layer .brake-btn { opacity: 0.82; }
-.ui-root.sch-new .touch-layer .drift-btn.down, .ui-root.sch-new .touch-layer .brake-btn.down { opacity: 1; }
+.ui-root.sch-new .touch-layer .brake-btn { opacity: 0.82; }
+.ui-root.sch-new .touch-layer .brake-btn.down { opacity: 1; }
 .ui-root.sch-new .touch-layer .brake-btn { background: radial-gradient(circle at 35% 28%, #ff8f8f, #e03a3a 55%, #8e1c1c); }
-.ui-root.sch-new .touch-layer .drift-btn { font-size: calc(var(--drift, 66px) * 0.17); }
 .ui-root.sch-new .touch-layer .brake-btn { font-size: calc(var(--brake, 66px) * 0.17); }
 /* floating stick / slide track */
 .ui-root .touch-layer .stick { position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 50%; transition: opacity 0.15s;
   border: 0.22em solid rgba(255, 255, 255, 0.7); background: rgba(16, 27, 58, 0.32); box-shadow: 0 0 0 0.18em rgba(11, 20, 48, 0.5); }
 .ui-root .touch-layer .stick.slide { height: 52px; border-radius: 26px; }
 .ui-root .touch-layer .stick.idle { opacity: 0.45; border-style: dashed; }
+.ui-root .touch-layer .stick:not(.slide):not(.idle) { opacity: 0.8; }
+.ui-root .touch-layer .stick.held { opacity: 1; background: rgba(16, 27, 58, 0.5); }
+/* tilt indicator: a bar with a dot at the steering being sent (bottom left, the left thumb zone is free in this scheme) */
+.ui-root .touch-layer .tilt-ind { position: absolute; left: calc(var(--gap, 16px) + env(safe-area-inset-left, 0px)); bottom: calc(var(--gap, 16px) * 1.4 + env(safe-area-inset-bottom, 0px));
+  width: min(42vw, 46vmin); height: 1.7em; font-size: calc(var(--brake, 66px) * 0.2); pointer-events: none; border-radius: 1em;
+  background: rgba(16, 27, 58, 0.5); border: 0.14em solid rgba(255, 255, 255, 0.7); box-shadow: 0 0 0 0.14em rgba(11, 20, 48, 0.5); }
+.ui-root .touch-layer .tilt-ind .tc { position: absolute; left: 50%; top: 18%; bottom: 18%; width: 0.14em; margin-left: -0.07em; background: rgba(255, 255, 255, 0.7); }
+.ui-root .touch-layer .tilt-ind .tz { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+.ui-root .touch-layer .tilt-ind .td { position: absolute; top: 50%; left: 50%; width: 1.1em; height: 1.1em; margin: -0.55em 0 0 -0.55em; border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe27a, #ff9d1e 60%, #c4600a); border: 0.14em solid rgba(11, 20, 48, 0.85); }
+.ui-root .touch-layer .tilt-ind.wait .td { opacity: 0.4; }
 .ui-root .touch-layer .stick-knob { position: absolute; left: 50%; top: 50%; width: 46%; aspect-ratio: 1; margin: -23% 0 0 -23%; border-radius: 50%;
   background: radial-gradient(circle at 35% 28%, #ffe27a, #ff9d1e 60%, #c4600a); border: 0.16em solid rgba(11, 20, 48, 0.85); }
 .ui-root .touch-layer .stick.slide .stick-knob { width: 36px; margin: -18px 0 0 -18px; }
@@ -493,6 +483,9 @@
 .ui-root.is-touch.sch-new .hud-item .item-slot { opacity: 0.9; }
 /* portrait: the speed readout and drift meter sit above the button row instead of behind it */
 @media (orientation: portrait) { .ui-root.is-touch.sch-new .hud-bc { bottom: calc(var(--btn-top, 0px) + env(safe-area-inset-bottom, 0px) + 0.5em); } }
+
+/* joystick: the speed readout and the drift meter sit above the fixed stick (--joy-top is set by InputController.layout) */
+.ui-root.is-touch.sch-joystick .hud-bc { bottom: calc(var(--joy-top, 0px) + env(safe-area-inset-bottom, 0px) + 0.5em); }
 
 /* ---- controls picker (settings, pause, first-run) ---- */
 .ui-root .s-ctl { flex-direction: column; align-items: stretch; }

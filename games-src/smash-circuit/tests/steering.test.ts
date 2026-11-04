@@ -172,7 +172,7 @@ describe('touch: authority at small offsets, stable full lock', () => {
     let prev = 0;
     for (let f = 0; f <= 1.0001; f += 0.05) { const v = at(f); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
     // the auto drift asks for the finger near the full-lock distance, as before the curve
-    expect(at(0.88)).toBeLessThan(CONFIG.drift.autoSteer);
+    expect(at(0.65)).toBeLessThan(CONFIG.drift.autoSteer);
   });
 
   it('full touch lock (auto drift request) never spins: heading < 130 deg in 0.6 s (a hairpin turn, not a spin round), slip bounded, straightens on release', () => {

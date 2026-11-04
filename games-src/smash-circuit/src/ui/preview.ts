@@ -57,7 +57,7 @@ const ui = new UI(root, {
 
 const touch = screen.endsWith('Touch') || params.has('touch');
 const input = new InputController(root);
-input.setLabels('GAS', 'BRAKE');
+input.setLabels('BRAKE');
 
 switch (screen) {
   case 'menu': ui.showMainMenu(save); break;

@@ -2,7 +2,7 @@
 // Everything here is DOM free so it can be unit tested (tests/inputSchemes.test.ts).
 import { CONFIG } from '../config';
 
-export const CONTROL_SCHEMES = ['buttons', 'slide', 'finger', 'joystick', 'tilt', 'tap'] as const;
+export const CONTROL_SCHEMES = ['buttons', 'slide', 'joystick', 'tilt', 'tap'] as const;
 export type ControlScheme = (typeof CONTROL_SCHEMES)[number];
 export const DEFAULT_SCHEME: ControlScheme = 'buttons';
 export const controlsOr = (v: unknown): ControlScheme =>
@@ -14,15 +14,23 @@ export const sensOr = (v: unknown): number => {
   return Math.round(Math.min(CONFIG.controls.sensMax, Math.max(CONFIG.controls.sensMin, n)) * 100) / 100;
 };
 
-/** Schemes whose steering is analog and may ask for the auto drift on a hard steer. */
-export const autoDriftScheme = (s: ControlScheme): boolean => s === 'finger' || s === 'slide' || s === 'joystick';
-/** Schemes where the throttle is always on (finger scheme: only with the Auto gas setting). */
-export const alwaysGas = (s: ControlScheme, autoGas: boolean): boolean => s !== 'finger' || autoGas;
+/** Every touch scheme asks for the auto drift on a hard steer (there is no DRIFT button; digital schemes need a hold, see `driftRequest`). */
+export const autoDriftScheme = (_s: ControlScheme): boolean => true;
+
+/**
+ * Auto drift request of a touch steer. `steer` is the raw steer (-1..1, before the sensitivity multiplier); `held` is how long
+ * (s) a DIGITAL steer (button / tap zone) has been held in one direction, `digital` tells the source. Analog sources
+ * (slide, joystick, tilt) ask at once when the steer is >= driftSteer, digital ones after driftHoldS.
+ */
+export function driftRequest(steer: number, held: number, digital: boolean): boolean {
+  if (Math.abs(steer) < CONFIG.controls.driftSteer) return false;
+  return !digital || held >= CONFIG.controls.driftHoldS;
+}
 
 const C = CONFIG.controls;
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
-export type BtnName = 'steerL' | 'steerR' | 'drift' | 'brake' | 'item';
+export type BtnName = 'steerL' | 'steerR' | 'brake' | 'item';
 /** A button box anchored to a screen edge: `off` px from the left (side 'l') or right (side 'r') edge, `b` px above the bottom edge. */
 export interface Box { side: 'l' | 'r'; off: number; b: number; w: number; h: number }
 export type Layout = Partial<Record<BtnName, Box>>;
@@ -36,24 +44,20 @@ export function touchLayout(W: number, H: number, scheme: ControlScheme): Layout
   const L: Layout = {};
   const steerW = portrait ? 0.225 * W : 0.3 * H;
   const steerH = portrait ? steerW * 1.1 : steerW * 0.95;
-  const ds = portrait ? 0.225 * W : 0.28 * H;     // DRIFT
-  const bs = ds * 0.84;                            // BRAKE
+  const ds = portrait ? 0.225 * W : 0.28 * H;     // BRAKE (the biggest right-hand button, no DRIFT button: drift is automatic)
+  const bs = ds * 0.9;
   const is = ds * 0.72;                            // item
   if (scheme === 'buttons') {
     L.steerL = { side: 'l', off: g, b: g, w: steerW, h: steerH };
     L.steerR = { side: 'l', off: g + steerW + gap, b: g, w: steerW, h: steerH };
   }
   if (scheme === 'tap') {
-    const ts = ds * 0.66;
-    const b = 0.3 * H;
-    L.drift = { side: 'l', off: g, b, w: ts, h: ts };
-    L.item = { side: 'r', off: g, b, w: ts, h: ts };
+    L.item = { side: 'r', off: g, b: 0.3 * H, w: is, h: is };
     return L;
   }
-  if (scheme === 'finger') return L;   // legacy GAS / BRAKE / DRIFT geometry lives in the CSS (gasButtonGeometry)
-  L.drift = { side: 'r', off: g, b: g, w: ds, h: ds };
-  if (scheme !== 'joystick') L.brake = { side: 'r', off: g + ds + gap, b: g, w: bs, h: bs };
-  L.item = { side: 'r', off: g + (ds - is) / 2, b: g + ds + gap * 1.5, w: is, h: is };
+  const hasBrake = scheme !== 'joystick';
+  if (hasBrake) L.brake = { side: 'r', off: g, b: g, w: bs, h: bs };
+  L.item = { side: 'r', off: g + ((hasBrake ? bs : is) - is) / 2, b: hasBrake ? g + bs + gap * 1.5 : g, w: is, h: is };
   return L;
 }
 
@@ -79,28 +83,30 @@ export function followHome(x: number, homeX: number, full: number): number {
   return Math.abs(dx) > full ? x - Math.sign(dx) * full : homeX;
 }
 
-/** Floating joystick radius (px). */
+/** Joystick radius (px). */
 export const joyRadius = (W: number, H: number): number => Math.min(W, H) * C.joyRadius;
 
-/**
- * Wheel roll of the phone (rad, + = turned clockwise as the player sees it) from DeviceOrientation angles (deg) and the
- * screen orientation angle (0 / 90 / 180 / 270). Computed from the gravity direction projected on the screen plane, so
- * it is the same movement in portrait and landscape: turn the phone like a steering wheel.
- */
-export function tiltRoll(beta: number, gamma: number, screenAngle = 0): number {
-  const b = beta * Math.PI / 180, g = gamma * Math.PI / 180;
-  // "up" in device coordinates (W3C Z-X'-Y'' rotation)
-  const ux = -Math.cos(b) * Math.sin(g), uy = Math.sin(b);
-  const a = ((Math.round(screenAngle / 90) % 4) + 4) % 4;
-  const right: [number, number] = a === 0 ? [1, 0] : a === 1 ? [0, -1] : a === 2 ? [-1, 0] : [0, 1];
-  const up: [number, number] = a === 0 ? [0, 1] : a === 1 ? [1, 0] : a === 2 ? [0, -1] : [-1, 0];
-  const sx = ux * right[0] + uy * right[1], sy = ux * up[0] + uy * up[1];
-  return -Math.atan2(sx, sy);
+/** Fixed joystick: centred horizontally in the lower part of the screen. `grab` = radius of the area where a touch grabs it. */
+export function joyGeom(W: number, H: number): { cx: number; cy: number; r: number; grab: number } {
+  const r = joyRadius(W, H);
+  return { cx: W / 2, cy: H - r - Math.max(0.03 * Math.min(W, H) * 1.5, 0.045 * H), r, grab: r * C.joyGrab };
 }
 
-/** Steering from the tilt offset to the calibrated centre (rad). */
-export function tiltAxis(delta: number): number {
-  const d = Math.atan2(Math.sin(delta), Math.cos(delta)) * 180 / Math.PI;
-  const mag = clamp((Math.abs(d) - C.tiltDeadDeg) / (C.tiltFullDeg - C.tiltDeadDeg), 0, 1);
-  return mag === 0 ? 0 : Math.sign(d) * Math.pow(mag, C.tiltCurve);
+/**
+ * Steering angle (deg, + = right) of a DeviceOrientation reading relative to the calibrated centre, the standard racing-game
+ * way: portrait steers from gamma (left / right tilt), landscape from beta (sign by screen.orientation.angle: 90 = +beta,
+ * 270 = -beta, 180 flips portrait). The offset is wrapped so the +-90 (gamma) / +-180 (beta) jump never reaches the steering.
+ */
+export function tiltSteerDeg(beta: number, gamma: number, cBeta: number, cGamma: number, screenAngle = 0): number {
+  const a = ((Math.round(screenAngle / 90) % 4) + 4) % 4;
+  const landscape = a === 1 || a === 3;
+  const wrap = (d: number, period: number): number => ((((d + period / 2) % period) + period) % period) - period / 2;
+  const raw = landscape ? wrap(beta - cBeta, 360) : wrap(gamma - cGamma, 180);
+  return a === 0 || a === 1 ? raw : -raw;
+}
+
+/** Steering (-1..1) from a tilt offset in degrees: dead band, full lock, response curve. */
+export function tiltAxis(deg: number): number {
+  const mag = clamp((Math.abs(deg) - C.tiltDeadDeg) / (C.tiltFullDeg - C.tiltDeadDeg), 0, 1);
+  return mag === 0 ? 0 : Math.sign(deg) * Math.pow(mag, C.tiltCurve);
 }

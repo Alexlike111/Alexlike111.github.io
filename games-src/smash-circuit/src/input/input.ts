@@ -1,35 +1,23 @@
-// Keyboard + touch input. Touch has six schemes (src/input/schemes.ts; settings "Controls"):
-//   buttons (default) auto gas, big left / right steer buttons, DRIFT + BRAKE + item on the right
-//   slide    auto gas, drag a thumb sideways on the left half, buttons on the right
-//   finger   the legacy scheme below (GAS button + slide of the same finger)
-//   joystick auto gas, a floating stick under the left thumb (sideways steers, down brakes)
-//   tilt     auto gas, steer by turning the phone like a wheel (DeviceOrientation)
-//   tap      auto gas, hold the left / right half of the screen to steer, both = brake
-// Legacy "finger" scheme:
+// Keyboard + touch input. Touch has five schemes (src/input/schemes.ts; settings "Controls"), all with automatic gas:
+//   buttons (default) big left / right steer buttons, BRAKE + item on the right
+//   slide    drag a thumb sideways on the left half, buttons on the right
+//   joystick a FIXED stick centred at the bottom of the screen (sideways steers, pull down brakes / reverses)
+//   tilt     steer by tilting the phone (DeviceOrientation: gamma in portrait, beta in landscape) + a live indicator
+//   tap      hold the left / right half of the screen to steer, both = brake
 //
-// Touch scheme (one finger): hold the GAS button (bottom-right) and slide the same finger left / right to
-// steer. Steering is the finger's horizontal offset from the GAS button centre (the "home" position of the
-// thumb); a finger that is NOT on the button steers relative to the screen centre (see `steerAxis`, the one place
-// that defines the reference point). Pulling the GAS finger
-// below the button (brakePull, always reachable before the screen edge) = brake / reverse. In auto-gas mode a
-// steering finger pulled down from where it landed brakes too. A small optional BRAKE button (bottom-left)
-// works with a second finger. With auto-gas on, throttle is always 1 and any touch steers (relative to the
-// screen centre).
-//
-// Drift (src/sim/drift.ts): a touch steer past the full-lock distance asks for an auto drift (the sim starts it above
-// ~60 km/h); the DRIFT button (left of GAS, second finger) holds a drift like Space does on a keyboard.
-//
-// Keyboard: WASD / arrows, Space = handbrake / drift, P = pause, R = repair. Esc is never bound (Playgama 1.5.2).
+// Drift (src/sim/drift.ts) is automatic on touch: a hard steer (>= CONFIG.controls.driftSteer) above ~60 km/h starts it; the
+// digital schemes (buttons, tap) need the steer held for driftHoldS first. Keyboard: WASD / arrows, Space = handbrake / drift,
+// P = pause, R = repair. Esc is never bound (Playgama 1.5.2).
 import { CONFIG } from '../config';
 import { DRIFT_AUTO, DRIFT_HOLD, DRIFT_NONE } from '../sim/drift';
 import type { CarInput } from '../types';
 import {
-  alwaysGas, autoDriftScheme, boxRect, followHome, joyRadius, slideAxis, stickAxis, tiltAxis, tiltRoll, touchLayout,
+  boxRect, driftRequest, followHome, joyGeom, slideAxis, stickAxis, tiltAxis, tiltSteerDeg, touchLayout,
   type BtnName, type ControlScheme,
 } from './schemes';
 
 type KeyAction = 'pause' | 'repair' | 'item';
-type PointerKind = 'gas' | 'brake' | 'steer' | 'drift' | 'sbtn' | 'slide' | 'tap';
+type PointerKind = 'brake' | 'sbtn' | 'slide' | 'tap';
 
 interface Ptr { kind: PointerKind; startX?: number; startY?: number; x: number; y: number; homeX: number; homeY: number; size: number; flicked?: boolean; pullT?: number }
 
@@ -104,7 +92,6 @@ export class InputController {
   private keys = new Set<string>();
   private pointers = new Map<number, Ptr>();
   private enabled = false;
-  private autoGas = false;
   private scheme: ControlScheme = 'buttons';
   private sens = 1;
   private _touch = false;
@@ -115,9 +102,12 @@ export class InputController {
   private btnSteer = 0;
   private lastT = 0;
   // tilt
-  private tiltRaw: number | null = null;
-  private tiltCenter: number | null = null;
+  private tiltRaw: { beta: number; gamma: number } | null = null;
+  private tiltCenter: { beta: number; gamma: number; ang: number } | null = null;
+  private tiltAng = 0;
   private tiltSteer = 0;
+  private digHeld = 0;      // s a digital steer has been held in one direction (auto drift)
+  private digDir = 0;
   private tiltSeen = false;
   private tiltTimer = 0;
   private tiltOn = false;
@@ -125,13 +115,13 @@ export class InputController {
   private boundary = 0;
 
   private layer: HTMLDivElement;
-  private gasEl: HTMLDivElement;
   private brakeEl: HTMLDivElement;
-  private driftEl: HTMLDivElement;
   private steerLEl: HTMLDivElement;
   private steerREl: HTMLDivElement;
   private stickEl: HTMLDivElement;
   private knobEl: HTMLDivElement;
+  private tiltEl: HTMLDivElement;
+  private tiltDot: HTMLElement;
   private zoneL: HTMLDivElement;
   private zoneR: HTMLDivElement;
 
@@ -149,14 +139,16 @@ export class InputController {
       e.innerHTML = html;
       return e;
     };
-    this.gasEl = mk('gas-btn', '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 6c9 7 15 17 15 30 0 6-2 11-5 15H22c-3-4-5-9-5-15C17 23 23 13 32 6z" fill="currentColor"/><path d="M26 54h12v4H26z" fill="currentColor" opacity=".7"/></svg><span data-gas-label></span>');
     this.brakeEl = mk('brake-btn', '<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="14" y="14" width="36" height="36" rx="8" fill="currentColor"/></svg><span data-brake-label></span>');
-    this.driftEl = mk('drift-btn', '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M14 44c6-14 18-22 34-24l-4-7 14 10-14 10 3-7c-12 2-21 8-27 20z" fill="currentColor"/><circle cx="16" cy="50" r="5" fill="currentColor" opacity=".7"/></svg><span data-drift-label></span>');
     const arrow = (d: string): string => `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     this.steerLEl = mk('steer-btn left', arrow('M40 12 20 32l20 20'));
     this.steerLEl.setAttribute('aria-label', 'left');
     this.steerREl = mk('steer-btn right', arrow('M24 12l20 20-20 20'));
     this.steerREl.setAttribute('aria-label', 'right');
+    this.tiltEl = document.createElement('div');
+    this.tiltEl.className = 'tilt-ind';
+    this.tiltEl.innerHTML = '<i class="tz"></i><i class="tc"></i><b class="td"></b>';
+    this.tiltDot = this.tiltEl.querySelector('.td') as HTMLElement;
     this.stickEl = document.createElement('div');
     this.stickEl.className = 'stick idle';
     this.knobEl = document.createElement('div');
@@ -168,8 +160,8 @@ export class InputController {
     this.zoneR = document.createElement('div');
     this.zoneR.className = 'tap-zone r';
     this.zoneR.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M24 10l22 22-22 22" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    for (const e of [this.stickEl, this.zoneL, this.zoneR]) e.setAttribute('aria-hidden', 'true');
-    this.layer.append(this.zoneL, this.zoneR, this.stickEl, this.gasEl, this.brakeEl, this.driftEl, this.steerLEl, this.steerREl);
+    for (const e of [this.stickEl, this.zoneL, this.zoneR, this.tiltEl]) e.setAttribute('aria-hidden', 'true');
+    this.layer.append(this.zoneL, this.zoneR, this.stickEl, this.tiltEl, this.brakeEl, this.steerLEl, this.steerREl);
     root.appendChild(this.layer);
 
     window.addEventListener('keydown', this.onKeyDown);
@@ -208,21 +200,18 @@ export class InputController {
     const handbrake = k.has('Space');
 
     // --- touch
-    let tThrottle = 0, tBrake = 0, tSteer = 0, steerSet = false, tDrift = false;
+    let tBrake = 0, tSteer = 0, steerSet = false;
     let sL = false, sR = false, tapL = false, tapR = false, stickP: Ptr | null = null;
     for (const p of this.pointers.values()) {
       if (p.kind === 'brake') { tBrake = 1; continue; }
-      if (p.kind === 'drift') { tDrift = true; continue; }
       if (p.kind === 'sbtn') { if (p.x < this.boundary) sL = true; else sR = true; continue; }
       if (p.kind === 'tap') { if (p.x < W / 2) tapL = true; else tapR = true; continue; }
       if (p.kind === 'slide') {
         stickP = p;
         if (scheme === 'joystick') {
-          const R = joyRadius(W, H);
-          p.homeX = followHome(p.x, p.homeX, R);
+          const R = joyGeom(W, H).r;
           tSteer = stickAxis(p.x - p.homeX, R, R * C.joyDead);
-          p.size = R * C.joyBrakePull;
-          if (stepPull(p, dt)) tBrake = 1;
+          if (p.y - p.homeY > R * C.joyBrakePull) tBrake = 1;   // pulled down past the brake line (fixed stick: no re-anchoring)
         } else {
           p.homeX = followHome(p.x, p.homeX, C.slideFull * W);
           tSteer = slideAxis(p.x, p.homeX, W);
@@ -230,12 +219,6 @@ export class InputController {
         steerSet = true;
         continue;
       }
-      if (p.kind === 'gas') {
-        if (p.y > brakeThresholdY(p.homeY, p.size)) { tBrake = 1; } else { tThrottle = 1; }
-      } else if (stepPull(p, dt)) {
-        tBrake = 1;   // a steering finger deliberately pulled down from where it landed = brake (auto-gas: the one-finger brake)
-      }
-      if (p.kind === 'gas' || !steerSet) { tSteer = this.steerFor(p); steerSet = true; }
     }
 
     // digital steering (buttons / two-side tap): ramps to full lock in ~0.1 s
@@ -244,43 +227,41 @@ export class InputController {
     else if (scheme === 'tap') {
       if (tapL && tapR) tBrake = 1; else btnTarget = (tapR ? 1 : 0) - (tapL ? 1 : 0);
     }
+    // auto drift: how long a digital steer has been held in one direction
+    const dDir = Math.sign(btnTarget);
+    if (dDir !== 0 && dDir === this.digDir) this.digHeld += dt; else { this.digHeld = 0; this.digDir = dDir; }
     const bRate = btnTarget === 0 || (this.btnSteer !== 0 && Math.sign(btnTarget) !== Math.sign(this.btnSteer)) ? C.buttonSteerReturn : C.buttonSteerRise;
     this.btnSteer += clamp(btnTarget - this.btnSteer, -bRate * dt, bRate * dt);
     if (Math.abs(this.btnSteer) < 1e-3 && btnTarget === 0) this.btnSteer = 0;
 
     // tilt
     if (scheme === 'tilt' && this.tiltRaw !== null && this.tiltCenter !== null) {
-      const target = tiltAxis(this.tiltRaw - this.tiltCenter);
-      this.tiltSteer += (target - this.tiltSteer) * Math.min(1, C.tiltSmooth * dt);
+      const deg = tiltSteerDeg(this.tiltRaw.beta, this.tiltRaw.gamma, this.tiltCenter.beta, this.tiltCenter.gamma, this.tiltAng);
+      this.tiltSteer += (tiltAxis(deg) - this.tiltSteer) * Math.min(1, C.tiltSmooth * dt);
     } else this.tiltSteer = 0;
 
-    let throttle = Math.max(kbThrottle, tThrottle);
+    let throttle = kbThrottle;
     const brake = Math.max(kbBrake, tBrake);
-    if (alwaysGas(scheme, this.autoGas) && (this._touch || scheme === 'finger')) throttle = 1;   // auto gas is a touch-scheme thing: keyboard / mouse play keeps manual gas
-    if (brake > 0) throttle = 0;   // braking always cancels gas
+    if (this._touch) throttle = 1;   // gas is automatic on touch devices: keyboard / mouse play keeps manual gas
+    if (brake > 0) throttle = 0;     // braking always cancels gas
 
-    let steer: number;
-    if (steerSet) steer = tSteer * this.sens;
-    else if (this.btnSteer !== 0) steer = this.btnSteer * this.sens;
-    else if (scheme === 'tilt' && this.kbSteer === 0 && kbTarget === 0) steer = this.tiltSteer * this.sens;
+    const tiltUse = scheme === 'tilt' && this.kbSteer === 0 && kbTarget === 0 && !steerSet && this.btnSteer === 0;
+    let steer: number, rawTouch = 0, digital = false;
+    if (steerSet) { steer = tSteer * this.sens; rawTouch = tSteer; }
+    else if (this.btnSteer !== 0) { steer = this.btnSteer * this.sens; rawTouch = this.btnSteer; digital = true; }
+    else if (tiltUse) { steer = this.tiltSteer * this.sens; rawTouch = this.tiltSteer; }
     else steer = this.kbSteer;
 
-    this.gasEl.classList.toggle('down', tThrottle > 0);
     this.brakeEl.classList.toggle('down', tBrake > 0 && this.brakeEl.offsetParent !== null);
-    this.driftEl.classList.toggle('down', tDrift);
     this.steerLEl.classList.toggle('down', sL);
     this.steerREl.classList.toggle('down', sR);
     this.zoneL.classList.toggle('down', tapL);
     this.zoneR.classList.toggle('down', tapR);
+    this.drawTilt(scheme === 'tilt');
     this.drawStick(stickP, W, H);
-    // touch steering: a hard analog steer asks for an auto drift (the sim decides on speed); the DRIFT button holds one
-    const drift = tDrift ? DRIFT_HOLD : steerSet && autoDriftScheme(scheme) ? DRIFT_AUTO : DRIFT_NONE;
+    // touch steering: a hard steer asks for an auto drift (the sim decides on speed); there is no DRIFT button
+    const drift = this._touch && rawTouch !== 0 && driftRequest(rawTouch, this.digHeld, digital) ? DRIFT_AUTO : DRIFT_NONE;
     return { throttle, brake, steer: clamp(steer, -1, 1), handbrake, drift };
-  }
-
-  setAutoGas(on: boolean): void {
-    this.autoGas = on;
-    this.syncLayer();
   }
 
   get controlScheme(): ControlScheme { return this.scheme; }
@@ -299,7 +280,10 @@ export class InputController {
   setSensitivity(v: number): void { this.sens = clamp(v, C.sensMin, C.sensMax); }
 
   /** Tilt: take the current phone angle as the straight-ahead position. */
-  recenter(): void { this.tiltCenter = this.tiltRaw; this.tiltSteer = 0; }
+  recenter(): void {
+    this.tiltCenter = this.tiltRaw ? { ...this.tiltRaw, ang: this.tiltAng } : null;
+    this.tiltSteer = 0;
+  }
 
   /** Tilt scheme feedback: 'ok' once events arrive, 'denied' / 'unavailable' when the game should fall back to Buttons. */
   onTiltStatus(cb: (s: TiltStatus) => void): void { this.tiltCb = cb; }
@@ -317,13 +301,10 @@ export class InputController {
   /** Called when the active scheme flips between touch and keyboard/mouse (tutorial text, hints). */
   onTouchMode(cb: (touch: boolean) => void): void { this.touchCb = cb; }
 
-  /** Label texts of the on-screen buttons (already translated). */
-  setLabels(gas: string, brake: string, drift?: string): void {
-    const g = this.gasEl.querySelector('[data-gas-label]'), b = this.brakeEl.querySelector('[data-brake-label]');
-    if (g) g.textContent = gas;
+  /** Label text of the BRAKE button (already translated). */
+  setLabels(brake: string): void {
+    const b = this.brakeEl.querySelector('[data-brake-label]');
     if (b) b.textContent = brake;
-    const d = this.driftEl.querySelector('[data-drift-label]');
-    if (d && drift !== undefined) d.textContent = drift;
   }
 
   /** Accessible names of the two steer buttons. */
@@ -361,11 +342,6 @@ export class InputController {
     } catch { return false; }
   }
 
-  /** Steering from a pointer: horizontal offset from its home position (see `steerAxis`). */
-  private steerFor(p: Ptr): number {
-    return steerAxis(p.x, p.homeX, Math.max(1, window.innerWidth), p.kind === 'gas', p.size);
-  }
-
   private setupTilt(): void {
     window.clearTimeout(this.tiltTimer);
     const want = this.scheme === 'tilt';
@@ -373,6 +349,7 @@ export class InputController {
       if (this.tiltOn) window.removeEventListener('deviceorientation', this.onOrient);
       this.tiltOn = false;
       this.tiltRaw = null; this.tiltCenter = null; this.tiltSteer = 0;
+      this.drawTilt(false);
       return;
     }
     this.tiltSeen = false;
@@ -398,8 +375,10 @@ export class InputController {
   private onOrient = (e: DeviceOrientationEvent): void => {
     if (e.beta == null || e.gamma == null) return;
     const ang = typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number' ? screen.orientation.angle : (window.innerWidth > window.innerHeight ? 90 : 0);
-    this.tiltRaw = tiltRoll(e.beta, e.gamma, ang);
-    if (this.tiltCenter === null) this.tiltCenter = this.tiltRaw;
+    this.tiltAng = ang;
+    this.tiltRaw = { beta: e.beta, gamma: e.gamma };
+    // first reading, or the phone was rotated to another screen orientation: calibrate to the current pose
+    if (this.tiltCenter === null || this.tiltCenter.ang !== ang) this.tiltCenter = { ...this.tiltRaw, ang };
     if (!this.tiltSeen) { this.tiltSeen = true; this.tiltCb?.('ok'); }
   };
 
@@ -407,12 +386,11 @@ export class InputController {
     const showLayer = this.enabled && this._touch;
     const s = this.scheme;
     this.layer.hidden = !showLayer;
-    this.root.classList.toggle('sch-new', s !== 'finger');
-    for (const n of ['buttons', 'slide', 'finger', 'joystick', 'tilt', 'tap']) this.root.classList.toggle('sch-' + n, n === s);
-    this.gasEl.hidden = s !== 'finger' || this.autoGas;
+    this.root.classList.add('sch-new');
+    for (const n of ['buttons', 'slide', 'joystick', 'tilt', 'tap']) this.root.classList.toggle('sch-' + n, n === s);
     this.steerLEl.hidden = this.steerREl.hidden = s !== 'buttons';
     this.brakeEl.hidden = s === 'joystick' || s === 'tap';
-    this.driftEl.hidden = false;
+    this.tiltEl.hidden = s !== 'tilt';
     this.stickEl.hidden = s !== 'slide' && s !== 'joystick';
     this.stickEl.classList.toggle('slide', s === 'slide');
     this.zoneL.hidden = this.zoneR.hidden = s !== 'tap';
@@ -434,17 +412,13 @@ export class InputController {
     const W = window.innerWidth, H = window.innerHeight;
     const m = Math.min(W, H);
     const s = this.layer.style;
-    s.setProperty('--gas', Math.round(m * C.gasButtonSize) + 'px');
     s.setProperty('--brake', Math.round(m * C.brakeButtonSize) + 'px');
-    s.setProperty('--drift', Math.round(m * C.driftButtonSize) + 'px');
     s.setProperty('--gap', Math.round(m * C.buttonMargin) + 'px');
-    s.setProperty('--joy', Math.round(joyRadius(W, H) * 2) + 'px');
+    s.setProperty('--joy', Math.round(joyGeom(W, H).r * 2) + 'px');
     const L = touchLayout(W, H, this.scheme);
     this.place(this.steerLEl, L.steerL);
     this.place(this.steerREl, L.steerR);
-    this.place(this.driftEl, L.drift);
     this.place(this.brakeEl, L.brake);
-    if (L.drift) s.setProperty('--drift', Math.round(L.drift.w) + 'px');
     if (L.brake) s.setProperty('--brake', Math.round(L.brake.w) + 'px');
     if (L.steerL) s.setProperty('--steer', Math.round(L.steerL.w) + 'px');
     // the item slot lives in the HUD layer: it follows the scheme through CSS variables on the UI root
@@ -455,8 +429,11 @@ export class InputController {
       r.setProperty('--it-b', L.item.b.toFixed(1) + 'px');
     }
     let btnTop = 0;
-    for (const k of ['steerL', 'steerR', 'drift', 'brake'] as BtnName[]) { const b = L[k]; if (b && b.b < 0.2 * H) btnTop = Math.max(btnTop, b.b + b.h); }
+    for (const k of ['steerL', 'steerR', 'brake'] as BtnName[]) { const b = L[k]; if (b && b.b < 0.2 * H) btnTop = Math.max(btnTop, b.b + b.h); }
     r.setProperty('--btn-top', btnTop.toFixed(0) + 'px');
+    // joystick: the speed readout / drift meter sit above the stick (px from the bottom edge)
+    const jg = joyGeom(W, H);
+    r.setProperty('--joy-top', (H - jg.cy + jg.r).toFixed(0) + 'px');
     r.setProperty('--tut-pad', this.tutorialClearance(L, W, H).toFixed(0) + 'px');
     if (L.steerL && L.steerR) this.boundary = boxRect(L.steerL, W, H).x + L.steerL.w + (L.steerR.off - L.steerL.off - L.steerL.w) / 2;
   };
@@ -465,25 +442,45 @@ export class InputController {
   private tutorialClearance(L: ReturnType<typeof touchLayout>, W: number, H: number): number {
     let top = 0;
     for (const b of Object.values(L)) if (b) top = Math.max(top, b.b + b.h);
-    return L && this.scheme === 'finger' ? 0 : top + Math.max(8, 0.03 * Math.min(W, H));
+    if (this.scheme === 'joystick') { const jg = joyGeom(W, H); top = Math.max(top, H - jg.cy + jg.r); }
+    return top + Math.max(8, 0.03 * Math.min(W, H));
   }
 
-  /** Joystick / slide ring: floats under the thumb while touched, rests (dim) at the bottom left otherwise. */
+  /** Joystick: fixed ring, always visible, the knob follows the thumb. Slide: floats under the thumb, rests (dim) at the bottom left. */
   private drawStick(p: Ptr | null, W: number, H: number): void {
     if (this.scheme !== 'slide' && this.scheme !== 'joystick') return;
-    const R = this.scheme === 'joystick' ? joyRadius(W, H) : C.slideFull * W;
     const el = this.stickEl;
-    let cx: number, cy: number, kx = 0, ky = 0;
-    if (p) {
-      cx = p.homeX; cy = p.startY ?? p.homeY;
-      kx = clamp(p.x - p.homeX, -R, R);
-      ky = this.scheme === 'joystick' ? clamp(p.y - (p.startY ?? p.homeY), -R * 0.6, R) : 0;
-    } else { cx = W * 0.27; cy = H - Math.min(W, H) * 0.3; }
-    el.classList.toggle('idle', !p);
-    const sz = this.scheme === 'joystick' ? R * 2 : R * 2 + 28;
-    el.style.width = sz + 'px'; el.style.height = this.scheme === 'joystick' ? sz + 'px' : '';
-    el.style.transform = `translate(${(cx - sz / 2).toFixed(1)}px, ${(cy - (this.scheme === 'joystick' ? sz / 2 : 26)).toFixed(1)}px)`;
-    this.knobEl.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
+    if (this.scheme === 'joystick') {
+      const g = joyGeom(W, H);
+      let kx = 0, ky = 0;
+      if (p) {
+        kx = p.x - g.cx; ky = clamp(p.y - g.cy, -g.r * 0.6, g.r);
+        const m = Math.hypot(kx, ky);
+        if (m > g.r) { kx *= g.r / m; ky *= g.r / m; }
+      }
+      el.classList.remove('idle'); el.classList.toggle('held', !!p);
+      el.style.width = el.style.height = g.r * 2 + 'px';
+      el.style.transform = `translate(${(g.cx - g.r).toFixed(1)}px, ${(g.cy - g.r).toFixed(1)}px)`;
+      this.knobEl.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
+      return;
+    }
+    const R = C.slideFull * W;
+    let cx: number, cy: number, kx = 0;
+    if (p) { cx = p.homeX; cy = p.startY ?? p.homeY; kx = clamp(p.x - p.homeX, -R, R); }
+    else { cx = W * 0.27; cy = H - Math.min(W, H) * 0.3; }
+    el.classList.toggle('idle', !p); el.classList.remove('held');
+    const sz = R * 2 + 28;
+    el.style.width = sz + 'px'; el.style.height = '';
+    el.style.transform = `translate(${(cx - sz / 2).toFixed(1)}px, ${(cy - 26).toFixed(1)}px)`;
+    this.knobEl.style.transform = `translate(${kx.toFixed(1)}px, 0px)`;
+  }
+
+  /** Tilt indicator: a bar with a dot at the steering the phone is sending. */
+  private drawTilt(on: boolean): void {
+    if (!on) return;
+    this.tiltDot.style.left = (50 + clamp(this.tiltSteer, -1, 1) * 50).toFixed(1) + '%';
+    this.tiltEl.classList.toggle('wait', this.tiltRaw === null);
+    this.tiltEl.dataset.steer = this.tiltSteer.toFixed(2);
   }
 
   private reset = (): void => {
@@ -491,7 +488,7 @@ export class InputController {
     this.pointers.clear();
     this.kbSteer = 0;
     this.btnSteer = 0;
-    for (const e of [this.gasEl, this.brakeEl, this.driftEl, this.steerLEl, this.steerREl, this.zoneL, this.zoneR]) e.classList.remove('down');
+    for (const e of [this.brakeEl, this.steerLEl, this.steerREl, this.zoneL, this.zoneR]) e.classList.remove('down');
   };
 
   private setTouch(on: boolean): void {
@@ -524,39 +521,30 @@ export class InputController {
     const target = e.target instanceof Element ? e.target : null;
     const scheme = this.scheme;
     const W = window.innerWidth;
-    let kind: PointerKind = 'steer';
+    let kind: PointerKind;
     let homeX = W / 2, homeY = e.clientY;
-    let size = Math.min(W, window.innerHeight) * C.gasButtonSize;
+    const H = window.innerHeight;
     if (target?.closest('.brake-btn')) {
       kind = 'brake';
-    } else if (target?.closest('.drift-btn')) {
-      kind = 'drift';
     } else if (target?.closest('.steer-btn')) {
       kind = 'sbtn';
     } else if (target?.closest('button, a, input, select, [data-ui]')) {
       return; // HUD / menu controls keep their own behaviour
-    } else if (scheme === 'finger') {
-      if (target?.closest('.gas-btn')) {
-        kind = 'gas';
-        const r = this.gasEl.getBoundingClientRect();
-        // steering home = where the thumb landed (no jump on touch-down), kept far enough from the right edge to steer
-        size = r.width; homeY = r.top + r.height / 2;
-        const dead = C.gasDeadBand * size;
-        homeX = Math.min(e.clientX, W - dead - 0.2 * size);
-      } else if (this.autoGas === false && this.hasGasPointer()) {
-        return; // manual gas: only the GAS finger steers while it is down
-      }
-    } else if (scheme === 'slide' || scheme === 'joystick') {
+    } else if (scheme === 'joystick') {
+      // fixed stick: a touch within grab radius of its centre takes it (one finger)
+      const g = joyGeom(W, H);
+      if (this.hasKind('slide') || Math.hypot(e.clientX - g.cx, e.clientY - g.cy) > g.grab) return;
+      kind = 'slide'; homeX = g.cx; homeY = g.cy;
+    } else if (scheme === 'slide') {
       if (e.clientX >= W / 2 || this.hasKind('slide')) return;   // the left half steers, one finger at a time
       kind = 'slide'; homeX = e.clientX;
     } else if (scheme === 'tap') {
       kind = 'tap';
     } else return;   // buttons / tilt: touches outside the buttons do nothing
-    if (kind !== 'brake' && kind !== 'drift' && kind !== 'sbtn' && e.cancelable) e.preventDefault();
-    this.pointers.set(e.pointerId, { kind, x: e.clientX, y: e.clientY, homeX, homeY, size, startY: e.clientY });
+    if (kind !== 'brake' && kind !== 'sbtn' && e.cancelable) e.preventDefault();
+    this.pointers.set(e.pointerId, { kind, x: e.clientX, y: e.clientY, homeX, homeY, size: 0, startY: homeY });
   };
 
-  private hasGasPointer(): boolean { return this.hasKind('gas'); }
   private hasKind(k: PointerKind): boolean {
     for (const p of this.pointers.values()) if (p.kind === k) return true;
     return false;
@@ -566,12 +554,6 @@ export class InputController {
     const p = this.pointers.get(e.pointerId);
     if (p) {
       p.x = e.clientX; p.y = e.clientY;
-      // flick the GAS thumb up = use the held item (one-handed play); re-arms when the thumb is back near home
-      if (p.kind === 'gas') {
-        const up = (p.homeY - p.y) / p.size;
-        if (!p.flicked && up > C.itemFlickUp) { p.flicked = true; this.keyCb?.('item'); }
-        else if (p.flicked && up < C.itemFlickUp * 0.5) p.flicked = false;
-      }
     }
   };
 

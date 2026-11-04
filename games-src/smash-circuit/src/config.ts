@@ -476,7 +476,8 @@ export const CONFIG = {
     touchSteerCurve: 0.6,      // touch steer = offset^this (offset 0..1 between dead zone and full lock): more authority at small finger offsets
                                // (one-finger play: 10% of the full-lock distance already gives 25% steer, half the distance 66%)
     itemFlickUp: 0.55,         // GAS thumb moved up by this many button sizes = use item (re-arms at half)
-    driftButtonSize: 0.17,     // fraction of min(screen w,h): DRIFT button left of GAS (second finger; holds a drift like Space)
+    driftSteer: 0.8,           // touch: |steer| from which the input layer asks for the auto drift (no DRIFT button)
+    driftHoldS: 0.25,          // touch: a digital steer (button / tap zone) must be held this long to ask for it
     // ---- audit #4 / #15 ----
     gasDeadBand: 0.25,         // GAS finger: dead band around its landing x, in button sizes (no steering jump on touch-down)
     gasDeadBandMin: 0.1,       // ... but never smaller than this (landing near the right screen edge has little room)
@@ -489,11 +490,12 @@ export const CONFIG = {
     slideCurve: 0.8,           // Slide / Joystick response exponent
     joyRadius: 0.16,           // Joystick ring radius, fraction of min(screen w,h)
     joyDead: 0.1,              // Joystick dead band, fraction of the radius
-    joyBrakePull: 1.6,         // Joystick: pulling down this far (0.4 x radius x this) brakes
-    tiltFullDeg: 20,           // Tilt: wheel angle for full lock
-    tiltDeadDeg: 2,            // Tilt: dead band
+    joyGrab: 1.5,              // Joystick: a touch within this x radius of its centre grabs it
+    joyBrakePull: 0.55,        // Joystick: pulling down this far (x radius, from its centre) brakes / reverses
+    tiltFullDeg: 25,           // Tilt: tilt angle for full lock
+    tiltDeadDeg: 3,            // Tilt: dead band
     tiltCurve: 0.9,
-    tiltSmooth: 22,            // 1/s smoothing of the tilt steering
+    tiltSmooth: 14,            // 1/s smoothing of the tilt steering
     tiltCheckMs: 1500,         // no orientation event within this long after choosing Tilt = unavailable
     sensMin: 0.5, sensMax: 1.5,   // steering sensitivity slider
     homeYDrift: 0.35,          // button sizes per second the steering finger's home Y follows a slow downward creep
@@ -588,7 +590,7 @@ export const CONFIG = {
   drift: {
     minSpeed: 11,             // m/s (~40 km/h): a held drift (Space / DRIFT button) starts above this
     autoSpeed: 16.7,          // m/s (~60 km/h): a hard touch steer starts a drift above this
-    autoSteer: 0.95,          // |steer| that counts as a hard touch steer (finger at ~92% of the full-lock distance, after controls.touchSteerCurve)
+    autoSteer: 0.8,           // |steer| that counts as a hard touch steer (80% of full lock)
     brakeTapSpeed: 15,        // m/s: brake + hard steer at speed starts a drift (player, keyboard)
     brakeTapSteer: 0.6,
     brakeTapMax: 0.3,         // s: only a short brake TAP starts a drift (on release); ordinary braking into a corner never does

@@ -542,7 +542,7 @@ describe('i18n and config', () => {
       expect(EN['item.' + it], it).toBeTruthy();
       expect(RU['item.' + it], it).toBeTruthy();
     }
-    for (const k of ['hud.itemTap', 'hud.itemHintKey', 'hud.itemHintTap']) { expect(EN[k]).toBeTruthy(); expect(RU[k]).toBeTruthy(); }
+    for (const k of ['hud.itemTap', 'hud.itemHintKey']) { expect(EN[k]).toBeTruthy(); expect(RU[k]).toBeTruthy(); }
   });
   it('item roll weights cover every item for every position', () => {
     for (const row of I.weights) expect(row.w.length).toBe(ITEMS.length);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CONTROL_SCHEMES, controlsOr, sensOr, touchLayout, boxRect, slideAxis, followHome, stickAxis, tiltRoll, tiltAxis, autoDriftScheme, alwaysGas,
+  CONTROL_SCHEMES, controlsOr, sensOr, touchLayout, boxRect, slideAxis, followHome, stickAxis, tiltSteerDeg, tiltAxis, autoDriftScheme, driftRequest, joyGeom,
   type ControlScheme, type Rect,
 } from '../src/input/schemes';
 import { sanitizeSave } from '../src/meta/save';
@@ -31,16 +31,17 @@ describe('control scheme layouts', () => {
       expect(b.x + b.w).toBeLessThan(W * 0.55);   // both under the left thumb
       expect(a.y).toBeGreaterThan(H * 0.7);          // bottom thumb zone
       // right thumb cluster does not collide with the steer pair
-      const d = boxRect(L.drift!, W, H), br = boxRect(L.brake!, W, H);
+      const br = boxRect(L.brake!, W, H);
       expect(br.x).toBeGreaterThan(b.x + b.w);
-      expect(d.x + d.w).toBeLessThanOrEqual(W);
+      expect(br.x + br.w).toBeLessThanOrEqual(W);
     });
   }
   it('schemes expose the expected buttons', () => {
-    expect(Object.keys(touchLayout(390, 844, 'buttons')).sort()).toEqual(['brake', 'drift', 'item', 'steerL', 'steerR']);
-    expect(Object.keys(touchLayout(390, 844, 'joystick')).sort()).toEqual(['drift', 'item']);
-    expect(Object.keys(touchLayout(390, 844, 'tilt')).sort()).toEqual(['brake', 'drift', 'item']);
-    expect(Object.keys(touchLayout(390, 844, 'tap')).sort()).toEqual(['drift', 'item']);
+    expect(Object.keys(touchLayout(390, 844, 'buttons')).sort()).toEqual(['brake', 'item', 'steerL', 'steerR']);
+    expect(Object.keys(touchLayout(390, 844, 'joystick')).sort()).toEqual(['item']);
+    expect(Object.keys(touchLayout(390, 844, 'tilt')).sort()).toEqual(['brake', 'item']);
+    expect(Object.keys(touchLayout(390, 844, 'tap')).sort()).toEqual(['item']);
+    for (const sc of CONTROL_SCHEMES) expect(Object.keys(touchLayout(390, 844, sc))).not.toContain('drift');   // drift is automatic
   });
 });
 
@@ -57,8 +58,18 @@ describe('scheme settings', () => {
     expect(k.settings.controls).toBe('tilt'); expect(k.settings.steerSens).toBe(1.3); expect(k.settings.controlsPicked).toBe(true);
   });
   it('gas / drift rules', () => {
-    expect(alwaysGas('buttons', false)).toBe(true); expect(alwaysGas('finger', false)).toBe(false); expect(alwaysGas('finger', true)).toBe(true);
-    expect(autoDriftScheme('buttons')).toBe(false); expect(autoDriftScheme('slide')).toBe(true);
+    for (const sc of CONTROL_SCHEMES) expect(autoDriftScheme(sc)).toBe(true);
+  });
+  it('the removed One finger scheme migrates to Buttons', () => {
+    expect(CONTROL_SCHEMES as readonly string[]).not.toContain('finger');
+    expect(controlsOr('finger')).toBe('buttons');
+    expect(sanitizeSave({ version: 2, settings: { controls: 'finger', controlsPicked: true } }, {}).settings.controls).toBe('buttons');
+  });
+  it('auto drift request: analog steers ask at once, digital ones after the hold time', () => {
+    expect(driftRequest(0.85, 0, false)).toBe(true); expect(driftRequest(-0.85, 0, false)).toBe(true);
+    expect(driftRequest(0.7, 5, false)).toBe(false);
+    expect(driftRequest(1, 0.1, true)).toBe(false); expect(driftRequest(1, 0.3, true)).toBe(true);
+    expect(driftRequest(0, 5, true)).toBe(false);
   });
 });
 
@@ -78,18 +89,44 @@ describe('slide / stick maths', () => {
   });
 });
 
+describe('fixed joystick', () => {
+  for (const [W, H] of [[390, 844], [360, 640], [844, 390], [667, 375]] as [number, number][]) {
+    it(`${W}x${H}: centred horizontally, on screen, clear of the right-hand buttons`, () => {
+      const g = joyGeom(W, H);
+      expect(g.cx).toBe(W / 2);
+      expect(g.cy - g.r).toBeGreaterThan(H * 0.45);                 // lower part
+      expect(g.cy + g.r).toBeLessThanOrEqual(H); expect(g.r).toBeGreaterThanOrEqual(50);
+      expect(g.grab).toBeCloseTo(g.r * 1.5, 6);
+      const ring: Rect = { x: g.cx - g.grab, y: g.cy - g.grab, w: g.grab * 2, h: g.grab * 2 };
+      for (const b of Object.values(touchLayout(W, H, 'joystick'))) expect(hit(ring, boxRect(b!, W, H))).toBe(false);
+    });
+  }
+});
+
 describe('tilt', () => {
-  const deg = (r: number): number => r * 180 / Math.PI;
-  it('level phone = 0, wheel turned right = positive in portrait and in both landscapes', () => {
-    expect(tiltRoll(60, 0, 0)).toBeCloseTo(0, 6);
-    // gamma > 0 = right edge down = turned to the right
-    expect(deg(tiltRoll(45, 30, 0))).toBeGreaterThan(10); expect(deg(tiltRoll(45, -30, 0))).toBeLessThan(-10);
-    expect(tiltRoll(45, 30, 0)).toBeCloseTo(-tiltRoll(45, -30, 0), 6);
+  it('portrait steers from gamma, relative to the calibrated centre (phone held flat-ish)', () => {
+    expect(tiltSteerDeg(30, 15, 30, 0, 0)).toBe(15);
+    expect(tiltSteerDeg(30, -15, 30, 0, 0)).toBe(-15);
+    expect(tiltSteerDeg(55, 10, 30, 10, 0)).toBe(0);               // pitching the phone does not steer
+    expect(tiltAxis(tiltSteerDeg(30, 15, 30, 0, 0))).toBeGreaterThan(0.4);
+    expect(tiltAxis(tiltSteerDeg(30, -15, 30, 0, 0))).toBeLessThan(-0.4);
+    expect(tiltSteerDeg(30, 15, 30, 0, 180)).toBe(-15);
   });
-  it('axis: dead band, full lock, symmetric', () => {
-    expect(tiltAxis(0.01)).toBe(0);
-    expect(tiltAxis(30 * Math.PI / 180)).toBe(1); expect(tiltAxis(-30 * Math.PI / 180)).toBe(-1);
-    expect(tiltAxis(0.2)).toBeCloseTo(-tiltAxis(-0.2), 6);
+  it('landscape steers from beta, sign by the screen angle', () => {
+    expect(tiltSteerDeg(45, 5, 30, 5, 90)).toBe(15); expect(tiltSteerDeg(15, 5, 30, 5, 90)).toBe(-15);
+    expect(tiltSteerDeg(45, 5, 30, 5, 270)).toBe(-15); expect(tiltSteerDeg(15, 5, 30, 5, 270)).toBe(15);
+    expect(tiltSteerDeg(30, 40, 30, -40, 90)).toBe(0);              // gamma is ignored in landscape
+  });
+  it('wrap-around near +-90 (gamma) and +-180 (beta) does not jump', () => {
+    expect(tiltSteerDeg(0, -89, 0, 89, 0)).toBe(2);
+    expect(tiltSteerDeg(0, 89, 0, -89, 0)).toBe(-2);
+    expect(tiltSteerDeg(-179, 0, 179, 0, 90)).toBe(2);
+  });
+  it('axis: ~3 deg dead band, full lock at 25 deg, symmetric', () => {
+    expect(tiltAxis(2.9)).toBe(0); expect(tiltAxis(-2.9)).toBe(0);
+    expect(tiltAxis(3.5)).toBeGreaterThan(0);
+    expect(tiltAxis(25)).toBe(1); expect(tiltAxis(-40)).toBe(-1);
+    expect(tiltAxis(12)).toBeCloseTo(-tiltAxis(-12), 6);
   });
 });
 export type { ControlScheme };
