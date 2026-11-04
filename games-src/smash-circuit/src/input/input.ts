@@ -256,7 +256,7 @@ export class InputController {
 
     let throttle = Math.max(kbThrottle, tThrottle);
     const brake = Math.max(kbBrake, tBrake);
-    if (alwaysGas(scheme, this.autoGas)) throttle = 1;
+    if (alwaysGas(scheme, this.autoGas) && (this._touch || scheme === 'finger')) throttle = 1;   // auto gas is a touch-scheme thing: keyboard / mouse play keeps manual gas
     if (brake > 0) throttle = 0;   // braking always cancels gas
 
     let steer: number;
@@ -387,8 +387,9 @@ export class InputController {
     const DOE = (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<string> } }).DeviceOrientationEvent;
     if (DOE && typeof DOE.requestPermission === 'function') {
       try {
-        DOE.requestPermission().then((r) => { if (r === 'granted') attach(); else this.tiltCb?.('denied'); }, () => this.tiltCb?.('denied'));
-      } catch { this.tiltCb?.('denied'); }
+        // an explicit 'denied' falls back at once; a rejected call (no user gesture / not iOS) just waits for events like any browser
+        DOE.requestPermission().then((r) => { if (r === 'granted') attach(); else this.tiltCb?.('denied'); }, () => attach());
+      } catch { attach(); }
     } else if (typeof window.DeviceOrientationEvent === 'undefined') {
       if (this._touch) this.tiltCb?.('unavailable');
     } else attach();
@@ -453,6 +454,9 @@ export class InputController {
       r.setProperty('--it-off', L.item.off.toFixed(1) + 'px');
       r.setProperty('--it-b', L.item.b.toFixed(1) + 'px');
     }
+    let btnTop = 0;
+    for (const k of ['steerL', 'steerR', 'drift', 'brake'] as BtnName[]) { const b = L[k]; if (b && b.b < 0.2 * H) btnTop = Math.max(btnTop, b.b + b.h); }
+    r.setProperty('--btn-top', btnTop.toFixed(0) + 'px');
     r.setProperty('--tut-pad', this.tutorialClearance(L, W, H).toFixed(0) + 'px');
     if (L.steerL && L.steerR) this.boundary = boxRect(L.steerL, W, H).x + L.steerL.w + (L.steerR.off - L.steerL.off - L.steerL.w) / 2;
   };

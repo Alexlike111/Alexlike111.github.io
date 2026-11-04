@@ -39,6 +39,9 @@ declare global {
       resume(): void;
       repair(): void;
       menu(): void;
+      /** e2e: change settings like the settings screen does / the input controller (tilt recenter) */
+      setSettings(s: SaveData['settings']): void;
+      readonly input: InputController;
       /** pure car model for e2e/feel.mjs (debug builds only) */
       readonly model: typeof carModel & { DriftTracker: typeof DriftTracker };
     };
@@ -682,6 +685,8 @@ export class Game {
       get sim() { return g.sim; },
       get save() { return g.save; },
       get ui() { return g.ui; },
+      get input() { return g.input; },
+      setSettings: (s) => { g.setSettings(s); g.ui.setSettings(g.save.settings); },
       get timeScale() { return g.timeScale; },
       startRace: (id) => g.startRace(id),
       setTimeScale: (n) => { g.timeScale = Math.max(0.05, Math.min(CONFIG.game.maxTimeScale, n)); },

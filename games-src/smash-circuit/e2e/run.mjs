@@ -112,8 +112,13 @@ async function runProfile(prof) {
   await page.click('[data-act=play]');
   await sleep(700);
   await shot('tracks');
-  // start t1
+  // start t1 (touch: the one-time controls picker comes first; the legacy One finger scheme drives this profile)
+  if (prof.touch) await page.evaluate(() => { const g = window.__game; g.setSettings({ ...g.save.settings, controls: 'finger', controlsPicked: false }); });
   await page.click('[data-act=track][data-id=t1]');
+  if (prof.touch) {
+    R.checks.controlsPicker = !!(await page.waitForSelector('.ctlpick', { timeout: 5000 }).catch(() => null));
+    if (R.checks.controlsPicker) { await shot('picker'); await page.click('[data-act=ctlPickSkip]'); }
+  }
   R.checks.raceStarted = await waitState('racing', 20000);
   await sleep(600);
   await shot('race-start');
@@ -396,6 +401,13 @@ async function auditLayout() {
     // first-run tutorial
     await page.evaluate(() => { window.__game.save.settings.tutorialDone = false; });
     await page.click('[data-act=track][data-id=t1]'); await sleep(900);
+    if (touch) {
+      await look('picker');
+      const pk = await page.evaluate(() => { const p = document.querySelector('.ctlpick'); if (!p) return null; const r = p.getBoundingClientRect(); return { b: r.bottom, t: r.top, h: innerHeight, sh: p.scrollHeight, ch: p.clientHeight }; });
+      if (!pk) problems.push(`${key} picker: first-run controls picker not shown`);
+      else if (pk.t < -1 || pk.b > pk.h + 1) problems.push(`${key} picker: card is clipped (${Math.round(pk.t)}..${Math.round(pk.b)} of ${pk.h})`);
+      await page.click('[data-act=ctlPickSkip]'); await sleep(900);
+    }
     await look('tutorial');
     const tut = await page.evaluate(() => {
       const t = document.querySelector('.tutorial'); const cd = document.querySelector('.countdown');
@@ -403,6 +415,19 @@ async function auditLayout() {
       return { h: r.height, vh: innerHeight, countdownOverlap: !!cd && !cd.hidden && (() => { const c = cd.getBoundingClientRect(); return c.width > 0 && !(c.right < r.left || c.left > r.right || c.bottom < r.top || c.top > r.bottom); })(), okBtn: !!t.querySelector('[data-act=tutorialOk]') && t.querySelector('[data-act=tutorialOk]').getBoundingClientRect().bottom <= r.bottom + 1 };
     });
     if (touch && Math.min(w, h) < 520 && tut.h > tut.vh * 0.3 + 1) problems.push(`${key} tutorial: ${Math.round(tut.h)}px is more than 30% of ${tut.vh}px`);
+    if (touch) {
+      const ov = await page.evaluate(() => {
+        const t = document.querySelector('.tutorial'); if (!t) return [];
+        const r = t.getBoundingClientRect(); const out = [];
+        for (const e of document.querySelectorAll('#ui .touch-layer > div, #ui .hud-item')) {
+          if (e.hidden || e.classList.contains('stick') || e.classList.contains('tap-zone')) continue;
+          const b = e.getBoundingClientRect(); if (!b.width || getComputedStyle(e).display === 'none') continue;
+          if (!(b.right <= r.left || b.left >= r.right || b.bottom <= r.top || b.top >= r.bottom)) out.push(e.className.toString().slice(0, 24));
+        }
+        return out;
+      });
+      for (const c of ov) problems.push(`${key} tutorial: the hint sheet overlaps the ${c} button`);
+    }
     if (tut.countdownOverlap) problems.push(`${key} tutorial: the hint sheet overlaps the countdown`);
     if (!tut.okBtn) problems.push(`${key} tutorial: "Got it" button is clipped`);
     await page.click('[data-act=tutorialOk]'); await sleep(2200);

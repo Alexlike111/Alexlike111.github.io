@@ -491,6 +491,8 @@
   bottom: calc(var(--it-b, 120px) + env(safe-area-inset-bottom, 0px));
 }
 .ui-root.is-touch.sch-new .hud-item .item-slot { opacity: 0.9; }
+/* portrait: the speed readout and drift meter sit above the button row instead of behind it */
+@media (orientation: portrait) { .ui-root.is-touch.sch-new .hud-bc { bottom: calc(var(--btn-top, 0px) + env(safe-area-inset-bottom, 0px) + 0.5em); } }
 
 /* ---- controls picker (settings, pause, first-run) ---- */
 .ui-root .s-ctl { flex-direction: column; align-items: stretch; }

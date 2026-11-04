@@ -33,7 +33,7 @@ async function openRace(ctxOpts, label) {
   const ver = await page.$eval('#ver', (e) => e.textContent).catch(() => '');
   check(`[${label}] build label shows v${version}`, ver.includes(`v${version}`), ver);
   await page.screenshot({ path: path.join(OUT, `${label}-menu.png`) });
-  await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.startRace('t1'); });
+  await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.save.settings.controlsPicked = true; window.__game.startRace('t1'); });
   await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 });
   return { ctx, page, errors };
 }
@@ -210,47 +210,219 @@ try {
     await ctx.close();
   }
 
-  // ---------------- phone / one finger ----------------
+  // ---------------- phone: every control scheme ----------------
+  // Multi-touch through CDP: every call sends the full list of fingers that are down.
+  const touchKit = async (ctx, page) => {
+    const cdp = await ctx.newCDPSession(page);
+    const pts = new Map();
+    const send = (type) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: [...pts].map(([id, p]) => ({ x: p.x, y: p.y, id })) });
+    return {
+      async down(id, x, y) { pts.set(id, { x, y }); await send('touchStart'); },
+      async downBoth(a, b) { pts.set(a[0], { x: a[1], y: a[2] }); pts.set(b[0], { x: b[1], y: b[2] }); await send('touchStart'); },
+      async move(id, x, y) { pts.set(id, { x, y }); await send('touchMove'); },
+      async up(id) { pts.delete(id); await send('touchEnd'); },
+      async upAll() { if (!pts.size) return; pts.clear(); await send('touchEnd'); },
+    };
+  };
+  const center = (page, sel) => page.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; }).catch(() => null);
+  const setControls = (page, controls, extra = {}) => page.evaluate(([c, x]) => { const g = window.__game; g.setSettings({ ...g.save.settings, controls: c, controlsPicked: true, ...x }); }, [controls, extra]);
+  // measure the heading change over 0.3 s of game time from a clean straight at 15 m/s
+  const turnOf = async (page, act) => {
+    await onStraight(page, 15); await waitSim(page, 0.2);
+    const a0 = await angle(page);
+    await act();
+    await waitSim(page, 0.3);
+    return unwrap((await angle(page)) - a0);
+  };
+  const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 };
+  const speedOf = (page) => page.evaluate(() => window.__game.sim.cars[0].speed);
+  const brakeOf = (page) => page.evaluate(() => window.__game.sim.cars[0].brake);
+
+  // ---- Buttons (the default) in portrait, with the layout rules
   {
-    const { ctx, page, errors } = await openRace({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, 'phone');
-    const box = await page.$eval('.gas-btn', (e) => { const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }).catch(() => null);
-    if (!box) check('[phone] GAS button visible', false);
+    const { ctx, page, errors } = await openRace(PHONE, 'phone');
+    const def = await page.evaluate(() => window.__game.save.settings.controls);
+    check('[phone] default control scheme is Buttons', def === 'buttons', def);
+    const T = await touchKit(ctx, page);
+    await waitSim(page, 1.2);
+    const sp = await speedOf(page);
+    check('[phone] auto gas drives forward without touching anything', sp > 5, `speed=${sp.toFixed(1)} m/s`);
+    const L = await center(page, '.steer-btn.left'), R = await center(page, '.steer-btn.right');
+    const BR = await center(page, '.brake-btn'), DR = await center(page, '.drift-btn');
+    if (!L || !R || !BR || !DR) check('[phone] steer / BRAKE / DRIFT buttons visible', false);
     else {
-      const cdp = await ctx.newCDPSession(page);
-      const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
-      await touch('touchStart', box.x, box.y); await waitSim(page, 1.2);
-      const sp = await page.evaluate(() => window.__game.sim.cars[0].speed);
-      check('[phone] holding GAS drives forward', sp > 5, `speed=${sp.toFixed(1)} m/s`);
-      // one finger: slide the GAS finger to the left of the button centre -> steer left
-      await onStraight(page, 15); await waitSim(page, 0.2);
+      check('[phone] steer buttons are >= 22% of the screen width, side by side bottom-left', L.w / 390 >= 0.22 && R.w / 390 >= 0.22 && R.x > L.x && R.x < 390 * 0.5 && L.y > 844 * 0.8, `w=${L.w.toFixed(0)}/${R.w.toFixed(0)} at (${L.x.toFixed(0)},${L.y.toFixed(0)})`);
+      check('[phone] BRAKE and DRIFT are under the right thumb', BR.x > 390 * 0.45 && DR.x > 390 * 0.6 && BR.y > 844 * 0.8 && DR.y > 844 * 0.8, `brake ${BR.x.toFixed(0)},${BR.y.toFixed(0)} drift ${DR.x.toFixed(0)},${DR.y.toFixed(0)}`);
+      const dl = await turnOf(page, () => T.down(1, L.x, L.y));
+      check('[phone] holding the left arrow turns left', dl > 0.15, `dAngle=${dl.toFixed(2)}`);
+      await page.screenshot({ path: path.join(OUT, 'phone-buttons-left.png') });
+      await T.upAll();
+      const dr = await turnOf(page, () => T.down(1, R.x, R.y));
+      check('[phone] holding the right arrow turns right', dr < -0.15, `dAngle=${dr.toFixed(2)}`);
+      await T.upAll();
+      const db = await turnOf(page, () => T.downBoth([1, L.x, L.y], [2, R.x, R.y]));
+      check('[phone] pressing both arrows = no steering', Math.abs(db) < 0.3, `dAngle=${db.toFixed(2)}`);
+      await T.upAll();
+      // multi-touch: left thumb steers while the right thumb brakes
+      await onStraight(page, 18); await waitSim(page, 0.2);
       const a0 = await angle(page);
-      // measured early (0.3 s): a full-lock touch steer drifts the car round past 180 degrees within ~0.6 s, which wraps the sign
-      for (let i = 1; i <= 6; i++) { await touch('touchMove', box.x - i * 15, box.y); await sleep(30); }
+      await T.down(1, L.x, L.y); await T.down(2, BR.x, BR.y);
       await waitSim(page, 0.3);
-      const a1 = await angle(page);
-      check('[phone] sliding the GAS finger left turns left', unwrap(a1 - a0) > 0.15, `dAngle=${unwrap(a1 - a0).toFixed(2)}`);
-      await touch('touchMove', box.x, box.y);
-      await onStraight(page, 15); await waitSim(page, 0.2);
-      const a1b = await angle(page);
-      for (let i = 1; i <= 6; i++) { await touch('touchMove', box.x + i * 15, box.y); await sleep(30); }
-      await waitSim(page, 0.3);
-      const a2 = await angle(page);
-      check('[phone] sliding the GAS finger right turns right', unwrap(a2 - a1b) < -0.15, `dAngle=${unwrap(a2 - a1b).toFixed(2)}`);
-      await page.screenshot({ path: path.join(OUT, 'phone-steer.png') });
-      await touch('touchEnd', 0, 0);
-      // ---- heading-up camera on a straight: the car points up the screen within 20 degrees
-      await onStraight(page, 20);
-      await touch('touchStart', box.x, box.y);
-      await waitSim(page, 2.5);
-      await touch('touchEnd', 0, 0);
-      const head = await page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); const W = innerWidth, H = innerHeight; return { az: r.azimuth, ang: Math.atan2((b.x - a.x) * W, (b.y - a.y) * H) }; });
-      check('[phone] on a straight the car points up the screen (within 20 deg)', Math.abs(head.ang) * 180 / Math.PI < 20, `${(head.ang * 180 / Math.PI).toFixed(1)} deg`);
-      // ---- camera framing on a real lap
-      await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });
-      const lapP = await cameraLap(page, 'phone', 32);
-      check('[phone] camera rotates with the track (portrait, touch default)', lapP.azMax - lapP.azMin > 1, `azimuth ${lapP.azMin.toFixed(2)}..${lapP.azMax.toFixed(2)}`);
+      const br = await brakeOf(page), da = unwrap((await angle(page)) - a0);
+      check('[phone] multi-touch: steer with the left thumb while holding BRAKE with the right', br > 0.5 && da > 0.1, `brake=${br} dAngle=${da.toFixed(2)}`);
+      await T.move(2, DR.x, DR.y).catch(() => {});
+      await T.upAll();
+      // steering ramps up fast (full lock in ~0.1 s): the car's steer value after 0.15 s
+      await onStraight(page, 15); await waitSim(page, 0.1);
+      await T.down(1, R.x, R.y);
+      await waitSim(page, 0.15);
+      const st = await page.evaluate(() => window.__game.sim.cars[0].steer);
+      check('[phone] steer buttons ramp quickly (|steer| > 0.5 after 0.15 s)', Math.abs(st) > 0.5, `steer=${st.toFixed(2)}`);
+      await T.upAll();
+      // item button geometry: above DRIFT, not overlapping any other button
+      await page.evaluate(() => { const g = window.__game; const c = g.sim.cars[0]; c.item = 'nitro'; });
+      await sleep(400);
+      const geo = await page.evaluate(() => {
+        const q = (s) => { const e = document.querySelector(s); if (!e || e.hidden) return null; const r = e.getBoundingClientRect(); return r.width ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null; };
+        return { item: q('.item-slot'), drift: q('.drift-btn'), brake: q('.brake-btn'), l: q('.steer-btn.left'), r: q('.steer-btn.right'), W: innerWidth, H: innerHeight };
+      });
+      const hit = (a, b) => a && b && !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
+      if (geo.item) check('[phone] item button sits near the right thumb, clear of the other buttons', geo.item.l > geo.W * 0.55 && !hit(geo.item, geo.drift) && !hit(geo.item, geo.brake) && !hit(geo.item, geo.r), JSON.stringify(geo.item));
+      else check('[phone] item button shown while holding an item', false);
     }
+    await page.screenshot({ path: path.join(OUT, 'phone-buttons.png') });
+    // ---- heading-up camera on a straight: the car points up the screen within 20 degrees (auto gas, no finger needed)
+    await onStraight(page, 20);
+    await waitSim(page, 2.5);
+    const head = await page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); const W = innerWidth, H = innerHeight; return { az: r.azimuth, ang: Math.atan2((b.x - a.x) * W, (b.y - a.y) * H) }; });
+    check('[phone] on a straight the car points up the screen (within 20 deg)', Math.abs(head.ang) * 180 / Math.PI < 20, `${(head.ang * 180 / Math.PI).toFixed(1)} deg`);
+    // ---- camera framing on a real lap
+    await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });
+    const lapP = await cameraLap(page, 'phone', 32);
+    check('[phone] camera rotates with the track (portrait, touch default)', lapP.azMax - lapP.azMin > 1, `azimuth ${lapP.azMin.toFixed(2)}..${lapP.azMax.toFixed(2)}`);
     check('[phone] no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+    await ctx.close();
+  }
+
+  // ---- Buttons on the other phone sizes (screenshots + hit test of the real elements)
+  for (const [w, h, name] of [[360, 640, 'small'], [844, 390, 'landscape']]) {
+    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-${name}`);
+    const T = await touchKit(ctx, page);
+    const L = await center(page, '.steer-btn.left'), R = await center(page, '.steer-btn.right');
+    if (!L || !R) check(`[phone-${name}] steer buttons visible`, false);
+    else {
+      const hitOk = await page.evaluate(([a, b]) => document.elementFromPoint(a.x, a.y)?.closest('.steer-btn.left') && document.elementFromPoint(b.x, b.y)?.closest('.steer-btn.right'), [L, R]);
+      check(`[phone-${name}] steer buttons are hittable`, !!hitOk);
+      const dl = await turnOf(page, () => T.down(1, L.x, L.y));
+      check(`[phone-${name}] left arrow turns left`, dl > 0.15, `dAngle=${dl.toFixed(2)}`);
+      await page.screenshot({ path: path.join(OUT, `phone-${name}-buttons.png`) });
+      await T.upAll();
+      const dr = await turnOf(page, () => T.down(1, R.x, R.y));
+      check(`[phone-${name}] right arrow turns right`, dr < -0.15, `dAngle=${dr.toFixed(2)}`);
+      await T.upAll();
+    }
+    check(`[phone-${name}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
+    await ctx.close();
+  }
+
+  // ---- the other schemes: left turns left, right turns right
+  for (const scheme of ['finger', 'slide', 'joystick', 'tilt', 'tap']) {
+    const { ctx, page, errors } = await openRace(PHONE, `phone-${scheme}`);
+    const T = await touchKit(ctx, page);
+    // headless Chromium reports requestPermission() as denied (no real prompt): stand in for an iOS player who tapped Allow
+    if (scheme === 'tilt') await page.evaluate(() => { try { Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { value: async () => 'granted', configurable: true }); } catch { /* ignore */ } });
+    await setControls(page, scheme, scheme === 'finger' ? { autoGas: false } : {});
+    await sleep(300);
+    let dl, dr;
+    if (scheme === 'finger') {
+      const g = await center(page, '.gas-btn');
+      await T.down(1, g.x, g.y); await waitSim(page, 1.2);
+      check('[phone-finger] holding GAS drives forward', (await speedOf(page)) > 5);
+      dl = await turnOf(page, async () => { for (let i = 1; i <= 6; i++) { await T.move(1, g.x - i * 15, g.y); await sleep(30); } });
+      await T.move(1, g.x, g.y);
+      dr = await turnOf(page, async () => { for (let i = 1; i <= 6; i++) { await T.move(1, g.x + i * 15, g.y); await sleep(30); } });
+      await T.move(1, g.x, g.y);
+      await onStraight(page, 20); await T.move(1, g.x, g.y + 0.5 * g.w); await waitSim(page, 0.6);
+      check('[phone-finger] pulling the GAS finger down brakes', (await brakeOf(page)) > 0.5);
+    } else if (scheme === 'slide' || scheme === 'joystick') {
+      const x0 = 150, y0 = 600;
+      dl = await turnOf(page, async () => { await T.down(1, x0, y0); for (let i = 1; i <= 4; i++) { await T.move(1, x0 - i * 14, y0); await sleep(30); } });
+      await page.screenshot({ path: path.join(OUT, `phone-${scheme}-steer.png`) });
+      await T.upAll();
+      dr = await turnOf(page, async () => { await T.down(1, x0, y0); for (let i = 1; i <= 4; i++) { await T.move(1, x0 + i * 14, y0); await sleep(30); } });
+      await T.upAll();
+      if (scheme === 'joystick') {
+        await onStraight(page, 20);
+        await T.down(1, x0, y0); await T.move(1, x0, y0 + 40); await T.move(1, x0, y0 + 80); await waitSim(page, 0.6);
+        check('[phone-joystick] pulling the stick down brakes', (await brakeOf(page)) > 0.5);
+        await T.upAll();
+      }
+    } else if (scheme === 'tilt') {
+      const tilt = (gamma) => page.evaluate((gm) => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 50, gamma: gm, absolute: false })), gamma);
+      await tilt(0); await waitSim(page, 0.1);
+      await page.evaluate(() => window.__game.input.recenter());
+      dl = await turnOf(page, () => tilt(-35).then(() => sleep(80)));
+      await tilt(0); await sleep(150);
+      dr = await turnOf(page, () => tilt(35).then(() => sleep(80)));
+      await tilt(0);
+      await page.screenshot({ path: path.join(OUT, 'phone-tilt.png') });
+      const fb = await page.evaluate(() => window.__game.save.settings.controls);
+      check('[phone-tilt] stays on Tilt while orientation events arrive', fb === 'tilt', fb);
+    } else {
+      dl = await turnOf(page, () => T.down(1, 90, 600));
+      await page.screenshot({ path: path.join(OUT, 'phone-tap-left.png') });
+      await T.upAll();
+      dr = await turnOf(page, () => T.down(1, 300, 600));
+      await T.upAll();
+      await onStraight(page, 20);
+      await T.downBoth([1, 90, 600], [2, 300, 600]); await waitSim(page, 0.5);
+      check('[phone-tap] touching both halves brakes', (await brakeOf(page)) > 0.5);
+      await T.upAll();
+    }
+    check(`[phone-${scheme}] left turns left`, dl > 0.15, `dAngle=${dl.toFixed(2)}`);
+    check(`[phone-${scheme}] right turns right`, dr < -0.15, `dAngle=${dr.toFixed(2)}`);
+    await T.upAll();
+    check(`[phone-${scheme}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
+    await ctx.close();
+  }
+
+  // ---- Tilt without orientation events falls back to Buttons with a toast
+  {
+    const { ctx, page } = await openRace(PHONE, 'phone-tiltfail');
+    await setControls(page, 'tilt');
+    await page.waitForFunction(() => window.__game.save.settings.controls === 'buttons', null, { timeout: 5000 }).catch(() => {});
+    const c = await page.evaluate(() => window.__game.save.settings.controls);
+    check('[phone-tilt] no orientation events -> falls back to Buttons', c === 'buttons', c);
+    await ctx.close();
+  }
+
+  // ---- first launch on a touch device: the skippable controls picker before the first race
+  {
+    const ctx = await browser.newContext(PHONE);
+    const page = await ctx.newPage();
+    await page.goto(`http://localhost:${PORT}/?debug`);
+    await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
+    await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.startRace('t1'); });
+    await sleep(500);
+    const shown = await page.$('.ctlpick');
+    check('[phone] first race shows the one-time controls picker', !!shown);
+    if (shown) {
+      const on = await page.$eval('.ctl-card.on', (e) => e.dataset.v);
+      check('[phone] picker highlights Buttons by default', on === 'buttons', on);
+      await page.screenshot({ path: path.join(OUT, 'phone-picker.png') });
+      await page.click('[data-act=ctlPickSel][data-v=slide]');
+      await page.click('[data-act=ctlPickOk]');
+      await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 });
+      const st = await page.evaluate(() => ({ c: window.__game.save.settings.controls, p: window.__game.save.settings.controlsPicked }));
+      check('[phone] picking Slide in the picker starts the race with it, never shown again', st.c === 'slide' && st.p === true, JSON.stringify(st));
+      // pause menu has the quick switch
+      await page.evaluate(() => window.__game.pause());
+      await sleep(400);
+      await page.screenshot({ path: path.join(OUT, 'phone-pause.png') });
+      await page.click('.ctl-ic[data-v=tap]');
+      const c2 = await page.evaluate(() => window.__game.save.settings.controls);
+      check('[phone] pause menu switches the control scheme', c2 === 'tap', c2);
+    }
     await ctx.close();
   }
 } catch (e) {

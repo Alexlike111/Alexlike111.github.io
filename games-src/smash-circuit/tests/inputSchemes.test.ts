@@ -73,7 +73,7 @@ describe('slide / stick maths', () => {
     expect(slideAxis(230, 200, W)).toBeGreaterThan(0.3);   // comfortable: 30 px already steers noticeably
   });
   it('the home point follows a finger beyond full lock', () => {
-    expect(followHome(400, 200, 60)).toBe(340); expect(followHome(230, 200, 60)).toBe(200); expect(followHome(100, 200, 60)).toBe(260);
+    expect(followHome(400, 200, 60)).toBe(340); expect(followHome(230, 200, 60)).toBe(200); expect(followHome(100, 200, 60)).toBe(160);
     expect(stickAxis(-10, 60, 6)).toBeLessThan(0);
   });
 });
