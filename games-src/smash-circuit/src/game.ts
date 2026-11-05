@@ -597,7 +597,7 @@ export class Game {
   private applyMute(): void {
     if (!this.audio) return;
     this.audio.setMuted(this.save.settings.muted || !this.platformAudio);
-    this.audio.setMusicVolume(this.save.settings.musicVol ?? 1);
+    this.audio.setMusicVolume?.(this.save.settings.musicVol ?? 1);
   }
 
   // ------------------------------------------------------------------ race end

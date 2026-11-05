@@ -101,9 +101,11 @@ describe('applyRaceResult', () => {
     expect(b.save.unlockedTracks).toEqual(['t1', 't2']);
     const c = applyRaceResult(a.save, 't2', 2, 100, 90);
     expect(c.unlocked).toBe('t3');
-    const d = applyRaceResult(c.save, 't3', 1, 100, 90);
+    const order = CONFIG.meta.trackOrder;
+    const last = order[order.length - 1];
+    const d = applyRaceResult({ ...c.save, unlockedTracks: [...order] }, last, 1, 100, 90);
     expect(d.unlocked).toBeNull();
-    expect(nextTrackId('t3')).toBeNull();
+    expect(nextTrackId(last)).toBeNull();
   });
 
   it('ignores a zero lap time and negative rewards', () => {

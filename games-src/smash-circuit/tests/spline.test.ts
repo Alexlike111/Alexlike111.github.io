@@ -57,7 +57,7 @@ describe('tracks', () => {
   });
   it('control polygons are genuinely different', () => {
     const sig = TRACKS.map((t) => t.points.length + ':' + t.width);
-    expect(new Set(sig).size).toBe(3);
+    expect(new Set(sig).size).toBe(TRACKS.length);
   });
 
   for (const def of TRACKS) {
