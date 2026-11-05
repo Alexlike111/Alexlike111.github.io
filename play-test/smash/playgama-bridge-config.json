@@ -1,0 +1,15 @@
+{
+  "advertisement": {
+    "minimumDelayBetweenInterstitial": 60,
+    "initialInterstitialDelay": 30
+  },
+  "leaderboards": [
+    { "id": "best_lap_t1", "isMain": true },
+    { "id": "best_lap_t2" },
+    { "id": "best_lap_t3" }
+  ],
+  "saas": {
+    "publicToken": "REPLACE_WITH_GAME_PUBLIC_TOKEN",
+    "leaderboards": { "platforms": ["playgama", "qa_tool"] }
+  }
+}

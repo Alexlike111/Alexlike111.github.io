@@ -1,0 +1,797 @@
+/* Smash Circuit UI - bold cartoon racing look. Everything scales from --u (one "em" of UI). */
+.ui-root {
+  --u: clamp(14px, min(4.1vw, 2.4vh), 22px);
+  --ink: #14213d;
+  --ink2: #0b1430;
+  --cream: #fff7e0;
+  --orange: #ff5a36; --orange-d: #b93216;
+  --yellow: #ffc93c; --yellow-d: #c58d00;
+  --blue: #2f8cff; --blue-d: #1757b8;
+  --green: #3ccf6e; --green-d: #1b8f46;
+  --red: #ff3b4e; --red-d: #a8182a;
+  --panel: rgba(16, 27, 58, 0.9);
+  --panel-line: rgba(255, 255, 255, 0.16);
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --display: "Arial Black", "Segoe UI Black", Impact, "Trebuchet MS", Roboto, system-ui, sans-serif;
+  --body: "Trebuchet MS", "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  position: absolute; inset: 0; overflow: hidden;
+  font: 800 var(--u)/1.2 var(--body);
+  color: #fff;
+  pointer-events: none;
+  user-select: none; -webkit-user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+.ui-root *, .ui-root *::before, .ui-root *::after { box-sizing: border-box; }
+.ui-root [hidden] { display: none !important; }
+.ui-root .layer { position: absolute; inset: 0; pointer-events: none; }
+.ui-root .ic { width: 1.3em; height: 1.3em; flex: none; display: block; }
+.ui-root b { font-weight: 900; }
+.ui-root small { font-size: 0.82em; font-weight: 800; opacity: 0.85; }
+.ui-root h2, .ui-root h3, .ui-root p { margin: 0; }
+
+/* ---------------------------------------------------------------- shared pieces */
+.ui-root .screen {
+  position: absolute; inset: 0;
+  padding: max(0.9em, var(--sat)) max(0.9em, var(--sar)) max(0.9em, var(--sab)) max(0.9em, var(--sal));
+  display: flex; flex-direction: column; gap: 0.7em;
+  animation: scr-in 0.28s ease-out both;
+}
+.ui-root .screen > * { pointer-events: auto; min-width: 0; }
+@keyframes scr-in { from { opacity: 0; transform: translateY(0.8em); } to { opacity: 1; transform: none; } }
+
+.ui-root .title {
+  font: 900 italic 1.7em/1 var(--display); text-transform: uppercase; letter-spacing: 0.02em;
+  color: #fff; -webkit-text-stroke: 0.1em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.09em 0 var(--ink); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ui-root .title.sm { font-size: 1.3em; }
+
+.ui-root .panel {
+  background: var(--panel); border: 0.16em solid var(--ink); border-radius: 1.1em;
+  box-shadow: 0 0.3em 0 rgba(0, 0, 0, 0.35), inset 0 0 0 0.12em var(--panel-line);
+}
+.ui-root .ph {
+  font: 900 italic 0.85em/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--yellow);
+  margin-bottom: 0.5em;
+}
+.ui-root .chip {
+  display: inline-flex; align-items: center; gap: 0.4em; padding: 0.3em 0.8em; border-radius: 2em;
+  background: var(--panel); border: 0.14em solid var(--ink); box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3);
+  font-weight: 900; font-size: 1.05em; white-space: nowrap;
+}
+.ui-root .coin { display: inline-flex; align-items: center; gap: 0.35em; font-variant-numeric: tabular-nums; }
+.ui-root .coin .ic { width: 1.4em; height: 1.4em; }
+
+.ui-root .btn {
+  --c1: #ff8a4a; --c2: #ff4d2e; --fg: #fff;
+  pointer-events: auto; appearance: none; -webkit-appearance: none; cursor: pointer;
+  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5em;
+  min-height: max(3.2em, 44px); padding: 0.55em 1.1em;
+  font: 900 italic 1em/1.05 var(--display); text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--fg); text-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.3);
+  background: linear-gradient(var(--c1), var(--c2));
+  border: 0.16em solid var(--ink); border-radius: 0.85em;
+  box-shadow: 0 0.28em 0 var(--ink), inset 0 0.14em 0 rgba(255, 255, 255, 0.4);
+  transition: transform 0.07s, box-shadow 0.07s, filter 0.15s;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.ui-root .btn::after { /* racing stripe sheen */
+  content: ""; position: absolute; top: 0; bottom: 0; left: -30%; width: 22%;
+  background: rgba(255, 255, 255, 0.2); transform: skewX(-20deg); pointer-events: none;
+}
+.ui-root .btn:hover { filter: brightness(1.08); }
+.ui-root .btn:active { transform: translateY(0.2em); box-shadow: 0 0.08em 0 var(--ink), inset 0 0.14em 0 rgba(255, 255, 255, 0.3); }
+.ui-root .btn:focus-visible { outline: 0.2em solid #fff; outline-offset: 0.1em; }
+.ui-root .btn span { min-width: 0; }
+.ui-root .btn.orange { --c1: #ff8a4a; --c2: #ff4d2e; }
+.ui-root .btn.blue { --c1: #55a7ff; --c2: #2371e0; }
+.ui-root .btn.green { --c1: #5fe08a; --c2: #25ab55; }
+.ui-root .btn.red { --c1: #ff6a78; --c2: #e0283d; }
+.ui-root .btn.grey { --c1: #7d8bad; --c2: #4b5878; }
+.ui-root .btn.yellow { --c1: #ffe17a; --c2: #ffb62b; --fg: #3a2300; text-shadow: 0 0.08em 0 rgba(255, 255, 255, 0.45); }
+.ui-root .btn.big { min-height: 3.9em; font-size: 1.3em; border-radius: 1em; }
+.ui-root .btn.big .ic { width: 1.2em; height: 1.2em; }
+.ui-root .btn.round { min-height: 44px; min-width: 44px; width: max(3.2em, 44px); height: max(3.2em, 44px); padding: 0; border-radius: 50%; }
+.ui-root .btn.round .ic { width: 1.5em; height: 1.5em; }
+.ui-root .btn[disabled], .ui-root .btn.cant { filter: grayscale(0.85) brightness(0.8); cursor: default; }
+.ui-root .btn[disabled]:hover, .ui-root .btn.cant:hover { filter: grayscale(0.85) brightness(0.8); }
+.ui-root .btn.armed { --c1: #ffe17a; --c2: #ffb62b; --fg: #3a2300; text-shadow: none; animation: armed 0.5s ease-in-out infinite alternate; }
+@keyframes armed { to { transform: scale(1.04); } }
+.ui-root .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; }
+.ui-root .pair > .btn { padding-left: 0.6em; padding-right: 0.6em; }
+
+.ui-root .checker {
+  display: inline-block; width: 1.6em; height: 100%; min-height: 1.6em; flex: none;
+  background: conic-gradient(#fff 25%, var(--ink) 0 50%, #fff 0 75%, var(--ink) 0) 0 0 / 0.8em 0.8em;
+  border: 0.1em solid var(--ink); border-radius: 0.2em;
+}
+
+/* screen header bar */
+.ui-root .bar { display: grid; grid-template-columns: 3.2em 1fr auto; align-items: center; gap: 0.7em; min-height: 3.2em; }
+.ui-root .bar > span { width: 3.2em; }
+.ui-root .bar .chip { justify-self: end; }
+.ui-root .bar .title { font-size: 1.4em; white-space: normal; line-height: 1.02; text-wrap: balance; }
+
+/* ---------------------------------------------------------------- main menu */
+.ui-root .menu { gap: 0; }
+.ui-root .menu-top { position: absolute; top: max(0.9em, var(--sat)); right: max(0.9em, var(--sar)); }
+.ui-root .menu-main { flex: 1; display: flex; flex-direction: column; justify-content: space-between; align-items: stretch; min-height: 0; padding-top: 2.2em; }
+.ui-root .logo { display: flex; flex-direction: column; align-items: center; padding-top: 0.6em; pointer-events: none; }
+.ui-root .logo-a {
+  display: block; font: 900 italic 4.6em/0.92 var(--display); color: var(--yellow); letter-spacing: 0.01em;
+  -webkit-text-stroke: 0.1em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.07em 0 var(--ink), 0.06em 0.13em 0 var(--orange-d);
+  transform: skew(-7deg) rotate(-2deg);
+}
+.ui-root .logo-b {
+  display: flex; align-items: stretch; gap: 0.5em; margin-top: 0.2em; padding: 0.15em 0.5em;
+  background: var(--ink); border-radius: 0.5em; transform: skew(-7deg) rotate(-2deg);
+  box-shadow: 0 0.22em 0 rgba(0, 0, 0, 0.35);
+}
+.ui-root .logo-b span { font: 900 italic 2.1em/1.1 var(--display); letter-spacing: 0.12em; color: #fff; }
+.ui-root .logo-tag { display: block; margin-top: 0.7em; padding: 0.25em 0.9em; border-radius: 2em; background: rgba(11, 20, 48, 0.72); font-weight: 900; font-size: 1.05em; letter-spacing: 0.04em; text-shadow: 0 0.1em 0 rgba(0, 0, 0, 0.55); }
+.ui-root .menu-buttons { display: flex; flex-direction: column; gap: 0.8em; width: min(100%, 24em); align-self: center; }
+
+/* ---------------------------------------------------------------- track select */
+.ui-root .tracks .cards { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr; grid-auto-rows: minmax(0, 1fr); gap: 0.8em; align-content: start; }
+.ui-root .card.track {
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.8em;
+  padding: 0.65em; max-height: 9.4em;
+  /* opaque: the 3D pedestal / car / tyre stacks behind must never show through a card */
+  background-color: #101b3a; border: 0.16em solid var(--ink); border-radius: 1.1em; box-shadow: 0 0.3em 0 var(--ink);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  overflow: hidden; cursor: pointer; transition: transform 0.08s;
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--ta) 38%, #101b3a), #101b3a 55%);
+}
+.ui-root .card.track:hover { transform: translateY(-0.1em); }
+.ui-root .card.track:active { transform: translateY(0.15em); }
+.ui-root .card .map { width: 6.4em; height: 6.4em; border-radius: 0.8em; border: 0.14em solid var(--ink); background: linear-gradient(var(--ta), var(--tb)); padding: 0.25em; }
+.ui-root .card .map svg { width: 100%; height: 100%; display: block; }
+.ui-root .card .tname { font: 900 italic 1.2em/1.1 var(--display); text-transform: uppercase; text-shadow: 0 0.08em 0 var(--ink); }
+.ui-root .card .meta { display: flex; flex-wrap: wrap; gap: 0.2em 0.9em; margin-top: 0.25em; font-size: 0.9em; opacity: 0.92; }
+.ui-root .card .diff { display: flex; align-items: center; gap: 0.5em; margin-top: 0.3em; font-size: 0.85em; opacity: 0.92; }
+.ui-root .pips3 { display: inline-flex; gap: 0.25em; }
+.ui-root .pips3 i { width: 0.95em; height: 0.55em; transform: skew(-18deg); background: rgba(255, 255, 255, 0.2); border: 0.1em solid var(--ink); border-radius: 0.15em; }
+.ui-root .pips3 i.on { background: linear-gradient(var(--yellow), var(--orange)); }
+.ui-root .card .best { display: flex; flex-direction: column; align-items: center; gap: 0.3em; min-width: 4.6em; text-align: center; }
+.ui-root .card .bl { display: flex; flex-direction: column; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ui-root .card .bl b { font-size: 0.95em; }
+.ui-root .mini-medal { width: 2.6em; height: 2.6em; border-radius: 50%; display: grid; place-items: center; border: 0.14em solid var(--ink); box-shadow: 0 0.14em 0 rgba(0, 0, 0, 0.35); font: 900 1.2em/1 var(--display); color: var(--ink); }
+.ui-root .mini-medal.p1 { background: radial-gradient(circle at 35% 30%, #ffe88a, #ffc93c 60%, #d99a00); }
+.ui-root .mini-medal.p2 { background: radial-gradient(circle at 35% 30%, #fff, #cfd8e3 60%, #98a6ba); }
+.ui-root .mini-medal.p3 { background: radial-gradient(circle at 35% 30%, #ffc796, #e08a4a 60%, #a95d28); }
+.ui-root .mini-medal.p4 { background: radial-gradient(circle at 35% 30%, #c7d2ea, #7d8cab 60%, #566686); color: #fff; }
+.ui-root .mini-medal.none { background: transparent; border-style: dashed; color: rgba(255, 255, 255, 0.5); box-shadow: none; }
+.ui-root .card.locked .map { filter: grayscale(0.9) brightness(0.6); }
+.ui-root .card.locked { background-color: #0d1530; background-image: none; }
+.ui-root .lockhint { margin-top: 0.3em; font-size: 0.88em; line-height: 1.2; font-weight: 700; opacity: 0.9; }
+.ui-root .lockbadge { min-width: 3em; }
+.ui-root .lockbadge .ic { width: 2.4em; height: 2.4em; color: var(--yellow); filter: drop-shadow(0 0.1em 0 var(--ink)); }
+
+/* ---------------------------------------------------------------- garage */
+.ui-root .garage { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; gap: 0.6em; }
+.ui-root .garage > .bar { grid-area: auto; }
+.ui-root .g-view { pointer-events: none !important; min-height: 5em; }
+.ui-root .g-colors { padding: 0.5em 0.7em; display: flex; align-items: center; gap: 0.6em; }
+.ui-root .g-colors .lab { font: 900 italic 0.85em/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--yellow); flex: none; }
+.ui-root .swatches { display: grid; grid-template-columns: repeat(4, minmax(44px, 1fr)); gap: 0; flex: 1; min-width: 0; }
+@media (min-width: 1100px) { .ui-root .swatches { grid-template-columns: repeat(8, minmax(44px, 1fr)); } }
+/* the button is a >= 44 px hit area; the visible paint disc is smaller */
+.ui-root .swatch {
+  pointer-events: auto; appearance: none; -webkit-appearance: none; cursor: pointer; padding: 0; margin: 0; min-width: 44px; min-height: 44px; width: 100%;
+  background: transparent; border: 0; display: grid; place-items: center; color: var(--ink); touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.ui-root .swatch .disc {
+  width: 30px; height: 30px; border-radius: 50%; border: 0.16em solid var(--ink); display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff8, transparent 45%), var(--c); box-shadow: 0 0.16em 0 var(--ink);
+}
+.ui-root .swatch .ic { width: 60%; height: 60%; }
+.ui-root .swatch.on .disc { outline: 0.2em solid #fff; outline-offset: 0.08em; transform: scale(1.1); }
+.ui-root .swatch:focus-visible .disc { outline: 0.2em solid var(--yellow); outline-offset: 0.12em; }
+.ui-root .g-stats, .ui-root .g-ups { padding: 0.7em 0.8em; }
+.ui-root .stat { display: grid; grid-template-columns: 1.4em 6.4em minmax(0, 1fr) 4.6em; align-items: center; gap: 0.5em; padding: 0.18em 0; }
+.ui-root .stat .si .ic { width: 1.2em; height: 1.2em; color: var(--yellow); }
+.ui-root .stat .sl { font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-root .bar2 { position: relative; height: 0.85em; border-radius: 1em; background: rgba(0, 0, 0, 0.5); border: 0.12em solid var(--ink); overflow: hidden; }
+.ui-root .bar2 i { position: absolute; top: 0; bottom: 0; left: 0; display: block; }
+.ui-root .bar2 .cur { background: linear-gradient(#69b7ff, #2f8cff); border-radius: 1em 0 0 1em; }
+.ui-root .bar2 .gain { background: repeating-linear-gradient(-45deg, #7dff9c 0 0.35em, #3ccf6e 0.35em 0.7em); animation: gain 1.1s ease-in-out infinite alternate; }
+@keyframes gain { to { filter: brightness(1.35); } }
+.ui-root .stat .sv { font-size: 0.85em; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.ui-root .stat .sv em { font-style: normal; color: #7dff9c; margin-left: 0.3em; }
+
+.ui-root .up { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.7em; padding: 0.45em 0; }
+.ui-root .up + .up { border-top: 0.1em dashed rgba(255, 255, 255, 0.18); }
+.ui-root .up-ic { width: 2.7em; height: 2.7em; border-radius: 0.8em; display: grid; place-items: center; border: 0.14em solid var(--ink); box-shadow: 0 0.14em 0 var(--ink); }
+.ui-root .up-ic .ic { width: 1.6em; height: 1.6em; color: #fff; }
+.ui-root .up.engine .up-ic { background: linear-gradient(#ff8a4a, #e0401f); }
+.ui-root .up.grip .up-ic { background: linear-gradient(#55a7ff, #2371e0); }
+.ui-root .up.armor .up-ic { background: linear-gradient(#5fe08a, #25ab55); }
+.ui-root .up-name { font: 900 italic 1em/1.1 var(--display); text-transform: uppercase; display: flex; align-items: baseline; gap: 0.5em; }
+.ui-root .up-name small { font-family: var(--body); font-style: normal; }
+.ui-root .pips { display: flex; gap: 0.25em; margin: 0.25em 0; }
+.ui-root .pips i { width: 1.4em; height: 0.65em; transform: skew(-18deg); background: rgba(255, 255, 255, 0.16); border: 0.11em solid var(--ink); border-radius: 0.15em; }
+.ui-root .pips i.on { background: linear-gradient(var(--yellow), var(--orange)); }
+.ui-root .up-desc { font-size: 0.8em; opacity: 0.85; line-height: 1.15; font-weight: 700; }
+.ui-root .btn.buy { min-width: max(6.6em, 44px); min-height: max(3em, 44px); padding: 0.4em 0.7em; }
+.ui-root .btn.buy.cant { --c1: #7d8bad; --c2: #4b5878; }
+.ui-root .btn.buy.max { --c1: #ffe17a; --c2: #ffb62b; --fg: #3a2300; filter: none; text-shadow: none; }
+.ui-root .cost { display: inline-flex; align-items: center; gap: 0.3em; font-style: normal; }
+.ui-root .cost .ic { width: 1.25em; height: 1.25em; }
+
+/* Portrait garage: the 3D car sits in the screen centre, so the stats + upgrades are a COMPACT bottom sheet
+   (about 40% of the height at most) and the free band between the paint row and the sheet belongs to the car. */
+@media (max-aspect-ratio: 5/4) {
+  .ui-root .garage { gap: 0.45em; }
+  .ui-root .garage .g-view { min-height: 0; }
+  .ui-root .g-stats { padding: 0.45em 0.6em 0.5em; border-radius: 1em 1em 0.5em 0.5em; }
+  .ui-root .g-stats .ph { display: none; }
+  .ui-root .stat-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.2em 0.7em; }
+  .ui-root .stat { grid-template-columns: 1.15em minmax(0, 1fr); grid-template-areas: "sv sv" "si bar"; gap: 0.1em 0.3em; padding: 0; align-items: center; }
+  .ui-root .stat .si { grid-area: si; }
+  .ui-root .stat .si .ic { width: 1.1em; height: 1.1em; }
+  .ui-root .stat .sv { grid-area: sv; text-align: left; font-size: 0.8em; }
+  .ui-root .stat .sv em { margin-left: 0.2em; }
+  .ui-root .stat .bar2 { grid-area: bar; height: 0.6em; }
+  .ui-root .stat .sl { display: none; }
+  .ui-root .g-ups { padding: 0.2em 0.7em 0.35em; border-radius: 0.5em 0.5em 1em 1em; }
+  .ui-root .g-ups .ph { display: none; }
+  .ui-root .up { grid-template-columns: 2.4em minmax(0, 1fr) auto; gap: 0.6em; padding: 0.28em 0; }
+  .ui-root .up-ic { width: 2.4em; height: 2.4em; border-radius: 0.7em; }
+  .ui-root .up-ic .ic { width: 1.4em; height: 1.4em; }
+  .ui-root .up-desc { display: none; }
+  .ui-root .pips { margin: 0.15em 0 0; }
+  .ui-root .btn.buy { min-height: max(2.6em, 44px); min-width: max(6em, 44px); padding: 0.25em 0.6em; }
+}
+
+/* ---------------------------------------------------------------- settings */
+.ui-root .settings .s-panel { width: min(100%, 36em); align-self: center; padding: 0.4em 0.9em; margin-top: 0.4em; }
+.ui-root .srow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5em 0.9em; padding: 0.8em 0; }
+.ui-root .srow + .srow { border-top: 0.1em dashed rgba(255, 255, 255, 0.18); }
+.ui-root .sl2 { display: flex; align-items: center; gap: 0.6em; flex: 1 1 9em; min-width: 0; }
+.ui-root .sl2 b { display: block; font-size: 1.05em; }
+.ui-root .sl2 small { display: block; font-weight: 700; opacity: 0.75; line-height: 1.15; }
+.ui-root .sic { width: 2.2em; height: 2.2em; border-radius: 0.65em; display: grid; place-items: center; background: linear-gradient(#55a7ff, #2371e0); border: 0.13em solid var(--ink); flex: none; }
+.ui-root .sic .ic { width: 1.3em; height: 1.3em; }
+.ui-root .seg { display: flex; flex: 1 1 15em; min-width: 0; padding: 0.2em; gap: 0.2em; background: rgba(0, 0, 0, 0.4); border: 0.14em solid var(--ink); border-radius: 0.9em; }
+.ui-root .seg button {
+  pointer-events: auto; appearance: none; cursor: pointer; flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0.2em 0.3em;
+  font: 900 italic 0.8em/1.05 var(--display); text-transform: uppercase; color: #cdd6ee; background: transparent; border: 0; border-radius: 0.65em; touch-action: manipulation;
+}
+.ui-root .seg button.on { color: #fff; background: linear-gradient(#55a7ff, #2371e0); box-shadow: 0 0.14em 0 var(--ink), inset 0 0.1em 0 rgba(255, 255, 255, 0.35); }
+.ui-root .seg button { display: grid; place-items: center; }
+/* never truncate a label (RU): wrap instead of an ellipsis */
+.ui-root .seg button span { display: block; white-space: normal; overflow-wrap: anywhere; text-align: center; hyphens: auto; }
+/* the 4-option graphics control gets the full row, so even the longest RU label fits on one line */
+.ui-root .seg.n4 { flex-basis: 100%; }
+.ui-root .switch {
+  pointer-events: auto; appearance: none; cursor: pointer; position: relative; flex: none; width: max(6.2em, 84px); height: max(2.8em, 44px); min-height: 44px; padding: 0 0.9em 0 3em;
+  border: 0.16em solid var(--ink); border-radius: 2em; background: #4b5878; color: #fff; text-align: right;
+  font: 900 italic 0.85em/1 var(--display); text-transform: uppercase; touch-action: manipulation;
+  box-shadow: inset 0 0.15em 0 rgba(0, 0, 0, 0.3);
+}
+.ui-root .switch i { position: absolute; left: 0.2em; top: 50%; margin-top: -1.05em; width: 2.1em; height: 2.1em; border-radius: 50%; background: #fff; border: 0.13em solid var(--ink); transition: left 0.15s; }
+.ui-root .switch.on { background: linear-gradient(#5fe08a, #25ab55); padding: 0 3em 0 0.8em; text-align: left; }
+.ui-root .switch.on i { left: calc(100% - 2.3em); }
+
+/* ---------------------------------------------------------------- pause + results overlays */
+.ui-root .layer-overlay { z-index: 10; }
+.ui-root .dim {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: auto;
+  padding: max(0.9em, var(--sat)) max(0.9em, var(--sar)) max(0.9em, var(--sab)) max(0.9em, var(--sal));
+  background: rgba(5, 10, 26, 0.62); animation: dim-in 0.2s ease-out both;
+}
+@keyframes dim-in { from { opacity: 0; } to { opacity: 1; } }
+.ui-root .pausecard { width: min(100%, 24em); padding: 0.9em; display: flex; flex-direction: column; gap: 0.7em; animation: pop-in 0.25s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.88); } to { opacity: 1; transform: none; } }
+.ui-root .pc-head { display: grid; grid-template-columns: 3.2em 1fr 3.2em; align-items: center; gap: 0.5em; }
+.ui-root .pc-head .title { grid-column: 2; grid-row: 1; }
+.ui-root .pc-head .btn { grid-column: 3; grid-row: 1; }
+.ui-root .repairbtn { justify-content: space-between; }
+.ui-root .repairbtn > span:first-of-type { flex: 1; text-align: left; }
+.ui-root .pc-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.6em; font-size: 0.9em; opacity: 0.9; }
+.ui-root .pc-foot span { display: inline-flex; align-items: center; gap: 0.35em; }
+.ui-root .pc-foot .ic { width: 1.3em; height: 1.3em; }
+.ui-root .keyhint { font-weight: 700; opacity: 0.75; }
+
+.ui-root .rescard { width: min(100%, 26em); padding: 1em; display: grid; gap: 0.8em; animation: pop-in 0.3s cubic-bezier(.2, 1.4, .4, 1) both; }
+.ui-root .res-left { display: flex; flex-direction: column; align-items: center; gap: 0.3em; }
+.ui-root .res-title { font: 900 italic 1.3em/1 var(--display); text-transform: uppercase; color: var(--yellow); text-shadow: 0 0.09em 0 var(--ink); text-align: center; }
+.ui-root .medal { position: relative; width: 7.4em; height: 8.9em; --medal-a: #ffc93c; --medal-b: #ffe27a; animation: medal-in 0.6s cubic-bezier(.2, 1.5, .4, 1) 0.15s both; }
+.ui-root .medal.m2 { --medal-a: #c9d3df; --medal-b: #eef3f8; }
+.ui-root .medal.m3 { --medal-a: #e08a4a; --medal-b: #f2b27c; }
+.ui-root .medal.m4 { --medal-a: #8a7a68; --medal-b: #a89880; width: 6em; height: 6em; animation-name: badge-in; }
+.ui-root .medal.m4 .medal-num { top: 50%; font-size: 2.6em; color: #2a2118; text-shadow: none; }
+@keyframes badge-in { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: none; } }
+@keyframes medal-in { from { opacity: 0; transform: scale(0.4) rotate(-20deg); } to { opacity: 1; transform: none; } }
+.ui-root .medal-svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0.2em 0 rgba(0, 0, 0, 0.35)); }
+.ui-root .medal-num { position: absolute; left: 50%; top: 61.7%; transform: translate(-50%, -50%); font: 900 italic 3.2em/1 var(--display); color: var(--ink); text-shadow: 0 0.04em 0 rgba(255, 255, 255, 0.5); }
+.ui-root .res-ord { font: 900 italic 1.7em/1 var(--display); text-transform: uppercase; text-shadow: 0 0.08em 0 var(--ink); }
+.ui-root .res-ord small { font-size: 0.5em; font-style: normal; opacity: 0.8; margin-left: 0.2em; }
+.ui-root .res-right { display: flex; flex-direction: column; gap: 0.6em; min-width: 0; }
+.ui-root .stats-list { display: flex; flex-direction: column; gap: 0.35em; }
+.ui-root .rr { display: flex; align-items: center; justify-content: space-between; gap: 0.6em; padding: 0.45em 0.7em; background: rgba(0, 0, 0, 0.35); border-radius: 0.7em; border: 0.1em solid rgba(255, 255, 255, 0.1); }
+.ui-root .rr > span { display: inline-flex; align-items: center; gap: 0.45em; font-size: 0.92em; min-width: 0; }
+.ui-root .rr > span .ic { width: 1.2em; height: 1.2em; color: var(--yellow); }
+.ui-root .rr b { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.ui-root .rr em { font-style: normal; font-size: 0.7em; margin-left: 0.5em; padding: 0.15em 0.5em; border-radius: 1em; background: var(--green); color: var(--ink); text-transform: uppercase; vertical-align: middle; }
+.ui-root .rr.reward { background: linear-gradient(90deg, rgba(255, 201, 60, 0.28), rgba(255, 201, 60, 0.08)); border-color: rgba(255, 201, 60, 0.6); }
+.ui-root .rr.reward b { font-size: 1.25em; color: var(--yellow); }
+.ui-root .rr.reward.dbl b { animation: bump 0.5s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes bump { from { transform: scale(0.6); } to { transform: none; } }
+.ui-root .unlock { display: flex; align-items: center; gap: 0.5em; padding: 0.45em 0.7em; border-radius: 0.7em; background: linear-gradient(#5fe08a, #25ab55); color: var(--ink); border: 0.14em solid var(--ink); font-size: 0.92em; line-height: 1.1; }
+.ui-root .unlock .ic { width: 1.4em; height: 1.4em; }
+.ui-root .adbtn { justify-content: flex-start; text-align: left; gap: 0.7em; min-height: max(3.6em, 44px); text-transform: none; font-style: normal; }
+.ui-root .adbtn .adtag { display: inline-flex; flex-direction: column; align-items: center; gap: 0.1em; padding: 0.3em 0.5em; border-radius: 0.55em; background: var(--ink); color: #fff; text-shadow: none; font-size: 0.8em; flex: none; }
+.ui-root .adbtn .adtag .ic { width: 1.5em; height: 1.5em; }
+.ui-root .adbtn .adtxt { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.1; }
+.ui-root .adbtn .adtxt b { font: 900 italic 1em/1.1 var(--display); text-transform: uppercase; }
+.ui-root .adbtn .adtxt small { font-weight: 800; opacity: 0.8; margin-top: 0.15em; }
+.ui-root .adbtn.busy { opacity: 0.75; }
+.ui-root .adbtn.done { --c1: #5fe08a; --c2: #25ab55; --fg: #fff; filter: none; }
+.ui-root .adbtn.done .ic { width: 1.5em; height: 1.5em; }
+
+/* ---------------------------------------------------------------- HUD */
+.ui-root .layer-hud { z-index: 2; }
+.ui-root .hud { position: absolute; inset: 0; }
+.ui-root .hud > * { position: absolute; }
+.ui-root .hud-tl { top: max(0.7em, var(--sat)); left: max(0.7em, var(--sal)); display: flex; flex-direction: column; gap: 0.4em; align-items: flex-start; }
+.ui-root .hud-tc { top: max(0.7em, var(--sat)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 0.25em; }
+.ui-root .hud-tr { top: max(0.7em, var(--sat)); right: max(0.7em, var(--sar)); display: flex; flex-direction: column; align-items: flex-end; gap: 0.5em; }
+.ui-root .hud-bc { bottom: max(0.8em, var(--sab)); left: 50%; transform: translateX(-50%); }
+.ui-root .plab { display: block; font: 900 0.62em/1 var(--body); letter-spacing: 0.12em; opacity: 0.85; }
+.ui-root .pos, .ui-root .lapbox {
+  display: flex; align-items: baseline; gap: 0.25em; padding: 0.2em 0.7em 0.25em; border-radius: 0.9em;
+  background: var(--panel); border: 0.15em solid var(--ink); box-shadow: 0 0.22em 0 rgba(0, 0, 0, 0.32);
+}
+.ui-root .pos { flex-wrap: wrap; align-items: baseline; }
+.ui-root .pos .plab, .ui-root .lapbox .plab { flex-basis: 100%; }
+.ui-root .pos .pn { font: 900 italic 2.5em/0.95 var(--display); color: var(--yellow); -webkit-text-stroke: 0.06em var(--ink); paint-order: stroke fill; }
+.ui-root .pos[data-pos="1"] .pn { color: #ffd34d; }
+.ui-root .pos[data-pos="2"] .pn { color: #dfe7f1; }
+.ui-root .pos[data-pos="3"] .pn { color: #f0a066; }
+.ui-root .pos .pt { font: 900 1.15em/1 var(--display); opacity: 0.8; }
+.ui-root .lapbox { flex-wrap: wrap; }
+.ui-root .lapbox .lapn { font: 900 italic 1.45em/1 var(--display); }
+.ui-root .timer {
+  font: 900 italic 1.9em/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; padding: 0.12em 0.5em 0.16em;
+  background: var(--panel); border: 0.14em solid var(--ink); border-radius: 0.7em; box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3);
+  min-width: 5.4em; text-align: center;
+}
+.ui-root .laps { display: flex; gap: 0.8em; font-size: 0.85em; text-shadow: 0 0.1em 0 var(--ink), 0 0 0.3em var(--ink); }
+.ui-root .laps span { display: inline-flex; gap: 0.35em; align-items: baseline; }
+.ui-root .laps small { opacity: 0.85; }
+.ui-root .laps b { font-variant-numeric: tabular-nums; }
+.ui-root .hud .pausebtn { pointer-events: auto; }
+.ui-root .hud .chip.money { font-size: 0.95em; }
+.ui-root .hud .chip.money .ic { width: 1.3em; height: 1.3em; }
+.ui-root .speed { display: flex; align-items: baseline; gap: 0.3em; padding: 0.1em 0.7em 0.2em; border-radius: 0.9em; background: var(--panel); border: 0.14em solid var(--ink); box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3); }
+.ui-root .speed .sp { font: 900 italic 2em/1 var(--display); font-variant-numeric: tabular-nums; min-width: 1.7em; text-align: right; }
+.ui-root .cardmg { position: relative; pointer-events: none; display: flex; align-items: center; gap: 0.45em; min-width: 44px; min-height: 44px; }
+.ui-root .cardmg .car-wrap { width: 2.7em; height: 5.4em; flex: none; filter: drop-shadow(0 0.15em 0 rgba(0, 0, 0, 0.35)); }
+.ui-root .cardmg .carz { width: 100%; height: 100%; display: block; }
+.ui-root .cardmg .carz [data-z] { fill: hsl(120 88% 46%); stroke: var(--ink); stroke-width: 1; transition: fill 0.2s; }
+.ui-root .cardmg .car-wrap.crit { animation: crit 0.6s ease-in-out infinite alternate; }
+@keyframes crit { to { transform: scale(1.1); filter: drop-shadow(0 0 0.4em var(--red)); } }
+.ui-root .cardmg .rep { display: none; flex-direction: column; align-items: flex-start; gap: 0.2em; padding: 0.3em 0.55em; border-radius: 0.7em; background: var(--yellow); color: var(--ink); border: 0.14em solid var(--ink); box-shadow: 0 0.18em 0 var(--ink); font-size: 0.78em; line-height: 1; text-transform: uppercase; }
+.ui-root .cardmg.show { pointer-events: auto; cursor: pointer; }
+/* generous invisible hit area around the tap-to-repair widget (>= 44 px wide, also on a 38 px silhouette) */
+.ui-root .cardmg.show::before { content: ""; position: absolute; inset: -0.5em -0.6em; min-width: 44px; }
+.ui-root .cardmg.show .rep { display: flex; }
+.ui-root .cardmg .rk { font: 900 italic 1em/1 var(--display); }
+.ui-root .cardmg .rc { display: inline-flex; align-items: center; gap: 0.25em; font-weight: 900; }
+.ui-root .cardmg .rc .ic { width: 1.2em; height: 1.2em; }
+.ui-root .countdown {
+  left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; white-space: nowrap;
+  font: 900 italic 8em/1 var(--display); color: #fff; -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink), 0 0.12em 0 var(--orange-d);
+}
+.ui-root .countdown.go { color: var(--green); font-size: 6.5em; }
+.ui-root .countdown.pop { animation: cd-pop 0.7s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes cd-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0.85; transform: translate(-50%, -50%) scale(0.9); } }
+.ui-root .hud-fps { left: 50%; bottom: 0.2em; transform: translateX(-50%); font-size: 0.7em; opacity: 0.7; }
+
+/* drift meter (above the speedometer) */
+.ui-root .hud-bc { display: flex; flex-direction: column; align-items: center; gap: 0.25em; }
+.ui-root .driftm { --dc: #fff; display: flex; flex-direction: column; align-items: center; gap: 0.15em; pointer-events: none;
+  font: 900 italic 1.05em/1 var(--display); color: var(--dc); text-shadow: 0 0.1em 0 var(--ink), 0 0 0.6em rgba(0, 0, 0, 0.35); }
+.ui-root .driftm[hidden] { display: none; }
+.ui-root .driftm .dl { display: flex; gap: 0.4em; align-items: baseline; white-space: nowrap; }
+.ui-root .driftm .dpts { font-size: 0.9em; color: #fff; }
+.ui-root .driftm .dbar { width: 6.5em; height: 0.36em; border-radius: 0.2em; background: rgba(0, 0, 0, 0.45); overflow: hidden; border: 0.08em solid var(--ink); }
+.ui-root .driftm .dbar i { display: block; height: 100%; width: 0; background: var(--dc); }
+.ui-root .driftm[data-mode="bank"] .dbar, .ui-root .driftm[data-mode="lost"] .dbar { display: none; }
+.ui-root .driftm[data-tier="1"] { --dc: #5fc8ff; }
+.ui-root .driftm[data-tier="2"] { --dc: #ffa63a; }
+.ui-root .driftm[data-tier="3"] { --dc: #c77dff; }
+.ui-root .driftm[data-mode="lost"] { --dc: #ff5a5a; }
+.ui-root .driftm[data-mode="bank"] { animation: drift-pop 0.35s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes drift-pop { 0% { transform: scale(1.5); } 100% { transform: scale(1); } }
+.ui-root .drift-hint { display: flex; gap: 0.4em; align-items: center; font-size: 0.78em; line-height: 1.15; opacity: 0.9; margin-top: 0.3em; }
+.ui-root .drift-hint svg { width: 1.1em; height: 1.1em; flex: none; color: var(--yellow); }
+.ui-root .tut-drift svg { width: 2.2em; height: 2.2em; color: #c77dff; }
+
+/* touch buttons (created by InputController) */
+.ui-root .touch-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.ui-root .touch-layer .brake-btn {
+  position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1em;
+  border-radius: 50%; pointer-events: auto; touch-action: none; color: #fff;
+  font: 900 italic calc(var(--gas, 100px) * 0.17)/1 var(--display); text-transform: uppercase; letter-spacing: 0.04em;
+  border: 0.18em solid var(--ink); text-shadow: 0 0.08em 0 rgba(0, 0, 0, 0.35);
+  transition: transform 0.06s, filter 0.1s;
+}
+.ui-root .touch-layer .brake-btn {
+  left: calc(var(--gap, 16px) + env(safe-area-inset-left, 0px)); bottom: calc(var(--gap, 16px) + env(safe-area-inset-bottom, 0px));
+  width: var(--brake, 66px); height: var(--brake, 66px); font-size: calc(var(--brake, 66px) * 0.19);
+  background: radial-gradient(circle at 35% 28%, #7fb8ff, #2f6fe0 55%, #1a3f94);
+  box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.35);
+}
+.ui-root .touch-layer .brake-btn svg { width: 38%; height: 38%; }
+.ui-root .touch-layer .down { transform: scale(0.94) translateY(0.1em); filter: brightness(1.2); }
+
+/* ---- control schemes (positions are set inline by InputController.layout from src/input/schemes.ts) ---- */
+.ui-root .touch-layer [hidden] { display: none !important; }
+.ui-root .touch-layer .steer-btn {
+  position: absolute; display: grid; place-items: center; border-radius: 26%; pointer-events: auto; touch-action: none; color: #fff;
+  background: linear-gradient(160deg, rgba(86, 140, 235, 0.62), rgba(26, 52, 128, 0.7)); border: 0.16em solid rgba(11, 20, 48, 0.85);
+  box-shadow: 0 0.28em 0 rgba(11, 20, 48, 0.8), inset 0 0.18em 0 rgba(255, 255, 255, 0.28);
+  font-size: calc(var(--steer, 90px) * 0.1); transition: transform 0.06s, filter 0.1s, background 0.1s; user-select: none; -webkit-user-select: none;
+}
+.ui-root .touch-layer .steer-btn svg { width: 46%; height: 46%; filter: drop-shadow(0 0.08em 0 rgba(0, 0, 0, 0.35)); }
+.ui-root .touch-layer .steer-btn.down { background: linear-gradient(160deg, rgba(255, 214, 80, 0.92), rgba(255, 150, 30, 0.9)); color: #23140a; }
+.ui-root.sch-new .touch-layer .brake-btn { opacity: 0.82; }
+.ui-root.sch-new .touch-layer .brake-btn.down { opacity: 1; }
+.ui-root.sch-new .touch-layer .brake-btn { background: radial-gradient(circle at 35% 28%, #ff8f8f, #e03a3a 55%, #8e1c1c); }
+.ui-root.sch-new .touch-layer .brake-btn { font-size: calc(var(--brake, 66px) * 0.17); }
+/* floating stick / slide track */
+.ui-root .touch-layer .stick { position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 50%; transition: opacity 0.15s;
+  border: 0.22em solid rgba(255, 255, 255, 0.7); background: rgba(16, 27, 58, 0.32); box-shadow: 0 0 0 0.18em rgba(11, 20, 48, 0.5); }
+.ui-root .touch-layer .stick.slide { height: 52px; border-radius: 26px; }
+.ui-root .touch-layer .stick.idle { opacity: 0.45; border-style: dashed; }
+.ui-root .touch-layer .stick:not(.slide):not(.idle) { opacity: 0.8; }
+.ui-root .touch-layer .stick.held { opacity: 1; background: rgba(16, 27, 58, 0.5); }
+/* tilt indicator: a bar with a dot at the steering being sent (bottom left, the left thumb zone is free in this scheme) */
+.ui-root .touch-layer .tilt-ind { position: absolute; left: calc(var(--gap, 16px) + env(safe-area-inset-left, 0px)); bottom: calc(var(--gap, 16px) * 1.4 + env(safe-area-inset-bottom, 0px));
+  width: min(42vw, 46vmin); height: 1.7em; font-size: calc(var(--brake, 66px) * 0.2); pointer-events: none; border-radius: 1em;
+  background: rgba(16, 27, 58, 0.5); border: 0.14em solid rgba(255, 255, 255, 0.7); box-shadow: 0 0 0 0.14em rgba(11, 20, 48, 0.5); }
+.ui-root .touch-layer .tilt-ind .tc { position: absolute; left: 50%; top: 18%; bottom: 18%; width: 0.14em; margin-left: -0.07em; background: rgba(255, 255, 255, 0.7); }
+.ui-root .touch-layer .tilt-ind .tz { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; }
+.ui-root .touch-layer .tilt-ind .td { position: absolute; top: 50%; left: 50%; width: 1.1em; height: 1.1em; margin: -0.55em 0 0 -0.55em; border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe27a, #ff9d1e 60%, #c4600a); border: 0.14em solid rgba(11, 20, 48, 0.85); }
+.ui-root .touch-layer .tilt-ind.wait .td { opacity: 0.4; }
+.ui-root .touch-layer .stick-knob { position: absolute; left: 50%; top: 50%; width: 46%; aspect-ratio: 1; margin: -23% 0 0 -23%; border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #ffe27a, #ff9d1e 60%, #c4600a); border: 0.16em solid rgba(11, 20, 48, 0.85); }
+.ui-root .touch-layer .stick.slide .stick-knob { width: 36px; margin: -18px 0 0 -18px; }
+/* two-side tap zones */
+.ui-root .touch-layer .tap-zone { position: absolute; bottom: 0; width: 50%; height: 26%; pointer-events: none; display: flex; align-items: center; color: #fff; opacity: 0.8;
+  transition: background 0.08s; }
+.ui-root .touch-layer .tap-zone.l { left: 0; justify-content: flex-start; background: linear-gradient(to top, rgba(16, 27, 58, 0.32), transparent); padding-left: 22%; }
+.ui-root .touch-layer .tap-zone.r { right: 0; justify-content: flex-end; background: linear-gradient(to top, rgba(16, 27, 58, 0.32), transparent); padding-right: 22%; }
+.ui-root .touch-layer .tap-zone svg { width: min(16vmin, 80px); height: min(16vmin, 80px); filter: drop-shadow(0 0.1em 0 rgba(0, 0, 0, 0.4)); opacity: 0.7; }
+.ui-root .touch-layer .tap-zone.down { background: linear-gradient(to top, rgba(255, 200, 60, 0.4), transparent); }
+.ui-root .touch-layer .tap-zone.down svg { opacity: 1; color: #ffe27a; }
+/* the item slot follows the scheme (variables set by InputController.layout on the UI root) */
+.ui-root.is-touch.sch-new .hud-item {
+  --isz: var(--it-s, 60px);
+  right: calc(var(--it-off, 20px) + env(safe-area-inset-right, 0px));
+  bottom: calc(var(--it-b, 120px) + env(safe-area-inset-bottom, 0px));
+}
+.ui-root.is-touch.sch-new .hud-item .item-slot { opacity: 0.9; }
+/* portrait: the speed readout and drift meter sit above the button row instead of behind it */
+@media (orientation: portrait) { .ui-root.is-touch.sch-new .hud-bc { bottom: calc(var(--btn-top, 0px) + env(safe-area-inset-bottom, 0px) + 0.5em); } }
+
+/* joystick: the speed readout and the drift meter sit above the fixed stick (--joy-top is set by InputController.layout) */
+.ui-root.is-touch.sch-joystick .hud-bc { bottom: calc(var(--joy-top, 0px) + env(safe-area-inset-bottom, 0px) + 0.5em); }
+
+/* ---- controls picker (settings, pause, first-run) ---- */
+.ui-root .s-ctl { flex-direction: column; align-items: stretch; }
+.ui-root .ctlgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45em; width: 100%; }
+.ui-root .ctl-card {
+  display: grid; grid-template-columns: 2.4em minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 0.55em; align-items: center; text-align: left; padding: 0.45em 0.55em;
+  color: #cdd6ee; background: rgba(0, 0, 0, 0.36); border: 0.14em solid var(--ink); border-radius: 0.9em; touch-action: manipulation; min-height: 44px;
+}
+.ui-root .ctl-card .ctl-pic { grid-row: 1 / span 2; width: 2.4em; height: 2.4em; display: grid; place-items: center; border-radius: 0.6em; background: rgba(255, 255, 255, 0.1); }
+.ui-root .ctl-card .ctl-pic svg { width: 78%; height: 78%; }
+.ui-root .ctl-card b { font: 900 italic 0.9em/1.1 var(--display); text-transform: uppercase; color: #fff; }
+.ui-root .ctl-card small { font-size: 0.68em; line-height: 1.15; opacity: 0.85; }
+.ui-root .ctl-card.on { background: linear-gradient(#3f8ff0, #2268d6); border-color: #fff; box-shadow: 0 0.14em 0 var(--ink), inset 0 0.1em 0 rgba(255, 255, 255, 0.3); color: #fff; }
+.ui-root .sens { display: grid; grid-template-columns: auto minmax(5em, 1fr) 3em; align-items: center; gap: 0.6em; width: 100%; margin-top: 0.5em; font-size: 0.85em; }
+.ui-root .sens input[type=range] { width: 100%; min-height: 44px; accent-color: var(--yellow); touch-action: pan-y; }
+.ui-root .sens b { text-align: right; font-family: var(--display); }
+.ui-root .ctlpause { display: flex; flex-direction: column; gap: 0.3em; }
+.ui-root .ctlrow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.25em; }
+.ui-root .ctl-ic { min-height: 44px; display: grid; place-items: center; color: #cdd6ee; background: rgba(0, 0, 0, 0.36); border: 0.14em solid var(--ink); border-radius: 0.7em; touch-action: manipulation; }
+.ui-root .ctl-ic svg { width: 1.7em; height: 1.7em; }
+.ui-root .ctl-ic.on { background: linear-gradient(#3f8ff0, #2268d6); border-color: #fff; color: #fff; }
+.ui-root .ctl-desc { font-size: 0.74em; line-height: 1.15; opacity: 0.92; }
+.ui-root .ctl-desc b { color: var(--yellow); text-transform: uppercase; font-family: var(--display); }
+.ui-root .ctlpause .sens { margin-top: 0; font-size: 0.8em; }
+.ui-root .ctlpause .btn { min-height: 44px; }
+.ui-root .ctlpick { width: min(100%, 40em); max-height: 100%; overflow-y: auto; padding: 0.8em; display: flex; flex-direction: column; gap: 0.5em; animation: pop-in 0.25s cubic-bezier(.2, 1.4, .4, 1) both; }
+.ui-root .ctlpick .sub { font-size: 0.8em; opacity: 0.85; text-align: center; }
+.ui-root .ctlpick .pair { display: flex; gap: 0.5em; }
+.ui-root .ctlpick .pair .btn { flex: 1; }
+.ui-root .tut-ic1 svg { width: 2.4em; height: 2.4em; color: #fff; }
+.ui-root .tut-brake i { display: block; width: 2.4em; height: 2.4em; border-radius: 50%; background: radial-gradient(circle at 35% 28%, #ff8f8f, #e03a3a 60%, #8e1c1c); border: 0.13em solid var(--ink); }
+@media (min-width: 640px) { .ui-root .ctlgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 519px) { .ui-root .ctl-card small { font-size: 0.62em; } .ui-root .ctl-card { padding: 0.35em 0.45em; } }
+@media (max-height: 460px) { .ui-root .pausecard { max-height: 100%; overflow-y: auto; } .ui-root .ctlgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ---------------------------------------------------------------- tutorial + toasts */
+/* tutorial = a semi-transparent BOTTOM SHEET: the start grid and the track stay visible above it.
+   Touch layout keeps clear of the GAS button (bottom-right, 26% of the short side + margin). */
+.ui-root .layer-tutorial { z-index: 6; display: flex; align-items: flex-end; justify-content: center; padding: 0 max(0.7em, var(--sar)) calc(max(0.7em, var(--sab))) max(0.7em, var(--sal)); }
+.ui-root.is-touch .layer-tutorial { padding-bottom: calc(max(0.7em, var(--sab)) + 44vmin); }
+.ui-root.is-touch.sch-new .layer-tutorial { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--tut-pad, 44vmin)); }
+.ui-root .tutorial { width: min(100%, 30em); overflow: visible; padding: 0.55em 0.8em 0.75em; display: flex; flex-direction: column; gap: 0.35em; pointer-events: none; background: rgba(16, 27, 58, 0.78); animation: pop-in 0.3s cubic-bezier(.2, 1.4, .4, 1) both; }
+.ui-root .tutorial .title { font-size: 1.05em; }
+.ui-root .tutorial .btn { pointer-events: auto; align-self: center; min-width: 11em; }
+.ui-root .tut-steps { display: flex; flex-direction: column; gap: 0.4em; }
+.ui-root .tut-step { display: grid; grid-template-columns: 1.4em 5em minmax(0, 1fr); align-items: center; gap: 0.5em; padding: 0.15em 0.4em; background: rgba(0, 0, 0, 0.3); border-radius: 0.8em; }
+.ui-root .tut-step .n { width: 1.6em; height: 1.6em; border-radius: 50%; display: grid; place-items: center; background: var(--yellow); color: var(--ink); font: 900 0.9em/1 var(--display); }
+.ui-root .tut-step p { font-size: 0.82em; line-height: 1.12; }
+.ui-root .tut-ic { height: 2.3em; display: grid; place-items: center; transform-origin: center; }
+.ui-root .tut-ic > * { transform: scale(0.78); }
+.ui-root .tut-gas { position: relative; width: 3em; height: 3em; border-radius: 50%; background: radial-gradient(circle at 35% 28%, #ff9a6a, #ff4d2e 60%, #b81f12); border: 0.13em solid var(--ink); display: grid; place-items: center; }
+.ui-root .tut-gas .ic { width: 1.6em; height: 1.6em; color: #fff; animation: tap 0.9s ease-in-out infinite alternate; }
+@keyframes tap { to { transform: translateY(0.25em) scale(0.92); } }
+.ui-root .tut-steer { display: flex; align-items: center; gap: 0.1em; }
+.ui-root .tut-steer .ic { width: 1.25em; height: 1.25em; color: var(--yellow); }
+.ui-root .tut-steer .ic:nth-child(2) { width: 1.6em; height: 1.6em; color: #fff; animation: slide 1.2s ease-in-out infinite alternate; }
+@keyframes slide { from { transform: translateX(-0.35em); } to { transform: translateX(0.35em); } }
+.ui-root .tut-smash .ic { width: 2.3em; height: 2.3em; color: var(--orange); filter: drop-shadow(0 0.08em 0 var(--ink)); animation: bump 0.8s ease-in-out infinite alternate; }
+.ui-root .keys { display: flex; gap: 0.2em; justify-content: center; }
+.ui-root .keys.sub { margin-top: 0.15em; }
+.ui-root kbd { min-width: 1.6em; height: 1.6em; padding: 0 0.3em; display: inline-grid; place-items: center; font: 900 0.8em/1 var(--display); color: var(--ink); background: linear-gradient(#fff, #d9e0ee); border: 0.14em solid var(--ink); border-radius: 0.35em; box-shadow: 0 0.14em 0 var(--ink); }
+.ui-root kbd.wide { min-width: 4.6em; }
+.ui-root .tut-ic:has(.keys.sub) { height: auto; }
+
+.ui-root .layer-toasts { z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 0.4em; padding-top: calc(max(0.9em, var(--sat)) + 4.6em); }
+.ui-root .toast {
+  max-width: min(92%, 26em); padding: 0.55em 1.1em; border-radius: 1em; text-align: center; line-height: 1.15;
+  background: var(--ink); border: 0.14em solid #fff; box-shadow: 0 0.25em 0 rgba(0, 0, 0, 0.4); font-weight: 900;
+  animation: toast 2.2s ease both;
+}
+@keyframes toast { 0% { opacity: 0; transform: translateY(-0.8em) scale(0.9); } 10% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-0.4em); } }
+
+/* ---------------------------------------------------------------- responsive: wide / landscape / square */
+/* Landscape and desktop: aspect >= 5:4 */
+@media (min-aspect-ratio: 5/4) {
+  /* the left 40% belongs to the logo + buttons; the 3D pedestal is meant to sit in the free right 60% */
+  .ui-root .menu-main { justify-content: center; align-items: flex-start; gap: 1.1em; padding-top: 0; width: min(40%, 30em); }
+  .ui-root .logo { align-items: flex-start; padding-top: 0; }
+  .ui-root .logo-a { font-size: 4.4em; }
+  .ui-root .menu-buttons { align-self: flex-start; width: min(100%, 22em); }
+
+  /* track cards sit in a low band at the bottom: the 3D car on its pedestal (screen centre) stays visible above them */
+  .ui-root .tracks .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: auto; align-content: end; }
+  .ui-root .card.track { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "map info" "map best"; justify-items: stretch; text-align: left; max-height: none; gap: 0.2em 0.8em; padding: 0.6em; }
+  .ui-root .card .map { grid-area: map; width: 6em; height: 6em; align-self: center; }
+  .ui-root .card .info { grid-area: info; align-self: end; }
+  .ui-root .card .best { grid-area: best; align-self: start; flex-direction: row; justify-content: flex-start; gap: 0.6em; }
+  .ui-root .card .meta, .ui-root .card .diff { justify-content: flex-start; }
+  .ui-root .card .bl { align-items: flex-start; text-align: left; }
+  .ui-root .card .mini-medal { width: 2.2em; height: 2.2em; }
+
+  .ui-root .garage {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.1fr) minmax(0, 0.95fr); grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas: "bar bar bar" "colors view ups" "stats view ups";
+  }
+  .ui-root .garage > .bar { grid-area: bar; }
+  .ui-root .g-colors { grid-area: colors; flex-direction: column; align-items: stretch; gap: 0.4em; }
+  .ui-root .g-view { grid-area: view; }
+  .ui-root .g-stats { grid-area: stats; align-self: start; }
+  .ui-root .g-ups { grid-area: ups; align-self: start; }
+  .ui-root .stat { grid-template-columns: 1.3em 5.4em minmax(0, 1fr) 4.2em; }
+
+  .ui-root .rescard { width: min(100%, 44em); grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.3fr); align-items: center; }
+  .ui-root .tut-steps { flex-direction: row; }
+  .ui-root .tut-step { grid-template-columns: 1fr; justify-items: center; text-align: center; flex: 1; position: relative; padding-top: 0.9em; }
+  .ui-root .tut-step .n { position: absolute; top: -0.5em; left: -0.4em; }
+  .ui-root .tutorial { width: min(100%, 40em); }
+  /* landscape / desktop: the hint sheet sits at the TOP under the timer, so it never covers the speed readout or the GAS button;
+     the countdown drops below it while it is up */
+  .ui-root .layer-tutorial, .ui-root.is-touch .layer-tutorial { align-items: flex-start; padding: calc(max(0.7em, var(--sat)) + 5.2em) max(0.7em, var(--sar)) 0 max(0.7em, var(--sal)); }
+  .ui-root.tut-on .countdown { top: 66%; }
+}
+
+/* Short screens (landscape phones): tighten vertical rhythm */
+@media (max-height: 460px) {
+  .ui-root .screen { gap: 0.5em; padding-top: max(0.6em, var(--sat)); padding-bottom: max(0.6em, var(--sab)); }
+  .ui-root .up-desc { display: none; }
+  .ui-root .g-colors .lab { display: none; }
+  .ui-root .up { padding: 0.3em 0; }
+  .ui-root .ph { margin-bottom: 0.3em; }
+  .ui-root .stat { padding: 0.08em 0; }
+  .ui-root .logo-a { font-size: 3.6em; }
+  .ui-root .logo-b span { font-size: 1.7em; }
+  .ui-root .btn.big { min-height: max(3.4em, 44px); }
+  .ui-root .srow { padding: 0.5em 0; }
+  .ui-root .rescard { padding: 0.7em 0.9em; gap: 0.5em; }
+  .ui-root .medal { width: 5.4em; height: 6.5em; }
+  .ui-root .medal.m4 { width: 4.8em; height: 4.8em; }
+  .ui-root .medal-num { font-size: 2.4em; }
+  .ui-root .medal.m4 .medal-num { font-size: 2.1em; }
+  .ui-root .res-ord { font-size: 1.4em; }
+  .ui-root .rr { padding: 0.3em 0.6em; }
+  .ui-root .adbtn { min-height: max(3em, 44px); }
+  .ui-root .pausecard { gap: 0.5em; padding: 0.7em; }
+  .ui-root .btn { min-height: max(2.9em, 44px); }
+  .ui-root .btn.big { min-height: max(3.3em, 44px); }
+  /* landscape phone: one row (steps + button) so the sheet stays under 30% of the height */
+  .ui-root .tutorial { padding: 0.5em 0.7em; gap: 0.6em; flex-direction: row; align-items: center; width: min(100%, 44em); }
+  .ui-root .tutorial .title { display: none; }
+  .ui-root .tutorial .tut-steps { flex: 1; min-width: 0; margin-top: 0; }
+  .ui-root .tutorial .btn { min-width: 7em; margin-top: 0; }
+  .ui-root .tutorial .btn span { white-space: nowrap; }
+  .ui-root .tut-ic { height: 2.2em; }
+  .ui-root .countdown { font-size: 6em; }
+  .ui-root .layer-toasts { padding-top: calc(max(0.6em, var(--sat)) + 4.2em); }
+}
+
+/* Phones (portrait width < 520 px, or landscape height <= 460 px): the tutorial sheet stays under 30% of the height */
+@media (max-width: 519px), (max-height: 460px) {
+  .ui-root .tutorial { max-height: 30vh; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
+  .ui-root .tutorial .title { display: none; }
+  .ui-root .tut-steps { gap: 0.25em; }
+  .ui-root .tut-step { grid-template-columns: 1.4em 3.6em minmax(0, 1fr); padding: 0.1em 0.4em; }
+  .ui-root .tut-ic { height: 1.8em; }
+  .ui-root .tut-ic > * { transform: scale(0.62); }
+  .ui-root .tutorial .btn { padding-top: 0.35em; padding-bottom: 0.35em; }
+}
+/* Square / tablet-portrait touch windows with the button schemes: the buttons fill the bottom, so the compact hint sheet sits at the top */
+@media (min-width: 520px) and (max-aspect-ratio: 5/4) {
+  .ui-root.is-touch.sch-new .layer-tutorial { justify-content: center; align-items: flex-start; padding: calc(max(0.7em, var(--sat)) + 7.6em) max(0.7em, var(--sar)) 0 max(0.7em, var(--sal)); }
+  .ui-root.is-touch.sch-new.tut-on .countdown { top: 62%; }
+  .ui-root.is-touch.sch-new .tutorial { width: min(100%, 36em); max-width: none; gap: 0.25em; padding: 0.4em 0.6em 0.5em; }
+  .ui-root.is-touch.sch-new .tutorial .title { display: none; }
+  .ui-root.is-touch.sch-new .tut-steps { gap: 0.25em; }
+  .ui-root.is-touch.sch-new .tut-step { grid-template-columns: 1.4em 3.6em minmax(0, 1fr); padding: 0.1em 0.4em; }
+  .ui-root.is-touch.sch-new .tut-ic { height: 1.8em; }
+  .ui-root.is-touch.sch-new .tut-ic > * { transform: scale(0.62); }
+  .ui-root.is-touch.sch-new .tutorial .btn { padding-top: 0.35em; padding-bottom: 0.35em; }
+}
+/* Square / tablet-portrait windows: the sheet sits bottom-left, beside the GAS button instead of above it */
+@media (max-aspect-ratio: 5/4) and (min-width: 520px) {
+  .ui-root .layer-tutorial { justify-content: flex-start; }
+  .ui-root.is-touch .layer-tutorial { padding-bottom: max(0.7em, var(--sab)); padding-right: calc(30vmin + 1.5em); }
+  .ui-root .tutorial { width: 100%; max-width: 32em; }
+}
+
+/* Near-square windows: portrait structure, but trim heights */
+@media (max-aspect-ratio: 5/4) and (max-height: 700px) {
+  .ui-root .up-desc { display: none; }
+  .ui-root .logo-a { font-size: 3.8em; }
+  .ui-root .stat { padding: 0.08em 0; }
+  .ui-root .g-view { min-height: 3em; }
+  .ui-root .tracks .cards { gap: 0.5em; }
+  .ui-root .card .map { width: 5em; height: 5em; }
+  .ui-root .medal { width: 5.6em; height: 6.8em; }
+  .ui-root .medal.m4 { width: 5em; height: 5em; }
+  .ui-root .medal-num { font-size: 2.5em; }
+  .ui-root .medal.m4 .medal-num { font-size: 2.2em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-root *, .ui-root *::before, .ui-root *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+}
+
+/* Narrow screens (portrait phones): keep the HUD top row from colliding */
+@media (max-width: 520px) {
+  .ui-root .timer { font-size: 1.55em; min-width: 4.8em; }
+  .ui-root .laps { gap: 0.6em; font-size: 0.8em; }
+  .ui-root .pos { padding: 0.15em 0.5em 0.2em; }
+  .ui-root .pos .pn { font-size: 2.1em; }
+  .ui-root .lapbox { padding: 0.15em 0.5em 0.2em; }
+  .ui-root .lapbox .lapn { font-size: 1.3em; }
+  .ui-root .hud .chip.money { font-size: 0.9em; padding: 0.2em 0.6em; }
+}
+@media (min-aspect-ratio: 5/4) {
+  .ui-root .tut-steps { margin-top: 0.5em; }
+  .ui-root .tutorial .btn { margin-top: 0.2em; }
+}
+
+/* ---------------------------------------------------------------- power-ups: item slot + boost speed lines */
+.ui-root .hud-item { display: flex; flex-direction: column; align-items: center; gap: 0.25em; pointer-events: none;
+  right: max(0.8em, var(--sar)); bottom: max(0.8em, var(--sab)); --isz: max(4.3em, 56px); }
+.ui-root .hud-item[hidden] { display: none; }
+.ui-root.is-touch .hud-item {
+  /* straight above the GAS button (GAS = 26vmin, gap = 4vmin; see InputController.layout) */
+  --isz: max(15vmin, 56px);
+  right: calc(4vmin + (26vmin - var(--isz)) / 2 + env(safe-area-inset-right, 0px));
+  bottom: calc(4vmin + 26vmin + 3.2vmin + env(safe-area-inset-bottom, 0px));
+}
+.ui-root .item-slot {
+  position: relative; width: var(--isz); height: var(--isz); border-radius: 50%; padding: 0; margin: 0; cursor: pointer; pointer-events: auto;
+  appearance: none; -webkit-appearance: none; touch-action: manipulation; color: #fff; border: 0.18em solid var(--ink);
+  background: radial-gradient(circle at 35% 28%, var(--ic1, #bfc8da), var(--ic2, #7d8ba6) 60%, var(--ic3, #4d5a76));
+  box-shadow: 0 0.3em 0 var(--ink), inset 0 0.2em 0 rgba(255, 255, 255, 0.4);
+  display: grid; place-items: center; overflow: visible; transition: transform 0.06s, filter 0.1s;
+}
+.ui-root .item-slot:active { transform: scale(0.94) translateY(0.1em); filter: brightness(1.15); }
+.ui-root .hud-item.empty .item-slot { background: rgba(16, 27, 58, 0.55); border-style: dashed; border-color: rgba(255, 255, 255, 0.45); box-shadow: none; pointer-events: none; }
+.ui-root .hud-item.empty.running .item-slot { background: radial-gradient(circle at 35% 28%, var(--ic1), var(--ic2) 60%, var(--ic3)); border-style: solid; border-color: var(--ink); opacity: 0.8; }
+.ui-root .item-ic { display: grid; place-items: center; width: 62%; height: 62%; filter: drop-shadow(0 0.08em 0 rgba(0, 0, 0, 0.35)); }
+.ui-root .item-ic .ic { width: 100%; height: 100%; }
+.ui-root .item-key {
+  position: absolute; right: -0.15em; bottom: -0.15em; min-width: 1.5em; padding: 0.1em 0.35em 0.15em; border-radius: 0.5em; text-align: center;
+  background: var(--panel); border: 0.12em solid var(--ink); font: 900 italic 0.8em/1 var(--display); color: #fff; letter-spacing: 0.02em;
+}
+.ui-root.is-touch .item-key { display: none; }
+.ui-root .item-bar { position: absolute; left: 12%; right: 12%; bottom: -0.55em; height: 0.35em; border-radius: 0.2em; background: #fff; border: 0.08em solid var(--ink);
+  transform-origin: 0 50%; transform: scaleX(0); transition: transform 0.12s linear; }
+.ui-root .item-name { margin-top: 0.4em; font: 900 italic 0.8em/1 var(--display); text-transform: uppercase; color: #fff; -webkit-text-stroke: 0.1em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.08em 0 var(--ink); white-space: nowrap; }
+.ui-root .hud-item.got .item-slot { animation: item-got 0.5s cubic-bezier(.2, 1.5, .4, 1) both; }
+@keyframes item-got { 0% { transform: scale(0.3) rotate(-25deg); } 100% { transform: scale(1) rotate(0); } }
+.ui-root .hud-item[data-item="nitro"] { --ic1: #ffd27a; --ic2: #ff8a1f; --ic3: #b8420b; }
+.ui-root .hud-item[data-item="shield"] { --ic1: #9fd0ff; --ic2: #3d86f0; --ic3: #1c4aa8; }
+.ui-root .hud-item[data-item="repair"] { --ic1: #9bf0b0; --ic2: #2fc25b; --ic3: #167a37; }
+.ui-root .hud-item[data-item="oil"] { --ic1: #9a8fb8; --ic2: #4b4468; --ic3: #1f1a33; }
+.ui-root .hud-item[data-item="shockwave"] { --ic1: #e1a8ff; --ic2: #a24df0; --ic3: #5f1fa8; }
+.ui-root .hud-item.running .item-slot { animation: item-run 0.5s ease-in-out infinite alternate; }
+@keyframes item-run { to { filter: brightness(1.3); } }
+/* speed lines: converge on the car while a pad / nitro boost runs (pure CSS, no per-frame work) */
+.ui-root .speedlines {
+  inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.18s ease-out; will-change: opacity;
+  background: repeating-conic-gradient(from 3deg at 50% 52%, rgba(255, 255, 255, 0.55) 0deg 0.7deg, transparent 0.7deg 7.3deg);
+  -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 38%, #000 100%);
+  mask-image: radial-gradient(ellipse 62% 58% at 50% 52%, transparent 38%, #000 100%);
+}
+.ui-root .speedlines.on { opacity: 0.5; animation: sl-flicker 0.14s steps(2) infinite; }
+@keyframes sl-flicker { 0% { transform: rotate(0deg) scale(1.02); } 100% { transform: rotate(1.6deg) scale(1.05); } }
+@media (prefers-reduced-motion: reduce) { .ui-root .speedlines.on { animation: none; opacity: 0.4; } }
+
+/* ---------------------------------------------------------------- audit #5 / #12 / #21 / #1: feedback, repair hold, save banner */
+.ui-root .lappill, .ui-root .finishban, .ui-root .smashfloat { left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; white-space: nowrap; }
+.ui-root .lappill[hidden], .ui-root .finishban[hidden], .ui-root .smashfloat[hidden] { display: none; }
+.ui-root .lappill {
+  top: 21%; display: flex; align-items: baseline; gap: 0.6em; padding: 0.3em 0.9em 0.35em; border-radius: 1em;
+  background: var(--panel); border: 0.16em solid var(--ink); box-shadow: 0 0.25em 0 rgba(0, 0, 0, 0.35); font-weight: 900;
+}
+.ui-root .lappill span { font: 900 italic 1em/1 var(--display); letter-spacing: 0.04em; }
+.ui-root .lappill small { opacity: 0.7; font-size: 0.8em; }
+.ui-root .lappill b { font: 900 italic 1.6em/1 var(--display); font-variant-numeric: tabular-nums; }
+.ui-root .lappill i { font-style: normal; font-size: 1.05em; font-variant-numeric: tabular-nums; color: var(--green); }
+.ui-root .lappill[data-state="slow"] i { color: #ff8a7a; }
+.ui-root .lappill[data-state="best"] { background: #6b2fd6; border-color: #fff; }
+.ui-root .lappill[data-state="best"] i { color: #fff; }
+.ui-root .lappill.pop, .ui-root .finishban.pop, .ui-root .smashfloat.pop { animation: pill-pop 0.35s cubic-bezier(.2, 1.5, .4, 1) both; }
+@keyframes pill-pop { from { opacity: 0; transform: translateX(-50%) scale(0.7); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+.ui-root .finishban { top: 30%; display: flex; flex-direction: column; align-items: center; gap: 0.15em; }
+.ui-root .finishban b { font: 900 italic 4.4em/1 var(--display); color: #fff; -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink), 0 0.12em 0 var(--orange-d); }
+.ui-root .finishban span { font: 900 italic 1.7em/1 var(--display); padding: 0.15em 0.7em 0.2em; border-radius: 0.8em; background: var(--panel); border: 0.12em solid var(--ink); font-variant-numeric: tabular-nums; }
+.ui-root .finishban[data-pos="1"] span { color: #ffd34d; }
+.ui-root .smashfloat { top: 60%; display: flex; flex-direction: column; align-items: center; opacity: 0.95; }
+.ui-root .smashfloat b { font: 900 italic 2.4em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill; text-shadow: 0 0.06em 0 var(--ink); }
+.ui-root .smashfloat small { font: 900 0.8em/1 var(--body); letter-spacing: 0.14em; color: #fff; text-shadow: 0 0.1em 0 var(--ink); }
+
+/* repair chip = a hold; the hint says what to do */
+.ui-root .cardmg .rep { position: relative; overflow: hidden; touch-action: none; user-select: none; }
+.ui-root .cardmg .rbar { position: absolute; left: 0; bottom: 0; height: 0.3em; width: calc(var(--rp, 0) * 100%); background: var(--green); border-radius: 0 0.2em 0.2em 0; }
+.ui-root .cardmg[data-mode="stop"] .rep, .ui-root .cardmg[data-mode="cd"] .rep { background: #c7c1a3; }
+.ui-root .cardmg[data-mode="poor"] .rep { background: #9a9a9a; }
+.ui-root .cardmg[data-mode="go"] .rep { animation: rep-pulse 1.1s ease-in-out infinite alternate; }
+.ui-root .cardmg.holding .rep { animation: none; background: #ffe27a; }
+@keyframes rep-pulse { to { transform: scale(1.06); } }
+
+/* progress could not be loaded */
+.ui-root .savewarn {
+  display: flex; align-items: center; gap: 0.7em; margin: 0 auto; max-width: min(100%, 30em); padding: 0.5em 0.8em; border-radius: 0.9em;
+  background: rgba(120, 28, 20, 0.92); border: 0.14em solid #fff; font-weight: 800; font-size: 0.85em; line-height: 1.2; z-index: 3;
+}
+.ui-root .savewarn .btn { flex: none; min-height: 44px; padding: 0.4em 0.9em; }
+
+/* results: breakdown rows and the three actions */
+.ui-root .rr.sub { padding-top: 0.28em; padding-bottom: 0.28em; background: rgba(0, 0, 0, 0.25); font-size: 0.95em; }
+.ui-root .res-pair { margin-top: 0.1em; }
+.ui-root .res-pair > .btn:only-child { grid-column: 1 / -1; }
+@media (max-height: 460px) {
+  .ui-root .rr.sub { padding-top: 0.15em; padding-bottom: 0.15em; font-size: 0.88em; }
+  .ui-root .finishban b { font-size: 3em; }
+  .ui-root .lappill { top: 20%; }
+}
