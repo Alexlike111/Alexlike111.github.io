@@ -48,6 +48,8 @@ export class Sim implements ISim {
   /** smashes since the last `takeSmashes()` (HUD "+N" float) */
   private smashPending = 0;
   private smashPendingCount = 0;
+  /** where and for how much each of those smashes happened (HUD floats at the object) */
+  private smashPendingItems: { x: number; y: number; money: number }[] = [];
   /** How many times a stuck AI car was put back on the road (should stay 0 in normal races). */
   respawns = 0;
   readonly physics: PhysicsWorld;
@@ -473,14 +475,15 @@ export class Sim implements ISim {
         const pay = smashValue(e.kind, e.propType);
         if (pay > 0) { this.smashMoney += pay; this.smashPending += pay; }
         this.smashPendingCount++;
+        this.smashPendingItems.push({ x: e.x, y: e.y, money: pay });
       }
     }
   }
 
   /** HUD: money and piece count smashed by the player since the last call. */
-  takeSmashes(): { money: number; count: number } {
-    const r = { money: this.smashPending, count: this.smashPendingCount };
-    this.smashPending = 0; this.smashPendingCount = 0;
+  takeSmashes(): { money: number; count: number; items: { x: number; y: number; money: number }[] } {
+    const r = { money: this.smashPending, count: this.smashPendingCount, items: this.smashPendingItems };
+    this.smashPending = 0; this.smashPendingCount = 0; this.smashPendingItems = [];
     return r;
   }
 

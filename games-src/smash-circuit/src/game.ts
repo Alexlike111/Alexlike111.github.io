@@ -19,6 +19,7 @@ import * as carModel from './sim/carModel';
 import { Sim } from './sim/sim';
 import { trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, TrackDef, UpgradeBranch } from './types';
+import { HudExtras } from './ui/hud';
 import { UI, type UiHandlers } from './ui/ui';
 import { driverName, goalText, type PodiumData } from './ui/career';
 
@@ -34,6 +35,8 @@ declare global {
       readonly save: SaveData;
       /** HUD/UI instance (e2e screenshots of lap pill / finish banner) */
       readonly ui: UI;
+      /** in-race HUD extras: minimap, gaps, combo (e2e screenshots) */
+      readonly hud: HudExtras;
       readonly timeScale: number;
       startRace(trackId: string): void;
       setTimeScale(n: number): void;
@@ -55,6 +58,7 @@ export class Game {
   private save: SaveData = defaultSave();
   private renderer!: GameRenderer;
   private ui!: UI;
+  private hx!: HudExtras;
   private input!: InputController;
   private audio!: AudioManager;
 
@@ -129,6 +133,7 @@ export class Game {
       this.renderer.setReducedMotion(reduced);
     } catch { /* no matchMedia: full effects */ }
     this.ui = new UI(uiRoot, this.handlers());
+    this.hx = new HudExtras(this.ui.hudRoot());
     this.input = new InputController(uiRoot);
     this.applyControls();
     this.input.setLabels(t('input.brake'));
@@ -254,6 +259,7 @@ export class Game {
     this.results = null;
     this.tutorialOn = false;
     this.repairIntent = 'none';
+    this.hx?.stop();
     this.input?.setEnabled(false);
     this.closeLevel('failed');
     this.renderer.showMenuScene(this.save.carColor, this.save.car);
@@ -310,6 +316,7 @@ export class Game {
     this.ui.setTouchMode(this.input.touchActive);
     this.ui.showHud(this.save.money);
     this.ui.resetRaceFeedback();
+    this.hx.start(sim);
     this.bestLapRef = this.save.bestLap[def.id] ?? 0;
     this.repairIntent = 'none'; this.repairProgress = 0; this.repairsUsed = 0; this.lastRepairAt = -999;
     // first run: a hint sheet that never blocks the start (countdown runs; hides at the first input or GO + N s)
@@ -612,7 +619,7 @@ export class Game {
     const bestLap = p.bestLapTime;
     const newBestLap = bestLap > 0 && (!prevBest || bestLap < prevBest);
     const drift = driftCoins(p.driftScore ?? 0);
-    const parts = raceRewardParts(this.trackId, info.place, sim.smashMoney);
+    const parts = raceRewardParts(this.trackId, info.place, sim.smashMoney + this.hx.bonusMoney);   // combo multipliers + takedowns share the smash cap
     const reward = parts.total + drift;
     const res = applyRaceResult(this.save, this.trackId, info.place, reward, bestLap);
     this.save = res.save;
@@ -632,7 +639,7 @@ export class Game {
       place: info.place, time: info.time, bestLap, reward,
       canDouble: platform.isRewardedSupported() && reward > 0,
       unlocked: res.unlocked, newBestLap, drift,
-      prize: parts.prize, smash: parts.smash, smashCount: sim.brokenByPlayer,
+      prize: parts.prize, smash: parts.smash, smashCount: sim.brokenByPlayer, combo: this.hx.bestChain, slams: this.hx.takedownCount,
       nextTrack: careerRes ? null : (() => { const n = nextTrackId(this.trackId); return n && this.save.unlockedTracks.includes(n) ? n : null; })(),
       career: careerRes ?? undefined,
     };
@@ -726,7 +733,7 @@ export class Game {
           this.ui.hideTutorial();
         }
         const sm = sim.takeSmashes();
-        if (sm.money > 0) this.ui.smashFloat(sm.money);
+        if (this.hx.frame(sim, events, dt, sm.items, (x, y) => this.renderer.worldToScreen(x, y)) > 0) this.audio.ui('buy');
         this.audio.onEvents(events, 0);
       }
       this.renderer.frame(sim, events, live ? dt : 0);
@@ -824,6 +831,7 @@ export class Game {
       get sim() { return g.sim; },
       get save() { return g.save; },
       get ui() { return g.ui; },
+      get hud() { return g.hx; },
       get input() { return g.input; },
       setSettings: (s) => { g.setSettings(s); g.ui.setSettings(g.save.settings); },
       get timeScale() { return g.timeScale; },

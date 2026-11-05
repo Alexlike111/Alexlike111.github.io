@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'e2e', 'out', 'player');
 mkdirSync(OUT, { recursive: true });
-const PORT = 4400 + Math.floor(Math.random() * 400);
+const PORT = 21000 + Math.floor(Math.random() * 8000);
 const version = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 
 const results = [];
@@ -522,6 +522,77 @@ try {
       const c2 = await page.evaluate(() => window.__game.save.settings.controls);
       check('[phone] pause menu switches the control scheme', c2 === 'tap', c2);
     }
+    await ctx.close();
+  }
+
+  // ---- HUD extras (minimap, gap chips, combo): never overlap the touch controls, in any scheme, portrait or landscape
+  for (const [w, h] of [[390, 844], [360, 640], [844, 390], [667, 375], [915, 412]]) {
+    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-hud-${w}x${h}`);
+    await page.evaluate(() => { try { Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { value: async () => 'granted', configurable: true }); } catch { /* ignore */ } });
+    await sleep(600);
+    const bad = [];
+    let mapOk = true, mapDetail = '';
+    for (const scheme of ['buttons', 'slide', 'joystick', 'tilt', 'tap']) {
+      await setControls(page, scheme);
+      await page.evaluate(() => { window.__game.sim.cars[0].item = 'nitro'; window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 30, gamma: 0, absolute: false })); });
+      await sleep(450);
+      const r = await page.evaluate(() => {
+        const q = (s) => { const e = document.querySelector(s); if (!e || e.hidden) return null; const b = e.getBoundingClientRect(); return b.width && getComputedStyle(e).visibility !== 'hidden' ? { l: b.left, t: b.top, r: b.right, b: b.bottom } : null; };
+        const map = document.querySelector('.hx-map');
+        const m = q('.hx-map');
+        const cx = m ? (m.l + m.r) / 2 : 0, cy = m ? (m.t + m.b) / 2 : 0;
+        return {
+          scheme: window.__game.save.settings.controls, W: innerWidth, H: innerHeight, map: m, gaps: q('.hx-gaps'),
+          others: { steerL: q('.steer-btn.left'), steerR: q('.steer-btn.right'), brake: q('.brake-btn'), stick: q('.stick'), item: q('.item-slot'), tilt: q('.tilt-ind'), speed: q('.speed'), driftm: q('.driftm'), pause: q('[data-act=pauseBtn]'), money: q('.chip.money'), timer: q('.timer') },
+          passThrough: map ? getComputedStyle(map).pointerEvents === 'none' && document.elementFromPoint(cx, cy) !== map && !map.contains(document.elementFromPoint(cx, cy)) : false,
+        };
+      });
+      const hit = (a, b) => a && b && !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
+      if (!r.map) { mapOk = false; mapDetail = `no map in ${scheme}`; continue; }
+      if (r.map.l < 0 || r.map.r > r.W || r.map.t < 0 || r.map.b > r.H) { mapOk = false; mapDetail = `${scheme}: map outside the screen`; }
+      if (!r.passThrough) { mapOk = false; mapDetail = `${scheme}: map takes touches`; }
+      for (const [k, v] of Object.entries(r.others)) {
+        if (hit(r.map, v)) bad.push(`${scheme}:map x ${k}`);
+        if (r.gaps && hit(r.gaps, v)) bad.push(`${scheme}:gaps x ${k}`);
+      }
+      if (r.scheme !== scheme && scheme !== 'tilt') bad.push(`scheme ${scheme} did not apply (${r.scheme})`);
+    }
+    check(`[phone-hud ${w}x${h}] minimap + gap chips overlap no control, button, readout or the stick in any scheme, and never take touches`, mapOk && !bad.length, `${mapDetail} ${bad.join(', ')}`);
+    await setControls(page, 'buttons');
+    await sleep(300);
+    await page.screenshot({ path: path.join(OUT, `phone-hud-${w}x${h}.png`) });
+    check(`[phone-hud ${w}x${h}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
+    await ctx.close();
+  }
+
+  // ---- HUD extras: the minimap draws, gap chips show, a quick smash chain shows the combo and its bonus, then it fades
+  {
+    const { ctx, page, errors } = await openRace(PHONE, 'phone-hudfx');
+    await waitSim(page, 1.5);
+    const mm = await page.evaluate(() => {
+      const c = document.querySelector('.hx-map canvas'); const g = c.getContext('2d');
+      const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+      return { w: c.width, n, frac: n / (c.width * c.height) };
+    });
+    check('[phone-hudfx] the minimap canvas has the track and cars drawn', mm.w >= 100 && mm.frac > 0.02, JSON.stringify(mm));
+    const gaps = await page.evaluate(() => { const e = document.querySelector('.hx-gaps'); return { shown: !!e && !e.hidden, txt: e ? e.textContent : '' }; });
+    check('[phone-hudfx] gap chips show the car ahead / behind with a time', gaps.shown && /[0-9]\.[0-9]/.test(gaps.txt), gaps.txt);
+    const combo = await page.evaluate(async () => {
+      const g = window.__game, sim = g.sim, p = sim.cars[0];
+      const items = [0, 1, 2, 3].map((i) => ({ x: p.x + 4 + i * 2, y: p.y, money: 6 }));
+      const before = g.hud.bonusMoney;
+      g.hud.frame(sim, [], 0.016, items, null);
+      const el = document.querySelector('.hx-combo');
+      const out = { shown: !!el && !el.hidden, txt: el ? el.textContent : '', bonus: g.hud.bonusMoney - before, floats: [...document.querySelectorAll('.hx-float')].filter((f) => !f.hidden).length, best: g.hud.bestChain };
+      return out;
+    });
+    check('[phone-hudfx] four quick smashes show "x2.5 COMBO" and bank a coin bonus', combo.shown && /x2\.5/.test(combo.txt) && combo.bonus > 0 && combo.floats >= 4 && combo.best >= 4, JSON.stringify(combo));
+    await page.screenshot({ path: path.join(OUT, 'phone-hudfx-combo.png') });
+    await waitSim(page, 1.8);
+    await sleep(1200);
+    const gone = await page.evaluate(() => { const el = document.querySelector('.hx-combo'); return !el || el.hidden; });
+    check('[phone-hudfx] the combo banner goes away once the chain ends', gone);
+    check('[phone-hudfx] no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();
   }
 } catch (e) {

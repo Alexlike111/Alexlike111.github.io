@@ -43,6 +43,11 @@ vi.mock('../src/render', () => ({
   GameRenderer: class { fps = 60; loadRace() {} frame() {} showMenuScene() {} setQuality() {} setCameraRotating() {} },
 }));
 
+// the in-race HUD extras (minimap, combo, gaps) build real DOM / canvas elements: stubbed here (see tests/hudLogic.test.ts)
+vi.mock('../src/ui/hud', () => ({
+  HudExtras: class { bonusMoney = 0; bestChain = 0; takedownCount = 0; start() {} stop() {} frame() { return 0; } },
+}));
+
 vi.mock('../src/audio/audio', () => ({
   AudioManager: class { setPaused() {} setGameplayPaused() {} setMuted() {} update() {} onEvents() {} ui() {} },
 }));

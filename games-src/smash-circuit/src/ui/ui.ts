@@ -57,6 +57,8 @@ export interface ResultsData {
   drift?: number;
   /** place prize / smash money (pieces broken by type) / number of pieces; `reward` is their sum plus drift */
   prize?: number; smash?: number; smashCount?: number;
+  /** longest chain of quick smashes (x combo) and rivals wrecked, shown as extra rows when > 0 */
+  combo?: number; slams?: number;
   /** next track id when it is unlocked */
   nextTrack?: string | null;
   /** career race: cup block (points, standing, star goals, extra coins) */
@@ -228,6 +230,9 @@ export class UI {
     this.overlayRender = draw;
     draw();
   }
+
+  /** The `.hud` element: the in-race HUD extras (minimap, gaps, combo; src/ui/hud.ts) attach to it. */
+  hudRoot(): HTMLElement { return this.layers.hud.querySelector('.hud') as HTMLElement; }
 
   /** Money shown in the HUD chip. */
   setMoney(m: number): void { this.money = m; this.updateMoneyChip(); }
@@ -1036,6 +1041,8 @@ export class UI {
           <div class="rr"><span>${icon('bolt')}${esc(t('results.bestLap'))}</span><b>${fmtTime(r.bestLap)}${r.newBestLap ? `<em>${esc(t('results.newBest'))}</em>` : ''}</b></div>
           ${r.prize !== undefined ? `<div class="rr sub"><span>${icon('flag')}${esc(t('results.prize'))}</span><b>+${fmtMoney(r.prize)}</b></div>` : ''}
           ${r.smash ? `<div class="rr sub"><span>${icon('crash')}${esc(t('results.smash', { n: r.smashCount ?? 0 }))}</span><b>+${fmtMoney(r.smash)}</b></div>` : ''}
+          ${r.combo && r.combo >= 2 ? `<div class="rr sub"><span>${icon('crash')}${esc(t('results.combo'))}</span><b>x${r.combo}</b></div>` : ''}
+          ${r.slams ? `<div class="rr sub"><span>${icon('crash')}${esc(t('results.slams'))}</span><b>${r.slams}</b></div>` : ''}
           ${r.drift ? `<div class="rr sub"><span>${icon('bolt')}${esc(t('results.drift'))}</span><b>+${fmtMoney(r.drift)}</b></div>` : ''}
           <div class="rr reward${st.doubled ? ' dbl' : ''}"><span>${icon('coin')}${esc(t('results.reward'))}</span><b>+${fmtMoney(reward)}${st.doubled ? `<em>x${mult}</em>` : ''}</b></div>
         </div>
