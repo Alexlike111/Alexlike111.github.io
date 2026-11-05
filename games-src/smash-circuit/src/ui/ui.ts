@@ -11,6 +11,8 @@ import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icon
 import { carGrid, carSvg, garageHtml, rivalLabel, rivalsSheetHtml, RIVAL_MODES, type GarageTab } from './garage';
 import { CONTROL_SCHEMES, controlsOr, sensOr, type ControlScheme } from '../input/schemes';
 import { CAR_IDS, carIdOr, levelsOf, rivalModeOr } from '../meta/cars';
+import { cupById, cupLock, cupIndex, runActive } from '../meta/career';
+import { careerHubHtml, careerMenuInfo, careerResultsHtml, cupPageHtml, podiumHtml, type CareerResultsData, type PodiumData } from './career';
 
 export interface UiHandlers {
   start(trackId: string): void;
@@ -29,6 +31,8 @@ export interface UiHandlers {
   nextTrack?(id: string): void;
   /** Menu banner: reload the progress now. */
   retrySave?(): void;
+  /** Career: start the next race of the cup / restart the cup / results "next" / podium "continue". */
+  career?(act: 'go' | 'restart' | 'next' | 'done', cupId?: string): void;
   /** Use the held power-up item (HUD item button). */
   useItem?(): void;
   /** Buy the next level of `b` for car `carId` (upgrades are per car). */
@@ -55,6 +59,8 @@ export interface ResultsData {
   prize?: number; smash?: number; smashCount?: number;
   /** next track id when it is unlocked */
   nextTrack?: string | null;
+  /** career race: cup block (points, standing, star goals, extra coins) */
+  career?: CareerResultsData;
 }
 
 const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
@@ -119,6 +125,8 @@ export class UI {
   /** garage: car being looked at and the open tab */
   private gCar = '';
   private gTab: GarageTab = 'car';
+  /** career: cup page being viewed */
+  private cupId = '';
 
   // HUD cache
   private hud: {
@@ -229,6 +237,19 @@ export class UI {
     this.enter('garage', s, () => this.renderGarage());
   }
   showTrackSelect(s: SaveData): void { this.enter('tracks', s, () => this.renderTracks()); }
+  /** Career: cup list, one cup (next-race briefing + standings) and the cup podium. */
+  showCareer(s: SaveData): void { this.enter('career', s, () => this.setScreen('career', careerHubHtml(this.save ?? s, this.header('career.title')))); }
+  showCup(s: SaveData, cupId: string): void {
+    this.cupId = cupId;
+    this.enter('cup', s, () => this.setScreen('cupscr', cupPageHtml(this.save ?? s, this.cupId, this.header(cupById(this.cupId)?.nameKey ?? 'career.title'), (id) => this.trackMap(id), (id) => t(TRACKS.find((x) => x.id === id)?.nameKey ?? 'track.t1'))));
+  }
+  showPodium(s: SaveData, data: PodiumData): void { this.enter('podium', s, () => this.setScreen('podium', podiumHtml(data))); }
+  private trackMap(id: string): string {
+    const v = getTrackViews().find((x) => x.id === id);
+    if (!v) return '';
+    const side = Number(v.vb.split(' ')[2]);
+    return `<svg viewBox="${v.vb}" aria-hidden="true"><path d="${v.d}" fill="none" stroke="#14213d" stroke-width="${(side * 0.085).toFixed(1)}" stroke-linejoin="round" stroke-linecap="round"/><path d="${v.d}" fill="none" stroke="${(THEMES[v.theme] ?? THEMES.meadow).road}" stroke-width="${(side * 0.05).toFixed(1)}" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${v.start[0].toFixed(1)}" cy="${v.start[1].toFixed(1)}" r="${(side * 0.055).toFixed(1)}" fill="#ff5a36" stroke="#14213d" stroke-width="${(side * 0.02).toFixed(1)}"/></svg>`;
+  }
   showSettings(s: SaveData): void { this.enter('settings', s, () => this.renderSettings()); }
 
   showHud(money?: number): void {
@@ -596,8 +617,35 @@ export class UI {
         this.sfx('click');
         // leaving the garage while looking at another car: the turntable goes back to the car you drive
         if (save && this.current?.name === 'garage' && this.gCar && this.gCar !== carIdOr(save.car)) this.h.previewCar?.(carIdOr(save.car));
-        if (save) this.showMainMenu(save);
+        if (save && this.current?.name === 'cup') this.showCareer(save);
+        else if (save) this.showMainMenu(save);
         break;
+      case 'career': this.sfx('click'); if (save) this.showCareer(save); break;
+      case 'cCup': {
+        const id = el.dataset.id ?? '';
+        const i = cupIndex(id);
+        if (!save || i < 0) break;
+        const lock = cupLock(save.career, i);
+        if (!lock.unlocked) {
+          this.sfx('error');
+          this.toast(t('career.lockedToast', { need: [lock.missingStars > 0 ? t('career.lockStars', { n: lock.missingStars }) : '', lock.needPrev ? t('career.lockPrev') : ''].filter(Boolean).join(' \u00b7 ') }));
+          break;
+        }
+        this.sfx('click');
+        this.showCup(save, id);
+        break;
+      }
+      case 'cGo': {
+        // starting a cup while another cup run is in progress ends that run: ask for a second tap
+        const run = save?.career.run;
+        const other = !!run && run.cup !== this.cupId && runActive(save!.career, run.cup);
+        if (other) this.confirm('cGo', el, () => this.h.career?.('go', this.cupId));
+        else { this.sfx('click'); this.h.career?.('go', this.cupId); }
+        break;
+      }
+      case 'cRestart': this.sfx('click'); this.h.career?.('restart', this.cupId); break;
+      case 'cNext': this.sfx('click'); this.h.career?.('next'); break;
+      case 'cDone': this.sfx('click'); this.h.career?.('done'); break;
       case 'track': {
         const id = el.dataset.id!;
         if (el.classList.contains('locked')) { this.sfx('error'); this.toast(t('track.lockedHint', { track: t(this.prevTrackKey(id)) })); break; }
@@ -789,8 +837,10 @@ export class UI {
 
   private renderMenu(): void {
     const money = this.save?.money ?? 0;
+    const ci = this.save ? careerMenuInfo(this.save) : null;
+    const sub = ci ? (ci.fresh ? t('menu.career.new') : t('menu.career.sub', { cup: ci.cup, n: ci.stars })) : '';
     this.setScreen('menu', `
-      <div class="menu-top"><div class="chip">${this.coin(money)}</div></div>
+      <div class="menu-top"><button class="btn round grey" data-act="settings" aria-label="${esc(t('menu.settings'))}">${icon('gear')}</button><div class="chip">${this.coin(money)}</div></div>
       ${this.saveWarn ? `<div class="savewarn" role="alert"><span>${esc(t('save.warn'))}</span><button class="btn grey sm" data-act="retrySave">${esc(t('save.retry'))}</button></div>` : ''}
       <div class="menu-main">
         <div class="logo" role="img" aria-label="${esc(CONFIG.title)}">
@@ -799,10 +849,10 @@ export class UI {
           <div class="logo-tag">${esc(t('menu.tagline'))}</div>
         </div>
         <div class="menu-buttons">
-          <button class="btn big orange" data-act="play">${icon('play')}<span>${esc(t('menu.play'))}</span></button>
+          <button class="btn big orange career-btn" data-act="career">${icon('trophy')}<span class="cb-t"><b>${esc(t('menu.career'))}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></button>
           <div class="pair">
+            <button class="btn green" data-act="play">${icon('play')}<span>${esc(t('menu.quick'))}</span></button>
             <button class="btn blue" data-act="garage">${icon('wrench')}<span>${esc(t('menu.garage'))}</span></button>
-            <button class="btn grey" data-act="settings">${icon('gear')}<span>${esc(t('menu.settings'))}</span></button>
           </div>
         </div>
       </div>`);
@@ -962,7 +1012,7 @@ export class UI {
           <span class="adtxt"><b>${esc(st.doubled ? t('results.doubled') : t('results.watchAd', { n: mult }))}</b>${st.doubled ? '' : `<small>${esc(t('results.adSub', { n: fmtMoney(r.reward * (mult - 1)) }))}</small>`}</span>
           ${st.doubled ? icon('check') : ''}
         </button>` : '';
-    this.layers.overlay.innerHTML = `<div class="dim results-dim"><div class="rescard panel">
+    this.layers.overlay.innerHTML = `<div class="dim results-dim"><div class="rescard panel${r.career ? ' career' : ''}">
       <div class="res-left">
         <div class="res-title">${esc(t('results.title'))}</div>
         <div class="medal ${medalCls}">${r.place <= 3 ? MEDAL_SVG : BADGE_SVG}<div class="medal-num"><b>${r.place}</b></div></div>
@@ -977,13 +1027,18 @@ export class UI {
           ${r.drift ? `<div class="rr sub"><span>${icon('bolt')}${esc(t('results.drift'))}</span><b>+${fmtMoney(r.drift)}</b></div>` : ''}
           <div class="rr reward${st.doubled ? ' dbl' : ''}"><span>${icon('coin')}${esc(t('results.reward'))}</span><b>+${fmtMoney(reward)}${st.doubled ? `<em>x${mult}</em>` : ''}</b></div>
         </div>
+        ${r.career ? careerResultsHtml(r.career) : ''}
         ${r.unlocked ? `<div class="unlock">${icon('flag')}<span>${esc(t('results.unlocked', { track: unlockName }))}</span></div>` : ''}
         ${dbl}
-        <button class="btn big orange" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
+        ${r.career ? `<button class="btn big orange" data-act="cNext">${icon(r.career.cupDone ? 'trophy' : 'play')}<span>${esc(t(r.career.cupDone ? 'career.res.cupResults' : 'career.res.nextRace'))}</span></button>
+        <div class="pair res-pair">
+          <button class="btn blue" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
+          <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span></button>
+        </div>` : `<button class="btn big orange" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
         <div class="pair res-pair">
           ${r.nextTrack ? `<button class="btn green" data-act="nextTrack" data-id="${esc(r.nextTrack)}"><span>${esc(t('results.next'))}</span>${icon('arrowR')}</button>` : ''}
           <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span>${r.nextTrack ? '' : icon('arrowR')}</button>
-        </div>
+        </div>`}
       </div>
     </div></div>`;
   }

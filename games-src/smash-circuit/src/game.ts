@@ -7,6 +7,7 @@ import { InputController } from './input/input';
 import { applyRaceResult, buyUpgrade, nextTrackId, raceRewardParts, repairCost } from './meta/economy';
 import { makeOpponents, makePlayerSetup, rivalChoiceOf } from './meta/opponents';
 import { carIdOr } from './meta/cars';
+import { commitRace, cupById, cupOpponents, cupUnlocked, cupIndex, normalizePlaces, runActive, startRun, type Cup, type RaceCommit } from './meta/career';
 import { defaultSave, loadSave, writeSave, type SaveStatus } from './meta/save';
 import { StuckWatch, pickResetPose } from './playerReset';
 import { platform } from './platform/bridge';
@@ -18,6 +19,7 @@ import { Sim } from './sim/sim';
 import { trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, UpgradeBranch } from './types';
 import { UI, type UiHandlers } from './ui/ui';
+import { driverName, goalText, type PodiumData } from './ui/career';
 
 export type GameState = 'boot' | 'menu' | 'racing' | 'paused' | 'finishing' | 'results' | 'ad';
 
@@ -88,6 +90,10 @@ export class Game {
   private repairIntent: 'none' | 'ui' | 'key' = 'none';
   private repairProgress = 0;
   private repairsUsed = 0;
+  // ---- career: the cup race being played / just played, repairs paid in this race, and the last cup result (podium)
+  private careerCtx: { cupId: string; idx: number } | null = null;
+  private raceRepairs = 0;
+  private podium: PodiumData | null = null;
   private lastRepairAt = -999;
 
   private raf = 0;
@@ -193,12 +199,13 @@ export class Game {
       start: (id) => this.startRace(id),
       pause: () => this.pauseRace(),
       resume: () => this.resumeRace(),
-      quit: () => void this.leaveRace(() => this.toMenu()),
-      restart: () => void this.leaveRace(() => this.startRace(this.trackId)),
+      quit: () => void this.leaveRace(() => this.toMenu(this.careerCtx ? 'career' : 'menu')),
+      restart: () => void this.leaveRace(() => this.restartRace()),
       repair: () => this.repairNow(true),
       recenter: () => this.input.recenter(),
       repairHold: (on) => this.repairHold(on),
-      retry: () => { if (this.state === 'results') this.startRace(this.trackId); },
+      retry: () => { if (this.state === 'results') this.restartRace(); },
+      career: (act, id) => this.careerAct(act, id),
       nextTrack: (id) => { if (this.state === 'results') this.startRace(id); },
       retrySave: () => { this.reloadN = 0; this.scheduleReload(true); },
       useItem: () => this.useItem(),
@@ -221,7 +228,7 @@ export class Game {
     };
   }
 
-  private toMenu(): void {
+  private toMenu(target: 'menu' | 'career' | 'podium' = 'menu'): void {
     this.userPaused = false;
     this.finish = null;
     this.results = null;
@@ -235,32 +242,38 @@ export class Game {
     old?.dispose();
     this.state = 'menu';
     this.ui.setSettings(this.save.settings);
-    this.ui.showMainMenu(this.save);
+    if (target !== 'menu' && this.careerCtx) this.showCareerScreen(target);
+    else { this.careerCtx = null; this.ui.showMainMenu(this.save); }
     this.ui.setSaveWarning(this.saveStatus === 'failed');
     this.audio.update(null, 0);
     this.syncPause();
     if (this.pendingLoaded) this.adoptLoaded();
   }
 
-  startRace(trackId: string): void {
+  startRace(trackId: string, career?: { cup: Cup; idx: number }): void {
     if (this.state === 'ad' || this.continuing) return;
     const def = trackById(trackId);
-    if (!def || !this.save.unlockedTracks.includes(def.id)) return;
+    if (!def || (!career && !this.save.unlockedTracks.includes(def.id))) return;
     // first race on a touch device: a one-time, skippable controls picker (Buttons highlighted)
     if (this.input.touchActive && !this.save.settings.controlsPicked && !this.pickerOpen) {
       this.pickerOpen = true;
       this.ui.setSettings(this.save.settings);
-      this.ui.showControlsPicker(() => { this.pickerOpen = false; this.startRace(trackId); });
+      this.ui.showControlsPicker(() => { this.pickerOpen = false; this.startRace(trackId, career); });
       return;
     }
     const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(def.id));
     const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
     const player = makePlayerSetup(this.save, 'Player');
-    const cars = [player, ...makeOpponents(idx, player.stats, seed, this.save.carColor, rivalChoiceOf(this.save))];
+    const run = this.save.career.run;
+    const cars = [player, ...(career && run
+      ? cupOpponents(career.cup, career.idx, player.stats, run.seed, this.save.carColor, rivalChoiceOf(this.save))
+      : makeOpponents(idx, player.stats, seed, this.save.carColor, rivalChoiceOf(this.save)))];
+    this.careerCtx = career ? { cupId: career.cup.id, idx: career.idx } : null;
+    this.raceRepairs = 0;
     const old = this.sim;
     this.sim = null;
     old?.dispose();
-    const sim = new Sim({ track: def, cars, seed, ghost: this.save.ghosts[def.id] });
+    const sim = new Sim({ track: def, cars, seed, ghost: this.save.ghosts[def.id], laps: career ? career.cup.races[career.idx].laps : undefined });
     this.sim = sim;
     this.trackId = def.id;
     this.finish = null;
@@ -285,7 +298,51 @@ export class Game {
     this.closeLevel('failed');   // restarting from the pause menu abandons the previous attempt
     this.levelOpen = true;
     platform.level('started', def.id);
+    if (career) this.ui.toast(t('career.toast.race', { cup: t(career.cup.nameKey), n: career.idx + 1, total: career.cup.races.length }));
     this.syncPause();
+  }
+
+  // ------------------------------------------------------------------ career flow
+
+  /** Same race again (pause menu restart / results retry): the same cup race in a career, else the same track. */
+  private restartRace(): void {
+    const ctx = this.careerCtx;
+    const cup = ctx ? cupById(ctx.cupId) : undefined;
+    if (ctx && cup) this.startRace(cup.races[ctx.idx].track, { cup, idx: ctx.idx });
+    else this.startRace(this.trackId);
+  }
+
+  /** Cup page (or the podium after the last race) instead of the main menu. */
+  private showCareerScreen(target: 'career' | 'podium'): void {
+    const ctx = this.careerCtx;
+    if (target === 'podium' && this.podium) this.ui.showPodium(this.save, this.podium);
+    else if (ctx) this.ui.showCup(this.save, ctx.cupId);
+    else this.ui.showCareer(this.save);
+  }
+
+  private careerAct(act: 'go' | 'restart' | 'next' | 'done', cupId?: string): void {
+    if (this.state === 'ad' || this.continuing) return;
+    if (act === 'done') { this.careerCtx = null; this.podium = null; this.ui.showCareer(this.save); return; }
+    if (act === 'next') {
+      const ctx = this.careerCtx;
+      const cup = ctx ? cupById(ctx.cupId) : undefined;
+      if (!ctx || !cup || this.state !== 'results') return;
+      const done = this.save.career.run?.results.length ?? 0;
+      if (done >= cup.races.length) { this.toMenu('podium'); return; }
+      this.startRace(cup.races[done].track, { cup, idx: done });
+      return;
+    }
+    const cup = cupById(cupId ?? '');
+    if (!cup || !cupUnlocked(this.save.career, cupIndex(cup.id)) || this.state !== 'menu') return;
+    if (act === 'restart' || !runActive(this.save.career, cup.id)) {
+      const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
+      this.save = { ...this.save, career: startRun(this.save.career, cup.id, seed) };
+      void writeSave(this.save);
+    }
+    this.careerCtx = { cupId: cup.id, idx: 0 };
+    if (act === 'restart') { this.ui.showCup(this.save, cup.id); return; }
+    const idx = this.save.career.run?.results.length ?? 0;
+    this.startRace(cup.races[idx].track, { cup, idx });
   }
 
   private pauseRace(): void {
@@ -400,6 +457,7 @@ export class Game {
       return;
     }
     this.save = { ...this.save, money: this.save.money - cost };
+    this.raceRepairs++;
     this.sim.repairPlayer();
     this.ui.setMoney(this.save.money);
     if (!fromUi) { this.audio.ui('buy'); this.ui.toast(t('pause.repair')); }
@@ -494,7 +552,7 @@ export class Game {
     this.beginAd();
     try { await platform.showInterstitial(); } finally { this.endAd(); }
     this.continuing = false;
-    this.toMenu();
+    this.toMenu(this.careerCtx ? 'career' : 'menu');
   }
 
   private beginAd(): void { this.adBusy = true; this.prevForAd = this.state; this.state = 'ad'; this.syncPause(); }
@@ -541,6 +599,7 @@ export class Game {
     if (ghost && (!saved || ghost.lapTime < saved.lapTime)) {
       this.save = { ...this.save, ghosts: { ...this.save.ghosts, [this.trackId]: ghost } };
     }
+    const careerRes = this.commitCareer(sim, info);
     void writeSave(this.save);
     if (newBestLap && platform.leaderboardAvailable()) {
       void platform.submitScore(CONFIG.game.leaderboardPrefix + this.trackId, Math.round(bestLap * 1000));
@@ -552,11 +611,49 @@ export class Game {
       canDouble: platform.isRewardedSupported() && reward > 0,
       unlocked: res.unlocked, newBestLap, drift,
       prize: parts.prize, smash: parts.smash, smashCount: sim.brokenByPlayer,
-      nextTrack: (() => { const n = nextTrackId(this.trackId); return n && this.save.unlockedTracks.includes(n) ? n : null; })(),
+      nextTrack: careerRes ? null : (() => { const n = nextTrackId(this.trackId); return n && this.save.unlockedTracks.includes(n) ? n : null; })(),
+      career: careerRes ?? undefined,
     };
     this.ui.showFinishBanner(info.place, info.time);
     this.audio.ui('buy');
     if (this.state === 'racing') this.state = 'finishing';
+  }
+
+  /**
+   * Career race finished: places of all 8 cars -> points and standings, star goals (best-ever), extra coins; the career part of
+   * the save is updated here (the race money was already added by the caller). Returns the results-card block.
+   */
+  private commitCareer(sim: Sim, info: FinishInfo): NonNullable<Parameters<UI['showResults']>[0]['career']> | null {
+    const ctx = this.careerCtx;
+    const cup = ctx ? cupById(ctx.cupId) : undefined;
+    if (!ctx || !cup) return null;
+    const byId: number[] = [];
+    for (const c of sim.cars) byId[c.id] = c.place;
+    const places = normalizePlaces(byId, info.place);
+    const p = sim.cars[0];
+    const commit: RaceCommit = commitRace(this.save.career, ctx.cupId, ctx.idx, places, { place: info.place, broken: sim.brokenByPlayer, health: p.health, repairs: this.raceRepairs });
+    const track = cup.races[ctx.idx].track;
+    this.save = {
+      ...this.save,
+      career: commit.career,
+      money: this.save.money + commit.starCoins + commit.cupCoins,
+      unlockedTracks: this.save.unlockedTracks.includes(track) ? this.save.unlockedTracks : [...this.save.unlockedTracks, track],   // a cup race opens its track in Quick race
+    };
+    const seed = commit.career.run?.seed ?? 1;
+    const me = commit.table.find((r) => r.driver === 0);
+    const unlockedName = commit.unlockedCup ? t(cupById(commit.unlockedCup)?.nameKey ?? '') : null;
+    if (commit.cupDone) {
+      this.podium = {
+        cupName: t(cup.nameKey), playerPos: commit.playerPos, cupCoins: commit.cupCoins, unlockedCup: unlockedName,
+        table: commit.table.map((r) => ({ driver: r.driver, name: driverName(r.driver, seed), points: r.points, pos: r.pos })),
+      };
+    }
+    return {
+      cupName: t(cup.nameKey), raceNo: ctx.idx + 1, raceTotal: cup.races.length,
+      points: commit.points, pos: commit.playerPos, totalPoints: me?.points ?? 0,
+      goals: cup.races[ctx.idx].goals.map((g, i) => ({ text: goalText(g), earned: commit.stars[i], isNew: commit.newStars[i] })),
+      starCoins: commit.starCoins, cupCoins: commit.cupCoins, cupDone: commit.cupDone, unlockedCup: unlockedName,
+    };
   }
 
   private showResultsNow(): void {

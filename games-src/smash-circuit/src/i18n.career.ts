@@ -21,6 +21,7 @@ export const CAREER_EN: Record<string, string> = {
   'career.lockedToast': 'Locked: {need}',
   'career.cupStars': 'Stars: {n} / {max}',
   'career.tip': 'Win cups, collect stars, open harder cups',
+  'career.runElsewhere': 'Starting here ends your run in {cup}',
 
   'cup.start': 'Start cup',
   'cup.go': 'Race {n}',
@@ -81,6 +82,7 @@ export const CAREER_RU: Record<string, string> = {
   'career.lockedToast': 'Закрыто: {need}',
   'career.cupStars': 'Звёзды: {n} / {max}',
   'career.tip': 'Выигрывай кубки, собирай звёзды, открывай сложные кубки',
+  'career.runElsewhere': 'Старт здесь сбросит заезд в «{cup}»',
 
   'cup.start': 'Начать кубок',
   'cup.go': 'Гонка {n}',

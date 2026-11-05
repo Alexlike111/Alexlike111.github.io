@@ -35,26 +35,26 @@ const NO_REPAIR: Goal = { k: 'noRepair' };
  */
 export const CUPS: readonly Cup[] = [
   { id: 'rookie', nameKey: 'cup.rookie', shift: -0.08, races: [
-    { track: 't1', laps: 2, tier: 0, goals: [top(3), top(1), smash(12)] },
+    { track: 't1', laps: 2, tier: 0, goals: [top(3), top(1), smash(10)] },
     { track: 't2', laps: 2, tier: 0, goals: [top(3), top(1), hp(0.6)] },
-    { track: 't1', laps: 3, tier: 0, goals: [top(3), top(1), smash(20)] },
+    { track: 't1', laps: 3, tier: 0, goals: [top(3), top(1), smash(15)] },
   ] },
   { id: 'turbo', nameKey: 'cup.turbo', shift: 0, races: [
-    { track: 't2', laps: 3, tier: 1, goals: [top(3), top(1), smash(20)] },
+    { track: 't2', laps: 3, tier: 1, goals: [top(3), top(1), smash(15)] },
     { track: 't1', laps: 3, tier: 1, goals: [top(3), top(2), NO_REPAIR] },
     { track: 't3', laps: 2, tier: 1, goals: [top(4), top(2), hp(0.5)] },
-    { track: 't2', laps: 3, tier: 1, goals: [top(3), top(1), smash(25)] },
+    { track: 't2', laps: 3, tier: 1, goals: [top(3), top(1), smash(20)] },
   ] },
   { id: 'frost', nameKey: 'cup.frost', shift: 0.06, races: [
     { track: 't3', laps: 3, tier: 2, goals: [top(4), top(2), smash(15)] },
     { track: 't1', laps: 3, tier: 1, goals: [top(3), top(1), NO_REPAIR] },
     { track: 't3', laps: 3, tier: 2, goals: [top(3), top(1), hp(0.5)] },
-    { track: 't2', laps: 3, tier: 2, goals: [top(3), top(1), smash(30)] },
+    { track: 't2', laps: 3, tier: 2, goals: [top(3), top(1), smash(25)] },
   ] },
   { id: 'grand', nameKey: 'cup.grand', shift: 0.12, races: [
     { track: 't2', laps: 3, tier: 2, goals: [top(3), top(1), NO_REPAIR] },
     { track: 't3', laps: 3, tier: 2, goals: [top(3), top(1), hp(0.6)] },
-    { track: 't1', laps: 4, tier: 2, goals: [top(3), top(1), smash(35)] },
+    { track: 't1', laps: 4, tier: 2, goals: [top(3), top(1), smash(30)] },
     { track: 't3', laps: 3, tier: 2, goals: [top(3), top(1), NO_REPAIR] },
   ] },
 ];
