@@ -33,6 +33,7 @@ vi.mock('../src/platform/bridge', () => ({
     isRewardedSupported: () => true,
     showRewarded: async () => h.rewardedOk,
     leaderboardAvailable: () => false,
+    leaderboardMode: () => 'none',
     submitScore: async () => {},
     gameReady: () => {},
     level: (kind: string) => { h.levels.push(kind); },
@@ -268,7 +269,7 @@ describe('game flow', () => {
     expect(h.levels).toEqual(['started', 'paused', 'failed', 'started']);
   });
 
-  it('results: Race again starts the same track with NO interstitial; Next track starts the unlocked one', async () => {
+  it('results: Race again and Next track go through the interstitial path (the Bridge decides if one shows), then start the race', async () => {
     h.ui!.handlers.settings(settings());
     G().startRace('t1');
     run(0.5);
@@ -277,7 +278,12 @@ describe('game flow', () => {
     const res = h.ui!.calls.showResults![0][0] as { nextTrack?: string | null };
     h.ui!.handlers.retry();
     await flush();
-    expect(h.interstitial).toBeNull();
+    expect(h.interstitial!.calls).toBe(1);            // asked once; nothing starts while it is open
+    expect(G().state).toBe('ad');
+    h.ui!.handlers.retry();                           // a second tap during the ad is ignored
+    expect(h.interstitial!.calls).toBe(1);
+    h.interstitial!.resolve();
+    await flush();
     expect(G().state).toBe('racing');
     const len1 = G().sim!.track.length;
     // top-3 unlocks t2 -> Next track
@@ -285,7 +291,10 @@ describe('game flow', () => {
     G().forceFinish();
     h.ui!.handlers.nextTrack('t2');
     await flush();
-    expect(h.interstitial).toBeNull();
+    expect(h.interstitial!.calls).toBe(2);
+    h.interstitial!.resolve();
+    await flush();
+    expect(G().state).toBe('racing');
     expect(G().sim!.track.length).not.toBe(len1);
     expect(res).toBeDefined();
   });

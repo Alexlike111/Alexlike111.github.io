@@ -160,11 +160,14 @@ describe('career flow', () => {
     expect(G().sim!.cars.map((c) => c.name)).toEqual(names1);
   });
 
-  it('retry replaces the result of the same race instead of adding one', () => {
+  it('retry replaces the result of the same race instead of adding one', async () => {
     H().career('go', 'rookie');
     G().forceFinish();
     expect(G().save.career.run?.results.length).toBe(1);
-    H().retry();
+    H().retry();                                   // goes through the interstitial path first (Playgama step 7)
+    await new Promise((r) => setTimeout(r, 0));
+    h.interstitial?.resolve();
+    await new Promise((r) => setTimeout(r, 0));
     expect(G().state).toBe('racing');
     expect(G().sim!.track.def.id).toBe('t1');
     G().forceFinish();

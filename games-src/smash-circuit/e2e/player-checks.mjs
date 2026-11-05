@@ -17,6 +17,8 @@ const version = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')
 const results = [];
 const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// E2E_SLOW=4 stretches the long waits on a busy machine (software GL on a shared CI runner): game time runs slower than wall time
+const SLOW = Number(process.env.E2E_SLOW) || 1;
 
 const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' });
 for (let i = 0; i < 240; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ } await sleep(500); }
@@ -29,12 +31,12 @@ async function openRace(ctxOpts, label) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`http://localhost:${PORT}/?debug`);
-  await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 * SLOW });
   const ver = await page.$eval('#ver', (e) => e.textContent).catch(() => '');
   check(`[${label}] build label shows v${version}`, ver.includes(`v${version}`), ver);
   await page.screenshot({ path: path.join(OUT, `${label}-menu.png`) });
   await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.save.settings.controlsPicked = true; window.__game.startRace('t1'); });
-  await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 * SLOW });
   return { ctx, page, errors };
 }
 
@@ -42,7 +44,7 @@ async function openRace(ctxOpts, label) {
 // wall time. All waits are in GAME seconds.
 async function waitSim(page, sec) {
   const t0 = await page.evaluate(() => window.__game.sim.race.time);
-  await page.waitForFunction((t) => window.__game.sim.race.time >= t, t0 + sec, { timeout: 60000, polling: 50 });
+  await page.waitForFunction((t) => window.__game.sim.race.time >= t, t0 + sec, { timeout: 60000 * SLOW, polling: 50 });
 }
 // Put the player on the calmest straight away from the pack, rolling at v m/s along the track.
 async function onStraight(page, v) {
@@ -500,7 +502,7 @@ try {
     const ctx = await browser.newContext(PHONE);
     const page = await ctx.newPage();
     await page.goto(`http://localhost:${PORT}/?debug`);
-    await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
+    await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 * SLOW });
     await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.startRace('t1'); });
     await sleep(500);
     const shown = await page.$('.ctlpick');
@@ -511,7 +513,7 @@ try {
       await page.screenshot({ path: path.join(OUT, 'phone-picker.png') });
       await page.click('[data-act=ctlPickSel][data-v=slide]');
       await page.click('[data-act=ctlPickOk]');
-      await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 });
+      await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 * SLOW });
       const st = await page.evaluate(() => ({ c: window.__game.save.settings.controls, p: window.__game.save.settings.controlsPicked }));
       check('[phone] picking Slide in the picker starts the race with it, never shown again', st.c === 'slide' && st.p === true, JSON.stringify(st));
       // pause menu has the quick switch

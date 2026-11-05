@@ -26,10 +26,14 @@ export interface UiHandlers {
   recenter?(): void;
   /** HUD repair chip pressed (true) / released (false): in a race the repair is a hold. */
   repairHold?(on: boolean): void;
-  /** Results: race the same track again (no ad). */
+  /** Results: race the same track again (an interstitial first; the Bridge decides if one really shows). */
   retry?(): void;
-  /** Results: start the given (unlocked) next track (no ad). */
+  /** Results: start the given (unlocked) next track (an interstitial first, like `retry`). */
   nextTrack?(id: string): void;
+  /** Open the leaderboard (track select and results). Only offered while `leaderboardAvailable()` is true. */
+  leaderboard?(): void;
+  /** The platform can show a leaderboard (in-game list or native overlay): false hides every leaderboard control. */
+  leaderboardAvailable?(): boolean;
   /** Menu banner: reload the progress now. */
   retrySave?(): void;
   /** Career: start the next race of the cup / restart the cup / results "next" / podium "continue". */
@@ -762,6 +766,7 @@ export class UI {
       case 'retry': this.sfx('click'); this.h.retry?.(); break;
       case 'nextTrack': this.sfx('click'); if (el.dataset.id) this.h.nextTrack?.(el.dataset.id); break;
       case 'retrySave': this.sfx('click'); this.h.retrySave?.(); break;
+      case 'leaderboard': this.sfx('click'); this.h.leaderboard?.(); break;
       case 'ctlPickSel': this.sfx('click'); this.pickSelect?.(controlsOr(el.dataset.v)); break;
       case 'ctlPickOk': this.sfx('click'); this.pickCommit?.(false); break;
       case 'ctlPickSkip': this.sfx('click'); this.pickCommit?.(true); break;
@@ -922,6 +927,7 @@ export class UI {
     const pre = `<div class="prerace">
       <button class="pr-btn" data-act="garage"><small>${esc(t('prerace.yourCar'))}</small>${carSvg(car, paint)}<b>${esc(t('car.' + car))}</b></button>
       <button class="pr-btn" data-act="rivals"><small>${esc(t('rivals.title'))}</small>${r.mode === 'pick' || r.mode === 'same' ? carSvg(r.mode === 'pick' ? carIdOr(r.car ?? s.car) : car, r.mode === 'pick' ? CONFIG.render.carColors[2] : paint) : icon('trophy')}<b>${esc(rivalLabel(r.mode, r.car))}</b></button>
+      ${this.h.leaderboardAvailable?.() ? `<button class="pr-btn pr-lb" data-act="leaderboard">${icon('trophy')}<b>${esc(t('lb.title'))}</b></button>` : ''}
     </div>`;
     this.setScreen('tracks', `${this.header('tracks.title')}${pre}<div class="cards">${cards}</div>`);
   }
@@ -1072,13 +1078,15 @@ export class UI {
         ${r.unlocked ? `<div class="unlock">${icon('flag')}<span>${esc(t('results.unlocked', { track: unlockName }))}</span></div>` : ''}
         ${dbl}
         ${r.career ? `<button class="btn big orange" data-act="cNext">${icon(r.career.cupDone ? 'trophy' : 'play')}<span>${esc(t(r.career.cupDone ? 'career.res.cupResults' : 'career.res.nextRace'))}</span></button>
-        <div class="pair res-pair">
+        <div class="pair res-pair${this.h.leaderboardAvailable?.() ? ' has-lb' : ''}">
           <button class="btn blue" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
           <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span></button>
+          ${this.h.leaderboardAvailable?.() ? `<button class="btn round blue res-lb" data-act="leaderboard" aria-label="${esc(t('lb.title'))}">${icon('trophy')}</button>` : ''}
         </div>` : `<button class="btn big orange" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
-        <div class="pair res-pair">
+        <div class="pair res-pair${this.h.leaderboardAvailable?.() ? ' has-lb' : ''}">
           ${r.nextTrack ? `<button class="btn green" data-act="nextTrack" data-id="${esc(r.nextTrack)}"><span>${esc(t('results.next'))}</span>${icon('arrowR')}</button>` : ''}
           <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span>${r.nextTrack ? '' : icon('arrowR')}</button>
+          ${this.h.leaderboardAvailable?.() ? `<button class="btn round blue res-lb" data-act="leaderboard" aria-label="${esc(t('lb.title'))}">${icon('trophy')}</button>` : ''}
         </div>`}
       </div>
     </div></div>`;

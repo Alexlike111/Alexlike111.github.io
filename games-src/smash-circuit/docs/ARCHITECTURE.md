@@ -124,9 +124,15 @@ export const platform: {
   load(keys: string[]): Promise<Record<string, unknown>>; save(data: Record<string, unknown>): Promise<void>;
   showInterstitial(): Promise<void>;           // resolves when closed/failed; caller pauses game+sound while awaiting
   isRewardedSupported(): boolean; showRewarded(): Promise<boolean>;  // true only on 'rewarded' state
-  leaderboardAvailable(): boolean; submitScore(id: string, score: number): Promise<void>;
-  gameReady(): void;
+  leaderboardMode(): 'none'|'in_game'|'native'|'native_popup'; leaderboardAvailable(): boolean;   // Bridge leaderboards.type; 'none' hides every leaderboard control
+  submitScore(id: string, score: number): Promise<boolean>;                                      // never throws, 8 s timeout, true = accepted
+  leaderboardTop(id: string, limit?: number): Promise<{ status: 'ok'; rows: { rank: number; name: string; score: number; isPlayer: boolean }[] } | { status: 'unavailable' | 'failed' }>;  // in_game only
+  showLeaderboardPopup(id: string): Promise<boolean>;                                            // native_popup only
+  gameReady(): void; level(kind: 'started'|'paused'|'resumed'|'completed'|'failed', track?: string): void;
 };
+// ui/leaderboard.ts — LeaderboardPanel(root).show(trackId): modal top-10 view (tabs per track, own row, loading / error / empty states).
+//   Opened from the track select and the results screen through UiHandlers.leaderboard; hidden unless UiHandlers.leaderboardAvailable().
+// Release gates: scripts/check-release.mjs (npm run check-release), docs/RELEASE.md (Playgama requirement map and owner actions).
 // i18n.ts
 export function initLang(platformLang: string, setting: 'en'|'ru'|'auto'): void; export function t(key: string, p?: Record<string, string|number>): string; export function lang(): 'en'|'ru';
 // meta/save.ts

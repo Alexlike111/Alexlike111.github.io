@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG } from '../src/config';
 import { AiDriver } from '../src/sim/ai';
+import { smashValue } from '../src/meta/economy';
 import { baseStats } from '../src/sim/carModel';
 import { makeRng } from '../src/sim/rng';
 import { Sim, createSim } from '../src/sim/sim';
@@ -242,20 +243,53 @@ describe('Sim: player, damage and destruction', () => {
     expect(sim.drainEvents().some((e) => e.type === 'repair' && e.carId === 0)).toBe(true);
   }, 60000);
 
-  it('counts what the player smashes', () => {
-    const sim = started();
-    sim.setPlayerInput({ throttle: 1, brake: 0, steer: 0.1, handbrake: false });
-    for (let i = 0; i < 60 * 40; i++) {
-      sim.update(DT);
-      // keep ramming: when the car stops, back off and go again
-      const c = sim.cars[0];
-      if (Math.abs(c.speed) < 1) sim.setPlayerInput({ throttle: 0, brake: 1, steer: -0.3, handbrake: false });
-      else if (c.speed > 8) sim.setPlayerInput({ throttle: 1, brake: 0, steer: 0.12, handbrake: false });
+  it('counts what the player smashes: every non-curb break caused by the player, and nothing else', () => {
+    // A solo sim: the only car that can break anything is the player, so the counter must equal the break events exactly.
+    // (The old version only asserted 0 <= count <= broken, which passes with a counter that never increments.)
+    const solo = (): Sim => {
+      const p: CarSetup = { id: 0, isPlayer: true, name: 'p', colorIndex: 0, stats: baseStats() };
+      const sim = new Sim({ track: trackOf('t1'), cars: [p], seed: 1 });
+      while (sim.race.phase === 'countdown') sim.update(DT);
+      sim.drainEvents();
+      return sim;
+    };
+    const breaksOf = (evs: SimEvent[]) => evs.filter((e): e is Extract<SimEvent, { type: 'break' }> => e.type === 'break' && e.kind !== 'curb');
+
+    // control: an idle player breaks nothing and the counter stays at 0
+    const idle = solo();
+    idle.setPlayerInput(IDLE);
+    for (let i = 0; i < 60 * 5; i++) idle.update(DT);
+    expect(breaksOf(idle.drainEvents()).length).toBe(0);
+    expect(idle.brokenByPlayer).toBe(0);
+    expect(idle.smashMoney).toBe(0);
+
+    // ram the outer guardrail of a long straight head-on at ~80 km/h
+    const sim = solo();
+    const S = sim.track.samples;
+    let mid = -1;
+    for (let i = 0; i < S.length && mid < 0; i++) {
+      let ok = true;
+      for (let k = 0; k < 40; k++) if (Math.abs(S[(i + k) % S.length].curvature) > 0.002) { ok = false; break; }
+      if (ok) mid = S[(i + 20) % S.length].s;
     }
-    const broken = sim.destructibles.filter((d) => d.broken).length;
-    expect(sim.brokenByPlayer).toBeLessThanOrEqual(broken);
-    expect(sim.brokenByPlayer).toBeGreaterThanOrEqual(0);
-    sim.drainEvents();
+    expect(mid).toBeGreaterThanOrEqual(0);
+    const t = sim.track.sampleAt(mid);
+    const side = -1, lat = side * (sim.track.def.width / 2 - 1);
+    const a = Math.atan2(t.ty, t.tx) + side * (Math.PI / 2), v = 80 / 3.6;
+    const x = t.x + t.nx * lat, y = t.y + t.ny * lat;
+    sim.simCars[0].reset(x, y, a);
+    sim.simCars[0].body.setLinearVelocity({ x: Math.cos(a) * v, y: Math.sin(a) * v });
+    const st = sim.cars[0];
+    st.x = x; st.y = y; st.angle = a; st.vx = Math.cos(a) * v; st.vy = Math.sin(a) * v;
+    sim.setPlayerInput(IDLE);
+    const evs: SimEvent[] = [];
+    for (let i = 0; i < 60 * 2; i++) { sim.update(DT); evs.push(...sim.drainEvents()); }
+    const breaks = breaksOf(evs);
+    expect(breaks.length).toBeGreaterThan(0);                         // the ram really broke something
+    expect(sim.brokenByPlayer).toBe(breaks.length);                   // and the counter saw exactly those
+    expect(sim.smashMoney).toBe(breaks.reduce((n, b) => n + smashValue(b.kind, b.propType), 0));
+    expect(sim.takeSmashes().count).toBe(breaks.length);
+    expect(sim.takeSmashes().count).toBe(0);                          // drained
   }, 60000);
 
   it('AI cars get around an idle player and still finish', () => {
