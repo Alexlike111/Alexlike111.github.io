@@ -795,3 +795,23 @@
   .ui-root .finishban b { font-size: 3em; }
   .ui-root .lappill { top: 20%; }
 }
+
+/* ---------------------------------------------------------------- speed readout never covers the player's car
+   The camera keeps the car inside the central 58% box (CONFIG.render.camera.safeEdge), so the bottom ~20% of the screen is
+   car-free. Touch: the speed readout + drift meter sit at the very bottom, in the gap between the steer buttons and BRAKE
+   (portrait), never above the button row where the car drives. Joystick: bottom-left (the stick owns the bottom centre). */
+.ui-root.is-touch .hud-bc { bottom: max(0.45em, var(--sab)); }
+.ui-root.is-touch .speed { flex-direction: column; align-items: center; gap: 0; padding: 0.12em 0.55em 0.18em; }
+.ui-root.is-touch .speed .sp { font-size: 1.55em; min-width: 0; text-align: center; }
+.ui-root.is-touch .speed small { font-size: 0.62em; line-height: 1; margin-top: 0.05em; }
+.ui-root.is-touch .driftm { font-size: 0.9em; }
+.ui-root.is-touch.sch-joystick .hud-bc { left: max(0.7em, var(--sal)); transform: none; align-items: flex-start; bottom: max(0.7em, var(--sab)); }
+/* tilt: the tilt indicator owns the bottom-left strip; the readout sits just above its height, centred */
+.ui-root.is-touch.sch-tilt .hud-bc { bottom: calc(max(0.45em, var(--sab)) + 3.3em); }
+@media (orientation: portrait) {
+  .ui-root.is-touch.sch-new .hud-bc { bottom: max(0.45em, var(--sab)); }
+  .ui-root.is-touch.sch-tilt .hud-bc { bottom: calc(max(0.45em, var(--sab)) + 3.3em); }
+  .ui-root.is-touch.sch-joystick .hud-bc { bottom: max(0.7em, var(--sab)); }
+}
+/* the build label moves off the steer buttons during a race */
+body:has(.ui-root .hud) #ver { left: 50%; transform: translateX(-50%); bottom: auto; top: calc(1px + env(safe-area-inset-top, 0px)); opacity: 0.4; white-space: nowrap; }

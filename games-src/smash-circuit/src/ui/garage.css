@@ -114,6 +114,20 @@
   .ui-root .g-trait p { font-size: 0.74em; }
   .ui-root .g-sheet { gap: 0.3em; padding: 0.35em 0.5em 0.45em; }
   .ui-root .g-pane .up-desc { display: none; }
+  /* the sheet takes the whole left column under the bar; the car strip and the name row move to the right column, above
+     the 3D car, so the stats / upgrades pane gets ~150 px instead of a 47 px peephole */
+  .ui-root .screen.garage {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-areas: "bar bar" "sheet strip" "sheet title" "sheet view";
+  }
+  .ui-root .g-strip { justify-content: flex-start; }
+  .ui-root .g-title { justify-self: center; width: min(100%, 22em); }
+  .ui-root .g-pane { flex: 1 1 auto; }
+  .ui-root .g-pane .up { padding: 0.15em 0; }
+  .ui-root .g-pane .up-ic { width: 2.1em; height: 2.1em; }
+  .ui-root .g-pane .up { grid-template-columns: 2.1em minmax(0, 1fr) auto; gap: 0.5em; }
+  .ui-root .g-pane .btn.buy { min-height: 44px; padding: 0.2em 0.6em; }
+  .ui-root .g-select { min-height: 44px; }
 }
 
 /* ------------------------------------------------------------ pre-race bar (track select) */
