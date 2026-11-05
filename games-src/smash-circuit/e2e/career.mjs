@@ -72,8 +72,9 @@ async function run(label, vp, lang) {
   const hub = await page.evaluate(() => ({ cards: document.querySelectorAll('.card.cup').length, locked: [...document.querySelectorAll('.card.cup')].map((c) => c.classList.contains('locked')) }));
   check(L('hub lists 4 cups, only the first is open'), hub.cards === 4 && JSON.stringify(hub.locked) === '[false,true,true,true]', JSON.stringify(hub));
   await audit('hub'); await shot('02-hub');
-  await page.click('.card.cup.locked'); await sleep(300);
-  check(L('a locked cup shows a hint and stays on the list'), await page.evaluate(() => !!document.querySelector('.c-cups') && !!document.querySelector('.toast')));
+  await page.click('.card.cup.locked');
+  const toast = await page.waitForSelector('.toast', { timeout: 5000 }).then(() => true).catch(() => false);   // the toast lives ~2 s: wait for it, do not sleep
+  check(L('a locked cup shows a hint and stays on the list'), toast && await page.evaluate(() => !!document.querySelector('.c-cups')));
   await shot('03-locked-toast');
 
   // ---- cup page with the star goals of the next race
