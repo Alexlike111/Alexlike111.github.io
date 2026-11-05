@@ -5,6 +5,8 @@ import { platform } from '../platform/bridge';
 import type { GhostData, GhostFrame, SaveData, UpgradeLevels } from '../types';
 import { CAR_IDS, carIdOr, isCarId, rivalModeOr } from './cars';
 import { controlsOr, sensOr } from '../input/schemes';
+import { sanitizeDaily } from './daily';
+import { sanitizeCosmetics } from './cosmetics';
 
 export const SAVE_KEY_CORE = 'sc_core';
 export const SAVE_KEY_GHOSTS = 'sc_ghosts';
@@ -130,6 +132,8 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
     ghosts: g,
     carColor: Math.floor(num(c.carColor, 0, 0, CONFIG.render.carColors.length - 1)),
     racesFinished: Math.floor(num(c.racesFinished, 0, 0, 1e9)),
+    daily: sanitizeDaily(c.daily),
+    cosmetics: sanitizeCosmetics(c.cosmetics),
   };
   // rival field: only stored values are kept (absent = the default, see rivalModeOr)
   if (st.rivals !== undefined && rivalModeOr(st.rivals) === st.rivals) out.settings.rivals = st.rivals as SaveData['settings']['rivals'];

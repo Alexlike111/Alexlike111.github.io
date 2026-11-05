@@ -1,0 +1,71 @@
+/* Daily missions panel, login calendar, menu button badge, garage paint shop. Phone portrait first. */
+.ui-root .btn.purple { --c1: #b98bff; --c2: #7a46e0; }
+.ui-root .daily-btn { position: relative; width: 100%; }
+.ui-root .d-badge {
+  position: absolute; top: -0.45em; right: -0.35em; min-width: 1.6em; height: 1.6em; padding: 0 0.35em; border-radius: 1em;
+  display: grid; place-items: center; font-style: normal; font-size: 0.85em; font-weight: 900; color: #fff;
+  background: #ff3b4e; border: 0.14em solid var(--ink); box-shadow: 0 0.12em 0 var(--ink); animation: d-pulse 1.1s ease-in-out infinite alternate;
+}
+@keyframes d-pulse { from { transform: scale(1); } to { transform: scale(1.15); } }
+
+.ui-root .daily-panel {
+  width: min(100%, 26em); max-height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 0.8em; display: flex; flex-direction: column; gap: 0.7em;
+  animation: pop-in 0.25s cubic-bezier(.2, 1.4, .4, 1) both;
+}
+.ui-root .d-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; }
+.ui-root .daily-panel h3 { margin: 0 0 0.4em; font-size: 0.95em; display: flex; justify-content: space-between; align-items: baseline; gap: 0.5em; }
+.ui-root .daily-panel h3 small { font-size: 0.8em; opacity: 0.75; font-weight: 700; }
+.ui-root .d-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.25em; }
+.ui-root .d-day {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1em; padding: 0.3em 0.1em; border-radius: 0.6em;
+  background: rgba(0, 0, 0, 0.35); border: 0.12em solid var(--ink); min-width: 0;
+}
+.ui-root .d-day small { font-size: 0.62em; white-space: nowrap; opacity: 0.85; }
+.ui-root .d-day b { font-size: 0.78em; }
+.ui-root .d-day .d-coin .ic { width: 1.2em; height: 1.2em; color: var(--yellow); }
+.ui-root .d-day.done { background: rgba(60, 207, 110, 0.35); }
+.ui-root .d-day.done .d-coin .ic { color: #7dff9c; }
+.ui-root .d-day.cur { background: rgba(255, 201, 60, 0.35); outline: 0.16em solid var(--yellow); animation: d-pulse 0.9s ease-in-out infinite alternate; }
+.ui-root .d-day.big { background-image: linear-gradient(rgba(185, 139, 255, 0.35), transparent); }
+.ui-root .d-loginbtn { width: 100%; margin-top: 0.5em; }
+.ui-root .d-hint { margin: 0.45em 0 0; font-size: 0.8em; opacity: 0.8; text-align: center; }
+.ui-root .d-mis {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.6em; padding: 0.5em 0.6em; margin-bottom: 0.4em;
+  border-radius: 0.7em; background: rgba(0, 0, 0, 0.3); border: 0.12em solid var(--ink);
+}
+.ui-root .d-mis.complete { background: rgba(60, 207, 110, 0.22); }
+.ui-root .d-mis.claimed { opacity: 0.65; }
+.ui-root .d-mtxt { min-width: 0; display: flex; flex-direction: column; gap: 0.2em; }
+.ui-root .d-mtxt b { font-size: 0.9em; }
+.ui-root .d-mtxt small { font-size: 0.72em; opacity: 0.8; }
+.ui-root .d-prog { height: 0.6em; border-radius: 1em; background: rgba(0, 0, 0, 0.5); border: 0.1em solid var(--ink); overflow: hidden; }
+.ui-root .d-prog i { display: block; height: 100%; background: linear-gradient(#ffe17a, #ffb62b); }
+.ui-root .d-mis.complete .d-prog i { background: linear-gradient(#7dff9c, #3ccf6e); }
+.ui-root .d-claim { min-height: 44px; min-width: 5.2em; }
+.ui-root .d-reward { display: inline-flex; align-items: center; gap: 0.2em; font-weight: 900; }
+.ui-root .d-reward .ic, .ui-root .d-claim .ic { width: 1.1em; height: 1.1em; color: var(--yellow); }
+
+/* ---- garage paint shop */
+.ui-root .cos-pane { display: flex; flex-direction: column; gap: 0.25em; }
+.ui-root .cos-pane h4 { margin: 0.3em 0 0; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.85; }
+.ui-root .cos-pane .swatches { flex: none; }
+.ui-root .swatch.prem { min-height: 56px; grid-template-rows: 32px auto; gap: 0.1em; }
+.ui-root .swatch.prem small { font-size: 0.66em; font-weight: 800; display: inline-flex; align-items: center; gap: 0.1em; white-space: nowrap; }
+.ui-root .swatch.prem small .ic { width: 1em; height: 1em; color: var(--yellow); }
+.ui-root .swatch.prem:not(.own) .disc .ic { width: 50%; height: 50%; color: #fff; filter: drop-shadow(0 0.06em 0 var(--ink)); }
+.ui-root .liv-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.3em; }
+.ui-root .g-chip.liv { min-width: 0; }
+.ui-root .g-chip.liv span { display: inline-flex; align-items: center; gap: 0.1em; font-size: 0.7em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-root .g-chip.liv span .ic { width: 1em; height: 1em; color: var(--yellow); }
+.ui-root .cos-buy {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.35em 0.5em; border-radius: 0.7em;
+  background: rgba(255, 201, 60, 0.18); border: 0.12em solid var(--yellow);
+}
+.ui-root .cos-prev { display: flex; align-items: center; gap: 0.4em; min-width: 0; font-size: 0.85em; }
+.ui-root .cos-prev .car-svg { width: 3.4em; height: auto; flex: none; }
+.ui-root .cos-prev span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .ui-root .daily-panel { width: min(100%, 40em); display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .ui-root .daily-panel .d-head { grid-column: 1 / -1; }
+  .ui-root .swatch.prem { min-height: 50px; }
+}

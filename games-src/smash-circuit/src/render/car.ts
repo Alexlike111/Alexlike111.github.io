@@ -8,6 +8,7 @@ import { GeoBuilder, concat } from './geo';
 import type { Materials } from './materials';
 import { clamp, lerp, makeRng } from './util';
 import { CHROME, MODEL_BUILDERS, type WheelSpec } from './carModels';
+import { paintHex } from './paintLayer';
 
 export type { WheelSpec } from './carModels';
 
@@ -303,7 +304,7 @@ export class CarFleet {
       const bodyM = _bm.compose(_v.set(0, bounce, 0), _qa, _one).premultiply(_b);
 
       // ---- paint colour and burn
-      const col = _col.set(CONFIG.render.carColors[st.colorIndex % CONFIG.render.carColors.length]);
+      const col = _col.set(paintHex(st.colorIndex));
       const dirt = clamp(Math.pow(clamp(1 - st.health, 0, 1), CFX.dirtPower) * CFX.dirtMax, 0, CFX.dirtMax);
       _c.copy(col).lerp(BURNT, dirt);
       const fl = this.flash[i] > 0 ? CR.hitFlashMix * (this.flash[i] / CR.hitFlashTime) : 0;

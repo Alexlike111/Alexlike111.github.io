@@ -274,6 +274,10 @@ export interface SaveData {
   ghosts: Record<string, GhostData>;
   carColor: number;
   racesFinished: number;
+  /** daily missions + login streak (own sub-object, defaulted when missing; see meta/daily.ts) */
+  daily?: import('./meta/daily').DailyState;
+  /** bought / equipped paints and liveries per car (defaulted when missing; see meta/cosmetics.ts) */
+  cosmetics?: import('./meta/cosmetics').CosmeticsState;
 }
 
 // ---------- Sim interface (implemented in src/sim/sim.ts) ----------

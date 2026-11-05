@@ -11,6 +11,7 @@ import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icon
 import { carGrid, carSvg, garageHtml, rivalLabel, rivalsSheetHtml, RIVAL_MODES, type GarageTab } from './garage';
 import { CONTROL_SCHEMES, controlsOr, sensOr, type ControlScheme } from '../input/schemes';
 import { CAR_IDS, carIdOr, levelsOf, rivalModeOr } from '../meta/cars';
+import { clearPreview, dailyAct, missionsButtonHtml, paintShopHtml, type DailyCtx } from './daily';
 
 export interface UiHandlers {
   start(trackId: string): void;
@@ -36,7 +37,9 @@ export interface UiHandlers {
   /** Garage: drive this car from now on (every car is selectable). */
   selectCar?(id: string): void;
   /** Garage: show this car on the turntable while browsing (not selected yet). */
-  previewCar?(id: string): void;
+  previewCar?(id: string, colorIndex?: number): void;
+  /** Daily missions / login reward / cosmetics: the UI applied a pure meta op; the game adopts money, daily, cosmetics. */
+  adoptMeta?(s: SaveData, shownCar?: string): void;
   /** Resolve `false` when the ad did not reward (UI then keeps the button); `true`/void = reward granted. */
   doubleReward(): Promise<boolean | void>;
   settings(s: SaveData['settings']): void;
@@ -586,8 +589,25 @@ export class UI {
     };
   }
 
+  /** Daily missions / login reward / paint shop actions (ui/daily.ts). */
+  private dailyCtx(): DailyCtx {
+    return {
+      save: this.save,
+      shownCar: carIdOr(this.gCar || this.save?.car),
+      set: (s) => { this.save = s; this.money = s.money; this.updateMoneyChip(); },
+      adopt: (s) => this.h.adoptMeta?.(s, this.current?.name === 'garage' ? carIdOr(this.gCar || s.car) : undefined),
+      toast: (text) => this.toast(text),
+      sfx: (n) => this.sfx(n),
+      overlay: (html) => { if (html === null) this.layers.overlay.replaceChildren(); else this.layers.overlay.innerHTML = html; },
+      rerender: () => { if (this.current?.name === 'garage') this.renderGarage(); else if (this.current?.name === 'menu') this.renderMenu(); },
+      previewCar: (id, ci) => this.h.previewCar?.(id, ci),
+      setFreeColor: (i) => this.h.color(i),
+    };
+  }
+
   private act(act: string, el: HTMLElement): void {
     const save = this.save;
+    if (dailyAct(act, el, this.dailyCtx())) return;
     switch (act) {
       case 'play': this.sfx('click'); if (save) this.showTrackSelect(save); break;
       case 'garage': this.sfx('click'); if (save) this.showGarage(save); break;
@@ -595,7 +615,7 @@ export class UI {
       case 'back':
         this.sfx('click');
         // leaving the garage while looking at another car: the turntable goes back to the car you drive
-        if (save && this.current?.name === 'garage' && this.gCar && this.gCar !== carIdOr(save.car)) this.h.previewCar?.(carIdOr(save.car));
+        if (save && this.current?.name === 'garage') { clearPreview(); this.h.previewCar?.(carIdOr(save.car)); }
         if (save) this.showMainMenu(save);
         break;
       case 'track': {
@@ -804,6 +824,7 @@ export class UI {
             <button class="btn blue" data-act="garage">${icon('wrench')}<span>${esc(t('menu.garage'))}</span></button>
             <button class="btn grey" data-act="settings">${icon('gear')}<span>${esc(t('menu.settings'))}</span></button>
           </div>
+          ${this.save ? missionsButtonHtml(this.save) : ''}
         </div>
       </div>`);
   }
@@ -852,7 +873,8 @@ export class UI {
     const s = this.save!;
     if (!this.gCar) this.gCar = carIdOr(s.car);
     const keepScroll = this.layers.screen.querySelector<HTMLElement>('.g-strip')?.scrollLeft ?? 0;
-    this.setScreen('garage', garageHtml({ save: s, shown: this.gCar, tab: this.gTab, fmtMoney, header: this.header('garage.title') }));
+    this.setScreen('garage', garageHtml({ save: s, shown: this.gCar, tab: this.gTab, fmtMoney, header: this.header('garage.title'),
+      paintPane: this.gTab === 'paint' ? paintShopHtml(s, this.gCar, fmtMoney) : undefined }));
     const strip = this.layers.screen.querySelector<HTMLElement>('.g-strip');
     if (strip) strip.scrollLeft = keepScroll;
   }
