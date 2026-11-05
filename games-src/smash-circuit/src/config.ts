@@ -262,6 +262,7 @@ export const CONFIG = {
     recoverOut: 2.5,           // m outside the wall line it first lines up at, in front of the gap
     recoverSpeed: 5,           // m/s base speed when driving back through the gap (+0.4 per m of distance)
     // ---- appended: rival personalities (clean racer / rammer / blocker) and pack manners ----
+    personalityLook: 46,       // m of road ahead that must be free of tight bends before a rammer attacks / smashes or a blocker covers
     launchHold: 30,            // m after the line a car keeps its grid column (no cutting across the pack at the start)
     wallMargin: 1.2,           // m from the road edge: on the outside of a bend, closer than this lifts the speed target ...
     wallLift: 0.94,            // ... to this fraction (the planned line already keeps laneMargin from the edge)

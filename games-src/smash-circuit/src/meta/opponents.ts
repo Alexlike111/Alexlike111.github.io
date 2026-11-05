@@ -105,5 +105,24 @@ export function makeOpponents(trackIndex: number, playerStats: CarStats, seed: n
       ai,
     });
   }
+  assignStyles(out, O.rammers[ti], O.blockers[ti]);
   return out;
+}
+
+/**
+ * Rival characters: the most aggressive drivers become rammers (they hunt the human and smashable props), the strongest of the rest
+ * blocks (defends the line against a follower), everyone else is a clean racer. Aggression follows the character.
+ */
+function assignStyles(field: CarSetup[], rammers: number, blockers: number): void {
+  const byAggr = field.map((_, i) => i).sort((a, b) => field[b].ai!.aggression - field[a].ai!.aggression);
+  const rest: number[] = [];
+  byAggr.forEach((i, k) => {
+    const ai = field[i].ai!;
+    if (k < rammers) { ai.style = 'rammer'; ai.aggression = Math.max(ai.aggression, 0.8); } else rest.push(i);
+  });
+  rest.sort((a, b) => field[b].ai!.skill - field[a].ai!.skill);
+  rest.forEach((i, k) => {
+    const ai = field[i].ai!;
+    if (k < blockers) { ai.style = 'blocker'; ai.aggression = Math.min(Math.max(ai.aggression, 0.4), 0.55); } else { ai.style = 'racer'; ai.aggression = Math.min(ai.aggression, 0.35); }
+  });
 }

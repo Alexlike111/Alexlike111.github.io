@@ -2,7 +2,7 @@
 // Decisions are taken a few times per second and scale with `iq` (0..1, the driver's skill): a clever driver waits for the
 // right moment (clear straight for Nitro, a rival closing in for the shield ...), a weak one fires at a random moment.
 import { CONFIG } from '../config';
-import type { CarState, ItemType, OilSlick, TrackGeometry } from '../types';
+import type { AiStyle, CarState, ItemType, OilSlick, TrackGeometry } from '../types';
 
 const A = CONFIG.items.ai;
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -55,7 +55,7 @@ export class AiItemUser {
   /** oil slicks on the road (set by the Sim): the AI does not stack slicks */
   oils: OilSlick[] | null = null;
 
-  constructor(private readonly iq: number, private readonly rng: () => number) {
+  constructor(private readonly iq: number, private readonly rng: () => number, private readonly style: AiStyle = 'racer') {
     this.delay = lerp(A.reaction[0], A.reaction[1], Math.min(1, Math.max(0, iq))) * (0.8 + 0.4 * rng());
     this.acc = rng() * A.thinkEvery;
   }
@@ -87,7 +87,7 @@ export class AiItemUser {
         if (!calm) return this.held > A.maxHold + 4;
         if (overdue) return true;
         if (!clever) return this.rng() < 0.06;
-        return !sur.aheadInLane;
+        return !sur.aheadInLane || this.style === 'rammer';   // a rammer fires it to close in on the car ahead
       }
       case 'shield':
         return overdue || sur.chaser || (car.health < A.shieldHealth && sur.nearCount > 0) || (clever && sur.blocker && car.speed > 12);
