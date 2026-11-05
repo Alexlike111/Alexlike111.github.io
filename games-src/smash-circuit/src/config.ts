@@ -115,6 +115,10 @@ export const CONFIG = {
     // ---- appended: fair damage (audit #14 / #19) ----
     toast: { power: 0.85, speed: 0.9, grip: 0.8, pull: 0.1, cooldown: 4 },   // effect toasts: shown once effects fall past these (re-armed on repair), min gap in s
     gripFloor: 0.3,           // effects.gripMul never drops below this (a battered car still steers)
+    // ---- appended: hit-stop on heavy car-vs-car hits (src/fx/hitStop.ts) ----
+    // the sim freezes for time[0]..time[1] s when the PLAYER's car takes a car hit of impact strength >= minStrength (~18000 N*s: the
+    // car-car crash-state impulse); at most one per `cooldown` s; off with prefers-reduced-motion
+    hitStop: { minStrength: 0.45, time: [0.04, 0.06] as [number, number], cooldown: 0.8 },
     hitWindow: 0.1,           // s: contact impulses of one car on one barrier (walls + guardrails) or one prop are summed over this window and
                               // the no-damage threshold applies once per window (a glancing hit's 3-4 solver steps count as one hit)
                               // plow-through (see destruction.plowKeep): the impulse that breaks the piece is charged in full and

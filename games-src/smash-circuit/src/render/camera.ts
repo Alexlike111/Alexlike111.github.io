@@ -66,7 +66,10 @@ export class CameraRig {
   get target(): { x: number; z: number } { return { x: this.tx, z: this.tz }; }
   get radius(): number { return Math.hypot(this.halfW, this.halfH); }
 
-  addTrauma(t: number): void { this.trauma = clamp(this.trauma + t, 0, 1); }
+  /** shake strength multiplier (1 = full; the game lowers it for prefers-reduced-motion) */
+  shakeScale = 1;
+
+  addTrauma(t: number): void { this.trauma = clamp(this.trauma + t * this.shakeScale, 0, 1); }
 
   /** Zoom punch (boost pad / nitro): the view widens by `amount` (fraction) and eases back. */
   addPunch(amount: number): void { this.punchK = Math.min(0.2, this.punchK + amount); }

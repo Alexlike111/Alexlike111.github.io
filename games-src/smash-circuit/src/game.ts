@@ -3,6 +3,7 @@
 import { CONFIG } from './config';
 import { initLang, lang, t } from './i18n';
 import { AudioManager } from './audio/audio';
+import { HitStop } from './fx/hitStop';
 import { InputController } from './input/input';
 import { applyRaceResult, buyUpgrade, nextTrackId, raceRewardParts, repairCost } from './meta/economy';
 import { makeOpponents, makePlayerSetup, rivalChoiceOf } from './meta/opponents';
@@ -90,6 +91,9 @@ export class Game {
   private repairsUsed = 0;
   private lastRepairAt = -999;
 
+  /** sim freeze on a heavy car-vs-car hit (src/fx/hitStop.ts) */
+  private hitStop = new HitStop();
+
   private raf = 0;
   private lastT = 0;
   private framesRendered = 0;
@@ -113,6 +117,11 @@ export class Game {
     this.audio = new AudioManager();
     this.applyMute();
     this.renderer = new GameRenderer(canvas, this.save.settings.quality);
+    try {
+      const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.hitStop.enabled = !reduced;
+      this.renderer.setReducedMotion(reduced);
+    } catch { /* no matchMedia: full effects */ }
     this.ui = new UI(uiRoot, this.handlers());
     this.input = new InputController(uiRoot);
     this.applyControls();
@@ -262,6 +271,7 @@ export class Game {
     old?.dispose();
     const sim = new Sim({ track: def, cars, seed, ghost: this.save.ghosts[def.id] });
     this.sim = sim;
+    this.hitStop.reset();
     this.trackId = def.id;
     this.finish = null;
     this.results = null;
@@ -585,7 +595,7 @@ export class Game {
         const inp = this.input.getInput();
         this.lastInput = inp;
         sim.setPlayerInput(inp);
-        let left = dt * this.timeScale;
+        let left = this.hitStop.advance(dt) * this.timeScale;
         const chunk = 1 / 30;
         let guard = 0;
         while (left > 1e-6 && guard++ < CONFIG.game.maxTimeScale + 2) {
@@ -596,6 +606,7 @@ export class Game {
           if (ev.length) events = events.length ? events.concat(ev) : ev;
         }
         this.handleEvents(events, sim);
+        this.hitStop.onEvents(events, sim.cars[0].id);
         this.watchStuck(sim, dt);
         this.watchDamage(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
