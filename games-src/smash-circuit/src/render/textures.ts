@@ -143,12 +143,12 @@ export function makeRoadTexture(width: number, shoulder: number, laneCount: numb
     const wy = (fn: (oy: number) => void): void => { for (const oy of [-H, 0, H]) fn(oy); };
     for (let i = 0; i < 5; i++) {
       const x = x0 + rng() * (x1 - x0 - 3 * px), y = rng() * H, w = (1.2 + rng() * 2.2) * px, h = (1 + rng() * 2.4) * py;
-      g.globalAlpha = 0.09 + rng() * 0.07; g.fillStyle = rng() > 0.5 ? '#000000' : '#ffffff';
+      g.globalAlpha = 0.035 + rng() * 0.035; g.fillStyle = rng() > 0.5 ? '#000000' : '#ffffff';
       wy((oy) => g.fillRect(x, y + oy, w, h));
     }
     for (let i = 0; i < 4; i++) {
       const x = x0 + (0.15 + rng() * 0.7) * (x1 - x0), y = rng() * H;
-      g.globalAlpha = 0.22; g.fillStyle = '#0b0c10';
+      g.globalAlpha = 0.15; g.fillStyle = '#0b0c10';
       wy((oy) => { g.beginPath(); g.ellipse(x, y + oy, (0.3 + rng() * 0.4) * px, (0.5 + rng() * 0.8) * py, rng() * 3, 0, 6.3); g.fill(); });
     }
     g.globalAlpha = 0.2; g.strokeStyle = '#0b0c10'; g.lineWidth = 1.4;
