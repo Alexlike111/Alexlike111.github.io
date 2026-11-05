@@ -233,7 +233,7 @@ export const CONFIG = {
     horizon: [40, 260] as [number, number],   // m look-ahead window for the speed profile [min, max]
     // per-track multiplier on the planned cornering speed (difficulty ramp). > 1 because the AI plans for the centre line while the road is wide enough
     // for a larger-radius racing line; with skill 1 the top AI laps t1/t2/t3 in ~26.5/30.5/33 s (a clean crude-bot human: 27.2/30.7/33.3)
-    trackSpeed: { t1: 1.09, t2: 1.12, t3: 1.14 } as Record<string, number>,
+    trackSpeed: { t1: 1.09, t2: 1.12, t3: 1.14, t4: 1.13 } as Record<string, number>,
     dragMaxSpeed: 12,          // m/s: above this a car that is not gaining speed is cornering / at its limit, not pushing something (no jink)
     dragTime: 2,               // s of pinned throttle without gaining speed before the AI jinks sideways
     shedTime: 0.9,             // s that jink lasts
@@ -439,7 +439,7 @@ export const CONFIG = {
   },
   // ---- appended by module E (meta / audio / ui) ----
   meta: {
-    trackOrder: ['t1', 't2', 't3'] as string[],
+    trackOrder: ['t1', 't2', 't3', 't4'] as string[],
     opponents: {
       skill: [[0.6, 0.95], [0.8, 1.0], [0.92, 1.0]] as [number, number][],      // [slowest, fastest] AI skill per track (round 2: base car ~3rd on t1, ~4th on t2, ~7th on t3 vs a crude keyboard bot)
       statScale: [[0.92, 1.04], [1.0, 1.12], [1.14, 1.28]] as [number, number][],  // AI power/grip multiplier range per track (rivals on later tracks are upgraded cars)

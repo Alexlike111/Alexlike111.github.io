@@ -5,6 +5,7 @@
 import { CONFIG } from '../config';
 import type { PropDef, PropType, TrackDef, TrackGeometry, Vec2 } from '../types';
 import { buildTrackGeometry } from './spline';
+import { extraTracks } from './tracksExtra';
 
 type Pt = [number, number];
 const pts = (a: Pt[]): Vec2[] => a.map(([x, y]) => ({ x, y }));
@@ -224,6 +225,7 @@ const THEME_DEFAULTS: Record<TrackDef['theme'], Omit<GenOptions, 'seed'>> = {
   meadow: { hay: 1.0, tyres: 0.5, cones: 0.8, barrels: 0.5, crates: 0.4, clutter: 0.55, trees: 150, rocks: 14, decorReach: 34 },
   desert: { hay: 0.4, tyres: 0.8, cones: 0.9, barrels: 1.0, crates: 0.9, clutter: 0.6, trees: 46, rocks: 70, decorReach: 40 },
   snow:   { hay: 0.7, tyres: 1.0, cones: 0.7, barrels: 0.7, crates: 0.6, clutter: 0.5, trees: 110, rocks: 36, decorReach: 30 },
+  night:  { hay: 0.1, tyres: 0.9, cones: 1.0, barrels: 1.0, crates: 1.0, clutter: 0.7, trees: 40, rocks: 20, decorReach: 26 },
 };
 
 /** Auto-dress a track (used by the dev editor for new layouts): corner dressing, clutter, decor, by theme. Deterministic per seed. */
@@ -260,7 +262,7 @@ const T3 = makeTrack({
 }, { seed: 3303, hay: 0.7, tyres: 1.0, cones: 0.7, barrels: 0.7, crates: 0.6, clutter: 0.5, trees: 110, rocks: 36, decorReach: 30 });
 
 /** Exactly three tracks, in unlock order. */
-export const TRACKS: TrackDef[] = [T1, T2, T3];
+export const TRACKS: TrackDef[] = [T1, T2, T3, ...extraTracks(makeTrack)];
 
 export function trackById(id: string): TrackDef {
   const t = TRACKS.find((x) => x.id === id);

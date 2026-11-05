@@ -108,6 +108,13 @@ export function buildDecor(track: TrackGeometry, pal: ThemePalette, mats: Materi
     kinds.push({ name: 'rock', geo: grounded(rockGeometry(pal, 9)), mat: mats.toon, count: L * 0.26, scale: [0.6, 2.4], radius: 1.4, reach: [2.5, 80], power: 1.5, cast: true, tint: brightness(0.88, 1.12) });
     kinds.push({ name: 'bush', geo: grounded(bushGeometry(pal, theme)), mat: mats.toon, count: L * 0.34, scale: [0.6, 1.3], radius: 0.9, reach: [2.2, 50], power: 1.8, cast: false, tint: brightness(0.85, 1.1) });
     kinds.push({ name: 'dune', geo: geo(duneGeometry(0xffffff)), mat: mats.toon, count: L * 0.045, scale: [3.5, 8], scaleY: [1.3, 2.6], radius: 1.0, reach: [10, 110], power: 1.0, cast: false, tint: (r, c) => { c.set([pal.ground, pal.groundDark, 0xf8d78c][Math.floor(r() * 3)]); }, lift: -0.02 });
+  } else if (theme === 'night') {
+    kinds.push({ name: 'lamp', geo: grounded(treeGeometry('night', pal, 0)), mat: mats.toon, count: L * 0.08, scale: [0.9, 1.1], radius: 1.4, reach: [3, 30], power: 1.6, cast: true, tint: brightness(1, 1) });
+    kinds.push({ name: 'lamp2', geo: grounded(treeGeometry('night', pal, 1)), mat: mats.toon, count: L * 0.06, scale: [0.9, 1.1], radius: 1.4, reach: [3, 30], power: 1.6, cast: true, tint: brightness(1, 1) });
+    kinds.push({ name: 'block', geo: grounded(rockGeometry(pal, 4)), mat: mats.toon, count: L * 0.08, scale: [0.6, 1.6], radius: 1.2, reach: [2.5, 60], power: 1.5, cast: false, tint: brightness(0.9, 1.1) });
+    kinds.push({ name: 'shrub', geo: grounded(bushGeometry(pal, theme)), mat: mats.toon, count: L * 0.08, scale: [0.6, 1.1], radius: 0.9, reach: [2.2, 40], power: 1.8, cast: false, tint: brightness(0.9, 1.05) });
+    kinds.push({ name: 'neonDot', geo: geo(flowerGeometry()), mat: mats.paint, count: L * 0.12, scale: [1.6, 2.4], radius: 0.2, reach: [1.8, 30], power: 1.6, cast: false, minShare: 0.95, tint: () => undefined,
+      cluster: { size: [3, 6], spread: 1.4, palette: [0xff4fb8, 0x5ff6ff, 0xffe14a, 0x9b6bff], colours: 2 } });
   } else {
     kinds.push({ name: 'pine', geo: grounded(treeGeometry('snow', pal, 0)), mat: mats.toon, count: L * 0.36, scale: [0.8, 1.6], radius: 1.6, reach: [3, 70], power: 1.5, cast: true, tint: hueJitter });
     kinds.push({ name: 'pine2', geo: grounded(treeGeometry('snow', pal, 1)), mat: mats.toon, count: L * 0.12, scale: [0.6, 1.1], radius: 1.2, reach: [4, 60], power: 1.4, cast: true, tint: hueJitter });

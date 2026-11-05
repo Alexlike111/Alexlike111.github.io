@@ -13,7 +13,7 @@ const PROP_TYPES: PropType[] = ['cone', 'barrel', 'crate', 'tireStack', 'hayBale
 const PROP_COLOR: Record<PropType, string> = {
   cone: '#ff7a1a', barrel: '#d8402f', crate: '#b8864b', tireStack: '#222', hayBale: '#e6d04a', sign: '#ffffff', tree: '#2e9a4a', rock: '#8e969c',
 };
-const THEME_GROUND: Record<TrackDef['theme'], string> = { meadow: '#4f8f45', desert: '#c9a566', snow: '#dfe9f1' };
+const THEME_GROUND: Record<TrackDef['theme'], string> = { meadow: '#4f8f45', desert: '#c9a566', snow: '#dfe9f1', night: '#2c3158' };
 const WALL_COLOR: Record<TrackDef['wallStyle'], string> = { concrete: '#9aa3a8', tires: '#2b2b2b', fence: '#9b6b3a' };
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -583,7 +583,7 @@ function parseDef(text: string): TrackDef {
   for (const p of o.points) if (typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error('bad point');
   const props = Array.isArray(o.props) ? o.props : [];
   for (const p of props) if (!PROP_TYPES.includes(p.type) || typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error('bad prop: ' + JSON.stringify(p));
-  const themes = ['meadow', 'desert', 'snow'], walls = ['concrete', 'tires', 'fence'];
+  const themes = ['meadow', 'desert', 'snow', 'night'], walls = ['concrete', 'tires', 'fence'];
   return {
     id: String(o.id ?? 'tX'), nameKey: String(o.nameKey ?? 'track.tX'),
     theme: themes.includes(o.theme as string) ? (o.theme as TrackDef['theme']) : 'meadow',

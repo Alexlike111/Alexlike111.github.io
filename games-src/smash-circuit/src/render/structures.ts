@@ -117,6 +117,13 @@ export function treeGeometry(theme: Theme, pal: ThemePalette, variant = 0): THRE
     b.cyl(0.2, 0.2, 0.7, 5, { pos: [-0.55, 2.1, 0], rot: [0, 0, Math.PI / 2], color: c });
     b.cyl(0.18, 0.19, 0.9, 5, { pos: [-0.88, 2.5, 0], color: c, vgrad: [2, 3, 0.9, 1.1] });
     b.ico(0.18, 0, { pos: [-0.88, 2.97, 0], color: c2 });
+  } else if (theme === 'night') {
+    // neon street lamp: dark pole, arm and a glowing head (the top-down camera sees the bright head and its halo disc)
+    const glow = g[variant % g.length];
+    b.cyl(0.14, 0.2, 4.2, 5, { pos: [0, 2.1, 0], color: pal.trunk, noBottom: true });
+    b.box(1.6, 0.18, 0.22, { pos: [0.7, 4.15, 0], color: pal.trunk });
+    b.box(0.9, 0.3, 0.6, { pos: [1.35, 3.95, 0], color: 0xffffff });
+    b.cyl(1.25, 1.25, 0.05, 8, { pos: [1.35, 0.04, 0], color: glow, noBottom: true });
   } else {
     // ~75 triangles: three stacked cones (snow caps lose their hidden bottoms)
     b.cyl(0.2, 0.28, 1.0, 4, { pos: [0, 0.5, 0], color: pal.trunk, noBottom: true });
@@ -216,7 +223,7 @@ export function flowerGeometry(): THREE.BufferGeometry {
 
 export function bushGeometry(pal: ThemePalette, theme: Theme): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  const c = theme === 'desert' ? 0xcaa862 : theme === 'snow' ? 0xeaf3fb : pal.foliage[0];
+  const c = theme === 'desert' ? 0xcaa862 : theme === 'snow' ? 0xeaf3fb : theme === 'night' ? 0x2f6b5a : pal.foliage[0];
   b.ico(0.75, 0, { pos: [0, 0.45, 0], scale: [1.15, 0.8, 1], color: c, vgrad: [0, 1, 0.78, 1.1] });
   b.ico(0.5, 0, { pos: [0.5, 0.35, 0.2], color: theme === 'meadow' ? pal.foliage[1] : c, vgrad: [0, 0.8, 0.8, 1.1] });
   return b.build();
@@ -279,6 +286,15 @@ export function landmarkGeometry(theme: Theme, pal: ThemePalette, variant: numbe
     } else {                         // pyramid + palm-less oasis stones
       b.cyl(0, 8.5, 9, 4, { pos: [0, 4.5, 0], rot: [0, 0.78, 0], color: 0xf0cf8a, vgrad: [0, 9, 0.8, 1.1] });
       b.cyl(0, 3.2, 3.4, 4, { pos: [9, 1.7, 3], rot: [0, 0.78, 0], color: 0xe9c176 });
+    }
+  } else if (theme === 'night') {
+    if (variant % 2 === 0) {         // tower block with lit window bands and a neon roof sign
+      b.box(9, 14, 9, { pos: [0, 7, 0], color: 0x2b2f52, vgrad: [0, 14, 0.8, 1.1] });
+      for (let k = 0; k < 4; k++) b.box(9.1, 0.6, 9.1, { pos: [0, 3 + k * 3, 0], color: k % 2 ? 0xffe14a : 0x5ff6ff });
+      b.box(7, 1.6, 0.4, { pos: [0, 15, 0], color: 0xff4fb8 });
+    } else {                         // stacked shipping containers
+      const cols = [0xff4fb8, 0x5ff6ff, 0xffe14a, 0x9b6bff];
+      for (let k = 0; k < 5; k++) b.box(6, 2.4, 2.4, { pos: [(k % 2) * 1.5 - 0.7, 1.2 + Math.floor(k / 2) * 2.45, (k % 3) * 2.5 - 2.5], color: cols[k % cols.length], vgrad: [0, 8, 0.8, 1.05] });
     }
   } else {
     if (variant % 2 === 0) {         // log cabin with snowy roof

@@ -76,6 +76,7 @@ const THEMES: Record<string, { a: string; b: string; road: string }> = {
   meadow: { a: '#58d66b', b: '#2a9d4b', road: '#fdf6e3' },
   desert: { a: '#ffb55a', b: '#d8782a', road: '#fff2d6' },
   snow: { a: '#bfe6ff', b: '#6fb6ee', road: '#ffffff' },
+  night: { a: '#9b6bff', b: '#2b1f6b', road: '#5ff6ff' },
 };
 
 interface TrackView { id: string; nameKey: string; theme: string; laps: number; length: number; d: string; vb: string; start: [number, number]; diff: number }
