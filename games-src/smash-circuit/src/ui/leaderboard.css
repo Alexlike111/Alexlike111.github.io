@@ -23,7 +23,7 @@
   min-height: max(2.6em, 44px); padding: 0.3em 0.4em; color: #fff; background: rgba(255, 255, 255, 0.08);
   border: 0.14em solid var(--ink); border-radius: 0.8em; box-shadow: 0 0.18em 0 var(--ink);
   font: 900 italic 0.82em/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.03em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; overflow-wrap: anywhere;   /* long track names wrap on a phone instead of being cut */
 }
 .ui-root .lb-tab.on { color: var(--ink); background: linear-gradient(var(--yellow), #ffa51f); }
 .ui-root .lb-tab:focus-visible { outline: 0.2em solid #fff; outline-offset: 0.1em; }

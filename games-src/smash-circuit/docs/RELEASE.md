@@ -22,6 +22,9 @@ All commands run from `games-src/smash-circuit`.
 | `npm run check-release:strict` | same, but open owner actions (placeholder token, synthesized audio) also fail the run |
 | `npm run release` | typecheck, test, build, e2e:player, e2e:platform, check-release (what `deploy` runs before copying `dist/` to `play-test/smash`) |
 
+The two Playwright scripts run Chromium with software WebGL, so on a busy machine game time runs slower than wall time and the long waits can expire;
+`E2E_SLOW=4 npm run e2e:player` (same for `e2e:platform`) multiplies those waits. They also wait for the preview server instead of sleeping a fixed time.
+
 CI: `.github/workflows/smash-circuit.yml` runs the same gates on pushes and pull requests that touch `games-src/smash-circuit/**`.
 Run it by hand with "strict" ticked before a real release.
 

@@ -16,6 +16,8 @@ const OUT = path.join(ROOT, 'e2e', 'out', 'platform');
 mkdirSync(OUT, { recursive: true });
 const PORT = 4800 + Math.floor(Math.random() * 300);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// E2E_SLOW=4 stretches every wait on a busy machine (software GL: game time runs slower than wall time)
+const SLOW = Number(process.env.E2E_SLOW) || 1;
 const results = [];
 const check = (name, ok, detail) => { results.push({ name, ok: !!ok }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`); };
 
@@ -60,11 +62,12 @@ async function open(lbType, viewport = { width: 1280, height: 720 }) {
   const ctx = await browser.newContext({ viewport });
   await ctx.route('**/playgama-bridge.js', (r) => r.fulfill({ contentType: 'text/javascript', body: STUB(lbType) }));
   const page = await ctx.newPage();
+  page.setDefaultTimeout(30000 * SLOW);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(`http://localhost:${PORT}/?debug`);
-  await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 * SLOW });
   await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.save.settings.controlsPicked = true; });
   return { ctx, page, errors };
 }
@@ -101,20 +104,20 @@ try {
 
     // ---------------------------------------------------------------- race, pause, ads
     await page.evaluate(() => window.__game.startRace('t1'));
-    await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 });
+    await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 * SLOW });
     check('level_started is sent for the race', (await stub(page, () => window.__stub.messages)).some((m) => m[0] === 'level_started' && m[1]?.level === 't1'));
     const t0 = await page.evaluate(() => window.__game.sim.race.time);
     await stub(page, () => window.__stub.emit('pause_state_changed', true));
     await sleep(600);
     const t1 = await page.evaluate(() => window.__game.sim.race.time);
-    check('platform pause event freezes the audio (hard pause) without crashing', errors.length === 0, errors.join(' | '));
+    check('platform pause event is handled without errors', errors.length === 0, errors.join(' | '));
     await stub(page, () => window.__stub.emit('pause_state_changed', false));
     await stub(page, () => window.__stub.emit('audio_state_changed', false));
     await stub(page, () => window.__stub.emit('audio_state_changed', true));
     check('race keeps running after pause / audio events', (await page.evaluate(() => window.__game.sim.race.time)) >= t1 && t1 >= t0);
 
     await page.evaluate(() => window.__game.forceFinish());
-    await page.waitForFunction(() => window.__game.state === 'results', null, { timeout: 30000 });
+    await page.waitForFunction(() => window.__game.state === 'results', null, { timeout: 30000 * SLOW });
     check('level_completed closes the level', (await stub(page, () => window.__stub.messages)).some((m) => m[0] === 'level_completed'));
     check('results offer the Leaderboard button', (await page.$('.rescard [data-act=leaderboard]')) !== null);
     await page.screenshot({ path: path.join(OUT, 'results-desktop.png') });
@@ -139,7 +142,7 @@ try {
     check('Race again asks for an interstitial', true);
     check('the game waits while the ad is open', (await page.evaluate(() => window.__game.state)) === 'ad');
     await stub(page, () => window.__stub.emit('interstitial_state_changed', 'closed'));
-    await page.waitForFunction(() => window.__game.state === 'racing', null, { timeout: 30000 });
+    await page.waitForFunction(() => window.__game.state === 'racing', null, { timeout: 30000 * SLOW });
     check('the next race starts after the ad closes', true);
     check('no console / page errors', errors.length === 0, errors.join(' | '));
     await ctx.close();
