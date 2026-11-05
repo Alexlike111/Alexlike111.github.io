@@ -153,7 +153,7 @@ function sourceChecks() {
     blocker('audio is recorded, licensed, not synthesized (Playgama 3.3.1 / 3.3.2)', 'docs/AUDIO.md still says PLACEHOLDERS (owner: supply CC0/licensed recordings, fill in the licence table)');
   } else pass('docs/AUDIO.md has no placeholder status');
   if (exists('public/sfx')) {
-    const files = readdirSync(path.join(ROOT, 'public/sfx'));
+    const files = readdirSync(path.join(ROOT, 'public/sfx')).filter((f) => /\.(ogg|mp3)$/.test(f));   // LICENSES.txt etc. are not sounds
     const names = new Set(files.map((f) => f.replace(/\.(ogg|mp3)$/, '')));
     const unpaired = [...names].filter((n) => !(files.includes(n + '.ogg') && files.includes(n + '.mp3')));
     expect(unpaired.length === 0, 'every sound ships as ogg + mp3 (Safari fallback)', `unpaired: ${short(unpaired)}`);

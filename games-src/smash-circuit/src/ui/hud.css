@@ -15,6 +15,8 @@
 /* ---- gap chips ---- */
 .ui-root .hx-gaps { display: flex; flex-direction: column; gap: 0.25em; pointer-events: none; }
 .ui-root .hx-gaps[hidden], .ui-root .hx-gap[hidden] { display: none; }
+/* short landscape screens: the two chips sit side by side so the column stays clear of the slide-steer pad (667x375) */
+@media (orientation: landscape) and (max-height: 420px) { .ui-root .hx-gaps { flex-direction: row; gap: 0.35em; } }
 .ui-root .hx-gap {
   --gc: #e9eefc; display: flex; align-items: center; gap: 0.4em; padding: 0.15em 0.55em 0.2em 0.45em; border-radius: 0.7em;
   background: var(--panel); border: 0.13em solid var(--ink); box-shadow: 0 0.16em 0 rgba(0, 0, 0, 0.3);

@@ -621,7 +621,8 @@ try {
     check(`[daily ${name}] login reward adds coins`, m1 > m0, `${m0} -> ${m1}`);
     await page.click('.d-head [data-act=dailyClose]');
     // garage paint shop
-    await page.evaluate(() => { window.__game.save.money = 5000; });
+    // the UI keeps its own save snapshot (the game adopts meta ops from it): give both the coins
+    await page.evaluate(() => { const g = window.__game; g.save.money = 5000; g.ui.save = { ...g.ui.save, money: 5000 }; g.ui.setMoney(5000); });
     await page.click('[data-act=garage]');
     await page.click('[data-act=gtab][data-tab=paint]');
     await page.waitForSelector('.cos-pane', { timeout: 5000 });
