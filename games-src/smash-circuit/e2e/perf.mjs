@@ -24,9 +24,7 @@ if (!args.includes('--no-build')) {
 }
 const server = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--port', String(PORT), '--strictPort'],
   { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-let up = false;
-server.stdout.on('data', (d) => { if (String(d).includes('localhost')) up = true; });
-for (let i = 0; i < 100 && !up; i++) await sleep(100);
+for (let i = 0; i < 240; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ } await sleep(500); }
 
 const browser = await chromium.launch();
 const res = { label: opt('label', ''), rate: RATE, track: TRACK };
