@@ -164,7 +164,7 @@ describe('takedown attribution', () => {
   it('a rival wrecked right after a car-to-car contact with the player is a takedown', () => {
     const t = new TakedownTracker(2.5, 5, 10);
     expect(t.update([impact(1.5, 0)], cars(), 10)).toEqual([]);
-    expect(t.update([wrecked(1)], cars(), 11.2)).toEqual([{ carId: 1, name: 'C1' }]);
+    expect(t.update([wrecked(1)], cars(), 11.2)).toEqual([{ carId: 1, name: 'C1', kind: 'wreck' }]);
   });
 
   it('too late, no contact, or a contact somewhere else is not a takedown', () => {
@@ -184,6 +184,19 @@ describe('takedown attribution', () => {
     expect(t.update([wrecked(1)], cars(), 10.5)).toEqual([]);
     t.update([impact(1.5, 0)], cars(), 11);
     expect(t.update([wrecked(0)], cars(), 11.2)).toEqual([]);
+  });
+
+  it('a rival thrown into a wall hard right after the player hit it is a takedown, a soft wall touch is not', () => {
+    const wall = (strength: number, other: 'wall' | 'prop' = 'wall'): SimEvent => ({ type: 'impact', x: 3, y: 9, strength, carId: 1, other });
+    const t = new TakedownTracker(2.5, 5, 10, 0.45);
+    t.update([impact(1.5, 0)], cars(), 10);
+    expect(t.update([wall(0.3)], cars(), 10.6)).toEqual([]);
+    expect(t.update([wall(0.6, 'prop')], cars(), 11)).toEqual([{ carId: 1, name: 'C1', kind: 'wall' }]);
+    // a wall hit with no recent contact with the player (the rival crashed on its own) does not count
+    const t2 = new TakedownTracker(2.5, 5, 10, 0.45);
+    expect(t2.update([wall(0.9)], cars(), 10)).toEqual([]);
+    t2.update([impact(1.5, 0)], cars(), 20);
+    expect(t2.update([wall(0.9)], cars(), 23)).toEqual([]);
   });
 
   it('the same rival cannot be taken down again inside the cooldown (no farming)', () => {

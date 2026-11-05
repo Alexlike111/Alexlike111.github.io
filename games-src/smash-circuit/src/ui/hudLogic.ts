@@ -152,12 +152,13 @@ export class ComboTracker {
 
 // ------------------------------------------------------------------------------------------------ takedowns
 
-export interface Takedown { carId: number; name: string }
+export interface Takedown { carId: number; name: string; /** wrecked outright, or thrown into a wall / prop hard right after the player's hit */ kind: 'wreck' | 'wall' }
 
 /**
- * Takedown attribution without touching the sim: a car-to-car `impact` event whose point is within `contactR` of both the
- * player and a rival marks a contact with that rival; if the rival is `wrecked` within `windowS` of it, the player took it
- * down. The same rival cannot be taken down again within `cooldownS` (no farming).
+ * Takedown attribution without touching the sim (GDD 9.2): a car-to-car `impact` event whose point is within `contactR` of
+ * both the player and a rival marks a contact with that rival; if within `windowS` of it the rival is `wrecked`, or hits a wall /
+ * prop with strength >= `wallStrength`, the player took it down. The same rival cannot be taken down again within
+ * `cooldownS` (no farming).
  */
 export class TakedownTracker {
   private contact = new Map<number, number>();
@@ -166,6 +167,7 @@ export class TakedownTracker {
     private readonly windowS: number = CONFIG.hud.takedownWindowS,
     private readonly contactR: number = CONFIG.hud.takedownContactR,
     private readonly cooldownS: number = CONFIG.hud.takedownCooldownS,
+    private readonly wallStrength: number = CONFIG.hud.takedownWallStrength,
   ) {}
 
   reset(): void { this.contact.clear(); this.done.clear(); }
@@ -175,24 +177,27 @@ export class TakedownTracker {
     const p = cars[playerIdx];
     if (!p) return [];
     let out: Takedown[] | null = null;
+    const award = (carId: number, kind: Takedown['kind']): void => {
+      if (carId === p.id) return;
+      const t = this.contact.get(carId);
+      if (t === undefined || now - t > this.windowS) return;
+      const d = this.done.get(carId);
+      if (d !== undefined && now - d < this.cooldownS) return;
+      this.done.set(carId, now);
+      (out ??= []).push({ carId, name: cars.find((c) => c.id === carId)?.name ?? '', kind });
+    };
     for (const e of events) {
       if (e.type === 'impact') {
-        if (e.other !== 'car') continue;
-        if (Math.hypot(p.x - e.x, p.y - e.y) > this.contactR) continue;
-        for (const c of cars) {
-          if (c === p) continue;
-          if (Math.hypot(c.x - e.x, c.y - e.y) <= this.contactR) this.contact.set(c.id, now);
+        if (e.other === 'car') {
+          if (Math.hypot(p.x - e.x, p.y - e.y) > this.contactR) continue;
+          for (const c of cars) {
+            if (c === p) continue;
+            if (Math.hypot(c.x - e.x, c.y - e.y) <= this.contactR) this.contact.set(c.id, now);
+          }
+        } else if (e.strength >= this.wallStrength && e.other !== 'road' && e.other !== 'curb') {
+          award(e.carId, 'wall');
         }
-      } else if (e.type === 'wrecked') {
-        if (e.carId === p.id) continue;
-        const t = this.contact.get(e.carId);
-        if (t === undefined || now - t > this.windowS) continue;
-        const d = this.done.get(e.carId);
-        if (d !== undefined && now - d < this.cooldownS) continue;
-        this.done.set(e.carId, now);
-        const car = cars.find((c) => c.id === e.carId);
-        (out ??= []).push({ carId: e.carId, name: car?.name ?? '' });
-      }
+      } else if (e.type === 'wrecked') award(e.carId, 'wreck');
     }
     return out ?? [];
   }

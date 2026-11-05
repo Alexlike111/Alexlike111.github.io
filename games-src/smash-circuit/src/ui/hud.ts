@@ -201,7 +201,7 @@ export class HudExtras {
         this.slams++;
         this.slamBonus += this.H.takedownCoins;
         const v = sim.cars.find((c) => c.id === d.carId) ?? p;
-        this.showTakedown(d.name, project ? project(v.x, v.y) : null);
+        this.showTakedown(d.name, d.kind, project ? project(v.x, v.y) : null);
       }
     }
 
@@ -306,8 +306,8 @@ export class HudExtras {
 
   // ------------------------------------------------------------------ takedown
 
-  private showTakedown(name: string, pos: { x: number; y: number } | null): void {
-    this.slam.innerHTML = `<b>${esc(t('hud.slam'))}</b><span>${esc(t('hud.slamSub', { name }))}</span><em>+${this.H.takedownCoins}</em>`;
+  private showTakedown(name: string, kind: 'wreck' | 'wall', pos: { x: number; y: number } | null): void {
+    this.slam.innerHTML = `<b>${esc(t('hud.slam'))}</b><span>${esc(t(kind === 'wall' ? 'hud.slamWall' : 'hud.slamSub', { name }))}</span><em>+${this.H.takedownCoins}</em>`;
     this.restart(this.slam);
     window.clearTimeout(this.slamTimer);
     this.slamTimer = window.setTimeout(() => { this.slam.hidden = true; }, this.H.takedownMs);
@@ -394,10 +394,10 @@ export class HudExtras {
     for (let i = cars.length - 1; i >= 0; i--) {
       const c = cars[i];
       if (c.isPlayer) continue;
-      this.drawDot(g, fit, c, px * 0.036, hex(palette[c.colorIndex % palette.length]), false);
+      this.drawDot(g, fit, c, px * 0.042, hex(palette[c.colorIndex % palette.length]), false);
     }
     const p = cars.find((c) => c.isPlayer);
-    if (p) this.drawDot(g, fit, p, px * 0.056, '#ffc93c', true);
+    if (p) this.drawDot(g, fit, p, px * 0.06, "#ffc93c", true);
   }
 
   private drawDot(g: CanvasRenderingContext2D, fit: MapFit, c: CarState, r: number, color: string, player: boolean): void {

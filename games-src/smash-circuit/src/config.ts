@@ -698,6 +698,7 @@ export const CONFIG = {
     floatMax: 8,               // pooled floats
     takedownWindowS: 2.5,      // a rival wrecked within this long of a contact with the player is a takedown
     takedownContactR: 5,       // m: both cars within this distance of the impact point = a contact between them
+    takedownWallStrength: 0.45, // a rival thrown into a wall / prop this hard (impact strength 0..1) right after the player's hit also counts (GDD 9.2)
     takedownCooldownS: 10,     // the same rival cannot be taken down again within this (no farming)
     takedownCoins: 20,         // bonus coins for a takedown (goes through the same per-race smash cap)
     takedownMs: 1700,

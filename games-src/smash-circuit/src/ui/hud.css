@@ -4,9 +4,9 @@
 
 /* ---- minimap ---- */
 .ui-root .hx-map {
-  --mm: clamp(72px, min(27vw, 21vh), 124px);
+  --mm: clamp(64px, min(27vw, 17.5vh), 124px);
   width: var(--mm); height: var(--mm); flex: none; pointer-events: none;
-  background: rgba(16, 27, 58, 0.66); border: 0.14em solid var(--ink); border-radius: 0.9em;
+  background: rgba(16, 27, 58, 0.8); border: 0.14em solid var(--ink); border-radius: 0.9em;
   box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3), inset 0 0 0 0.1em var(--panel-line); overflow: hidden;
 }
 .ui-root .hx-map[hidden] { display: none; }
@@ -81,8 +81,8 @@
   font: 900 italic 2.4em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill;
   text-shadow: 0 0.06em 0 var(--ink);
 }
-.ui-root .hx-combo[data-tier="2"] b { color: #ffa63a; font-size: 2.8em; }
-.ui-root .hx-combo[data-tier="3"] b { color: #ff5a36; font-size: 3.2em; text-shadow: 0 0.06em 0 var(--ink), 0 0 0.6em rgba(255, 90, 54, 0.85); }
+.ui-root .hx-combo[data-tier="2"] b { color: #ffa63a; font-size: 2.5em; }
+.ui-root .hx-combo[data-tier="3"] b { color: #ff5a36; font-size: 2.6em; text-shadow: 0 0.06em 0 var(--ink), 0 0 0.6em rgba(255, 90, 54, 0.85); }
 .ui-root .hx-combo span { font: 900 0.8em/1 var(--body); letter-spacing: 0.12em; color: #fff; text-shadow: 0 0.1em 0 var(--ink); text-transform: uppercase; }
 .ui-root .hx-combo i { display: block; width: 7em; height: 0.32em; border-radius: 0.2em; background: #fff; border: 0.08em solid var(--ink); transform-origin: left center; transition: transform 0.1s linear; }
 .ui-root .hx-combo.go { animation: hx-combo 0.3s cubic-bezier(.2, 1.7, .4, 1) both; }
@@ -110,8 +110,8 @@
 @media (max-height: 460px) {
   .ui-root .hx-ovt b { font-size: 1.8em; }
   .ui-root .hx-slam b { font-size: 2.6em; }
-  .ui-root .hx-combo b { font-size: 2em; }
-  .ui-root .hx-combo[data-tier="2"] b { font-size: 2.2em; }
-  .ui-root .hx-combo[data-tier="3"] b { font-size: 2.5em; }
+  .ui-root .hx-combo b { font-size: 1.7em; }
+  .ui-root .hx-combo[data-tier="2"] b { font-size: 1.9em; }
+  .ui-root .hx-combo[data-tier="3"] b { font-size: 2.1em; }
   .ui-root .hx-combo { top: 52%; }
 }
