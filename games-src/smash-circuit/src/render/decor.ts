@@ -7,6 +7,7 @@ import { WALL_BASE_LEN, bushGeometry, duneGeometry, flowerGeometry, landmarkGeom
 import type { Exclusion } from './trackBuilder';
 import type { Materials } from './materials';
 import type { ThemePalette } from './palette';
+import { hayGeometry, iceGeometry, tentGeometry } from './dressing';
 import { GeoBuilder, concat } from './geo';
 import { PointGrid, hashString, makeRng } from './util';
 
@@ -44,7 +45,7 @@ const CELL = 36;
 
 /** Max instances of one kind drawn at once (density 1): nearest cells first. Keeps the triangle count flat however thick the scenery is. */
 const VISIBLE_CAP: Record<string, number> = {
-  tree: 36, tree2: 16, bush: 46, rock: 26, flower: 90, cactus: 30, cactus2: 16, dune: 12, pine: 36, pine2: 16, mound: 28,
+  tree: 36, tree2: 16, bush: 46, rock: 26, flower: 90, cactus: 30, cactus2: 16, dune: 12, pine: 36, pine2: 16, mound: 28, hay: 14, tent: 6, ice: 20,
 };
 const DEFAULT_CAP = 40;
 
@@ -52,7 +53,8 @@ interface Pack {
   mesh: THREE.InstancedMesh;
   mats: Float32Array;
   cols: Float32Array | null;
-  ranges: { cx: number; cz: number; start: number; count: number }[];
+  /** `dither` (0..1, fixed at build time) decides which way a fractional share of a 1-2 instance range rounds, so the presets keep their configured share */
+  ranges: { cx: number; cz: number; start: number; count: number; dither: number }[];
   always: boolean;
   minShare: number;
 }
@@ -102,11 +104,13 @@ export function buildDecor(track: TrackGeometry, pal: ThemePalette, mats: Materi
     kinds.push({ name: 'rock', geo: grounded(rockGeometry(pal, 5)), mat: mats.toon, count: L * 0.05, scale: [0.5, 1.2], radius: 0.9, reach: [2.5, 40], power: 1.5, cast: false, tint: brightness(0.9, 1.1) });
     kinds.push({ name: 'flower', geo: geo(flowerGeometry()), mat: mats.paint, count: L * 0.3, scale: [1.3, 2.0], radius: 0.2, reach: [1.8, 38], power: 1.6, cast: false, minShare: 0.95, tint: () => undefined,
       cluster: { size: [4, 8], spread: 1.25, palette: [0xffffff, 0xffe14a, 0xff6fa8, 0xff7a3c, 0xb98cff], colours: 2 } });
+    kinds.push({ name: 'hay', geo: geo(hayGeometry()), mat: mats.toon, count: L * 0.022, scale: [0.9, 1.3], radius: 1.8, reach: [2.5, 26], power: 1.6, cast: false, tint: brightness(0.92, 1.08) });
   } else if (theme === 'desert') {
     kinds.push({ name: 'cactus', geo: grounded(treeGeometry('desert', pal, 0)), mat: mats.toon, count: L * 0.17, scale: [0.8, 1.5], radius: 1.4, reach: [3, 70], power: 1.4, cast: true, tint: hueJitter });
     kinds.push({ name: 'cactus2', geo: grounded(treeGeometry('desert', pal, 1)), mat: mats.toon, count: L * 0.09, scale: [0.6, 1.1], radius: 1.1, reach: [3, 60], power: 1.4, cast: true, tint: hueJitter });
     kinds.push({ name: 'rock', geo: grounded(rockGeometry(pal, 9)), mat: mats.toon, count: L * 0.26, scale: [0.6, 2.4], radius: 1.4, reach: [2.5, 80], power: 1.5, cast: true, tint: brightness(0.88, 1.12) });
     kinds.push({ name: 'bush', geo: grounded(bushGeometry(pal, theme)), mat: mats.toon, count: L * 0.34, scale: [0.6, 1.3], radius: 0.9, reach: [2.2, 50], power: 1.8, cast: false, tint: brightness(0.85, 1.1) });
+    kinds.push({ name: 'tent', geo: geo(tentGeometry(pal)), mat: mats.toon, count: L * 0.012, scale: [0.9, 1.25], radius: 3.2, reach: [4, 34], power: 1.3, cast: false, tint: brightness(0.95, 1.05) });
     kinds.push({ name: 'dune', geo: geo(duneGeometry(0xffffff)), mat: mats.toon, count: L * 0.045, scale: [3.5, 8], scaleY: [1.3, 2.6], radius: 1.0, reach: [10, 110], power: 1.0, cast: false, tint: (r, c) => { c.set([pal.ground, pal.groundDark, 0xf8d78c][Math.floor(r() * 3)]); }, lift: -0.02 });
   } else {
     kinds.push({ name: 'pine', geo: grounded(treeGeometry('snow', pal, 0)), mat: mats.toon, count: L * 0.36, scale: [0.8, 1.6], radius: 1.6, reach: [3, 70], power: 1.5, cast: true, tint: hueJitter });
@@ -114,6 +118,7 @@ export function buildDecor(track: TrackGeometry, pal: ThemePalette, mats: Materi
     kinds.push({ name: 'rock', geo: grounded(rockGeometry(pal, 2)), mat: mats.toon, count: L * 0.08, scale: [0.6, 1.8], radius: 1.2, reach: [2.5, 60], power: 1.5, cast: false, tint: brightness(0.9, 1.1) });
     kinds.push({ name: 'mound', geo: geo(moundGeometry()), mat: mats.toon, count: L * 0.2, scale: [1.2, 4.2], scaleY: [0.7, 1.3], radius: 1.0, reach: [2, 70], power: 1.4, cast: false, tint: (r, c) => { c.set(r() > 0.5 ? 0xffffff : 0xe3f0fb); } });
     kinds.push({ name: 'snowman', geo: geo(snowmanGeometry()), mat: mats.toon, count: 3, scale: [0.95, 1.25], radius: 1.2, reach: [4, 30], power: 1.2, cast: true, tint: brightness(1, 1) });
+    kinds.push({ name: 'ice', geo: geo(iceGeometry()), mat: mats.toon, count: L * 0.05, scale: [0.8, 1.8], radius: 1.0, reach: [2.5, 44], power: 1.5, cast: false, tint: brightness(0.94, 1.06) });
     kinds.push({ name: 'bush', geo: grounded(bushGeometry(pal, theme)), mat: mats.toon, count: L * 0.1, scale: [0.7, 1.2], radius: 0.9, reach: [2.2, 36], power: 1.8, cast: false, tint: brightness(0.9, 1.05) });
   }
   // landmarks (two variants, 1-2 each)
@@ -198,12 +203,13 @@ export function buildDecor(track: TrackGeometry, pal: ThemePalette, mats: Materi
     const mats = new Float32Array(placed * 16);
     const cols = srcC ? new Float32Array(placed * 3) : null;
     const ranges: Pack['ranges'] = [];
+    const ditherRng = makeRng(hashString(def.id) ^ 0xd17e5 ^ (packs.length * 7919));   // own stream: placement above is unchanged
     order.forEach((src, dst) => {
       mats.set(srcM.subarray(src * 16, src * 16 + 16), dst * 16);
       if (cols && srcC) cols.set(srcC.subarray(src * 3, src * 3 + 3), dst * 3);
       const cx = cellOf2[src * 2], cz = cellOf2[src * 2 + 1];
       const last = ranges[ranges.length - 1];
-      if (last && last.cx === cx && last.cz === cz) last.count++; else ranges.push({ cx, cz, start: dst, count: 1 });
+      if (last && last.cx === cx && last.cz === cz) last.count++; else ranges.push({ cx, cz, start: dst, count: 1, dither: ditherRng() });
     });
     packs.push({ mesh, mats, cols, ranges, always, minShare: k.minShare ?? 0 });
     mesh.count = 0;
@@ -240,7 +246,7 @@ export function buildDecor(track: TrackGeometry, pal: ThemePalette, mats: Materi
       if (!p.always) list.sort((a, b) => a.d - b.d);   // nearest cells claim the cap first
       for (const { r } of list) {
         if (left <= 0) break;
-        const c = p.always ? r.count : Math.min(Math.floor(r.count * share), left);
+        const c = p.always ? r.count : Math.min(Math.floor(r.count * share + r.dither), r.count, left);
         if (c <= 0) continue;
         dstM.set(p.mats.subarray(r.start * 16, (r.start + c) * 16), o * 16);
         if (dstC && p.cols) dstC.set(p.cols.subarray(r.start * 3, (r.start + c) * 3), o * 3);

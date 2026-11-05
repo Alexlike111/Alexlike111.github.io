@@ -5,6 +5,7 @@
 // out, wings, bull bars, beds and roof racks are what the player sees.
 import type * as THREE from 'three';
 import { GeoBuilder } from './geo';
+import { numberPlate } from './livery';
 
 export type BodyPartId = 'bumperF' | 'bumperR' | 'hood' | 'doorL' | 'doorR' | 'spoiler' | 'mirrorL' | 'mirrorR';
 
@@ -78,7 +79,8 @@ function scrapper(): ModelGeo {
   // long hatch cabin: glass all round, the roof stops short of the tail glass
   b.frustum(2.35, 1.6, 1.95, 1.24, 0.5, { pos: [-0.45, 1.24, 0], color: GLASS, vgrad: [1.0, 1.5, 0.8, 1.15] });
   b.box(1.75, 0.07, 1.18, { pos: [-0.3, 1.5, 0], color: 0xffffff, paint: P });
-  sym((s) => b.box(1.7, 0.012, 0.14, { pos: [-0.3, 1.54, s * 0.24], color: STRIPE }));
+  sym((s) => b.box(1.7, 0.012, 0.12, { pos: [-0.3, 1.54, s * 0.5], color: STRIPE }));
+  numberPlate(b, 7, -0.3, 1.535, 0, 0.95);                                              // roof roundel
   sym((s) => b.box(2.6, 0.06, 0.05, { pos: [-0.1, 0.5, s * 0.9], color: 0xffffff }));
   return {
     wheels: W,
@@ -120,6 +122,7 @@ function gravel(): ModelGeo {
   b.box(1.55, 0.07, 1.12, { pos: [-0.3, 1.5, 0], color: 0xffffff });                   // white roof (livery)
   b.box(0.5, 0.14, 0.5, { pos: [0.2, 1.58, 0], color: DARK });                          // roof scoop
   b.box(0.5, 0.06, 0.16, { pos: [0.2, 1.66, 0], color: 0xffffff, paint: P });
+  numberPlate(b, 22, -0.62, 1.535, 0, 0.9, { bg: DARK, fg: 0xffffff, rim: AMBER });     // dark roundel on the white roof
   return {
     wheels: W,
     body: b.build(),
@@ -159,6 +162,7 @@ function sandhopper(): ModelGeo {
   b.box(0.18, 0.4, 0.8, { pos: [-0.7, 1.05, 0], color: 0x3a2e28 });
   engineBay(b, -1.6, -0.95, 0.75, 0.9);                                         // rear engine
   b.box(0.5, 0.2, 0.5, { pos: [-1.3, 0.92, 0], color: 0x8d939e });
+  numberPlate(b, 3, -1.3, 1.02, 0, 0.55, { bg: 0xffd23a });                           // plate on the engine cover
   // roll cage: hoops + an X over the top (thin dark tubes)
   const T = 0x23262c;
   sym((s) => {
@@ -218,10 +222,10 @@ function brawler(): ModelGeo {
   b.frustum(1.55, 1.56, 0.95, 1.2, 0.44, { pos: [-0.75, 1.17, 0], color: GLASS, vgrad: [1.0, 1.4, 0.8, 1.15] });
   b.box(0.85, 0.07, 1.16, { pos: [-0.8, 1.41, 0], color: 0xffffff, paint: P });
   sym((s) => {
-    b.box(0.85, 0.012, 0.18, { pos: [-0.8, 1.45, s * 0.2], color: STRIPE });
     b.box(0.75, 0.012, 0.18, { pos: [-1.55, 0.97, s * 0.2], color: STRIPE });
   });
   b.box(0.9, 0.1, 1.58, { pos: [-1.55, 0.92, 0], color: 0xffffff, paint: P, seg: [3, 1, 4], noBottom: true });
+  numberPlate(b, 99, -0.8, 1.445, 0, 0.62);                                              // roof roundel (the twin stripes run bonnet and tail)
   return {
     wheels: W,
     body: b.build(),
@@ -244,6 +248,14 @@ function brawler(): ModelGeo {
   };
 }
 
+/** glint's bonnet: white panel, dark vent and the number roundel (the number leaves with the panel) */
+function glintHood(): THREE.BufferGeometry {
+  const b = g().box(1.2, 0.06, 1.05, { pos: [0.95, 0.76, 0], color: 0xffffff, paint: P })
+    .box(0.4, 0.04, 0.5, { pos: [0.75, 0.8, 0], color: DARK });
+  numberPlate(b, 5, 1.3, 0.79, 0, 0.6);
+  return b.build();
+}
+
 // ------------------------------------------------------------------------------------------------ 5 glint: sports coupe
 // low arrowhead wedge: tapered nose, teardrop canopy far back, flat wide wing on struts, side intakes, pop-up lamps
 function glint(): ModelGeo {
@@ -264,8 +276,7 @@ function glint(): ModelGeo {
     wheels: W,
     body: b.build(),
     parts: {
-      hood: g().box(1.2, 0.06, 1.05, { pos: [0.95, 0.76, 0], color: 0xffffff, paint: P })
-        .box(0.4, 0.04, 0.5, { pos: [0.75, 0.8, 0], color: DARK }).build(),
+      hood: glintHood(),
       bumperF: g().frustum(0.2, 1.0, 0.16, 0.6, 0.35, { pos: [2.05, 0.42, 0], rot: [0, 0, -Math.PI / 2], color: DARK }).build(),   // splitter
       bumperR: g().box(0.3, 0.32, 1.84, { pos: [-2.04, 0.52, 0], color: 0xffffff, paint: P })
         .box(0.08, 0.14, 1.2, { pos: [-2.2, 0.48, 0], color: 0x15171c }).build(),
@@ -297,6 +308,7 @@ function scorcher(): ModelGeo {
   // tiny chopped cabin
   b.frustum(1.05, 1.3, 0.75, 1.05, 0.4, { pos: [-1.25, 1.15, 0], color: GLASS, vgrad: [0.95, 1.35, 0.8, 1.15] });
   b.box(0.68, 0.07, 1.0, { pos: [-1.3, 1.37, 0], color: 0xffffff, paint: P });
+  numberPlate(b, 13, -1.3, 1.405, 0, 0.55, { bg: 0xffd23a });
   return {
     wheels: W,
     body: b.build(),
@@ -332,6 +344,7 @@ function needle(): ModelGeo {
   b.box(0.9, 0.06, 0.5, { pos: [-0.2, 0.74, 0], color: 0x111317 });                          // cockpit opening
   b.ico(0.2, 1, { pos: [-0.15, 0.92, 0], color: 0xffd23a });                                   // helmet
   b.box(0.7, 0.4, 0.5, { pos: [-0.95, 0.85, 0], color: 0xffffff, paint: P });                 // airbox
+  numberPlate(b, 1, -0.95, 1.05, 0, 0.5, { bg: 0xffd23a });
   engineBay(b, -1.9, -1.3, 0.72, 0.5);
   // push rods to the exposed wheels
   for (const k of W) b.box(0.08, 0.06, Math.abs(k.z) - 0.25, { pos: [k.x, 0.5, Math.sign(k.z) * (Math.abs(k.z) / 2 + 0.12)], color: DARK });
@@ -376,6 +389,7 @@ function bruiser(): ModelGeo {
   b.frustum(1.45, 1.75, 1.15, 1.45, 0.55, { pos: [0.3, 1.33, 0], color: GLASS, vgrad: [1.05, 1.6, 0.8, 1.15] });
   b.box(1.05, 0.08, 1.42, { pos: [0.25, 1.62, 0], color: 0xffffff, paint: P });
   b.box(0.12, 0.6, 1.8, { pos: [-0.5, 1.33, 0], color: 0xffffff, paint: P });                    // cab back wall
+  numberPlate(b, 8, 0.25, 1.66, 0, 1.0);                                                         // roof roundel
   // bed: dark floor inset, rails, two barrels
   b.box(1.75, 0.06, 1.55, { pos: [-1.4, 1.07, 0], color: 0x2a2c33 });
   sym((s) => b.box(1.8, 0.24, 0.12, { pos: [-1.4, 1.17, s * 0.88], color: 0xffffff, paint: P }));
@@ -427,6 +441,7 @@ function brick(): ModelGeo {
   b.box(2.8, 0.05, 1.8, { pos: [-0.7, 1.93, 0], color: 0x3a3d45 });
   for (const x of [-1.9, -1.2, -0.5, 0.2, 0.55]) b.box(0.06, 0.08, 1.8, { pos: [x, 1.98, 0], color: DARK });
   sym((s) => b.box(2.8, 0.1, 0.06, { pos: [-0.7, 2.0, s * 0.9], color: DARK }));
+  numberPlate(b, 2, 0.36, 2.03, 0, 0.7, { bg: 0xffd23a });
   return {
     wheels: W,
     body: b.build(),
@@ -464,6 +479,7 @@ function mammoth(): ModelGeo {
   b.frustum(1.9, 1.85, 1.75, 1.7, 0.55, { pos: [-0.35, 1.97, 0], color: 0x35383f });
   b.box(1.95, 0.12, 1.15, { pos: [-0.35, 2.06, 0], color: GLASS });                            // slit glass band
   b.box(1.7, 0.08, 1.66, { pos: [-0.35, 2.28, 0], color: 0xffffff, paint: P });
+  numberPlate(b, 66, -0.7, 2.32, 0, 0.7);                                                        // roof roundel between the cage bars
   // twin exhaust stacks behind the cab
   sym((s) => b.cyl(0.11, 0.11, 1.1, 7, { pos: [-1.45, 2.2, s * 0.62], color: CHROME }));
   b.box(0.9, 0.12, 1.7, { pos: [-1.65, 1.76, 0], color: STEEL });                               // rear deck plate
