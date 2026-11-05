@@ -163,6 +163,10 @@ export const EN: Dict = {
   'settings.camera.fixed': 'Fixed (north-up)',
   'settings.camera.hint': 'Rotating turns the map so the road ahead points up',
   'settings.sound': 'Sound',
+  'settings.music': 'Music',
+  'settings.music.low': 'Low',
+  'settings.music.mid': 'Medium',
+  'settings.music.high': 'Loud',
 
   'hud.place': 'POS',
   'hud.lap': 'LAP',
@@ -404,6 +408,10 @@ export const RU: Dict = {
   'settings.camera.fixed': 'Фиксированная',
   'settings.camera.hint': 'При повороте дорога впереди всегда направлена вверх',
   'settings.sound': 'Звук',
+  'settings.music': 'Музыка',
+  'settings.music.low': 'Тихо',
+  'settings.music.mid': 'Средне',
+  'settings.music.high': 'Громко',
 
   'hud.place': 'МЕСТО',
   'hud.lap': 'КРУГ',

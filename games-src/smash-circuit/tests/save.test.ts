@@ -63,6 +63,16 @@ describe('save ghosts', () => {
   });
 });
 
+describe('music volume setting', () => {
+  it('is kept when valid, clamped to 0..1, and dropped when junk', () => {
+    expect(sanitizeSave({ settings: { musicVol: 0.35 } }, {}).settings.musicVol).toBe(0.35);
+    expect(sanitizeSave({ settings: { musicVol: 7 } }, {}).settings.musicVol).toBe(1);
+    expect(sanitizeSave({ settings: { musicVol: -2 } }, {}).settings.musicVol).toBe(0);
+    expect(sanitizeSave({ settings: { musicVol: 'loud' } }, {}).settings.musicVol).toBeUndefined();
+    expect(sanitizeSave({}, {}).settings.musicVol).toBeUndefined();
+  });
+});
+
 const loadMock = () => bridge.platform.load as unknown as ReturnType<typeof vi.fn>;
 type LoadRes = { status: string; values: Record<string, unknown> };
 const stored = (core: unknown, ghosts: unknown = null): LoadRes => ({ status: 'ok', values: { [SAVE_KEY_CORE]: core, [SAVE_KEY_GHOSTS]: ghosts } });

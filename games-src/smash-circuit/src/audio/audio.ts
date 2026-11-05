@@ -1,9 +1,9 @@
-// File-based Web Audio. Samples live in public/sfx/*.ogg (+ .mp3 fallback for Safari). The shipped files are
-// PLACEHOLDERS (collision sounds: scripts/make-impacts.mjs, the rest: scripts/make-sfx.sh); see docs/AUDIO.md.
+// File-based Web Audio. Samples live in public/sfx/*.ogg (+ .mp3 fallback for Safari). They are RECORDED CC0 / MIT sounds
+// (Kenney packs, cynicmusic) built by scripts/make-recorded.mjs; sources and licences: docs/AUDIO.md.
 //
 // Graph:  engine / skid / scrape loops -> loopBus (ducked by impacts) -> sfxGain \
 //         impact voices -> impactBus (linear) ---------------------------> sfxGain -> masterGain -> limiter -> destination
-//         music -> musicGain -> musicDuck (ducked by impacts) -----------------------> masterGain
+//         menu / race music -> per-track gain (crossfade) -> musicGain (volume, pause duck) -> musicDuck (ducked by impacts) -> masterGain
 // The AudioContext is created lazily and unlocked by the first pointerdown / keydown / touchend.
 // Every public method is safe to call before unlock or when Web Audio is missing (silent no-op).
 import { CONFIG } from '../config';
@@ -19,12 +19,12 @@ type Family = keyof typeof FAMILIES;
 const FAMILY_RMS: Record<Family, number> = {
   impact_light: 0.11, impact_heavy: 0.2, impact_wood: 0.16, impact_metal: 0.16, impact_concrete: 0.19, impact_plastic: 0.126, crunch: 0.09, debris: 0.07,
 };
-type Plain = 'click' | 'buy' | 'error' | 'countdown' | 'go' | 'finish';
+type Plain = 'click' | 'buy' | 'error' | 'countdown' | 'go' | 'finish' | 'lap' | 'pickup' | 'nitro' | 'boost' | 'shockwave' | 'oil' | 'shield' | 'shieldpop' | 'repair';
 type OneShot = Plain | Family;
-type Loop = 'engine' | 'skid' | 'music' | 'scrape';
+type Loop = 'engine' | 'skid' | 'music' | 'music_menu' | 'scrape';
 
-const PLAIN: Plain[] = ['click', 'buy', 'error', 'countdown', 'go', 'finish'];
-const LOOPS: Loop[] = ['engine', 'skid', 'music', 'scrape'];
+const PLAIN: Plain[] = ['click', 'buy', 'error', 'countdown', 'go', 'finish', 'lap', 'pickup', 'nitro', 'boost', 'shockwave', 'oil', 'shield', 'shieldpop', 'repair'];
+const LOOPS: Loop[] = ['engine', 'skid', 'music', 'music_menu', 'scrape'];
 const FAMILY_NAMES = Object.keys(FAMILIES) as Family[];
 const SAMPLE_FILES: string[] = [
   ...LOOPS, ...PLAIN,
@@ -47,14 +47,20 @@ const MIX = {
   levelExp: 1.15,
   limiterThreshold: -2,   // dBFS: master limiter (the impact bus itself stays linear, so strong hits keep their dynamics)
   loopFadeEdge: 0.006,    // s: fade at both ends of a loop that cannot be crossfaded (music keeps its exact length)
+  musicFade: 0.55,        // s time constant of the menu <-> race music crossfade (about 2 s to settle)
+  musicMenu: 1.0,         // per-track level (the menu loop is mastered a little quieter than the race track)
+  musicRace: 0.9,
+  musicSwitchDelay: 0.35, // s without a live player car before the menu music takes over (ignores one-frame gaps)
+  musicRestartAfter: 2.2, // s a track must have been faded out before it restarts from its beginning
 };
 
 /** Loop-point treatment per loop, baked into the decoded buffer at load (also fixes replacement recordings). */
-const LOOP_SEAM: Record<'engine' | 'skid' | 'music' | 'scrape', { crop: number; xfade: number }> = {
+const LOOP_SEAM: Record<'engine' | 'skid' | 'music' | 'music_menu' | 'scrape', { crop: number; xfade: number; raw?: boolean }> = {
   engine: { crop: 0, xfade: 0.04 },    // equal-power crossfade tail -> head
   skid: { crop: 0.055, xfade: 0.05 }, // drop the faded edges first, then crossfade
-  scrape: { crop: 0, xfade: 0 },       // already crossfaded by scripts/make-impacts.mjs
-  music: { crop: 0, xfade: 0 },        // exact bar length: only a few-ms edge fade
+  scrape: { crop: 0, xfade: 0 },       // already crossfaded by scripts/make-recorded.mjs
+  music: { crop: 0, xfade: 0, raw: true },       // seamless by construction (scripts/make-recorded.mjs crossfades the seam); used as decoded
+  music_menu: { crop: 0, xfade: 0, raw: true },  // (no baked copy: a 90 s stereo buffer is ~33 MB, do not duplicate it)
 };
 
 /** Loudness of a hit (0..1+) from its strength, before distance: a wide curve so a 100 km/h crash is clearly bigger than a tap. */
@@ -122,7 +128,12 @@ export class AudioManager {
 
   private engine: { src: AudioBufferSourceNode; gain: GainNode; filter: BiquadFilterNode } | null = null;
   private skid: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
-  private music: AudioBufferSourceNode | null = null;
+  /** menu + race music: each has its own gain (the crossfade) and a looping source that restarts from the top when its mode begins */
+  private mus: Record<'menu' | 'race', { gain: GainNode; src: AudioBufferSourceNode | null; leftAt: number }> | null = null;
+  private musicMode: 'menu' | 'race' = 'menu';
+  private menuTimer = 0;
+  private musicStarted = false;
+  private musicVol = 1;          // user music volume 0..1 (settings), on top of CONFIG.audio.music
 
   private muted = false;
   private hardPaused = false;   // platform pause / ad / tab hidden: context suspended
@@ -162,7 +173,7 @@ export class AudioManager {
         this.musicGain = this.ctx.createGain();
         this.sfxGain = this.ctx.createGain();
         this.master.gain.value = this.muted ? 0 : A.master;
-        this.musicGain.gain.value = A.music;
+        this.musicGain.gain.value = this.musicLevel();
         this.sfxGain.gain.value = A.sfx;
         this.musicDuck = this.ctx.createGain();
         this.loopBus = this.ctx.createGain();
@@ -170,6 +181,13 @@ export class AudioManager {
         // master limiter (near -1 dBFS after its makeup): only catches peaks, it does not squash the impact dynamics
         const lim = this.ctx.createDynamicsCompressor();
         lim.threshold.value = MIX.limiterThreshold; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.12;
+        const mk = (): { gain: GainNode; src: AudioBufferSourceNode | null; leftAt: number } => {
+          const gain = this.ctx!.createGain();
+          gain.gain.value = 0;
+          gain.connect(this.musicGain!);
+          return { gain, src: null, leftAt: -99 };
+        };
+        this.mus = { menu: mk(), race: mk() };
         this.musicGain.connect(this.musicDuck); this.musicDuck.connect(this.master);
         this.loopBus.connect(this.sfxGain);
         this.impactBus.connect(this.sfxGain);
@@ -197,7 +215,7 @@ export class AudioManager {
         const data = await res.arrayBuffer();
         let buf = await new Promise<AudioBuffer>((resolve, reject) => ctx.decodeAudioData(data, resolve, reject));
         const seam = LOOP_SEAM[n as keyof typeof LOOP_SEAM];
-        if (seam) buf = this.bakeLoop(buf, seam);
+        if (seam && !seam.raw) buf = this.bakeLoop(buf, seam);
         this.buffers.set(n, buf);
         this.trim.set(n, this.measureTrim(n, buf));
       } catch (e) {
@@ -267,13 +285,52 @@ export class AudioManager {
       src.start();
       this.scrape = { src, gain };
     }
-    if (!this.music && this.buffers.has('music')) {
+    if (!this.musicStarted) { this.musicStarted = true; this.applyMusicMode(true); }   // startLoops runs on every unlock gesture
+  }
+
+  // ---------------------------------------------------------------- music (menu <-> race crossfade)
+
+  /** Music level before the per-track crossfade: CONFIG.audio.music x the user's music volume, ducked in the pause menu, 0 when off. */
+  private musicLevel(): number {
+    return this.musicWanted ? A.music * this.musicVol * (this.softPaused ? 0.45 : 1) : 0;
+  }
+
+  /** User music volume 0..1 (settings). Applies immediately. */
+  setMusicVolume(v: number): void {
+    this.musicVol = clamp01(Number.isFinite(v) ? v : 1);
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(this.musicLevel(), this.ctx.currentTime, 0.05);
+  }
+
+  /** Menu screens use the menu loop, a live race the race loop; the two crossfade over about 2 s. */
+  private setMusicMode(mode: 'menu' | 'race'): void {
+    if (mode === this.musicMode) return;
+    if (this.mus) this.mus[this.musicMode].leftAt = this.clock;
+    this.musicMode = mode;
+    this.applyMusicMode(false);
+  }
+
+  /** Start the wanted track (from its beginning if it has been silent for a while) and fade the two gains to their targets. */
+  private applyMusicMode(initial: boolean): void {
+    const ctx = this.ctx, mus = this.mus;
+    if (!ctx || !mus || !this.unlocked || !this.musicGain) return;
+    const want = this.musicMode;
+    const m = mus[want];
+    const buf = this.buffers.get(want === 'race' ? 'music' : 'music_menu');
+    if (buf && (!m.src || (!initial && this.clock - m.leftAt > MIX.musicRestartAfter))) {
+      if (m.src) { try { m.src.stop(ctx.currentTime + 0.05); } catch { /* ignore */ } }
       const src = ctx.createBufferSource();
-      src.buffer = this.buffers.get('music')!;
+      src.buffer = buf;
       src.loop = true;
-      src.connect(this.musicGain);
+      src.connect(m.gain);
       src.start();
-      this.music = src;
+      m.src = src;
+    }
+    const t = ctx.currentTime;
+    const level = { menu: MIX.musicMenu, race: MIX.musicRace };
+    for (const k of ['menu', 'race'] as const) {
+      const g = mus[k].gain.gain;
+      if (initial && k === want) g.value = level[k] * 0.0001;   // first start: begin from silence and fade in, no pop
+      g.setTargetAtTime(k === want ? level[k] : 0, t, MIX.musicFade);
     }
   }
 
@@ -293,14 +350,14 @@ export class AudioManager {
   /** Soft pause (in-game pause menu): engine / skid silent, music ducked, UI sounds still play. */
   setGameplayPaused(p: boolean): void {
     this.softPaused = p;
-    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(p ? A.music * 0.45 : A.music, this.ctx.currentTime, 0.1);
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(this.musicLevel(), this.ctx.currentTime, 0.1);
     if (p) this.silenceLoops();
   }
 
   /** Music on/off independently (e.g. during an ad break if the platform requires). */
   setMusic(on: boolean): void {
     this.musicWanted = on;
-    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(on ? (this.softPaused ? A.music * 0.45 : A.music) : 0, this.ctx.currentTime, 0.05);
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(this.musicLevel(), this.ctx.currentTime, 0.05);
   }
 
   private applySuspend(): void {
@@ -326,6 +383,9 @@ export class AudioManager {
   update(player: CarState | null, dt: number): void {
     this.clock += dt;
     this.bucket = Math.max(0, this.bucket - MIX.bucketDecay * dt);
+    // music follows the screen: a live player car = race music; menus / results = menu music; pauses keep whatever plays
+    if (player) { this.menuTimer = 0; this.setMusicMode('race'); }
+    else if (!this.softPaused && !this.hardPaused) { this.menuTimer += dt; if (this.menuTimer >= MIX.musicSwitchDelay) this.setMusicMode('menu'); }
     const ctx = this.ctx;
     if (!ctx || !this.unlocked) return;
     if (!player || this.softPaused || this.hardPaused) {
@@ -366,6 +426,7 @@ export class AudioManager {
   onEvents(events: SimEvent[], playerId: number): void {
     if (!this.ctx || !this.unlocked || this.hardPaused) return;
     let impacts: ImpactCand[] | null = null;
+    const finishing = events.some((e) => e.type === 'finish' && e.carId === playerId);   // the final lap gets the fanfare, not the lap chime
     for (const e of events) {
       switch (e.type) {
         case 'impact':
@@ -411,36 +472,41 @@ export class AudioManager {
         case 'finish':
           if (e.carId === playerId) this.play('finish', 1, 1);
           break;
-        case 'repair':
-          if (e.carId === playerId) this.play('buy', 0.8, 1);
+        case 'lap':
+          if (e.carId === playerId && !finishing) this.play('lap', 0.85, 1);
           break;
-        // ---- power-ups (placeholder mapping onto the existing samples; give them their own recordings later)
+        case 'repair':
+          if (e.carId === playerId) this.play('repair', 0.85, 1);
+          break;
+        // ---- power-ups, each with its own recording
         case 'boost': {
+          // a nitro boost is announced by its itemUse event (the 'nitro' sample); only boost pads make the whoosh here
+          if (e.source !== 'pad') break;
           const vol = this.near(e.x, e.y) * (e.carId === playerId ? 0.9 : 0.5);
-          if (vol > 0.04 && this.gate('boost' + e.carId, 0.3)) this.play('go', vol, e.source === 'pad' ? 1.9 : 1.4);
+          if (vol > 0.04 && this.gate('boost' + e.carId, 0.3)) this.play('boost', vol, 1);
           break;
         }
         case 'pickup':
-          if (e.carId === playerId) this.play('buy', 0.7, 1.6);
-          else { const vol = this.near(e.x, e.y) * 0.3; if (vol > 0.04 && this.gate('pickup', 0.15)) this.play('buy', vol, 1.9); }
+          if (e.carId === playerId) this.play('pickup', 0.75, 1);
+          else { const vol = this.near(e.x, e.y) * 0.3; if (vol > 0.04 && this.gate('pickup', 0.15)) this.play('pickup', vol, 1.15); }
           break;
         case 'itemUse': {
           const vol = this.near(e.x, e.y) * (e.carId === playerId ? 1 : 0.6);
           if (vol <= 0.04) break;
-          if (e.item === 'shockwave') { this.play('impact_heavy_1', vol, 0.55); this.play('crunch_1', vol * 0.6, 0.7); }
-          else if (e.item === 'oil') this.play('debris_1', vol * 0.8, 0.6);
-          else if (e.item === 'shield') this.play('click', vol * 0.9, 0.5);
-          else if (e.item === 'nitro') this.play('go', vol, 1.25);
+          if (e.item === 'shockwave') this.play('shockwave', vol, 1);
+          else if (e.item === 'oil') this.play('oil', vol * 0.9, 1);
+          else if (e.item === 'shield') this.play('shield', vol * 0.9, 1);
+          else if (e.item === 'nitro') this.play('nitro', vol, 1);
           break;
         }
         case 'shieldPop': {
           const vol = this.near(e.x, e.y);
-          if (vol > 0.04) this.play('crunch_1', vol * 0.8, 1.7);
+          if (vol > 0.04) this.play('shieldpop', vol * 0.9, 1);
           break;
         }
         case 'oilSpin': {
           const vol = this.near(e.x, e.y) * (e.carId === playerId ? 1 : 0.5);
-          if (vol > 0.04 && this.gate('oilspin', 0.2)) this.play('debris_1', vol * 0.8, 0.8);
+          if (vol > 0.04 && this.gate('oilspin', 0.2)) this.play('oil', vol * 0.7, 0.85);
           break;
         }
         default:

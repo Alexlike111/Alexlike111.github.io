@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Generates PLACEHOLDER sound effects into public/sfx/ with ffmpeg (reproducible, deterministic).
 #
-#  !!  These files are synthesized by a script. Playgama requirement 3.3.2 forbids code-synthesized sound
-#  !!  in a published game: REPLACE every file with a recorded CC0 / licensed sound (same file name,
-#  !!  same loop/one-shot role) before publishing. See docs/AUDIO.md.
+#  !!  LEGACY dev fallback. public/sfx now holds RECORDED CC0 sounds built by scripts/make-recorded.mjs; this script
+#  !!  would OVERWRITE them with code-synthesized placeholders (Playgama requirement 3.3.2 forbids those in a
+#  !!  published game). It refuses to run unless ALLOW_PLACEHOLDER_SFX=1. See docs/AUDIO.md.
 #
-# Usage: bash scripts/make-sfx.sh        (needs ffmpeg with libvorbis + libmp3lame)
+# Usage: ALLOW_PLACEHOLDER_SFX=1 bash scripts/make-sfx.sh   (needs ffmpeg with libvorbis + libmp3lame)
 set -euo pipefail
+if [ "${ALLOW_PLACEHOLDER_SFX:-}" != "1" ]; then
+  echo "make-sfx.sh: refusing to overwrite the recorded sounds in public/sfx with synthesized placeholders (set ALLOW_PLACEHOLDER_SFX=1 to force; see docs/AUDIO.md)." >&2
+  exit 1
+fi
 cd "$(dirname "$0")/.."
 OUT=public/sfx
 mkdir -p "$OUT"
