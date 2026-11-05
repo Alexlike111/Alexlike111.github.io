@@ -456,8 +456,8 @@ try {
     const hit = (a, b) => a && b && !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
     const bad = ['speed', 'driftm', 'item', 'brake', 'pause'].filter((k) => hit(r.stick, r[k]));
     check(`[phone-joy ${w}x${h}] fixed stick centred, visible, nothing overlaps it`, !!r.stick && Math.abs((r.stick.l + r.stick.r) / 2 - w / 2) < 1.5 && !bad.length, `${JSON.stringify(r.stick)} overlaps: ${bad.join(',')}`);
-    // the readout lives in the bottom band the camera keeps car-free (beside the stick, never over the car)
-    check(`[phone-joy ${w}x${h}] speedometer clear of the stick, in the bottom 20% (car-free band)`, !r.speed || (!hit(r.stick, r.speed) && r.speed.t >= h * 0.8), JSON.stringify(r.speed));
+    // owner request: the readout is centred, under the timer at the top (car-free band), clear of the stick
+    check(`[phone-joy ${w}x${h}] speedometer centred at the top, clear of the stick`, !r.speed || (!hit(r.stick, r.speed) && Math.abs((r.speed.l + r.speed.r) / 2 - w / 2) < 2 && r.speed.b <= h * 0.35), JSON.stringify(r.speed));
     await page.screenshot({ path: path.join(OUT, `phone-joy-${w}x${h}.png`) });
     check(`[phone-joy ${w}x${h}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();
