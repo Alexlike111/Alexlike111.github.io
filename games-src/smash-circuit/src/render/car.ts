@@ -118,6 +118,7 @@ const PART_ZONE: Record<BodyPart, ZoneId> = {
 };
 /** scorched paint. The mix towards it is capped (CFX.dirtMax ~55%) so even a wreck keeps its body colour and stays readable as a car */
 const BURNT = new THREE.Color(0x3a2f29);
+const FLASH = new THREE.Color(0xffffff);
 /** fake-shadow tint: one neutral dark for every car (a saturated tint reads as neon underglow); the player is told apart by the ground ring only */
 const BLOB_COLOR = new THREE.Color(0x10141c);
 
@@ -155,6 +156,9 @@ export class CarFleet {
   private spin: Float32Array;
   private dentSeed: Float32Array;
   private lightLevel: Float32Array;
+  /** hit reaction per car (render only): damped pitch / roll springs (angle, rate) and the paint flash timer */
+  private kick: Float32Array;
+  private flash: Float32Array;
   readonly count: number;
   /** currently drawn instance count */
   private shown: number;
@@ -168,6 +172,8 @@ export class CarFleet {
     this.spin = new Float32Array(count);
     this.dentSeed = new Float32Array(count * 4);
     this.lightLevel = new Float32Array(count).fill(0.5);
+    this.kick = new Float32Array(count * 4);
+    this.flash = new Float32Array(count);
     const rng = makeRng(777);
     for (let i = 0; i < this.dentSeed.length; i++) this.dentSeed[i] = rng() * 2 - 1;
 
@@ -248,6 +254,16 @@ export class CarFleet {
     return _m.multiply(_t);
   }
 
+  /** An impact on car k at car-local point (lx forward, ly left), strength 0..1: pitch / roll kick and a short paint flash. */
+  hit(k: number, strength: number, lx: number, ly: number): void {
+    if (k < 0 || k >= this.count) return;
+    const s = clamp(strength, 0, 1), j = k * 4;
+    const n = Math.hypot(lx, ly) || 1;
+    this.kick[j + 1] += s * CR.hitPitch * CR.hitKickRate * (lx / n);
+    this.kick[j + 3] += s * CR.hitRoll * CR.hitKickRate * (ly / n);
+    this.flash[k] = CR.hitFlashTime;
+  }
+
   update(poses: CarPose[], dt: number): void {
     const n = Math.min(poses.length, this.shown);
     for (let i = 0; i < n; i++) {
@@ -260,6 +276,16 @@ export class CarFleet {
       const latAcc = st.angularVel * speed;
       let roll = clamp(-latAcc * CR.rollPerLatAccel, -CR.maxRoll, CR.maxRoll);
       let pitch = (st.throttle - st.brake) * 0.018;
+      // hit reaction: semi-implicit damped springs, stable for any frame dt
+      {
+        const j = i * 4, h = Math.min(dt, 0.033);
+        const kv = this.kick;
+        kv[j + 1] += (-CR.hitStiffness * kv[j] - CR.hitDamping * kv[j + 1]) * h; kv[j] += kv[j + 1] * h;
+        kv[j + 3] += (-CR.hitStiffness * kv[j + 2] - CR.hitDamping * kv[j + 3]) * h; kv[j + 2] += kv[j + 3] * h;
+        pitch += clamp(kv[j], -CR.hitMax, CR.hitMax);
+        roll += clamp(kv[j + 2], -CR.hitMax, CR.hitMax);
+        this.flash[i] = Math.max(0, this.flash[i] - dt);
+      }
       let bounce = st.offRoad ? Math.sin(performance.now() * 0.03 + i * 2) * 0.03 * clamp(Math.abs(speed) / 20, 0, 1) : 0;
       // a lost wheel: that corner of the body drops onto the hub (+roll lowers the left side, -pitch the nose)
       const dp = st.detachedParts;
@@ -280,6 +306,8 @@ export class CarFleet {
       const col = _col.set(CONFIG.render.carColors[st.colorIndex % CONFIG.render.carColors.length]);
       const dirt = clamp(Math.pow(clamp(1 - st.health, 0, 1), CFX.dirtPower) * CFX.dirtMax, 0, CFX.dirtMax);
       _c.copy(col).lerp(BURNT, dirt);
+      const fl = this.flash[i] > 0 ? CR.hitFlashMix * (this.flash[i] / CR.hitFlashTime) : 0;
+      if (fl > 0) _c.lerp(FLASH, fl);
       this.body.setColorAt(i, _c);
       this.body.setMatrixAt(i, bodyM);
       this.blob.setMatrixAt(i, _t.compose(_v.set(P.x + 0.5, 0.05, P.y + 0.4), _q.setFromAxisAngle(_ay, -P.angle), this.blobScale));
@@ -301,6 +329,7 @@ export class CarFleet {
         const hpFrac = clamp(st.hp[PART_ZONE[p]] / zmax, 0, 1);
         mesh.setMatrixAt(i, _t.multiplyMatrices(bodyM, this.partMatrix(p, i, hpFrac)));
         _c.copy(col).lerp(BURNT, clamp(Math.max(Math.pow(1 - hpFrac, 0.7) * CFX.dirtMax, dirt), 0, CFX.dirtMax));
+        if (fl > 0) _c.lerp(FLASH, fl);
         mesh.setColorAt(i, _c);
       }
 
@@ -390,6 +419,12 @@ export class CarFleets {
     const n = Math.min(poses.length, this.slot.length);
     for (let i = 0; i < n; i++) { const sl = this.slot[i]; this.sub[sl.fleet][sl.k] = poses[i]; }
     for (let f = 0; f < this.fleets.length; f++) if (this.sub[f].length) this.fleets[f].update(this.sub[f], dt);
+  }
+
+  /** hit reaction of car index i (pose order) at car-local point (lx forward, ly left) */
+  hit(i: number, strength: number, lx: number, ly: number): void {
+    const sl = this.slot[i];
+    if (sl) this.fleets[sl.fleet].hit(sl.k, strength, lx, ly);
   }
 
   dispose(): void { for (const f of this.fleets) f.dispose(); }

@@ -113,6 +113,7 @@ export const CONFIG = {
     wheelOffHp: 0.5,          // wheel zone hp at or below which that wheel comes off
     maxWheelsOff: 2,          // a car never loses more wheels than this (it must still read as a car)
     // ---- appended: fair damage (audit #14 / #19) ----
+    toast: { power: 0.85, speed: 0.9, grip: 0.8, pull: 0.1, cooldown: 4 },   // effect toasts: shown once effects fall past these (re-armed on repair), min gap in s
     gripFloor: 0.3,           // effects.gripMul never drops below this (a battered car still steers)
     hitWindow: 0.1,           // s: contact impulses of one car on one barrier (walls + guardrails) or one prop are summed over this window and
                               // the no-damage threshold applies once per window (a glancing hit's 3-4 solver steps count as one hit)
@@ -359,6 +360,14 @@ export const CONFIG = {
       maxSteerVisual: 0.6,     // rad of front wheel yaw at steer = 1
       rollPerLatAccel: 0.0035, // body roll (rad) per m/s^2 of lateral acceleration
       maxRoll: 0.085,
+      hitPitch: 0.1,           // rad of nose pitch kick at impact strength 1 (hit at the nose / tail), damped spring, render only
+      hitRoll: 0.14,           // rad of roll kick at strength 1 for a hit on a flank
+      hitKickRate: 10,         // initial spring rate (1/s) per rad of kick amplitude
+      hitStiffness: 190,       // 1/s^2 spring (about 2.2 Hz)
+      hitDamping: 13,          // 1/s (settles in about 0.4 s)
+      hitMax: 0.2,             // rad cap of the kick on pitch and roll
+      hitFlashTime: 0.08,      // s of paint flash on an impact event
+      hitFlashMix: 0.85,       // paint share lerped to white at the start of the flash
       partDebrisLife: 9,       // s, flying car parts lie on the road for a while (oldest recycled first when the debris pool is full)
       ghostColor: 0x9ff0ff, ghostOpacity: 0.38,
     },

@@ -70,6 +70,8 @@ export class Game {
   private externalAd = false;   // an ad the platform opened on its own (or that was already open at start)
   private levelOpen = false;     // level_started sent and not yet completed / failed
   private stuck = new StuckWatch();
+  private dmgShown = new Set<string>();
+  private dmgGap = 0;
   private lastInput: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
   private userPaused = false;
   private itemHintShown = false;
@@ -279,7 +281,7 @@ export class Game {
     // first run: a hint sheet that never blocks the start (countdown runs; hides at the first input or GO + N s)
     this.tutorialOn = !this.save.settings.tutorialDone;
     if (this.tutorialOn) this.ui.showTutorial(this.input.touchActive);
-    this.stuck.reset();
+    this.stuck.reset(); this.dmgShown.clear(); this.dmgGap = 0;
     this.closeLevel('failed');   // restarting from the pause menu abandons the previous attempt
     this.levelOpen = true;
     platform.level('started', def.id);
@@ -595,6 +597,7 @@ export class Game {
         }
         this.handleEvents(events, sim);
         this.watchStuck(sim, dt);
+        this.watchDamage(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
         if (!this.wasGo && sim.race.phase === 'racing') { this.wasGo = true; this.input.recenter(); }
         if (this.tutorialOn && sim.race.phase === 'racing' && (sim.race.time >= CONFIG.ui.tutorialHideAfterGoS
@@ -634,6 +637,23 @@ export class Game {
     const ev = this.stuck.update(dt, p.speed, i.throttle > 0 || i.brake > 0, sim.race.time);
     if (ev === 'hint') this.ui.toast(t('hud.stuckHint'));
     else if (ev === 'reset') this.resetPlayerToTrack(sim);
+  }
+
+  /** Short toasts when the player's damage effects first cross a threshold (power, top speed, grip, steering pull). */
+  private watchDamage(sim: Sim, dt: number): void {
+    const fx = sim.cars[0].effects, T = CONFIG.damage.toast;
+    this.dmgGap = Math.max(0, this.dmgGap - dt);
+    const now: Record<string, boolean> = {
+      'dmg.power': fx.powerMul < T.power, 'dmg.speed': fx.topSpeedMul < T.speed, 'dmg.grip': fx.gripMul < T.grip,
+      'dmg.pull.r': fx.steerPull > T.pull, 'dmg.pull.l': fx.steerPull < -T.pull,
+    };
+    for (const k in now) {
+      if (!now[k]) { this.dmgShown.delete(k); continue; }
+      if (this.dmgShown.has(k) || this.dmgGap > 0) continue;
+      this.dmgShown.add(k);
+      this.dmgGap = T.cooldown;
+      this.ui.toast(t(k));
+    }
   }
 
   private resetPlayerToTrack(sim: Sim): void {

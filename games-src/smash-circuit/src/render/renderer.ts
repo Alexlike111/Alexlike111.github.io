@@ -439,7 +439,15 @@ export class GameRenderer {
     } else R.ghost.visible = false;
 
     // player marker: ring + arrow stay strong through the countdown and the first seconds, and flash again when the player is hit
-    for (const ev of events) if (ev.type === 'impact' && ev.carId === player.id && ev.strength > 0.25) R.marker.ping();
+    for (const ev of events) {
+      if (ev.type !== 'impact') continue;
+      if (ev.carId === player.id && ev.strength > 0.25) R.marker.ping();
+      const hi = this.poses.findIndex((p) => p.state.id === ev.carId);
+      if (hi >= 0 && dt > 0) {
+        const hp = this.poses[hi], dx = ev.x - hp.x, dy = ev.y - hp.y, c = Math.cos(hp.angle), sn = Math.sin(hp.angle);
+        R.fleet.hit(hi, ev.strength, dx * c + dy * sn, -dx * sn + dy * c);
+      }
+    }
     R.marker.update(dt, pp.x, pp.y, pp.angle, R.sim.race.phase === 'countdown', this.metresPerPixel());
 
     if (dt > 0) {
