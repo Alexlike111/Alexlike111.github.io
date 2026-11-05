@@ -85,7 +85,7 @@ Not used: payments, banners, achievements, tasks, daily rewards, notifications, 
 | 1.4.1 Full screen on mobile | done | fixed full-viewport canvas |
 | 1.4.2 Keyboard for text input | done | no text input |
 | 1.4.3 Orientation | owner | the game adapts to both; select both in the publication request |
-| 1.4.4 Touch controls, five schemes | done | buttons (default), slide, joystick, tilt, two-side tap; first-run picker |
+| 1.4.4 Touch controls, six schemes | done | point (default), buttons, slide, tilt, joystick, two-side tap; first-run picker (Point, Buttons, Slide, others under More) |
 | 1.4.5 Long press does not select or open menus | done | `user-select: none`, `-webkit-touch-callout: none`, `oncontextmenu="return false"` |
 | 1.4.6 No WebGL warnings | owner | no warning is shown by the game; confirm on iOS Safari |
 | 1.5.1 Keyboard | done | keyboard driving, `P` pause, repair and item keys (see the in-game tutorial) |

@@ -139,6 +139,9 @@ export class GameRenderer {
 
   /** heading-up (rotating) camera on / off; landscape screens stay north-up whatever this says */
   setCameraRotating(on: boolean): void { this.rig.rotating = on; this.dirty = true; }
+  /** Azimuth (rad) and ground tilt (rad) of the race camera: the Point scheme turns a screen direction into a world heading with them. */
+  get viewAzimuth(): number { return this.rig.viewAz; }
+  get cameraTilt(): number { return this.rig.tilt; }
   /** prefers-reduced-motion: camera shake at 30% */
   setReducedMotion(on: boolean): void { this.rig.shakeScale = on ? 0.3 : 1; }
 

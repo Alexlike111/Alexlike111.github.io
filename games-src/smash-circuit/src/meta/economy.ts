@@ -63,7 +63,7 @@ export function raceRewardParts(trackId: string, place: number, smashMoney: numb
 /** Repair price for the missing hit points summed over all zones. 0 when nothing is damaged. */
 export function repairCost(missingHp: number): number {
   if (!(missingHp > 0.5)) return 0;
-  return Math.max(CONFIG.economy.repairMinCost, Math.round(missingHp * CONFIG.economy.repairCostPerHp));
+  return Math.min(CONFIG.economy.repairMaxCost, Math.max(CONFIG.economy.repairMinCost, Math.round(missingHp * CONFIG.economy.repairCostPerHp)));
 }
 
 /** Id of the track unlocked after `trackId`, or null if it is the last one. */

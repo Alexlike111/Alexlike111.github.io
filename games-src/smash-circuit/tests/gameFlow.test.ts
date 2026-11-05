@@ -57,7 +57,7 @@ vi.mock('../src/input/input', () => ({
   InputController: class {
     touchActive = false;
     setAutoGas() {} setEnabled() {} setLabels() {} onKey() {} onTouchMode() {}
-    setScheme() {} setSensitivity() {} recenter() {} onTiltStatus() {}
+    setScheme() {} setSensitivity() {} setPointSource() {} recenter() {} onTiltStatus() {}
     getInput() { return { ...h.input }; }
   },
 }));
@@ -135,6 +135,17 @@ describe('game flow', () => {
     expect(h.ui!.calls.hideTutorial).toBeUndefined();
     run(CONFIG.race.countdown + 0.3);
     h.input = { throttle: 1, brake: 0, steer: 0, handbrake: false };
+    run(0.2);
+    expect(h.ui!.calls.hideTutorial?.length).toBe(1);
+  });
+
+  it('first run on touch: the automatic gas is not an input - the sheet stays after GO until a real steer, brake or the GO + N s timer', () => {
+    G().startRace('t1');
+    (G() as unknown as { input: { touchActive: boolean } }).input.touchActive = true;   // after the start: a first touch race would show the controls picker
+    h.input = { throttle: 1, brake: 0, steer: 0, handbrake: false };   // auto gas is always on
+    run(CONFIG.race.countdown + 1);
+    expect(h.ui!.calls.hideTutorial).toBeUndefined();
+    h.input = { throttle: 1, brake: 0, steer: 0.6, handbrake: false };
     run(0.2);
     expect(h.ui!.calls.hideTutorial?.length).toBe(1);
   });

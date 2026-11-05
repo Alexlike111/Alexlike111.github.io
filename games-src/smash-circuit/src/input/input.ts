@@ -1,5 +1,6 @@
-// Keyboard + touch input. Touch has five schemes (src/input/schemes.ts; settings "Controls"), all with automatic gas:
-//   buttons (default) big left / right steer buttons, BRAKE + item on the right
+// Keyboard + touch input. Touch has six schemes (src/input/schemes.ts; settings "Controls"), all with automatic gas:
+//   point    (default) a floating stick under the thumb: the car turns toward the SCREEN direction the thumb points; BRAKE + item on the right
+//   buttons  big left / right steer buttons, BRAKE + item on the right
 //   slide    drag a thumb sideways on the left half, buttons on the right
 //   joystick a FIXED stick centred at the bottom of the screen (sideways steers, pull down brakes / reverses)
 //   tilt     steer by tilting the phone (DeviceOrientation: gamma in portrait, beta in landscape) + a live indicator
@@ -7,17 +8,21 @@
 //
 // Drift (src/sim/drift.ts) is automatic on touch: a hard steer (>= CONFIG.controls.driftSteer) above ~60 km/h starts it; the
 // digital schemes (buttons, tap) need the steer held for driftHoldS first. Keyboard: WASD / arrows, Space = handbrake / drift,
-// P = pause, R = repair. Esc is never bound (Playgama 1.5.2).
+// P = pause, M = mute, R = repair. Esc is never bound (Playgama 1.5.2, checked by scripts/check-release.mjs).
 import { CONFIG } from '../config';
 import { DRIFT_AUTO, DRIFT_HOLD, DRIFT_NONE } from '../sim/drift';
 import type { CarInput } from '../types';
 import {
-  boxRect, driftRequest, followHome, joyGeom, slideAxis, slideFullPx, steerZone, stickAxis, tiltAxis, tiltSteerDeg, touchLayout,
-  type BtnName, type ControlScheme,
+  ALL_SCHEMES, PointController, boxRect, driftRequest, followHome, joyGeom, pointLeash, pointRadius, pointZone, slideAxis, slideFullPx,
+  steerZone, stickAxis, tiltAxis, tiltSteerDeg, touchLayout,
+  type BtnName, type ControlScheme, type PointCar,
 } from './schemes';
 
-type KeyAction = 'pause' | 'repair' | 'item';
-type PointerKind = 'brake' | 'sbtn' | 'slide' | 'tap';
+type KeyAction = 'pause' | 'repair' | 'item' | 'mute';
+type PointerKind = 'brake' | 'sbtn' | 'slide' | 'tap' | 'point';
+
+/** What the Point scheme needs from the game each frame: the player's car and the camera (null before a race). `screen` = the car in px. */
+export type PointSource = () => (PointCar & { screen: { x: number; y: number } | null }) | null;
 
 interface Ptr { kind: PointerKind; startX?: number; startY?: number; x: number; y: number; homeX: number; homeY: number; size: number; flicked?: boolean; pullT?: number }
 
@@ -70,6 +75,7 @@ export function steerAxis(x: number, homeX: number, screenW: number, onGasButton
 const GAME_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyP', 'KeyR',
   'KeyE', 'ShiftLeft', 'ShiftRight',   // use item
+  'KeyM',                              // mute
 ]);
 
 /**
@@ -111,6 +117,10 @@ export class InputController {
   private tiltSeen = false;
   private tiltTimer = 0;
   private tiltOn = false;
+  // point scheme
+  private pointCtl = new PointController();
+  private pointSrc: PointSource | null = null;
+  private pointVis: { bx: number; by: number; fx: number; fy: number } | null = null;
   // geometry caches
   private boundary = 0;
 
@@ -124,6 +134,9 @@ export class InputController {
   private tiltDot: HTMLElement;
   private zoneL: HTMLDivElement;
   private zoneR: HTMLDivElement;
+  private pointEl: HTMLDivElement;
+  private pointKnob: HTMLElement;
+  private pointArrow: HTMLDivElement;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -160,8 +173,16 @@ export class InputController {
     this.zoneR = document.createElement('div');
     this.zoneR.className = 'tap-zone r';
     this.zoneR.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M24 10l22 22-22 22" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    for (const e of [this.stickEl, this.zoneL, this.zoneR, this.tiltEl]) e.setAttribute('aria-hidden', 'true');
-    this.layer.append(this.zoneL, this.zoneR, this.stickEl, this.tiltEl, this.brakeEl, this.steerLEl, this.steerREl);
+    this.pointEl = document.createElement('div');
+    this.pointEl.className = 'point-ring idle';
+    this.pointEl.innerHTML = '<i class="pk"></i>';
+    this.pointKnob = this.pointEl.querySelector('.pk') as HTMLElement;
+    this.pointArrow = document.createElement('div');
+    this.pointArrow.className = 'point-arrow';
+    this.pointArrow.hidden = true;
+    this.pointArrow.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 6 52 40 32 31 12 40z" fill="currentColor" stroke="#0b1430" stroke-width="3.5" stroke-linejoin="round"/></svg>';
+    for (const e of [this.stickEl, this.zoneL, this.zoneR, this.tiltEl, this.pointEl, this.pointArrow]) e.setAttribute('aria-hidden', 'true');
+    this.layer.append(this.zoneL, this.zoneR, this.stickEl, this.pointEl, this.pointArrow, this.tiltEl, this.brakeEl, this.steerLEl, this.steerREl);
     root.appendChild(this.layer);
 
     window.addEventListener('keydown', this.onKeyDown);
@@ -201,8 +222,9 @@ export class InputController {
 
     // --- touch
     let tBrake = 0, tSteer = 0, steerSet = false;
-    let sL = false, sR = false, tapL = false, tapR = false, stickP: Ptr | null = null;
+    let sL = false, sR = false, tapL = false, tapR = false, stickP: Ptr | null = null, pointP: Ptr | null = null;
     for (const p of this.pointers.values()) {
+      if (p.kind === 'point') { pointP = p; continue; }
       if (p.kind === 'brake') { tBrake = 1; continue; }
       if (p.kind === 'sbtn') { if (p.x < this.boundary) sL = true; else sR = true; continue; }
       if (p.kind === 'tap') { if (p.x < W / 2) tapL = true; else tapR = true; continue; }
@@ -219,6 +241,22 @@ export class InputController {
         steerSet = true;
         continue;
       }
+    }
+
+    // point: the car turns toward the screen direction of the thumb (the game supplies the car and the camera azimuth)
+    let pointDrift = false;
+    if (scheme === 'point') {
+      const R = pointRadius(W, H);
+      const car = this.pointSrc ? this.pointSrc() : null;
+      if (pointP) {
+        const b = pointLeash(pointP.x, pointP.y, pointP.homeX, pointP.homeY, R);
+        pointP.homeX = b.x; pointP.homeY = b.y;
+        this.pointVis = { bx: b.x, by: b.y, fx: pointP.x, fy: pointP.y };
+      }
+      const o = this.pointCtl.update(!!pointP, pointP ? pointP.x - pointP.homeX : 0, pointP ? pointP.y - pointP.homeY : 0, R, dt, car, this.sens);
+      if (pointP || o.aim) { tSteer = o.steer; steerSet = true; pointDrift = o.drift; }
+      if (!pointP && !o.aim) this.pointVis = null;
+      this.drawPoint(pointP !== null, o.aim, car, W, H, R);
     }
 
     // digital steering (buttons / two-side tap): ramps to full lock in ~0.1 s
@@ -269,7 +307,7 @@ export class InputController {
     this.drawTilt(scheme === 'tilt');
     this.drawStick(stickP, W, H);
     // touch steering: a hard steer asks for an auto drift (the sim decides on speed); there is no DRIFT button
-    const drift = this._touch && rawTouch !== 0 && driftRequest(rawTouch, this.digHeld, digital) ? DRIFT_AUTO : DRIFT_NONE;
+    const drift = this._touch && rawTouch !== 0 && (scheme === 'point' ? pointDrift : driftRequest(rawTouch, this.digHeld, digital)) ? DRIFT_AUTO : DRIFT_NONE;
     return { throttle, brake, steer: clamp(steer, -1, 1), handbrake, drift };
   }
 
@@ -280,10 +318,14 @@ export class InputController {
     this.scheme = s;
     this.pointers.clear();
     this.btnSteer = 0;
+    this.pointCtl.reset(); this.pointVis = null;
     this.syncLayer();
     this.layout();
     this.setupTilt();
   }
+
+  /** Point scheme: where the player's car and the camera azimuth come from (set once by the game). */
+  setPointSource(src: PointSource | null): void { this.pointSrc = src; }
 
   /** Steering sensitivity multiplier (settings slider). */
   setSensitivity(v: number): void { this.sens = clamp(v, C.sensMin, C.sensMax); }
@@ -396,13 +438,15 @@ export class InputController {
     const s = this.scheme;
     this.layer.hidden = !showLayer;
     this.root.classList.add('sch-new');
-    for (const n of ['buttons', 'slide', 'joystick', 'tilt', 'tap']) this.root.classList.toggle('sch-' + n, n === s);
+    for (const n of ALL_SCHEMES) this.root.classList.toggle('sch-' + n, n === s);
     this.steerLEl.hidden = this.steerREl.hidden = s !== 'buttons';
     this.brakeEl.hidden = s === 'joystick' || s === 'tap';
     this.tiltEl.hidden = s !== 'tilt';
     this.stickEl.hidden = s !== 'slide' && s !== 'joystick';
     this.stickEl.classList.toggle('slide', s === 'slide');
     this.zoneL.hidden = this.zoneR.hidden = s !== 'tap';
+    this.pointEl.hidden = s !== 'point';
+    if (s !== 'point') this.pointArrow.hidden = true;
   }
 
   private place(el: HTMLElement, b: ReturnType<typeof touchLayout>[BtnName]): void {
@@ -484,6 +528,32 @@ export class InputController {
     this.knobEl.style.transform = `translate(${kx.toFixed(1)}px, 0px)`;
   }
 
+  /**
+   * Point scheme: the ring floats under the thumb (dim and dashed at rest in the lower left), the knob follows the finger inside the
+   * ring, and a chevron on the car shows the heading being asked for (the aim direction on screen).
+   */
+  private drawPoint(down: boolean, aim: { x: number; y: number } | null, car: ReturnType<PointSource>, W: number, H: number, R: number): void {
+    const el = this.pointEl, v = this.pointVis;
+    const size = R * 2;
+    let cx: number, cy: number, kx = 0, ky = 0;
+    if (v) {
+      cx = v.bx; cy = v.by;
+      kx = v.fx - v.bx; ky = v.fy - v.by;
+      const m = Math.hypot(kx, ky);
+      if (m > R) { kx *= R / m; ky *= R / m; }
+    } else { cx = Math.max(R + 16, W * 0.22); cy = H - R - Math.max(16, 0.05 * H); }   // rests in the bottom-left corner, clear of the HUD
+    el.classList.toggle('idle', !v); el.classList.toggle('held', down); el.classList.toggle('aim', !!aim);
+    el.style.width = el.style.height = size.toFixed(0) + 'px';
+    el.style.transform = `translate(${(cx - R).toFixed(1)}px, ${(cy - R).toFixed(1)}px)`;
+    this.pointKnob.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
+    const ar = this.pointArrow;
+    if (aim && car && car.screen) {
+      ar.hidden = false;
+      const ang = Math.atan2(aim.y, aim.x) + Math.PI / 2;
+      ar.style.transform = `translate(${(car.screen.x - 22).toFixed(1)}px, ${(car.screen.y - 22).toFixed(1)}px) rotate(${ang.toFixed(3)}rad) translateY(-30px)`;
+    } else ar.hidden = true;
+  }
+
   /** Tilt indicator: a bar with a dot at the steering the phone is sending. */
   private drawTilt(on: boolean): void {
     if (!on) return;
@@ -497,6 +567,7 @@ export class InputController {
     this.pointers.clear();
     this.kbSteer = 0;
     this.btnSteer = 0;
+    this.pointCtl.reset(); this.pointVis = null;
     for (const e of [this.brakeEl, this.steerLEl, this.steerREl, this.zoneL, this.zoneR]) e.classList.remove('down');
   };
 
@@ -511,6 +582,7 @@ export class InputController {
     if (!GAME_KEYS.has(e.code)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     e.preventDefault();
+    if (e.code === 'KeyM') { if (!e.repeat) this.keyCb?.('mute'); return; }   // does not switch the touch / keyboard mode
     if (this.pointers.size === 0) this.setTouch(false);
     if (e.repeat) return;
     if (e.code === 'KeyP') { this.keyCb?.('pause'); return; }
@@ -551,6 +623,9 @@ export class InputController {
       kind = 'slide'; homeX = e.clientX;
     } else if (scheme === 'tap') {
       kind = 'tap';
+    } else if (scheme === 'point') {
+      if (this.hasKind('point') || !pointZone(e.clientX, e.clientY, W, H)) return;   // one finger steers; the HUD strip and the right-hand buttons do not
+      kind = 'point'; homeX = e.clientX;
     } else return;   // buttons / tilt: touches outside the buttons do nothing
     if (kind !== 'brake' && kind !== 'sbtn' && e.cancelable) e.preventDefault();
     this.pointers.set(e.pointerId, { kind, x: e.clientX, y: e.clientY, homeX, homeY, size: 0, startY: homeY });

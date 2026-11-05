@@ -8,8 +8,9 @@ import { buildTrackGeometry } from '../track/spline';
 import { TRACKS } from '../track/tracks';
 import type { CarState, ISim, ItemType, RivalMode, SaveData, UpgradeBranch, ZoneId } from '../types';
 import { BADGE_SVG, CAR_ZONES_SVG, MEDAL_SVG, icon, type IconName } from './icons';
+import { resultsHeading } from './hudLogic';
 import { carGrid, carSvg, garageHtml, rivalLabel, rivalsSheetHtml, RIVAL_MODES, type GarageTab } from './garage';
-import { CONTROL_SCHEMES, controlsOr, sensOr, type ControlScheme } from '../input/schemes';
+import { CONTROL_SCHEMES, DEFAULT_SCHEME, MAIN_SCHEMES, controlsOr, sensOr, type ControlScheme } from '../input/schemes';
 import { CAR_IDS, carIdOr, levelsOf, rivalModeOr } from '../meta/cars';
 import { cupById, cupLock, cupIndex, runActive } from '../meta/career';
 import { careerHubHtml, careerMenuInfo, careerResultsHtml, cupPageHtml, podiumHtml, type CareerResultsData, type PodiumData } from './career';
@@ -74,7 +75,12 @@ export interface ResultsData {
 
 const ITEM_ICON: Record<ItemType, IconName> = { nitro: 'bolt', shield: 'shield', repair: 'wrench', oil: 'oil', shockwave: 'wave' };
 
-const CTL_ICON: Record<ControlScheme, IconName> = { buttons: 'ctlButtons', slide: 'ctlSlide', joystick: 'ctlJoystick', tilt: 'ctlTilt', tap: 'ctlTap' };
+/** Results heading by place (WINNER / PODIUM / FINISHED nth). */
+function resultsTitle(place: number): string {
+  const h = resultsHeading(place);
+  return t(h.key, { ord: t('ordinal.' + h.ord) });
+}
+const CTL_ICON: Record<ControlScheme, IconName> = { point: 'ctlPoint', buttons: 'ctlButtons', slide: 'ctlSlide', joystick: 'ctlJoystick', tilt: 'ctlTilt', tap: 'ctlTap' };
 
 const esc = (s: string | number): string =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -124,7 +130,7 @@ export class UI {
   private h: UiHandlers;
   private layers = {} as Record<Layer, HTMLElement>;
   private save: SaveData | null = null;
-  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false };
+  private settings: SaveData['settings'] = { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: DEFAULT_SCHEME, steerSens: 1, controlsPicked: false };
   private money = 0;
   private current: { name: string; render: () => void } | null = null;
   private overlayRender: (() => void) | null = null;
@@ -208,10 +214,10 @@ export class UI {
 
   /**
    * First-run controls picker (before the first race on a touch device): cards with a picture and a line each, Buttons
-   * highlighted. `done` runs after Play / Skip (the choice is already stored via the settings handler).
+   * highlighted (Point). `done` runs after Play / Skip (the choice is already stored via the settings handler).
    */
   showControlsPicker(done: () => void): void {
-    let sel: ControlScheme = controlsOr(this.settings.controls);
+    let sel: ControlScheme = controlsOr(this.settings.controls);   // a new save holds the default (Point), an old one keeps its scheme
     this.pickDone = done;
     const draw = (): void => {
       this.layers.overlay.innerHTML = `<div class="dim"><div class="ctlpick panel">
@@ -222,11 +228,13 @@ export class UI {
         <button class="btn big green" data-act="ctlPickOk">${icon('play')}<span>${esc(t('ctl.pickOk'))}</span></button></div>
       </div></div>`;
     };
+    this.ctlMore = false;
+    this.pickDraw = draw;
     this.pickSelect = (v) => { sel = v; draw(); };
     this.pickCommit = (skip) => {
       this.layers.overlay.replaceChildren();
       this.overlayRender = null;
-      this.pickSelect = null; this.pickCommit = null;
+      this.pickSelect = null; this.pickCommit = null; this.pickDraw = null;
       const s = { ...this.settings, controls: skip ? controlsOr(this.settings.controls) : sel, controlsPicked: true };
       this.settings = s;
       if (this.save) this.save = { ...this.save, settings: s };
@@ -414,6 +422,7 @@ export class UI {
     const el = this.layers.tutorial;
     const sc = controlsOr(this.settings.controls);
     const steerIc: Record<ControlScheme, string> = {
+      point: `<div class="tut-ic1">${icon('ctlPoint')}</div>`,
       buttons: `<div class="tut-steer">${icon('arrowL')}${icon('arrowR')}</div>`,
       slide: `<div class="tut-steer">${icon('arrowL')}${icon('finger')}${icon('arrowR')}</div>`,
       joystick: `<div class="tut-ic1">${icon('ctlJoystick')}</div>`,
@@ -767,6 +776,7 @@ export class UI {
       case 'nextTrack': this.sfx('click'); if (el.dataset.id) this.h.nextTrack?.(el.dataset.id); break;
       case 'retrySave': this.sfx('click'); this.h.retrySave?.(); break;
       case 'leaderboard': this.sfx('click'); this.h.leaderboard?.(); break;
+      case 'ctlMore': this.sfx('click'); this.ctlMore = true; if (this.pickDraw) this.pickDraw(); else this.rerender(); break;
       case 'ctlPickSel': this.sfx('click'); this.pickSelect?.(controlsOr(el.dataset.v)); break;
       case 'ctlPickOk': this.sfx('click'); this.pickCommit?.(false); break;
       case 'ctlPickSkip': this.sfx('click'); this.pickCommit?.(true); break;
@@ -809,10 +819,18 @@ export class UI {
 
   /** Cards with a picture, the name and one line per control scheme (settings screen, first-run picker). */
   private ctlCards(cur: ControlScheme, act: string): string {
-    return `<div class="ctlgrid" role="group">${CONTROL_SCHEMES.map((v) =>
+    // three main cards; the other schemes sit under "More" (open by default when the chosen one is among them)
+    const showAll = this.ctlMore || !MAIN_SCHEMES.includes(cur);
+    const list = showAll ? CONTROL_SCHEMES : MAIN_SCHEMES;
+    const card = (v: ControlScheme): string =>
       `<button class="ctl-card${v === cur ? ' on' : ''}" data-act="${act}" data-k="controls" data-v="${v}" aria-pressed="${v === cur}">
-        <span class="ctl-pic">${icon(CTL_ICON[v])}</span><b>${esc(t('ctl.' + v))}</b><small>${esc(t('ctl.' + v + '.d'))}</small></button>`).join('')}</div>`;
+        <span class="ctl-pic">${icon(CTL_ICON[v])}</span><b>${esc(t('ctl.' + v))}</b><small>${esc(t('ctl.' + v + '.d'))}</small></button>`;
+    const more = list.length < CONTROL_SCHEMES.length
+      ? `<button class="ctl-more" data-act="ctlMore" aria-expanded="false"><span>${esc(t('ctl.more'))}</span></button>` : '';
+    return `<div class="ctlgrid" role="group">${list.map(card).join('')}</div>${more}`;
   }
+  private ctlMore = false;
+  private pickDraw: (() => void) | null = null;
 
   private sensRow(): string {
     const pct = Math.round(sensOr(this.settings.steerSens) * 100);
@@ -1005,7 +1023,7 @@ export class UI {
           { v: 'en', label: 'English' }, { v: 'ru', label: 'Русский' }, { v: 'auto', label: t('settings.auto') },
         ]))}
         <div class="srow s-ctl"><div class="sl2"><span class="sic">${icon('finger')}</span><div><b>${esc(t('settings.controls'))}</b></div></div>
-          ${this.ctlCards(controlsOr(st.controls), 'set')}${this.sensRow()}</div>
+          ${this.pauseControls()}</div>
         ${row(icon('speed'), t('settings.quality'), this.seg('quality', st.quality, [
           { v: 'auto', label: t('settings.auto') }, { v: 'low', label: t('settings.low') }, { v: 'medium', label: t('settings.medium') }, { v: 'high', label: t('settings.high') },
         ]))}
@@ -1059,7 +1077,7 @@ export class UI {
         </button>` : '';
     this.layers.overlay.innerHTML = `<div class="dim results-dim"><div class="rescard panel${r.career ? ' career' : ''}">
       <div class="res-left">
-        <div class="res-title">${esc(t('results.title'))}</div>
+        <div class="res-title">${esc(resultsTitle(r.place))}</div>
         <div class="medal ${medalCls}">${r.place <= 3 ? MEDAL_SVG : BADGE_SVG}<div class="medal-num"><b>${r.place}</b></div></div>
         <div class="res-ord">${esc(ord)} <small>${esc(t('results.place'))}</small></div>
       </div>

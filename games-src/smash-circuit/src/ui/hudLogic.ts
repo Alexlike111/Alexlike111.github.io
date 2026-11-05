@@ -229,3 +229,9 @@ export function fitMap(xs: ArrayLike<number>, ys: ArrayLike<number>, size: numbe
 export function mapPoint(fit: MapFit, x: number, y: number): { x: number; y: number } {
   return { x: fit.offX + (x - fit.minX) * fit.scale, y: fit.size - (fit.offY + (y - fit.minY) * fit.scale) };
 }
+
+/** Results heading by finishing place: the winner, the podium (2nd and 3rd) or a plain finish with the place. */
+export function resultsHeading(place: number): { key: 'results.title.win' | 'results.title.podium' | 'results.title.fin'; ord: number } {
+  const p = Math.min(8, Math.max(1, Math.floor(Number.isFinite(place) ? place : 8)));
+  return { key: p === 1 ? 'results.title.win' : p <= 3 ? 'results.title.podium' : 'results.title.fin', ord: p };
+}

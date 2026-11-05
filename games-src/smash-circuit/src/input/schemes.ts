@@ -2,11 +2,18 @@
 // Everything here is DOM free so it can be unit tested (tests/inputSchemes.test.ts).
 import { CONFIG } from '../config';
 
-export const CONTROL_SCHEMES = ['buttons', 'slide', 'joystick', 'tilt', 'tap'] as const;
-export type ControlScheme = (typeof CONTROL_SCHEMES)[number];
-export const DEFAULT_SCHEME: ControlScheme = 'buttons';
-export const controlsOr = (v: unknown): ControlScheme =>
-  typeof v === 'string' && (CONTROL_SCHEMES as readonly string[]).includes(v) ? (v as ControlScheme) : DEFAULT_SCHEME;
+export const ALL_SCHEMES = ['point', 'buttons', 'slide', 'tilt', 'joystick', 'tap'] as const;
+export type ControlScheme = (typeof ALL_SCHEMES)[number];
+/** Schemes offered to the player, in picker order (Point is left out while CONFIG.controls.point.enabled is false). */
+export const CONTROL_SCHEMES: readonly ControlScheme[] = ALL_SCHEMES.filter((s) => s !== 'point' || CONFIG.controls.point.enabled);
+/** The three cards of the first-run picker; every other scheme sits under "More". */
+export const MAIN_SCHEMES: readonly ControlScheme[] = CONTROL_SCHEMES.filter((s) => s === 'point' || s === 'buttons' || s === 'slide');
+export const DEFAULT_SCHEME: ControlScheme = CONFIG.controls.point.enabled ? 'point' : 'buttons';
+/** A stored value to a valid scheme: unknown values get the default, a saved 'point' with the scheme switched off falls back to Buttons. */
+export const controlsOr = (v: unknown): ControlScheme => {
+  if (typeof v !== 'string' || !(ALL_SCHEMES as readonly string[]).includes(v)) return DEFAULT_SCHEME;
+  return (CONTROL_SCHEMES as readonly string[]).includes(v) ? (v as ControlScheme) : 'buttons';
+};
 
 /** Steering sensitivity multiplier limits (settings slider, all schemes). */
 export const sensOr = (v: unknown): number => {
@@ -127,4 +134,100 @@ export function tiltSteerDeg(beta: number, gamma: number, cBeta: number, cGamma:
 export function tiltAxis(deg: number): number {
   const mag = clamp((Math.abs(deg) - C.tiltDeadDeg) / (C.tiltFullDeg - C.tiltDeadDeg), 0, 1);
   return mag === 0 ? 0 : Math.sign(deg) * Math.pow(mag, C.tiltCurve);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Point scheme: a floating stick under the thumb gives a SCREEN direction; the car turns toward it (absolute steering).
+// ---------------------------------------------------------------------------------------------------------------------
+const P = CONFIG.controls.point;
+const wrapPi = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** Base radius R (CSS px) of the Point stick. */
+export const pointRadius = (W: number, H: number): number => clamp(P.radiusFrac * Math.min(W, H), P.radiusMin, P.radiusMax);
+
+/** Where a Point touch may start: portrait = below the HUD strip (the buttons are DOM targets and win first), landscape = the left part. */
+export function pointZone(x: number, y: number, W: number, H: number): boolean {
+  if (x < 0 || y < 0 || x > W || y > H) return false;
+  return H >= W ? y >= P.zoneTopFrac * H : x <= P.zoneLandscapeFrac * W;
+}
+
+/** Aim dead radius with hysteresis: enters above deadEnter * R, leaves below deadExit * R. */
+export function pointAim(dx: number, dy: number, R: number, wasActive: boolean): boolean {
+  const m = Math.hypot(dx, dy);
+  return m > (wasActive ? P.deadExit : P.deadEnter) * R;
+}
+
+/** The base follows the finger so it never gets further than leash * R away. Returns the new base. */
+export function pointLeash(fx: number, fy: number, bx: number, by: number, R: number): { x: number; y: number } {
+  const dx = fx - bx, dy = fy - by, d = Math.hypot(dx, dy), lim = P.leash * R;
+  if (d <= lim || d === 0) return { x: bx, y: by };
+  return { x: fx - (dx / d) * lim, y: fy - (dy / d) * lim };
+}
+
+/**
+ * Screen vector (dx right, dy DOWN, px) to a world heading (rad, physics coords: 0 = +x, counter-clockwise positive) under a
+ * camera with view azimuth `az` and ground-tilt `tilt`: the inverse of the camera's ground -> screen transform (render/camera.ts).
+ */
+export function screenToWorldHeading(dx: number, dy: number, az: number, tilt: number): number {
+  const X = dx, Y = -dy / Math.cos(tilt);
+  const ca = Math.cos(az), sa = Math.sin(az);
+  return Math.atan2(X * sa + Y * ca, X * ca - Y * sa);
+}
+
+/**
+ * Steer (-1 left .. 1 right) for a heading error `err` (rad, target - heading, + = the nose must turn left) and the car's angular
+ * velocity (rad/s, + = counter-clockwise). Full lock at steerFullRad / sens of error, damped by dGain * angVel.
+ * Returns the turn sign too: above keepSignRad the previous direction is kept so pointing straight back never flip-flops.
+ */
+export function pointSteer(err: number, angVel: number, prevSign: number, sens = 1): { steer: number; sign: number } {
+  let e = wrapPi(err);
+  if (Math.abs(e) > P.keepSignRad && prevSign !== 0) e = prevSign * Math.abs(e);
+  const sign = Math.abs(e) > 1e-4 ? Math.sign(e) : prevSign;
+  return { steer: -clamp((e - P.dGain * angVel) / (P.steerFullRad / Math.max(0.1, sens)), -1, 1) || 0, sign };
+}
+
+/** Auto drift request of the Point scheme: the heading error stayed above driftErrRad for driftHoldS. */
+export const pointDriftRequest = (err: number, heldS: number): boolean => Math.abs(wrapPi(err)) > P.driftErrRad && heldS >= P.driftHoldS;
+
+export interface PointCar { angle: number; angularVel: number; viewAz: number; tilt: number }
+export interface PointOut { steer: number; drift: boolean; /** smoothed screen aim (px, y down) or null when idle */ aim: { x: number; y: number } | null; err: number }
+
+/** State machine of the Point scheme (aim smoothing, dead radius, release grace, turn-sign memory, drift timer). DOM free. */
+export class PointController {
+  private ax = 0; private ay = 0;
+  private has = false;        // a smoothed aim exists (the finger has been down)
+  private active = false;     // outside the dead radius
+  private sign = 0;
+  private held = 0;           // s the heading error has been above the drift threshold
+  private grace = 0;          // s left of the lift-off grace
+  private lastErr = 0;
+
+  reset(): void { this.ax = this.ay = 0; this.has = false; this.active = false; this.sign = 0; this.held = 0; this.grace = 0; this.lastErr = 0; }
+
+  /** One frame. `down` = a finger holds the stick; (dx, dy) = finger minus base (px, y down); `car` null = no player car yet. */
+  update(down: boolean, dx: number, dy: number, R: number, dt: number, car: PointCar | null, sens = 1): PointOut {
+    if (down) {
+      if (!this.has) { this.ax = dx; this.ay = dy; this.has = true; }
+      else {
+        const k = 1 - Math.exp(-Math.max(0, dt) / P.smoothS);
+        this.ax += (dx - this.ax) * k; this.ay += (dy - this.ay) * k;
+      }
+      this.active = pointAim(this.ax, this.ay, R, this.active);
+      this.grace = this.active ? P.graceS : 0;
+    } else if (this.has && this.grace > 0) {
+      this.grace -= dt;                       // keep the last aim for a moment: micro-lifts do not kill a turn
+      if (this.grace <= 0) this.reset();
+    } else if (this.has) this.reset();
+    if (!this.has || !this.active || !car) {
+      this.held = 0;
+      return { steer: 0, drift: false, aim: this.has && this.active ? { x: this.ax, y: this.ay } : null, err: 0 };
+    }
+    const target = screenToWorldHeading(this.ax, this.ay, car.viewAz, car.tilt);
+    const err = wrapPi(target - car.angle);
+    const r = pointSteer(err, car.angularVel, this.sign, sens);
+    this.sign = r.sign;
+    this.lastErr = err;
+    if (Math.abs(err) > P.driftErrRad) this.held += dt; else this.held = 0;
+    return { steer: r.steer, drift: pointDriftRequest(err, this.held), aim: { x: this.ax, y: this.ay }, err };
+  }
 }

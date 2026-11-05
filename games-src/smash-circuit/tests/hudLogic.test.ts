@@ -234,3 +234,21 @@ describe('minimap fit', () => {
     expect(Number.isFinite(q.x) && Number.isFinite(q.y)).toBe(true);
   });
 });
+
+import { resultsHeading } from '../src/ui/hudLogic';
+import { t as tr, setLangSetting as setLangForTest } from '../src/i18n';
+describe('results heading by place', () => {
+  it('winner, podium, finished nth', () => {
+    expect(resultsHeading(1).key).toBe('results.title.win');
+    expect(resultsHeading(2).key).toBe('results.title.podium'); expect(resultsHeading(3).key).toBe('results.title.podium');
+    for (const p of [4, 5, 8]) { const h = resultsHeading(p); expect(h.key).toBe('results.title.fin'); expect(h.ord).toBe(p); }
+    expect(resultsHeading(99).ord).toBe(8); expect(resultsHeading(0).key).toBe('results.title.win'); expect(resultsHeading(NaN).ord).toBe(8);
+  });
+  it('is worded in English and Russian', () => {
+    setLangForTest('en');
+    expect(tr('results.title.win')).toBe('Winner!'); expect(tr('results.title.fin', { ord: tr('ordinal.8') })).toBe('Finished 8th');
+    setLangForTest('ru');
+    expect(tr('results.title.podium')).toBe('Подиум!'); expect(tr('results.title.fin', { ord: tr('ordinal.5') })).toBe('Финиш: 5-е');
+    setLangForTest('en');
+  });
+});

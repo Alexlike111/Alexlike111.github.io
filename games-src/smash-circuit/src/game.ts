@@ -4,7 +4,7 @@ import { CONFIG } from './config';
 import { initLang, lang, t } from './i18n';
 import { AudioManager } from './audio/audio';
 import { HitStop } from './fx/hitStop';
-import { InputController } from './input/input';
+import { InputController, type PointSource } from './input/input';
 import { applyRaceResult, buyUpgrade, nextTrackId, raceRewardParts, repairCost } from './meta/economy';
 import { makeOpponents, makePlayerSetup, rivalChoiceOf } from './meta/opponents';
 import { carIdOr } from './meta/cars';
@@ -51,6 +51,8 @@ declare global {
       /** e2e: change settings like the settings screen does / the input controller (tilt recenter) */
       setSettings(s: SaveData['settings']): void;
       readonly input: InputController;
+      /** the last input sent to the sim (e2e: Point steering) */
+      readonly lastInput: CarInput;
       /** pure car model for e2e/feel.mjs (debug builds only) */
       readonly model: typeof carModel & { DriftTracker: typeof DriftTracker };
     };
@@ -143,7 +145,8 @@ export class Game {
     this.applyControls();
     this.input.setLabels(t('input.brake'));
     this.input.onTiltStatus((st) => this.onTiltStatus(st));
-    this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else if (k === 'item') this.useItem(); else this.repairNow(); });
+    this.input.onKey((k) => { if (k === 'pause') this.togglePause(); else if (k === 'item') this.useItem(); else if (k === 'mute') this.toggleMute(); else this.repairNow(); });
+    this.input.setPointSource(() => this.pointSource());
     this.input.onTouchMode((touch) => this.ui.setTouchMode(touch));
     this.ui.setTouchMode(this.input.touchActive);
     this.ui.setSettings(this.save.settings);
@@ -538,6 +541,26 @@ export class Game {
     void writeSave(this.save);
   }
 
+  /** Point scheme: the player's car, the camera azimuth / tilt and the car's place on the screen (px). */
+  private pointSource(): ReturnType<PointSource> {
+    const car = this.sim?.cars[0];
+    if (!car) return null;
+    const sc = this.renderer.worldToScreen(car.x, car.y);
+    return {
+      angle: car.angle, angularVel: car.angularVel, viewAz: this.renderer.viewAzimuth, tilt: this.renderer.cameraTilt,
+      screen: sc ? { x: sc.x * window.innerWidth, y: sc.y * window.innerHeight } : null,
+    };
+  }
+
+  /** M key: sound on / off (same setting as the Settings and Pause buttons). */
+  private toggleMute(): void {
+    const muted = !this.save.settings.muted;
+    this.setSettings({ ...this.save.settings, muted });
+    this.ui.setSettings(this.save.settings);
+    this.ui.refreshSettingsView();
+    this.ui.toast(t(muted ? 'toast.soundOff' : 'toast.soundOn'));
+  }
+
   private applyControls(): void {
     const s = this.save.settings;
     this.input.setSensitivity(s.steerSens);
@@ -764,8 +787,9 @@ export class Game {
         this.watchDamage(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
         if (!this.wasGo && sim.race.phase === 'racing') { this.wasGo = true; this.input.recenter(); }
-        if (this.tutorialOn && sim.race.phase === 'racing' && (sim.race.time >= CONFIG.ui.tutorialHideAfterGoS
-          || inp.throttle > 0 || inp.brake > 0 || Math.abs(inp.steer) > 0.2 || inp.handbrake)) {
+        // hides at the first REAL input (touch gas is automatic, so throttle only counts from the keyboard) or GO + N s
+        const realInput = (!this.input.touchActive && inp.throttle > 0) || inp.brake > 0 || Math.abs(inp.steer) > 0.2 || inp.handbrake;
+        if (this.tutorialOn && (realInput || (sim.race.phase === 'racing' && sim.race.time >= CONFIG.ui.tutorialHideAfterGoS))) {
           this.tutorialOn = false;
           this.ui.hideTutorial();
         }
@@ -870,6 +894,7 @@ export class Game {
       get ui() { return g.ui; },
       get hud() { return g.hx; },
       get input() { return g.input; },
+      get lastInput() { return g.lastInput; },
       setSettings: (s) => { g.setSettings(s); g.ui.setSettings(g.save.settings); },
       get timeScale() { return g.timeScale; },
       startRace: (id) => g.startRace(id),

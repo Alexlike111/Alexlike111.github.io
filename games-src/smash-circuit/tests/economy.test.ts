@@ -37,12 +37,12 @@ describe('upgrade costs and stats', () => {
   });
 
   it('buyUpgrade spends exactly the cost, never goes negative, refuses at max', () => {
-    let s = { ...defaultSave(), money: 250 };
+    let s = { ...defaultSave(), money: CONFIG.upgrades.cost[0] as number };
     expect(canBuy(s, 'engine')).toBe(true);
     const bought = buyUpgrade(s, 'engine')!;
     expect(bought.money).toBe(0);
     expect(bought.carUpgrades[s.car].engine).toBe(1);            // upgrades belong to the selected car
-    expect(buyUpgrade(bought, 'engine')).toBeNull();            // 600 needed
+    expect(buyUpgrade(bought, 'engine')).toBeNull();            // the next level costs more
     expect(s.carUpgrades[s.car]).toBeUndefined();               // input not mutated
     s = { ...s, money: 1e6, carUpgrades: { [s.car]: { engine: 5, grip: 5, armor: 5 } } };
     expect(buyUpgrade(s, 'grip')).toBeNull();
@@ -68,8 +68,22 @@ describe('rewards and repair', () => {
     expect(repairCost(0)).toBe(0);
     expect(repairCost(-3)).toBe(0);
     expect(repairCost(1)).toBe(CONFIG.economy.repairMinCost);
-    expect(repairCost(500)).toBe(Math.round(500 * CONFIG.economy.repairCostPerHp));
-    expect(repairCost(600)).toBeGreaterThan(repairCost(500));
+    expect(repairCost(300)).toBe(Math.round(300 * CONFIG.economy.repairCostPerHp));
+    expect(repairCost(400)).toBeGreaterThan(repairCost(300));
+    expect(repairCost(900)).toBe(CONFIG.economy.repairMaxCost);   // capped
+  });
+
+  it('QA #3 pacing: repair is cheaper than a mid-table prize, a new player affords a first upgrade after about two races', () => {
+    const P = CONFIG.economy.prizeByPlace;
+    expect(CONFIG.economy.repairMaxCost).toBeLessThan(P[4]);          // a full repair < the 5th place prize
+    expect(repairCost(320)).toBeLessThan(P[4]);                       // the worst usual damage (about 320 hp, was 289 coins) < a mid prize
+    for (let i = 1; i < P.length; i++) expect(P[i]).toBeLessThanOrEqual(P[i - 1]);
+    // two 7th place races (+40 smash money each), each followed by a repair of 150 missing hp, from an empty wallet
+    const perRace = raceReward('t1', 7, 0) + 40 - repairCost(150);
+    expect(2 * perRace).toBeGreaterThanOrEqual(upgradeCost(0)!);
+    // the starting money alone also buys the first level; later levels keep growing
+    expect(CONFIG.economy.startMoney).toBeGreaterThanOrEqual(upgradeCost(0)!);
+    for (let l = 1; l < CONFIG.upgrades.maxLevel; l++) expect(upgradeCost(l)!).toBeGreaterThan(upgradeCost(l - 1)!);
   });
 });
 
@@ -179,7 +193,7 @@ describe('save sanitising', () => {
     expect(s.unlockedTracks).toEqual(['t1', 't2']);
     expect(s.bestPlace).toEqual({ t2: 3 });
     expect(s.bestLap).toEqual({ t1: 70.2 });
-    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false });
+    expect(s.settings).toEqual({ lang: 'auto', autoGas: true, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'point', steerSens: 1, controlsPicked: false });
     expect(s.carColor).toBe(CONFIG.render.carColors.length - 1);
     expect(s.racesFinished).toBe(4);
   });

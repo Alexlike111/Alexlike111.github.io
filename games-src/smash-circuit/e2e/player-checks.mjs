@@ -24,7 +24,7 @@ const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPo
 for (let i = 0; i < 240; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ } await sleep(500); }
 const browser = await chromium.launch();
 
-async function openRace(ctxOpts, label) {
+async function openRace(ctxOpts, label, scheme) {
   const ctx = await browser.newContext(ctxOpts);
   const page = await ctx.newPage();
   const errors = [];
@@ -35,7 +35,7 @@ async function openRace(ctxOpts, label) {
   const ver = await page.$eval('#ver', (e) => e.textContent).catch(() => '');
   check(`[${label}] build label shows v${version}`, ver.includes(`v${version}`), ver);
   await page.screenshot({ path: path.join(OUT, `${label}-menu.png`) });
-  await page.evaluate(() => { window.__game.save.settings.tutorialDone = true; window.__game.save.settings.controlsPicked = true; window.__game.startRace('t1'); });
+  await page.evaluate((sc) => { const st = window.__game.save.settings; st.tutorialDone = true; st.controlsPicked = true; if (sc) st.controls = sc; window.__game.startRace('t1'); }, scheme);
   await page.waitForFunction(() => window.__game.sim && window.__game.sim.race.phase === 'racing', null, { timeout: 30000 * SLOW });
   return { ctx, page, errors };
 }
@@ -204,6 +204,13 @@ try {
       check('[desktop] 90 km/h wall crash knocks a part off', after.p > before.p, `parts ${before.p} -> ${after.p}`);
     }
     await page.keyboard.up('ArrowUp');
+    // ---- M mutes (and unmutes); Esc is deliberately NOT bound (Playgama 1.5.2)
+    const m0 = await page.evaluate(() => !!window.__game.save.settings.muted);
+    await page.keyboard.press('KeyM'); await sleep(250);
+    const m1 = await page.evaluate(() => !!window.__game.save.settings.muted);
+    await page.keyboard.press('KeyM'); await sleep(250);
+    const m2 = await page.evaluate(() => !!window.__game.save.settings.muted);
+    check('[desktop] M mutes and unmutes', m1 === !m0 && m2 === m0, `${m0} -> ${m1} -> ${m2}`);
     // ---- camera framing on a real lap (fixed north-up is the desktop default)
     await page.evaluate(() => { const sim = window.__game.sim; const p = sim.track.sampleAt(0); const c = sim.simCars[0]; c.reset(p.x, p.y, Math.atan2(p.ty, p.tx)); });
     const lapD = await cameraLap(page, 'desktop', 32);
@@ -244,7 +251,8 @@ try {
   {
     const { ctx, page, errors } = await openRace(PHONE, 'phone');
     const def = await page.evaluate(() => window.__game.save.settings.controls);
-    check('[phone] default control scheme is Buttons', def === 'buttons', def);
+    check('[phone] default control scheme is Point', def === 'point', def);
+    await setControls(page, 'buttons'); await sleep(300);   // this block checks the Buttons layout
     const T = await touchKit(ctx, page);
     await waitSim(page, 1.2);
     const sp = await speedOf(page);
@@ -325,7 +333,7 @@ try {
 
   // ---- Buttons on the other phone sizes (screenshots + hit test of the real elements)
   for (const [w, h, name] of [[360, 640, 'small'], [844, 390, 'landscape']]) {
-    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-${name}`);
+    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-${name}`, 'buttons');
     const T = await touchKit(ctx, page);
     const L = await center(page, '.steer-btn.left'), R = await center(page, '.steer-btn.right');
     if (!L || !R) check(`[phone-${name}] steer buttons visible`, false);
@@ -341,6 +349,70 @@ try {
       await T.upAll();
     }
     check(`[phone-${name}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
+    await ctx.close();
+  }
+
+
+  // ---- Point (new default): a floating stick; the car turns toward the screen direction the thumb points
+  for (const [w, h, name] of [[390, 844, 'portrait'], [844, 390, 'landscape']]) {
+    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-point-${name}`);
+    const T = await touchKit(ctx, page);
+    const sc = await page.evaluate(() => window.__game.save.settings.controls);
+    check(`[phone-point ${name}] Point is the active scheme by default`, sc === 'point', sc);
+    check(`[phone-point ${name}] a dim ring rests on screen, BRAKE is on the right, there are no steer buttons`, await page.evaluate(() => { const r = document.querySelector('.point-ring'), b = document.querySelector('.brake-btn'); return !!r && !r.hidden && r.offsetWidth > 100 && !!b && !b.hidden && !document.querySelector('.steer-btn.left')?.offsetParent; }));
+    // heading of the car as the player SEES it: angle from screen-up, + = clockwise (to the right), degrees
+    const seen = () => page.evaluate(() => { const c = window.__game.sim.cars[0], r = window.__render.camera; const a = r.project(c.x, c.y), b = r.project(c.x + Math.cos(c.angle) * 4, c.y + Math.sin(c.angle) * 4); return Math.atan2((b.x - a.x) * innerWidth, (b.y - a.y) * innerHeight) * 180 / Math.PI; });
+    const sd = (a, b) => { let d = a - b; while (d > 180) d -= 360; while (d < -180) d += 360; return d; };
+    const bx = w * 0.3, by = h * 0.62;
+    // the rotating portrait camera needs a moment to follow the track after a teleport: wait until the view azimuth is still
+    const settle = async () => {
+      let prev = await page.evaluate(() => window.__render.camera.azimuth);
+      for (let i = 0; i < 14; i++) { await waitSim(page, 0.3); const a = await page.evaluate(() => window.__render.camera.azimuth); if (Math.abs(sd(a * 180 / Math.PI, prev * 180 / Math.PI)) < 1) return; prev = a; }
+    };
+    // thumb vector of length 55 px pointing `deg` clockwise from screen-up
+    const vec = (deg) => [Math.sin(deg * Math.PI / 180) * 55, -Math.cos(deg * Math.PI / 180) * 55];
+    // thumb pointing along the car's own heading on a straight: the car keeps its heading (steer ~ 0)
+    await onStraight(page, 18); await settle();
+    const up0 = await seen();
+    await T.down(1, bx, by); { const [vx, vy] = vec(up0); await T.move(1, bx + vx, by + vy); } await waitSim(page, 0.6);
+    const up1 = await seen(), upSteer = await page.evaluate(() => window.__game.sim.cars[0].steer);
+    check(`[phone-point ${name}] thumb pointing where the car already heads keeps it straight (steer ~ 0)`, Math.abs(upSteer) < 0.5 && Math.abs(sd(up1, up0)) < 25, `steer=${upSteer.toFixed(2)} seen ${up0.toFixed(0)} -> ${up1.toFixed(0)}`);
+    await T.upAll();
+    // thumb 55 deg to the right / left of the heading: the car turns that way on screen and ends up pointing toward the thumb
+    for (const [label, off] of [['right', 55], ['left', -55]]) {
+      await onStraight(page, 18); await settle();
+      const h0 = await seen(), want = h0 + off;
+      await T.down(1, bx, by); { const [vx, vy] = vec(want); await T.move(1, bx + vx, by + vy); }
+      await waitSim(page, 1.3);
+      const h1 = await seen(), st = await page.evaluate(() => window.__game.sim.cars[0].steer);
+      const turned = sd(h1, h0);
+      check(`[phone-point ${name}] thumb pointing ${label} turns the car ${label} on screen toward the thumb`, (label === 'right' ? turned > 20 : turned < -20) && Math.abs(sd(want, h1)) < Math.abs(sd(want, h0)) - 10, `seen ${h0.toFixed(0)} -> ${h1.toFixed(0)} (aimed ${sd(want, 0).toFixed(0)}) steer=${st.toFixed(2)}`);
+      if (label === 'right') await page.screenshot({ path: path.join(OUT, `phone-point-${name}.png`) });
+      await T.upAll();
+    }
+    // lifting the thumb: steering returns to 0 (after the 120 ms grace)
+    await T.down(1, bx, by); await T.move(1, bx + 60, by); await waitSim(page, 0.4);
+    await T.upAll(); await waitSim(page, 0.5);
+    const rest = await page.evaluate(() => ({ input: window.__game.lastInput.steer, car: window.__game.sim.cars[0].steer }));
+    check(`[phone-point ${name}] lifting the thumb stops steering`, Math.abs(rest.input) < 0.02 && Math.abs(rest.car) < 0.3, `input=${rest.input.toFixed(2)} car steer=${rest.car.toFixed(2)}`);
+    // a thumb pointing hard across the heading at speed starts the auto drift
+    let drifted = false;
+    for (let i = 0; i < 3 && !drifted; i++) {
+      await onStraight(page, 25); await settle();
+      const hd = await seen();
+      await page.evaluate(() => { window.__dEver = false; clearInterval(window.__dTimer); window.__dTimer = setInterval(() => { if (window.__game.sim.simCars[0].drift.active) window.__dEver = true; }, 10); });
+      await T.down(1, bx, by); { const [vx, vy] = vec(hd + 85); await T.move(1, bx + vx, by + vy); } await waitSim(page, 0.8);
+      drifted = await page.evaluate(() => { clearInterval(window.__dTimer); return window.__dEver; });
+      await T.upAll();
+    }
+    check(`[phone-point ${name}] pointing hard across the heading at speed starts an auto drift`, drifted);
+    // BRAKE still works with a second finger while steering
+    const BR = await center(page, '.brake-btn');
+    await onStraight(page, 18); await waitSim(page, 0.2);
+    await T.down(1, bx, by); await T.move(1, bx + 40, by); await T.down(2, BR.x, BR.y); await waitSim(page, 0.3);
+    check(`[phone-point ${name}] multi-touch: steer with one thumb, BRAKE with the other`, (await brakeOf(page)) > 0.5);
+    await T.upAll();
+    check(`[phone-point ${name}] no console errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();
   }
 
@@ -509,7 +581,7 @@ try {
     check('[phone] first race shows the one-time controls picker', !!shown);
     if (shown) {
       const on = await page.$eval('.ctl-card.on', (e) => e.dataset.v);
-      check('[phone] picker highlights Buttons by default', on === 'buttons', on);
+      check('[phone] picker highlights Point by default and offers Point, Buttons, Slide first', on === 'point' && (await page.$$eval('.ctl-card', (e) => e.map((x) => x.dataset.v).join())) === 'point,buttons,slide' && !!(await page.$('.ctl-more')), on);
       await page.screenshot({ path: path.join(OUT, 'phone-picker.png') });
       await page.click('[data-act=ctlPickSel][data-v=slide]');
       await page.click('[data-act=ctlPickOk]');
@@ -529,12 +601,12 @@ try {
 
   // ---- HUD extras (minimap, gap chips, combo): never overlap the touch controls, in any scheme, portrait or landscape
   for (const [w, h] of [[390, 844], [360, 640], [844, 390], [667, 375], [915, 412]]) {
-    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-hud-${w}x${h}`);
+    const { ctx, page, errors } = await openRace({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }, `phone-hud-${w}x${h}`, 'buttons');
     await page.evaluate(() => { try { Object.defineProperty(DeviceOrientationEvent, 'requestPermission', { value: async () => 'granted', configurable: true }); } catch { /* ignore */ } });
     await sleep(600);
     const bad = [];
     let mapOk = true, mapDetail = '';
-    for (const scheme of ['buttons', 'slide', 'joystick', 'tilt', 'tap']) {
+    for (const scheme of ['point', 'buttons', 'slide', 'joystick', 'tilt', 'tap']) {
       await setControls(page, scheme);
       await page.evaluate(() => { window.__game.sim.cars[0].item = 'nitro'; window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta: 30, gamma: 0, absolute: false })); });
       await sleep(450);
@@ -545,7 +617,7 @@ try {
         const cx = m ? (m.l + m.r) / 2 : 0, cy = m ? (m.t + m.b) / 2 : 0;
         return {
           scheme: window.__game.save.settings.controls, W: innerWidth, H: innerHeight, map: m, gaps: q('.hx-gaps'),
-          others: { steerL: q('.steer-btn.left'), steerR: q('.steer-btn.right'), brake: q('.brake-btn'), stick: q('.stick'), item: q('.item-slot'), tilt: q('.tilt-ind'), speed: q('.speed'), driftm: q('.driftm'), pause: q('[data-act=pauseBtn]'), money: q('.chip.money'), timer: q('.timer') },
+          others: { steerL: q('.steer-btn.left'), steerR: q('.steer-btn.right'), brake: q('.brake-btn'), stick: q('.stick'), pointRing: q('.point-ring'), item: q('.item-slot'), tilt: q('.tilt-ind'), speed: q('.speed'), driftm: q('.driftm'), pause: q('[data-act=pauseBtn]'), money: q('.chip.money'), timer: q('.timer') },
           passThrough: map ? getComputedStyle(map).pointerEvents === 'none' && document.elementFromPoint(cx, cy) !== map && !map.contains(document.elementFromPoint(cx, cy)) : false,
         };
       });
@@ -569,7 +641,7 @@ try {
 
   // ---- HUD extras: the minimap draws, gap chips show, a quick smash chain shows the combo and its bonus, then it fades
   {
-    const { ctx, page, errors } = await openRace(PHONE, 'phone-hudfx');
+    const { ctx, page, errors } = await openRace(PHONE, 'phone-hudfx', 'buttons');
     await waitSim(page, 1.5);
     const mm = await page.evaluate(() => {
       const c = document.querySelector('.hx-map canvas'); const g = c.getContext('2d');

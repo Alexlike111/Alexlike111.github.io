@@ -4,7 +4,7 @@ import { CONFIG } from '../config';
 import { platform } from '../platform/bridge';
 import type { GhostData, GhostFrame, SaveData, UpgradeLevels } from '../types';
 import { CAR_IDS, carIdOr, isCarId, rivalModeOr } from './cars';
-import { controlsOr, sensOr } from '../input/schemes';
+import { DEFAULT_SCHEME, controlsOr, sensOr } from '../input/schemes';
 import { defaultCareer, sanitizeCareer } from './career';
 
 /** Current save schema. v1: one global upgrade record; v2: per-car upgrades; v3: career (cups, stars, run). */
@@ -26,7 +26,7 @@ export function defaultSave(): SaveData {
     unlockedTracks: [CONFIG.meta.trackOrder[0]],
     bestPlace: {},
     bestLap: {},
-    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: 'buttons', steerSens: 1, controlsPicked: false },
+    settings: { lang: 'auto', autoGas: false, quality: 'auto', muted: false, tutorialDone: false, camera: 'auto', controls: DEFAULT_SCHEME, steerSens: 1, controlsPicked: false },
     ghosts: {},
     carColor: 0,
     racesFinished: 0,

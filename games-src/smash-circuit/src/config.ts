@@ -297,18 +297,20 @@ export const CONFIG = {
   upgrades: {
     maxLevel: 5,
     // cost per next level (index = current level)
-    cost: [250, 600, 1200, 2200, 3800],
+    // QA v0.1.7 #3: the first level is reachable after about two races of a new player (prize + smash - repair), later ones scale up
+    cost: [150, 420, 900, 1700, 3000],
     engine: { powerPerLevel: 0.07, topSpeedPerLevel: 0.04 },
     grip: { gripPerLevel: 0.07, latPerLevel: 0.04 },   // tyres: grip rate and the cornering limit (car roster)
     armor: { armorPerLevel: 0.18 },
   } as const,
   economy: {
     startMoney: 300,
-    prizeByPlace: [600, 420, 300, 220, 160, 120, 90, 60],
+    prizeByPlace: [600, 420, 320, 260, 200, 160, 130, 100],   // QA v0.1.7 #3: last place still pays about as much as a repair
     trackPrizeMul: { t1: 1, t2: 1.4, t3: 1.9 } as Record<string, number>,
     destructionBonus: 6,       // money per broken segment by player (curbs excluded)
-    repairCostPerHp: 0.9,      // per missing zone hp summed over zones
-    repairMinCost: 20,
+    repairCostPerHp: 0.4,      // per missing zone hp summed over zones
+    repairMinCost: 10,
+    repairMaxCost: 180,        // a full repair never costs more than a mid-table prize (5th place pays 200)
     rewardedMultiplier: 2,     // doubled reward [6.5]
     unlockPlace: 3,            // finish top-3 to unlock next track
     // ---- audit #12: smash payoff by object type (money per piece broken by the player; curbs pay nothing) ----
@@ -565,6 +567,22 @@ export const CONFIG = {
     tiltCheckMs: 1500,         // no orientation event within this long after choosing Tilt = unavailable
     sensMin: 0.5, sensMax: 1.5,   // steering sensitivity slider
     homeYDrift: 0.35,          // button sizes per second the steering finger's home Y follows a slow downward creep
+    // ---- Point scheme: a floating stick, the car turns toward the screen direction the thumb points (docs/CONTROLS_RESEARCH.md 4.1) ----
+    point: {
+      enabled: true,           // master switch: false hides Point from every picker and falls saved 'point' back to Buttons
+      radiusFrac: 0.15, radiusMin: 56, radiusMax: 84,   // base radius R = clamp(frac * min(W,H), min, max) CSS px
+      deadEnter: 0.22, deadExit: 0.15,                  // aim dead radius (x R): enter / exit (hysteresis)
+      leash: 1.3,              // the base follows the thumb beyond this x R
+      smoothS: 0.035,          // s: low-pass time constant of the aim vector
+      steerFullRad: 0.5,       // heading error (rad) for full lock, about 29 deg
+      dGain: 0.1,              // s: angular-velocity damping term of the steer law
+      keepSignRad: 2.6,        // |error| above this (about 150 deg): keep the previous turn direction
+      graceS: 0.12,            // s: the last aim is kept after lift-off
+      driftErrRad: 0.9,        // auto drift when |error| stays above this (about 52 deg) ...
+      driftHoldS: 0.1,         // ... for this long
+      zoneTopFrac: 0.18,       // portrait: the top part of the screen (HUD) does not start the stick
+      zoneLandscapeFrac: 0.55, // landscape: the stick starts on the left part of the screen
+    },
   },
   // ---- appended by module F (integration) ----
   game: {

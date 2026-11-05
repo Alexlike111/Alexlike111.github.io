@@ -56,7 +56,7 @@ vi.mock('../src/input/input', () => ({
   InputController: class {
     touchActive = false;
     setAutoGas() {} setEnabled() {} setLabels() {} onKey() {} onTouchMode() {}
-    setScheme() {} setSensitivity() {} recenter() {} onTiltStatus() {}
+    setScheme() {} setSensitivity() {} setPointSource() {} recenter() {} onTiltStatus() {}
     getInput() { return { ...h.input }; }
   },
 }));
