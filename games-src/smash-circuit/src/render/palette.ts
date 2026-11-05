@@ -43,6 +43,20 @@ export const PALETTES: Record<TrackDef['theme'], ThemePalette> = {
     rock: 0xd0804e, rockDark: 0xaa5f3a, stand: 0xe6cfa8,
     dirt: 0xc4975a, dirtDark: 0x84603a,
   },
+  // t4 Neon Harbour: a night-time city block. Dark navy pavement, violet-lit asphalt, hot neon accents; the light
+  // stays bright enough that cars, props and the racing line read as clearly as on the day tracks.
+  night: {
+    background: 0x1a1d3a,
+    ground: 0x2c3158, groundAlt: 0x333a66, groundDark: 0x23274a,
+    road: 0x3a3550, roadWear: 0x2f2b44, roadLine: 0x5ff6ff,
+    shoulder: 0xff4fb8, shoulderAlt: 0x2a2440,
+    hemiSky: 0xc9b8ff, hemiGround: 0x4b3f8a, hemiIntensity: 1.3, sun: 0xffd0f0, sunIntensity: 1.55,
+    dust: 0x8a86b8, skid: 0x0c0b16,
+    foliage: [0x5ff6ff, 0xff4fb8, 0xffe14a, 0x8cff6a], trunk: 0x3b3f5c,
+    accent: [0xff4fb8, 0x5ff6ff, 0xffe14a, 0xffffff, 0x9b6bff],
+    rock: 0x6c7194, rockDark: 0x4d5276, stand: 0x8c90b8,
+    dirt: 0x6a6280, dirtDark: 0x443d58,
+  },
   snow: {
     background: 0xdcecfa,
     ground: 0xf4f9ff, groundAlt: 0xe6f1fc, groundDark: 0xd3e5f6,

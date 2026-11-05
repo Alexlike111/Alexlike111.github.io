@@ -156,7 +156,7 @@ export interface CarState {
 export interface TrackDef {
   id: string;              // 't1', 't2', 't3'
   nameKey: string;         // i18n key
-  theme: 'meadow' | 'desert' | 'snow';
+  theme: 'meadow' | 'desert' | 'snow' | 'night';
   laps: number;
   width: number;           // road width, metres
   points: Vec2[];          // closed Catmull-Rom control points, clockwise or ccw

@@ -68,6 +68,17 @@ export function makeGroundTexture(theme: TrackDef['theme'], pal: ThemePalette): 
     }
     g.globalAlpha = 0.5; g.fillStyle = hex(pal.groundDark);
     for (let i = 0; i < 220; i++) { const x = rng() * S, y = rng() * S; g.fillRect(x, y, 2, 2); }
+  } else if (theme === 'night') {
+    // city pavement: paving-slab grid, painted parking bays and neon puddle glints
+    g.globalAlpha = 0.5; g.strokeStyle = hex(pal.groundDark); g.lineWidth = 3;
+    for (let i = 0; i <= 8; i++) { g.beginPath(); g.moveTo(i * S / 8, 0); g.lineTo(i * S / 8, S); g.moveTo(0, i * S / 8); g.lineTo(S, i * S / 8); g.stroke(); }
+    g.globalAlpha = 0.35; g.strokeStyle = '#ffe14a'; g.lineWidth = 2.5;
+    for (let i = 0; i < 6; i++) { const x = rng() * S, y = rng() * S; wrap(S, (ox, oy) => { g.strokeRect(x + ox, y + oy, 26, 50); }); }
+    for (let i = 0; i < 40; i++) {
+      const x = rng() * S, y = rng() * S, r = 3 + rng() * 9;
+      g.globalAlpha = 0.28; g.fillStyle = rng() > 0.5 ? '#ff4fb8' : '#5ff6ff';
+      wrap(S, (ox, oy) => { g.beginPath(); g.ellipse(x + ox, y + oy, r * 1.6, r, rng() * 3, 0, 6.3); g.fill(); });
+    }
   } else {
     // sparkles and blue drifts
     g.globalAlpha = 0.9; g.fillStyle = '#ffffff';
