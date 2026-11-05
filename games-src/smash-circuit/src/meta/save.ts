@@ -9,6 +9,8 @@ import { defaultCareer, sanitizeCareer } from './career';
 
 /** Current save schema. v1: one global upgrade record; v2: per-car upgrades; v3: career (cups, stars, run). */
 export const SAVE_VERSION = 3;
+import { sanitizeDaily } from './daily';
+import { sanitizeCosmetics } from './cosmetics';
 
 export const SAVE_KEY_CORE = 'sc_core';
 export const SAVE_KEY_GHOSTS = 'sc_ghosts';
@@ -29,6 +31,8 @@ export function defaultSave(): SaveData {
     carColor: 0,
     racesFinished: 0,
     career: defaultCareer(),
+    daily: sanitizeDaily(undefined),
+    cosmetics: sanitizeCosmetics(undefined),
   };
 }
 
@@ -137,6 +141,8 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
     racesFinished: Math.floor(num(c.racesFinished, 0, 0, 1e9)),
     // v3: a v1/v2 save has no career record -> an empty one (coins, cars and upgrades are carried over above)
     career: sanitizeCareer(c.career),
+    daily: sanitizeDaily(c.daily),
+    cosmetics: sanitizeCosmetics(c.cosmetics),
   };
   // rival field: only stored values are kept (absent = the default, see rivalModeOr)
   if (st.rivals !== undefined && rivalModeOr(st.rivals) === st.rivals) out.settings.rivals = st.rivals as SaveData['settings']['rivals'];

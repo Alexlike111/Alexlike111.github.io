@@ -299,6 +299,10 @@ export interface SaveData {
   carColor: number;
   racesFinished: number;
   career: CareerSave;
+  /** daily missions + login streak (own sub-object, defaulted when missing; see meta/daily.ts) */
+  daily?: import('./meta/daily').DailyState;
+  /** bought / equipped paints and liveries per car (defaulted when missing; see meta/cosmetics.ts) */
+  cosmetics?: import('./meta/cosmetics').CosmeticsState;
 }
 
 // ---------- Sim interface (implemented in src/sim/sim.ts) ----------

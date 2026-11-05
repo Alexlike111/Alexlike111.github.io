@@ -100,6 +100,8 @@ export interface GarageView {
   tab: GarageTab;
   fmtMoney(n: number): string;
   header: string;
+  /** HTML of the Paint tab (cosmetics shop); absent = the plain colour swatches */
+  paintPane?: string;
 }
 
 function barValue(k: BarKey, id: string, save: SaveData): string {
@@ -152,6 +154,8 @@ export function garageHtml(v: GarageView): string {
         <div class="up-main"><div class="up-name">${esc(t('up.' + br))}<small>${lvl}/${maxLevel()}</small></div><div class="pips">${pips}</div><div class="up-desc">${esc(t('up.' + br + '.desc'))}</div></div>
         ${btn}</div>`;
     }).join('')}<p class="g-note">${esc(t('garage.perCar', { car: t('car.' + id) }))}</p></div>`;
+  } else if (v.paintPane !== undefined) {
+    pane = v.paintPane;   // paint shop (ui/daily.ts): free colours, premium paints, liveries
   } else {
     pane = `<div class="swatches">${CONFIG.render.carColors.map((c, i) =>
       `<button class="swatch${s.carColor === i ? ' on' : ''}" data-act="color" data-i="${i}" style="--c:${hex(c)}" aria-label="${esc(t('garage.color'))} ${i + 1}" aria-pressed="${s.carColor === i}"><i class="disc">${s.carColor === i ? icon('check') : ''}</i></button>`).join('')}</div>`;

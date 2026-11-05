@@ -22,6 +22,8 @@ import type { CarInput, CarState, SaveData, SimEvent, TrackDef, UpgradeBranch } 
 import { HudExtras } from './ui/hud';
 import { UI, type UiHandlers } from './ui/ui';
 import { driverName, goalText, type PodiumData } from './ui/career';
+import { MissionTracker, applyRace, dailyOf, dayNumber, missionsForDay } from './meta/daily';
+import { paintIndexFor } from './meta/cosmetics';
 
 export type GameState = 'boot' | 'menu' | 'racing' | 'paused' | 'finishing' | 'results' | 'ad';
 
@@ -99,6 +101,8 @@ export class Game {
   private careerCtx: { cupId: string; idx: number } | null = null;
   private raceRepairs = 0;
   private podium: PodiumData | null = null;
+  /** daily missions: drift seconds / nitro uses / repairs of the current race */
+  private missions = new MissionTracker();
   private lastRepairAt = -999;
 
   /** sim freeze on a heavy car-vs-car hit (src/fx/hitStop.ts) */
@@ -237,15 +241,21 @@ export class Game {
       buy: (b, carId) => this.buy(b, carId),
       selectCar: (id) => {
         this.save = { ...this.save, car: carIdOr(id) };
-        this.renderer.showMenuScene(this.save.carColor, this.save.car);
+        this.renderer.showMenuScene(paintIndexFor(this.save), this.save.car);
         void writeSave(this.save);
       },
-      previewCar: (id) => this.renderer.showMenuScene(this.save.carColor, carIdOr(id)),
+      previewCar: (id, ci) => this.renderer.showMenuScene(ci ?? paintIndexFor(this.save, carIdOr(id)), carIdOr(id)),
+      adoptMeta: (s, shownCar) => {
+        // daily claims / cosmetics: the UI ran the pure meta op; only those fields (and the coins) are taken over
+        this.save = { ...this.save, money: s.money, daily: s.daily, cosmetics: s.cosmetics };
+        if (this.state === 'menu') this.renderer.showMenuScene(paintIndexFor(this.save, carIdOr(shownCar ?? this.save.car)), carIdOr(shownCar ?? this.save.car));
+        void writeSave(this.save);
+      },
       doubleReward: () => this.doubleReward(),
       settings: (s) => this.setSettings(s),
       color: (i) => {
         this.save = { ...this.save, carColor: i };
-        this.renderer.showMenuScene(i);
+        this.renderer.showMenuScene(paintIndexFor(this.save));
         void writeSave(this.save);
       },
       continueAfterResults: () => void this.continueAfterResults(),
@@ -262,7 +272,7 @@ export class Game {
     this.hx?.stop();
     this.input?.setEnabled(false);
     this.closeLevel('failed');
-    this.renderer.showMenuScene(this.save.carColor, this.save.car);
+    this.renderer.showMenuScene(paintIndexFor(this.save), this.save.car);
     const old = this.sim;
     this.sim = null;
     old?.dispose();
@@ -290,6 +300,8 @@ export class Game {
     const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(baseTrackId(def.id)));   // rival difficulty follows the base track
     const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
     const player = makePlayerSetup(this.save, 'Player');
+    player.colorIndex = paintIndexFor(this.save);   // equipped premium paint (render/paintLayer.ts)
+    this.missions.reset();
     const run = this.save.career.run;
     const cars = [player, ...(career && run
       ? cupOpponents(career.cup, career.idx, player.stats, run.seed, this.save.carColor, rivalChoiceOf(this.save))
@@ -487,6 +499,7 @@ export class Game {
     this.save = { ...this.save, money: this.save.money - cost };
     this.raceRepairs++;
     this.sim.repairPlayer();
+    this.missions.repaired();
     this.ui.setMoney(this.save.money);
     if (!fromUi) { this.audio.ui('buy'); this.ui.toast(t('pause.repair')); }
     void writeSave(this.save);
@@ -623,6 +636,11 @@ export class Game {
     const reward = parts.total + drift;
     const res = applyRaceResult(this.save, this.trackId, info.place, reward, bestLap);
     this.save = res.save;
+    // daily missions: progress from this race, a toast per mission that just completed (claimed from the menu)
+    const today = dayNumber(new Date());
+    const dm = applyRace(dailyOf(this.save), today, this.missions.stats(sim.brokenByPlayer, info.place));
+    this.save = { ...this.save, daily: dm.state };
+    for (const i of dm.completed) this.ui.toast(t('daily.done', { name: t('mission.' + missionsForDay(today)[i].kind, { n: missionsForDay(today)[i].target }) }));
     const ghost = sim.bestGhost();
     const saved = this.save.ghosts[this.trackId];
     if (ghost && (!saved || ghost.lapTime < saved.lapTime)) {
@@ -723,6 +741,7 @@ export class Game {
         }
         this.handleEvents(events, sim);
         this.hitStop.onEvents(events, sim.cars[0].id);
+        this.missions.tick(dt * this.timeScale, sim.cars[0], events);
         this.watchStuck(sim, dt);
         this.watchDamage(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
