@@ -11,7 +11,7 @@ import {
 /** One smashed piece of the player: where, and its base pay in coins (see Sim.takeSmashes). */
 export interface SmashItem { x: number; y: number; money: number }
 
-interface GapChip { root: HTMLElement; val: HTMLElement; name: HTMLElement; prev: number | null; key: string }
+interface GapChip { root: HTMLElement; val: HTMLElement; name: HTMLElement; prev: number | null; age: number; mood: string; key: string }
 
 const hex = (n: number): string => '#' + n.toString(16).padStart(6, '0');
 
@@ -121,7 +121,7 @@ export class HudExtras {
     const val = document.createElement('b');
     const name = document.createElement('small');
     root.append(ar, val, name);
-    return { root, val, name, prev: null, key: '' };
+    return { root, val, name, prev: null, age: 0, mood: 'flat', key: '' };
   }
 
   // ------------------------------------------------------------------ race lifecycle
@@ -134,7 +134,7 @@ export class HudExtras {
     this.takedowns.reset();
     this.slams = 0; this.slamBonus = 0;
     this.gapAcc = 0; this.mapAcc = 0;
-    this.gapA.prev = null; this.gapB.prev = null; this.gapA.key = ''; this.gapB.key = '';
+    for (const c of [this.gapA, this.gapB]) { c.prev = null; c.age = 0; c.mood = 'flat'; c.key = ''; }
     this.clearBanners();
     this.mapWrap.hidden = false;   // visible first: the canvas size is read from the layout
     this.buildMap(sim);
@@ -215,23 +215,29 @@ export class HudExtras {
 
   // ------------------------------------------------------------------ gaps
 
-  private updateGaps(sim: ISim, racing: boolean, _dt: number): void {
+  private updateGaps(sim: ISim, racing: boolean, dt: number): void {
     const g = racing ? computeGaps(sim.cars, 0) : { ahead: null, behind: null };
-    this.setGap(this.gapA, g.ahead, true);
-    this.setGap(this.gapB, g.behind, false);
+    this.setGap(this.gapA, g.ahead, true, dt);
+    this.setGap(this.gapB, g.behind, false, dt);
     this.gapWrap.hidden = !(g.ahead || g.behind);
   }
 
-  private setGap(chip: GapChip, info: { name: string; gap: number } | null, ahead: boolean): void {
+  private setGap(chip: GapChip, info: { name: string; gap: number } | null, ahead: boolean, dt: number): void {
     if (!info) {
       if (!chip.root.hidden) chip.root.hidden = true;
-      chip.prev = null; chip.key = '';
+      chip.prev = null; chip.age = 0; chip.mood = 'flat'; chip.key = '';
       return;
     }
-    const tr = gapTrend(chip.prev, info.gap);
-    chip.prev = info.gap;
-    // closing on the car ahead is good news (green), the car behind closing on the player is a warning (red)
-    const mood = tr === 0 ? 'flat' : (tr < 0) === ahead ? 'good' : 'bad';
+    // the trend is read over gapTrendS (a single refresh moves the gap by far less than the noise): closing on the car ahead is
+    // good news (green), the car behind closing on the player is a warning (red)
+    chip.age += dt;
+    if (chip.prev === null) { chip.prev = info.gap; chip.age = 0; }
+    else if (chip.age >= this.H.gapTrendS) {
+      const tr = gapTrend(chip.prev, info.gap);
+      chip.mood = tr === 0 ? 'flat' : (tr < 0) === ahead ? 'good' : 'bad';
+      chip.prev = info.gap; chip.age = 0;
+    }
+    const mood = chip.mood;
     const text = (ahead ? '-' : '+') + fmtGap(info.gap);
     const key = `${text}|${info.name}|${mood}`;
     if (key === chip.key) return;

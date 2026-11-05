@@ -685,7 +685,8 @@ export const CONFIG = {
     gapRefreshS: 0.12,         // gap chips refresh interval
     gapMinSpeed: 8,            // m/s: the gap divides by at least this speed (a stopped car must not show infinity)
     gapMaxS: 60,               // gaps above this many seconds are hidden
-    gapCloseEps: 0.04,         // s per refresh: the gap changed by more than this = closing / opening
+    gapTrendS: 0.6,            // the closing / opening colour is read over this long
+    gapCloseEps: 0.05,         // the gap changed by more than this (s) over gapTrendS = closing / opening
     placeDebounceS: 0.35,      // a new place must hold this long before the "P3 -> P2" flash
     placeStartGraceS: 2.5,     // no position flash during the start scramble (s after GO)
     placeFlashMs: 1500,
