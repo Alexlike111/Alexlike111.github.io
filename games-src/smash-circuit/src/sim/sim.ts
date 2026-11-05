@@ -80,6 +80,8 @@ export class Sim implements ISim {
   playerAssist = true;
   private disposed = false;
   private gridSeed = 0;
+  /** Demolition Arena (src/sim/arena.ts): replaces the racing AI of car i when set; race mode leaves it null. */
+  aiOverride: ((i: number, st: CarState, dt: number) => CarInput) | null = null;
 
   constructor(opts: SimOptions) {
     this.track = buildTrackGeometry(opts.track);
@@ -372,7 +374,8 @@ export class Sim implements ISim {
       let input: CarInput = NEUTRAL;
       if (racing) {
         const d = this.drivers[i];
-        if (d) {
+        if (d && this.aiOverride) input = this.aiOverride(i, st, dt);
+        else if (d) {
           if (st.finished) d.speedCap = CONFIG.ai.finishedCruise;
           if (d.wantsRespawn && !st.finished) this.respawn(i);
           input = d.think(st, this.others[i], this.track, dt, hints[i]);
@@ -511,6 +514,16 @@ export class Sim implements ISim {
     if (!this.recorder.recording || this.playerIndex < 0) return;
     const p = this.cars[this.playerIndex];
     this.recorder.update(this.race.time, p.x, p.y, p.angle);
+  }
+
+  /** Demolition Arena: take car i out of play (no contacts, parked far outside the arena). */
+  removeCar(i: number): void {
+    this.ghostCar(i);
+    const st = this.cars[i];
+    const x = 5000 + i * 40, y = 5000;
+    this.simCars[i].reset(x, y, 0);
+    st.x = x; st.y = y; st.angle = 0; st.vx = 0; st.vy = 0; st.speed = 0; st.angularVel = 0;
+    this.prevPoses[i].x = x; this.prevPoses[i].y = y; this.prevPoses[i].angle = 0;
   }
 
   /** A finished AI car keeps cruising but no longer collides (it must not block the cars still racing). */
