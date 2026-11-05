@@ -361,7 +361,7 @@ describe('save: per-car upgrades and v1 -> v2 migration', () => {
       bestLap: { t1: 70.5 }, settings: { lang: 'ru', autoGas: true, quality: 'low', muted: false, tutorialDone: true }, carColor: 3, racesFinished: 9,
     };
     const s = sanitizeSave(v1, null);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(3);
     expect(s.money).toBe(1234);
     expect(s.car).toBe(CONFIG.cars.starter);
     expect(s.carUpgrades).toEqual({ [CONFIG.cars.starter]: { engine: 2, grip: 1, armor: 4 } });

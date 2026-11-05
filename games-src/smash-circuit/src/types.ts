@@ -250,8 +250,24 @@ export type UpgradeBranch = 'engine' | 'grip' | 'armor';
 export type UpgradeLevels = Record<UpgradeBranch, number>;
 /** Which cars the 7 rivals drive: the player's model, all different models, random models, or one picked model. */
 export type RivalMode = 'same' | 'mixed' | 'random' | 'pick';
+/** Career progress (save v3). All maps are keyed by cup id / `${cupId}:${raceIndex}`. */
+export interface CareerRun {
+  cup: string;
+  /** fixes the rival names / colours / strengths of the whole cup */
+  seed: number;
+  /** results[raceIndex][driver] = finishing place (1..8); driver 0 = the player, 1..7 = the AIs */
+  results: number[][];
+}
+export interface CupRecord { done: boolean; /** best final standing 1..8, 0 = never finished */ best: number; /** coins of the final-standing bonus already paid out */ claimed: number }
+export interface CareerSave {
+  /** best-ever stars per race as a bitmask (bit 0..2 = star 1..3) */
+  stars: Record<string, number>;
+  cups: Record<string, CupRecord>;
+  run: CareerRun | null;
+}
+
 export interface SaveData {
-  version: 2;
+  version: 3;
   money: number;
   /** selected roster car id */
   car: string;
@@ -274,6 +290,7 @@ export interface SaveData {
   ghosts: Record<string, GhostData>;
   carColor: number;
   racesFinished: number;
+  career: CareerSave;
 }
 
 // ---------- Sim interface (implemented in src/sim/sim.ts) ----------
