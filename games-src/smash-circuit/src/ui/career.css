@@ -159,6 +159,7 @@
   .ui-root .c-res-goals { margin-top: 0.1em; gap: 0.2em; }
   .ui-root .c-res-goals li { padding: 0.2em 0.5em; font-size: 0.85em; }
   .ui-root .rescard.career .stats-list { gap: 0.2em; }
+  .ui-root .rescard.career .stats-list .rr:not(.reward) { display: none; }   /* time / best lap: shown in portrait; landscape phones need the room */
   .ui-root .rescard.career .res-title { font-size: 1em; }
   .ui-root .rescard.career .btn.big { min-height: max(2.8em, 44px); }
 }
