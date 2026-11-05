@@ -115,6 +115,10 @@ export const CONFIG = {
     // ---- appended: fair damage (audit #14 / #19) ----
     toast: { power: 0.85, speed: 0.9, grip: 0.8, pull: 0.1, cooldown: 4 },   // effect toasts: shown once effects fall past these (re-armed on repair), min gap in s
     gripFloor: 0.3,           // effects.gripMul never drops below this (a battered car still steers)
+    // ---- appended: hit-stop on heavy car-vs-car hits (src/fx/hitStop.ts) ----
+    // the sim freezes for time[0]..time[1] s when the PLAYER's car takes a car hit of impact strength >= minStrength (~18000 N*s: the
+    // car-car crash-state impulse); at most one per `cooldown` s; off with prefers-reduced-motion
+    hitStop: { minStrength: 0.45, time: [0.04, 0.06] as [number, number], cooldown: 0.8 },
     hitWindow: 0.1,           // s: contact impulses of one car on one barrier (walls + guardrails) or one prop are summed over this window and
                               // the no-damage threshold applies once per window (a glancing hit's 3-4 solver steps count as one hit)
                               // plow-through (see destruction.plowKeep): the impulse that breaks the piece is charged in full and
@@ -179,6 +183,12 @@ export const CONFIG = {
     // each step, a car corner within `gap` m of a wall / guardrail face sliding along it at >= scrape.minSpeed wears the
     // piece by scrape[kind] hp per metre (and makes sparks); independent of the solver impulse
     scrapeGap: 0.15,
+    // ---- appended: overkill cascade (audit X4) ----
+    // damage beyond the hp a piece had left is not thrown away: `carry` of it is passed on to each neighbour (wall / guardrail
+    // segments along the barrier; props within `propRadius` m), which passes on `carry` of ITS overkill, up to `depth` links.
+    // Neighbours go down in a domino ripple, `delay` s per link. `maxOverkill` (x maxHp) bounds one hit; `maxQueued` bounds the queue.
+    // Locked walls (anti-shortcut) never take part.
+    cascade: { carry: 0.5, depth: 4, delay: 0.05, propRadius: 3.2, maxOverkill: 3, maxQueued: 48 },
   },
   race: {
     cars: 8,                   // [3.3]
@@ -390,6 +400,10 @@ export const CONFIG = {
       strongBreakSpeed: 13,    // m/s of the break velocity from which a break counts as strong
       shakeFromBreak: { wall: 0.2, guardrail: 0.12, road: 0.28, curb: 0.03, prop: 0.05 } as Record<string, number>, // trauma per break at distance 0
       dustBurst: [6, 9] as [number, number],          // dust puffs per wall / guardrail break
+      // ---- appended: material variety, cascade shake cap, braking smoke ----
+      breakShakeCap: 0.45,     // trauma that breaks may add within ~0.4 s: a cascade of 9 segments shakes like one big hit, not nine
+      breakShakeDecay: 1.2,    // per s
+      brakeSmokeSpeed: 14,     // m/s above which a hard stop (brake > 0.85) smokes the front tyres
       sparkFan: [16, 26] as [number, number],         // sparks per heavy break (fanned along the travel direction)
       hitStopMinStrength: 0.45,  // impact strength / break weight from which the visual hit-stop applies
       hitStopTime: 0.1,        // s of slowed fx time after a heavy impact (the debris and sparks hang for a beat)

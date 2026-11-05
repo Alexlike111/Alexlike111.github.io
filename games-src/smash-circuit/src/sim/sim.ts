@@ -464,7 +464,10 @@ export class Sim implements ISim {
     for (let i = from; i < ev.length; i++) {
       const e = ev[i];
       if (e.type !== 'break') continue;
-      const by = e.kind === 'road' ? this.lastRoadHitBy : (e.id >= 0 && e.id < this.lastHitBy.length ? this.lastHitBy[e.id] : -1);
+      // a piece knocked over by an overkill cascade is credited to whoever hit the piece that started the chain
+      const src = this.destruction.chainSource(e.id);
+      const key = src >= 0 ? src : e.id;
+      const by = e.kind === 'road' ? this.lastRoadHitBy : (key >= 0 && key < this.lastHitBy.length ? this.lastHitBy[key] : -1);
       if (by >= 0 && this.byId.get(by)?.state.isPlayer && e.kind !== 'curb') {
         this.brokenByPlayer++;
         const pay = smashValue(e.kind, e.propType);

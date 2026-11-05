@@ -139,6 +139,8 @@ export class GameRenderer {
 
   /** heading-up (rotating) camera on / off; landscape screens stay north-up whatever this says */
   setCameraRotating(on: boolean): void { this.rig.rotating = on; this.dirty = true; }
+  /** prefers-reduced-motion: camera shake at 30% */
+  setReducedMotion(on: boolean): void { this.rig.shakeScale = on ? 0.3 : 1; }
 
   get fps(): number { return this.fpsAvg; }
   get quality(): Quality { return this.level; }

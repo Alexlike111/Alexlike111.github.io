@@ -61,6 +61,12 @@ export class DestructionSystem {
   /** wall / guardrail ids per side ([left, right]) in track order, segment length wallSeg (proximity scraping) */
   private wallIds: number[][] = [];
   private wallSeg = 1;
+  /** overkill cascade: delayed damage queued by a heavy hit (domino ripple), released by flush() when its time has come */
+  private chain: { id: number; dmg: number; at: number; vx: number; vy: number }[] = [];
+  private clock = 0;
+  /** id of the piece whose hit knocked this one over by cascade, else -1 (credit for the smash goes to whoever hit the source) */
+  private chainSrc: Int32Array = new Int32Array(0);
+  private propIds: number[] = [];
 
   // road chunk grid
   private roadFirst = 0;
@@ -85,6 +91,7 @@ export class DestructionSystem {
     const n = this.states.length;
     this.pendingFlag = new Uint8Array(n);
     this.awakeFlag = new Uint8Array(n);
+    this.chainSrc = new Int32Array(n).fill(-1);
     this.hitVx = new Float32Array(n);
     this.hitVy = new Float32Array(n);
     pw.onPostSolve((c, imp) => this.onPostSolve(c, imp));
@@ -282,6 +289,7 @@ export class DestructionSystem {
         hp: cfg.hp, maxHp: cfg.hp, ...(dynamic ? { dynamic: true, vx: 0, vy: 0, angularVel: 0 } : {}),
       }, body);
       if (dynamic) this.dynamicIds.push(id);
+      this.propIds.push(id);
       this.minPropThreshold = Math.min(this.minPropThreshold, cfg.threshold);
     }
   }
@@ -444,16 +452,23 @@ export class DestructionSystem {
         let dmg = (h.impulse - this.thresholdOf(st)) * D.impulseToDamage;
         if (st.kind === 'prop') dmg *= D.props[st.propType as PropType].dmgMul;
         if (dmg <= 0) continue;
+        const hpBefore = st.hp;
+        this.chainSrc[h.id] = -1;   // hit directly: not (only) a cascade victim
         this.damage(h.id, dmg, h.vx, h.vy);
+        // overkill: what the piece could not absorb (none for a locked piece or one that was already going down)
+        const over = hpBefore > 0 && this.lockedFlag[h.id] !== 1 ? Math.min(dmg - hpBefore, st.maxHp * D.cascade.maxOverkill) : 0;
         if (st.kind === 'wall' || st.kind === 'guardrail') {
-          const sp = Math.min(dmg, st.maxHp) * D.splash; // a catastrophic hit still only cracks the neighbours
+          const sp = Math.min(dmg, st.maxHp) * D.splash; // a catastrophic hit still cracks the neighbours; the rest cascades (below)
           const a = this.prev[h.id], b = this.next[h.id];
           if (a >= 0 && !this.states[a].broken) this.damage(a, sp, h.vx, h.vy);
           if (b >= 0 && !this.states[b].broken) this.damage(b, sp, h.vx, h.vy);
-        }
+          if (over > 0) this.cascadeWalls(h.id, over, h.vx, h.vy);
+        } else if (st.kind === 'prop' && over > 0) this.cascadeProps(h.id, over, h.vx, h.vy);
       }
       for (const h of list) if (this.pool.length < 256) this.pool.push(h);
     }
+    this.clock += CONFIG.physics.dt;
+    if (this.chain.length) this.releaseChain();
     if (this.scrapes.length) {
       const list = this.scrapes;
       this.scrapes = [];
@@ -473,6 +488,76 @@ export class DestructionSystem {
       n++;
     }
   }
+
+  // -------------------------------------------------------------------------------------------
+  // overkill cascade (audit X4)
+  // -------------------------------------------------------------------------------------------
+
+  private enqueueChain(id: number, dmg: number, hop: number, vx: number, vy: number, src: number): void {
+    if (this.chain.length >= D.cascade.maxQueued) return;
+    this.chain.push({ id, dmg, at: this.clock + hop * D.cascade.delay, vx, vy });
+    this.chainSrc[id] = src;
+  }
+
+  /** A wall / guardrail segment took `over` hp more than it had: pass `carry` of it down the barrier both ways, link by link. */
+  private cascadeWalls(id: number, over: number, vx: number, vy: number): void {
+    const K = D.cascade;
+    for (const links of [this.prev, this.next]) {
+      let cur = id, carry = over * K.carry;
+      for (let hop = 1; hop <= K.depth && carry > 0.5; hop++) {
+        cur = links[cur];
+        if (cur < 0) break;
+        const st = this.states[cur];
+        if (st.broken || st.hp <= 0 || this.lockedFlag[cur] === 1) break;   // a gap or a locked (anti-shortcut) segment stops the chain
+        this.enqueueChain(cur, carry, hop, vx, vy, id);
+        carry = (carry - st.hp) * K.carry;                                  // what is left after this segment goes down
+      }
+    }
+  }
+
+  /** A prop took `over` hp more than it had: it throws the props around it (within propRadius) down, and those their neighbours. */
+  private cascadeProps(id: number, over: number, vx: number, vy: number): void {
+    const K = D.cascade;
+    const r2 = K.propRadius * K.propRadius;
+    const seen = new Set<number>([id]);
+    let front: { id: number; over: number }[] = [{ id, over }];
+    for (let hop = 1; hop <= K.depth && front.length; hop++) {
+      const nextFront: { id: number; over: number }[] = [];
+      for (const f of front) {
+        const carry = f.over * K.carry;
+        if (carry < 1) continue;
+        const fb = this.bodies[f.id];
+        const fp = fb ? fb.getPosition() : this.states[f.id];
+        for (const pid of this.propIds) {
+          if (seen.has(pid)) continue;
+          const ps = this.states[pid];
+          if (ps.broken || ps.hp <= 0) continue;
+          const pb = this.bodies[pid];
+          const pp = pb ? pb.getPosition() : ps;
+          const dx = pp.x - fp.x, dy = pp.y - fp.y;
+          if (dx * dx + dy * dy > r2) continue;
+          seen.add(pid);
+          this.enqueueChain(pid, carry, hop, vx, vy, id);
+          if (carry > ps.hp) nextFront.push({ id: pid, over: carry - ps.hp });
+        }
+      }
+      front = nextFront;
+    }
+  }
+
+  private releaseChain(): void {
+    const c = this.chain;
+    let w = 0;
+    for (let i = 0; i < c.length; i++) {
+      const e = c[i];
+      if (e.at > this.clock) { c[w++] = e; continue; }
+      if (!this.states[e.id].broken) this.damage(e.id, e.dmg, e.vx, e.vy);
+    }
+    c.length = w;
+  }
+
+  /** Id of the piece whose heavy hit knocked `id` over by cascade, or -1 (it was hit itself). */
+  chainSource(id: number): number { return this.chainSrc[id] ?? -1; }
 
   private applyRoadHit(x: number, y: number, impulse: number): void {
     const g = this.track;
@@ -598,7 +683,7 @@ export class DestructionSystem {
   }
 
   dispose(): void {
-    this.hits.length = 0; this.scrapes.length = 0; this.roadHits.length = 0; this.pending.length = 0;
+    this.hits.length = 0; this.chain.length = 0; this.scrapes.length = 0; this.roadHits.length = 0; this.pending.length = 0;
     this.bodies.length = 0; this.dynamicIds.length = 0;
   }
 }

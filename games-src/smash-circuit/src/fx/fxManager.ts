@@ -9,6 +9,7 @@ import type { WallVisual } from '../render/structures';
 import type { CarPart, DestructibleKind, PropType, SimEvent, TrackDef, ZoneId } from '../types';
 import { DebrisPool } from './debris';
 import { DriftFx } from './driftFx';
+import { MATERIAL_FX, extraCount, materialOf, type FxMaterial } from './materials';
 import { ParticleSystem } from './particles';
 import { ShockwavePool } from './shockwave';
 import { SkidMarks } from './skidmarks';
@@ -61,6 +62,10 @@ export class FxManager {
   private acc: Float32Array;
   /** boost / nitro flame emitter accumulators, one per car */
   private accFlame: Float32Array;
+  /** hard-braking tyre smoke accumulators, one per car */
+  private accBrake: Float32Array;
+  /** trauma the breaks added lately (decays): bounds the shake of a cascade */
+  private recentBreakTrauma = 0;
   /** drift tier sparks, exit boost jet, speed streaks (driftFx.ts) */
   private driftFx!: DriftFx;
   private tmpC = new THREE.Color();
@@ -74,6 +79,7 @@ export class FxManager {
     this.skids = new SkidMarks(CONFIG.render.skidCapacity.high, carCount * 4);
     this.acc = new Float32Array(carCount * 6);
     this.accFlame = new Float32Array(carCount);
+    this.accBrake = new Float32Array(carCount);
     this.rings = new ShockwavePool();
     this.group.add(this.skids.mesh, ...this.debris.meshes, this.rings.mesh, this.smoke.mesh, this.sparks.mesh);
   }
@@ -93,7 +99,7 @@ export class FxManager {
   }
 
   clear(): void {
-    this.debris.clear(); this.smoke.clear(); this.sparks.clear(); this.skids.clear(); this.rings.clear(); this.acc.fill(0); this.accFlame.fill(0); this.hitStopLeft = 0;
+    this.debris.clear(); this.smoke.clear(); this.sparks.clear(); this.skids.clear(); this.rings.clear(); this.acc.fill(0); this.accFlame.fill(0); this.accBrake.fill(0); this.hitStopLeft = 0; this.recentBreakTrauma = 0;
   }
 
   private rnd(a: number, b: number): number { return a + (b - a) * this.rng(); }
@@ -304,7 +310,10 @@ export class FxManager {
     const heavyKind = ev.kind === 'wall' || ev.kind === 'road';
     const strong = heavyKind || sp > FX.strongBreakSpeed;
     const weight = clamp(0.35 + sp / 26, 0.3, 1) * (heavyKind ? 1 : 0.85);
-    ctx.addTrauma((FX.shakeFromBreak[ev.kind] ?? 0.05) * (0.45 + 0.55 * weight) * near);
+    const wantShake = (FX.shakeFromBreak[ev.kind] ?? 0.05) * (0.45 + 0.55 * weight) * near;
+    const giveShake = Math.min(wantShake, Math.max(0, FX.breakShakeCap - this.recentBreakTrauma));   // a cascade shakes like one big hit
+    this.recentBreakTrauma += giveShake;
+    ctx.addTrauma(giveShake);
     const k = sp > 18 ? 18 / sp : 1;
     const vx = ev.vx * k * 0.55, vz = ev.vy * k * 0.55;
     const light = ev.kind === 'curb' || ev.kind === 'prop';
@@ -319,6 +328,9 @@ export class FxManager {
     }
     this.chunk = FX.debrisScale;
     if (Math.hypot(x - ctx.camX, z - ctx.camZ) < ctx.radius * 1.25) {
+      const mat = materialOf(ev.kind, ev.propType, this.wallStyle);
+      const M = MATERIAL_FX[mat];
+      const dust = M.dust ?? this.dustColor();
       const road = ev.kind === 'road';
       const dl = sp > 0.5 ? sp : 1;
       const dx = ev.vx / dl, dz = ev.vy / dl;
@@ -327,8 +339,10 @@ export class FxManager {
         this.puff(x, 0.4, z, 5, this.dustColor(), 3.0, 2.2, 1.0, 0.8);
       } else if (ev.kind === 'wall' || ev.kind === 'guardrail') {
         const [d0, d1] = FX.dustBurst;
-        this.puff(x, 0.5, z, d0 + this.rng() * (d1 - d0), this.dustColor(), 2.6 + weight, 3.4, 1.4, 0.85, ev.vx * 0.1, ev.vy * 0.1);
-      } else this.puff(x, 0.4, z, light ? 2 : 3, this.dustColor(), 1.7, 2.6, 1.2, 0.8);
+        this.puff(x, 0.5, z, d0 + this.rng() * (d1 - d0), dust, 2.6 + weight, 3.4, 1.4, 0.85, ev.vx * 0.1, ev.vy * 0.1);
+      } else this.puff(x, 0.4, z, light ? 2 : 3, dust, 1.7, 2.6, 1.2, 0.8);
+      this.materialExtras(mat, x, z, vx, vz, strong ? 1 : 0.7);
+      if (M.sparks > 0) this.sparkBurst(x, 0.7, z, M.sparks * (strong ? 1.5 : 1), 6 + weight * 4, dx * 3, dz * 3);
       if (heavyKind || ev.kind === 'guardrail') {
         const [f0, f1] = FX.sparkFan;
         this.sparkFan(x, 0.7, z, strong ? f0 + this.rng() * (f1 - f0) : f0 * 0.6, 7 + weight * 9, dx, dz);
@@ -377,6 +391,31 @@ export class FxManager {
         break;
       }
     }
+  }
+
+  /**
+   * Material flavour on top of the normal 2-3 debris chunks (which stay the only debris-pool pieces of a break): flecks thrown from
+   * the break in the material's colours, drawn as small solid particles from the pooled smoke system (so they follow the quality
+   * preset's particle share and the pool cap, and never touch the debris budget). Wood and straw throw splinters, concrete / stone /
+   * tarmac pebbles, plastic bright shards, rubber dark crumbs, foliage leaves.
+   */
+  private materialExtras(mat: FxMaterial, x: number, z: number, vx: number, vz: number, power: number): void {
+    const M = MATERIAL_FX[mat];
+    if (this.share <= 0) return;
+    const sp = this.share * power;
+    const fling = (n: number, size: number, up: [number, number], side: number, life: number, grav: number): void => {
+      for (let i = 0; i < n * 3; i++) {
+        const a = this.rng() * Math.PI * 2, v = this.rnd(0.4, 1) * side;
+        this.smoke.spawn(
+          x + this.rnd(-0.4, 0.4), 0.5 + this.rnd(0, 0.4), z + this.rnd(-0.4, 0.4),
+          vx * 0.8 + Math.cos(a) * v, this.rnd(up[0], up[1]), vz * 0.8 + Math.sin(a) * v,
+          { life: this.rnd(life * 0.7, life), size0: size * this.rnd(0.8, 1.25), size1: size * 0.5, color: this.pick(M.colors), alpha: 1, drag: 0.5, gravity: grav, mode: 1 },
+        );
+      }
+    };
+    fling(extraCount(M.splinters, sp, this.rng()), 0.2, [5, 10], 7, 0.9, 22);
+    fling(extraCount(M.pebbles, sp, this.rng()), 0.26, [4, 8], 8, 0.8, 24);
+    fling(extraCount(M.shards, sp, this.rng()), 0.22, [4, 9], 7, 0.85, 20);
   }
 
   private onPartOff(ev: Extract<SimEvent, { type: 'partOff' }>, ctx: FxContext): void {
@@ -447,6 +486,18 @@ export class FxManager {
           });
         }
       } else this.acc[a] = 0;
+
+      // ---- hard braking: the front tyres smoke
+      if (this.share > 0 && st.brake > 0.85 && speed > FX.brakeSmokeSpeed && !st.offRoad && st.slip <= FX.skidSlip) {
+        this.accBrake[i] += dt * (16 + clamp((speed - FX.brakeSmokeSpeed) / 20, 0, 1) * 34) * this.share;
+        while (this.accBrake[i] >= 1) {
+          this.accBrake[i] -= 1;
+          const w = WL[this.rng() > 0.5 ? 0 : 1];
+          this.smoke.spawn(wx(w.x, w.z), 0.25, wz(w.x, w.z), st.vx * 0.2 + this.rnd(-0.5, 0.5), this.rnd(0.4, 1.0), st.vy * 0.2 + this.rnd(-0.5, 0.5), {
+            life: this.rnd(0.4, 0.8), size0: 0.4, size1: this.rnd(1.3, 2.0), color: 0xeef0f3, alpha: 0.4, drag: 2.2,
+          });
+        }
+      } else this.accBrake[i] = 0;
 
       // ---- off-road dust / snow spray
       if (this.share > 0 && st.offRoad && speed > 6) {
@@ -562,6 +613,7 @@ export class FxManager {
     let k = 1;
     if (this.hitStopLeft > 0) { k = FX.hitStopScale; this.hitStopLeft = Math.max(0, this.hitStopLeft - dt); }
     const fdt = dt * k;
+    this.recentBreakTrauma = Math.max(0, this.recentBreakTrauma - dt * FX.breakShakeDecay);
     this.debris.update(fdt);
     this.rings.update(fdt);
     this.smoke.setCamera(camera); this.sparks.setCamera(camera);
