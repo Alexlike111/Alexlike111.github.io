@@ -26,7 +26,7 @@
 .ui-root .hx-gap.up .ar { border-bottom: 0.62em solid var(--gc); }
 .ui-root .hx-gap.dn .ar { border-top: 0.62em solid var(--gc); }
 .ui-root .hx-gap b { font: 900 italic 1.05em/1 var(--display); color: var(--gc); min-width: 2.2em; }
-.ui-root .hx-gap small { font: 800 0.7em/1 var(--body); opacity: 0.85; max-width: 5.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-root .hx-gap small { font: 800 0.7em/1 var(--body); opacity: 0.85; max-width: 7em; overflow: hidden; white-space: nowrap; }
 
 /* ---- overlay: floats, banners, edge pulse ---- */
 .ui-root .hx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
