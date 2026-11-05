@@ -14,7 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const OUT = path.join(here, 'out', 'career');
 fs.mkdirSync(OUT, { recursive: true });
-const PORT = 4800 + Math.floor(Math.random() * 300);
+const PORT = 5200 + Math.floor(Math.random() * 3000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`); };
@@ -52,8 +52,14 @@ async function run(label, vp, lang) {
   };
   await page.goto(`http://localhost:${PORT}/?debug`);
   await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
-  await page.evaluate((lang) => { const g = window.__game; g.setSettings({ ...g.save.settings, lang, tutorialDone: true, controlsPicked: true }); g.menu(); }, lang);
+  await page.evaluate(() => { const g = window.__game; g.setSettings({ ...g.save.settings, tutorialDone: true, controlsPicked: true }); g.menu(); });
   await sleep(500);
+  if (lang !== 'en') {   // switch the language like a player does (the settings screen also re-inits the dictionary)
+    await page.click('[data-act=settings]'); await sleep(300);
+    await page.click(`[data-act=set][data-k=lang][data-v=${lang}]`); await sleep(300);
+    await page.click('[data-act=back]'); await sleep(400);
+    check(L(`language is ${lang}`), await page.evaluate((l) => document.documentElement.lang === l && /[А-Яа-я]/.test(document.querySelector('.menu [data-act=career]')?.textContent ?? ''), lang));
+  }
 
   // ---- menu: Career is the primary button, Quick race stays
   const menu = await page.evaluate(() => ({ career: !!document.querySelector('.menu [data-act=career]'), quick: !!document.querySelector('.menu [data-act=play]'), garage: !!document.querySelector('.menu [data-act=garage]'), settings: !!document.querySelector('.menu [data-act=settings]'),
@@ -144,11 +150,16 @@ async function run(label, vp, lang) {
   await ctx.close();
 }
 
+const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '').slice(7);   // --only=en | --only=ru
 try {
-  await run('p390x844-en', { width: 390, height: 844 }, 'en');
-  await run('l844x390-en', { width: 844, height: 390 }, 'en');
-  await run('p390x844-ru', { width: 390, height: 844 }, 'ru');
-  await run('l844x390-ru', { width: 844, height: 390 }, 'ru');
+  if (only !== 'ru') {
+    await run('p390x844-en', { width: 390, height: 844 }, 'en');
+    await run('l844x390-en', { width: 844, height: 390 }, 'en');
+  }
+  if (only !== 'en') {
+    await run('p390x844-ru', { width: 390, height: 844 }, 'ru');
+    await run('l844x390-ru', { width: 844, height: 390 }, 'ru');
+  }
 } catch (e) {
   check('e2e ran to the end', false, String(e && e.stack || e).slice(0, 600));
 }
