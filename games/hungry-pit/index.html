@@ -99,9 +99,9 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const KINDS = [
-  { name: 'coin', r: 7, v: 1, n: 150, cols: ['#ffd166', '#fee440'] },
-  { name: 'box', r: 12, v: 2, n: 70, cols: ['#06d6a0', '#118ab2', '#ef476f'] },
-  { name: 'ball', r: 19, v: 4, n: 26, cols: ['#9b5de5', '#f78c6b', '#00bbf9'] },
+  { name: 'coin', r: 10, v: 1, n: 120, cols: ['#ffd166', '#f4a100'] },
+  { name: 'box', r: 17, v: 2, n: 60, cols: ['#06d6a0', '#118ab2', '#ef476f'] },
+  { name: 'ball', r: 27, v: 4, n: 22, cols: ['#9b5de5', '#f78c6b', '#00bbf9'] },
 ];
 const TOWER_COLS = ['#e9c46a', '#8ecae6', '#f4a261'];
 const BOT_NAMES = ['Rex', 'Mia', 'Tom', 'Kai', 'Ivy'];
@@ -154,7 +154,7 @@ function placeFar(h) {
 }
 function respawn(h) {
   h.dead = false; h.inv = 2.5; h.vx = 0; h.vy = 0;
-  h.r = h.p ? Math.max(START_R, h.oldR * 0.45) : START_R * rnd(0.9, 1.1);
+  h.r = h.p ? Math.max(START_R, h.oldR * 0.6) : START_R * rnd(0.9, 1.1);
   h.vr = h.r;
   placeFar(h);
 }
@@ -254,7 +254,7 @@ function burst(x, y, c, n) {
 }
 function floatText(x, y, s, c) { texts.push({ x, y, s, c, t: 0.9 }); }
 function consume(h, it) {
-  h.r = Math.sqrt(h.r * h.r + it.r * it.r * 0.15); // slow growth: a run ends around 60–90 units
+  h.r = Math.sqrt(h.r * h.r + it.r * it.r * 0.065); // slow growth: a run ends around 60–90 units
   h.eat += it.v;
   if (h.p) {
     S.eaten += it.v;
@@ -443,11 +443,21 @@ function drawItem(it) {
   ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.9, 0, 0, TAU); ctx.fill();
   ctx.fillStyle = it.c;
   if (it.k.name === 'coin') {
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 2; ctx.stroke();
+    // coin: thick edge, lit face, embossed ring
+    ctx.fillStyle = shade(it.c, 0.7); ctx.beginPath(); ctx.arc(0, 2, r, 0, TAU); ctx.fill();
+    const cg = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
+    cg.addColorStop(0, '#fffbe6'); cg.addColorStop(0.45, it.c); cg.addColorStop(1, shade(it.c, 0.8));
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(160,100,0,.55)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, 0, r * 0.62, 0, TAU); ctx.stroke();
   } else if (it.k.name === 'box') {
-    ctx.beginPath(); ctx.roundRect(-r, -r, r * 2, r * 2, r * 0.25); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(-r * 0.6, -r * 0.7, r * 0.8, r * 0.35);
+    // crate: side face, lit top face and a bevel
+    ctx.fillStyle = shade(it.c, 0.6); ctx.beginPath(); ctx.roundRect(-r + 2, -r + 4, r * 2, r * 2, r * 0.2); ctx.fill();
+    const bg = ctx.createLinearGradient(-r, -r, r, r);
+    bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.3, it.c); bg.addColorStop(1, shade(it.c, 0.85));
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(-r, -r, r * 2, r * 2, r * 0.2); ctx.fill();
+    ctx.strokeStyle = 'rgba(29,22,48,.35)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-r * 0.75, -r * 0.2); ctx.lineTo(r * 0.75, -r * 0.2); ctx.stroke();
   } else {
     const g = ctx.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.1, 0, 0, r);
     g.addColorStop(0, '#ffffff'); g.addColorStop(0.25, it.c); g.addColorStop(1, '#1d1630');
@@ -463,7 +473,9 @@ function shade(hex, k) {
 function drawTower(t) {
   ctx.save(); ctx.translate(t.x, t.y);
   ctx.fillStyle = 'rgba(29,22,48,.25)'; ctx.beginPath(); ctx.ellipse(8, 12, t.r, t.r * 0.9, 0, 0, TAU); ctx.fill();
-  ctx.fillStyle = shade(t.c, 0.6); ctx.beginPath(); ctx.arc(0, 4, t.r, 0, TAU); ctx.fill();
+  const sg = ctx.createLinearGradient(-t.r, 0, t.r, 0);
+  sg.addColorStop(0, shade(t.c, 0.45)); sg.addColorStop(0.5, shade(t.c, 0.7)); sg.addColorStop(1, shade(t.c, 0.4));
+  ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0, 4, t.r, 0, TAU); ctx.fill();
   const tg = ctx.createRadialGradient(-t.r * 0.3, -4 - t.r * 0.3, t.r * 0.1, 0, -4, t.r * 0.92);
   tg.addColorStop(0, '#ffffff'); tg.addColorStop(0.35, t.c); tg.addColorStop(1, shade(t.c, 0.8));
   ctx.fillStyle = tg; ctx.beginPath(); ctx.arc(0, -4, t.r * 0.92, 0, TAU); ctx.fill();
