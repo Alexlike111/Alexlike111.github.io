@@ -117,6 +117,6 @@ export const CAREER_RU: Record<string, string> = {
   'career.toast.race': '{cup}: гонка {n} из {total}',
 
   'career.podium.title': 'Кубок завершён!',
-  'career.podium.you': 'Ты занял {ord}',
+  'career.podium.you': 'Твоё место: {ord}',
   'career.podium.continue': 'Дальше',
 };
