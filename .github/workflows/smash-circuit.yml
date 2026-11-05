@@ -1,5 +1,5 @@
 # Release gates for Smash Circuit (games-src/smash-circuit). Mirrors `npm run release`:
-# typecheck -> unit tests -> build (+ source checks) -> player-view e2e -> release check.
+# typecheck -> unit tests -> build (+ source checks) -> player-view e2e -> platform e2e -> release check.
 # It does NOT deploy anything. Owner blockers (placeholder SaaS token, synthesized audio) only warn on
 # push; run the workflow by hand with "strict" ticked to see them fail the build before a real release.
 name: Smash Circuit
@@ -61,6 +61,9 @@ jobs:
       - name: Player-view e2e
         run: npm run e2e:player
 
+      - name: Platform e2e (stub Bridge: ads, pause, leaderboard)
+        run: npm run e2e:platform
+
       - name: Release check
         run: npm run check-release
 
@@ -73,6 +76,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smash-circuit-e2e
-          path: games-src/smash-circuit/e2e/out/player
+          path: |
+            games-src/smash-circuit/e2e/out/player
+            games-src/smash-circuit/e2e/out/platform
           if-no-files-found: ignore
           retention-days: 7

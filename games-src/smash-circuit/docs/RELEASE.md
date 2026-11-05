@@ -16,10 +16,11 @@ All commands run from `games-src/smash-circuit`.
 | `npm test` | Vitest unit tests (sim, economy, i18n, platform with a mocked Bridge) |
 | `npm run build` | `prebuild` runs the source checks, then `tsc --noEmit && vite build` |
 | `npm run e2e:player` | `node e2e/player-checks.mjs`, the player-view checks in headless Chromium. Needs a fresh `dist/` (run `npm run build` first) |
+| `npm run e2e:platform` | `node e2e/platform.mjs`, the built game against a stub Bridge: `game_ready`, `level_*`, pause and audio events, the interstitial between races, rewarded only in the `rewarded` state, the leaderboard view, controls hidden when the platform has none. Needs `dist/` |
 | `npm run e2e` | `node e2e/run.mjs`, a longer smoke run with screenshots and the layout audit |
 | `npm run check-release` | `scripts/check-release.mjs`: source checks plus dist checks and the bundle budget |
 | `npm run check-release:strict` | same, but open owner actions (placeholder token, synthesized audio) also fail the run |
-| `npm run release` | typecheck, test, build, e2e:player, check-release (what `deploy` runs before copying `dist/` to `play-test/smash`) |
+| `npm run release` | typecheck, test, build, e2e:player, e2e:platform, check-release (what `deploy` runs before copying `dist/` to `play-test/smash`) |
 
 CI: `.github/workflows/smash-circuit.yml` runs the same gates on pushes and pull requests that touch `games-src/smash-circuit/**`.
 Run it by hand with "strict" ticked before a real release.
@@ -55,7 +56,7 @@ It reports as **owner blockers** (warnings, failures with `--strict`): any `REPL
 | 4 | Storage only through the Bridge, one `get` for all keys at start, one `set` per meaningful change | done | `src/meta/save.ts`, `platform.load` / `platform.save`; writes are blocked until a real load finished; `check-release` forbids `localStorage` and friends |
 | 5 | Pause and audio: check `isAudioEnabled` at start, handle both events | done | `platform.onPause`, `platform.onAudio`, `platform.isAudioEnabled` in `Game.boot`; tab hidden pauses too |
 | 6 | `game_ready` when the first playable frame is ready | done | `platform.gameReady()` after the second rendered frame, after the boot overlay is removed |
-| 7 | Interstitial at natural pauses, no own timers | done | results "Continue", "Race again", "Next track", and quitting or restarting from the pause menu; the Bridge decides if an ad shows (`advertisement.initialInterstitialDelay` 30 s, `minimumDelayBetweenInterstitial` 60 s in the config) |
+| 7 | Interstitial at natural pauses, no own timers | done | results "Continue", "Race again", "Next track", and quitting or restarting from the pause menu; the Bridge decides if an ad shows (`advertisement.initialInterstitialDelay` 30 s, `minimumDelayBetweenInterstitial` 60 s in the config). Audit #3 wanted no ad on "Race again"; it now goes through the same path because Playgama counts a new race as a level transition, and the Bridge interval keeps it from nagging. Change `retry` / `nextTrack` in `Game.handlers` if that is not wanted |
 | 8 | Hide what the platform does not support | done | rewarded button only if `isRewardedSupported`; leaderboard controls only if `leaderboards.type` is `in_game` (read) or `native_popup`; no payments, no sign-in, no external links in the game |
 
 Optional modules in use: rewarded (double race reward), leaderboards (best lap per track, top 10 read), `level_*` messages.

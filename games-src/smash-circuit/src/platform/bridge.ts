@@ -5,7 +5,10 @@
 // Required Bridge steps covered here: initialize first, platform.language, storage only through Bridge
 // (one get for all keys, one set per meaningful change), pause + audio events, game_ready,
 // interstitial at natural pauses without own timers, rewarded reward ONLY in the 'rewarded' state,
-// unsupported features reported as unavailable so the UI can hide them.
+// unsupported features reported as unavailable so the UI can hide them (rewarded, leaderboards).
+// Leaderboards: setScore for every type, a top-10 read for `in_game` (Playgama SaaS), the overlay for `native_popup`.
+// Tests with a mocked Bridge: tests/platformAds.test.ts, platformMessages.test.ts, platformBridge.test.ts;
+// against the built game with a stub Bridge: e2e/platform.mjs.
 
 type Listener = (...args: unknown[]) => void;
 

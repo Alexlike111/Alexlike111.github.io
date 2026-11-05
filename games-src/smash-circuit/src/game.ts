@@ -17,6 +17,7 @@ import * as carModel from './sim/carModel';
 import { Sim } from './sim/sim';
 import { trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, UpgradeBranch } from './types';
+import { LeaderboardPanel } from './ui/leaderboard';
 import { UI, type UiHandlers } from './ui/ui';
 
 export type GameState = 'boot' | 'menu' | 'racing' | 'paused' | 'finishing' | 'results' | 'ad';
@@ -198,8 +199,12 @@ export class Game {
       repair: () => this.repairNow(true),
       recenter: () => this.input.recenter(),
       repairHold: (on) => this.repairHold(on),
-      retry: () => { if (this.state === 'results') this.startRace(this.trackId); },
-      nextTrack: (id) => { if (this.state === 'results') this.startRace(id); },
+      // A new race from the results is a natural pause too (Playgama required step 7): the Bridge decides if an
+      // interstitial really shows (initial delay + minimum interval in playgama-bridge-config.json), the game has no timers.
+      retry: () => { if (this.state === 'results') void this.leaveRace(() => this.startRace(this.trackId)); },
+      nextTrack: (id) => { if (this.state === 'results') void this.leaveRace(() => this.startRace(id)); },
+      leaderboard: () => this.openLeaderboard(),
+      leaderboardAvailable: () => { const m = platform.leaderboardMode(); return m === 'in_game' || m === 'native_popup'; },
       retrySave: () => { this.reloadN = 0; this.scheduleReload(true); },
       useItem: () => this.useItem(),
       buy: (b, carId) => this.buy(b, carId),
@@ -453,6 +458,19 @@ export class Game {
   private applyCamera(): void {
     const c = this.save.settings.camera;
     this.renderer.setCameraRotating(c === 'rotating' || (c === 'auto' && this.input.touchActive));
+  }
+
+  /** Leaderboard of the current (or last raced) track: our own top-10 view, or the platform overlay; nothing when the platform has none. */
+  private lb: LeaderboardPanel | null = null;
+  private openLeaderboard(): void {
+    const mode = platform.leaderboardMode();
+    const id = CONFIG.game.leaderboardPrefix + this.trackId;
+    if (mode === 'native_popup') { void platform.showLeaderboardPopup(id); return; }
+    if (mode !== 'in_game') return;
+    const root = document.getElementById('ui');
+    if (!root) return;
+    this.lb ??= new LeaderboardPanel(root, (n) => this.audio.ui(n));
+    this.lb.show(this.trackId);
   }
 
   private async doubleReward(): Promise<boolean> {

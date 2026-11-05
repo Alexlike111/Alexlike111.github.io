@@ -11,9 +11,10 @@
     "test": "vitest run",
     "e2e": "node e2e/run.mjs",
     "e2e:player": "node e2e/player-checks.mjs",
+    "e2e:platform": "node e2e/platform.mjs",
     "check-release": "node scripts/check-release.mjs",
     "check-release:strict": "node scripts/check-release.mjs --strict",
-    "release": "npm run typecheck && npm test && npm run build && npm run e2e:player && npm run check-release",
+    "release": "npm run typecheck && npm test && npm run build && npm run e2e:player && npm run e2e:platform && npm run check-release",
     "deploy": "npm run release && rm -rf ../../play-test/smash && cp -r dist ../../play-test/smash"
   },
   "dependencies": {
