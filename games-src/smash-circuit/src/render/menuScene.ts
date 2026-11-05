@@ -46,6 +46,46 @@ export class MenuScene {
     this.group.add(podium);
     this.disposables.push(pg);
 
+    // donut skid arcs burned into the grass around the podium (flat dark strips, merged)
+    {
+      const sb = new GeoBuilder();
+      const dark = new THREE.Color(pal.ground).multiplyScalar(0.62).getHex();
+      for (const [r, a0, a1] of [[5.7, 0.2, 2.5], [6.0, 0.5, 2.1], [5.5, 3.5, 5.9], [5.85, 3.9, 5.5]] as [number, number, number][]) {
+        for (let a = a0; a < a1; a += 0.1) {
+          sb.box(0.7, 0.02, 0.26, { pos: [Math.cos(a) * r, 0.03, -Math.sin(a) * r], rot: [0, a + Math.PI / 2, 0], color: dark });
+        }
+      }
+      const sg = sb.build();
+      const skids = new THREE.Mesh(sg, mats.toon);
+      skids.receiveShadow = false;
+      this.group.add(skids);
+      this.disposables.push(sg);
+    }
+
+    // bunting: flag strings between poles around the podium
+    {
+      const bb = new GeoBuilder();
+      const N = 6, R = 8.4, H = 3.4;
+      const top = (k: number): [number, number] => { const a = (k / N) * Math.PI * 2 + 0.35; return [Math.cos(a) * R, -Math.sin(a) * R]; };
+      for (let k = 0; k < N; k++) {
+        const [x, z] = top(k), [x2, z2] = top((k + 1) % N);
+        bb.box(0.22, H, 0.22, { pos: [x, H / 2, z], colorFn: (_a, _b, _c, _x, y) => (Math.floor(y / 0.45) % 2 ? 0xe8383a : 0xffffff) });
+        bb.ico(0.22, 0, { pos: [x, H + 0.1, z], color: 0xffd23c });
+        const M = 11;
+        for (let i = 0; i < M; i++) {
+          const f = (i + 0.5) / M, sag = Math.sin(Math.PI * f) * 0.9;
+          const px = x + (x2 - x) * f, pz = z + (z2 - z) * f, py = H - 0.1 - sag;
+          const yaw = Math.atan2(-(z2 - z), x2 - x);
+          bb.frustum(0.04, 0.04, 0.5, 0.04, 0.55, { pos: [px, py - 0.28, pz], rot: [0, yaw, 0], color: pal.accent[(i + k) % pal.accent.length] });
+        }
+      }
+      const bg = bb.build();
+      const bunting = new THREE.Mesh(bg, mats.toon);
+      bunting.castShadow = false;
+      this.group.add(bunting);
+      this.disposables.push(bg);
+    }
+
     // scenery ring
     const rng = makeRng(77);
     const addMany = (geo: THREE.BufferGeometry, count: number, r0: number, r1: number, s0: number, s1: number, cast: boolean, tint = false): void => {

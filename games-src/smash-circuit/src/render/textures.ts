@@ -78,6 +78,26 @@ export function makeGroundTexture(theme: TrackDef['theme'], pal: ThemePalette): 
       wrap(S, (ox, oy) => { g.beginPath(); g.moveTo(x + ox, y + oy); g.quadraticCurveTo(x + ox + len / 2, y + oy + 10, x + ox + len, y + oy - 4); g.stroke(); });
     }
   }
+  // second pass: fine detail that breaks up the tile (pebbles / dew / ice patches, a few worn bare spots)
+  const fine = (n: number, draw: (x: number, y: number) => void): void => { for (let i = 0; i < n; i++) { const x = rng() * S, y = rng() * S; wrap(S, (ox, oy) => draw(x + ox, y + oy)); } };
+  if (theme === 'meadow') {
+    g.globalAlpha = 0.3; g.fillStyle = hex(pal.shoulderAlt);
+    fine(7, (x, y) => { g.beginPath(); g.ellipse(x, y, 9 + (x % 7), 5 + (y % 4), (x + y) % 3, 0, 6.3); g.fill(); });      // worn dirt spots
+    g.globalAlpha = 0.65;
+    fine(60, (x, y) => { g.fillStyle = (x + y) % 3 < 1 ? '#fff6d6' : '#ffe14a'; g.fillRect(x, y, 2.4, 2.4); });          // tiny wildflowers
+  } else if (theme === 'desert') {
+    g.globalAlpha = 0.55; g.fillStyle = hex(pal.groundDark);
+    fine(90, (x, y) => { g.beginPath(); g.ellipse(x, y, 3.4, 2.2, (x * 7) % 3, 0, 6.3); g.fill(); });                      // pebbles
+    g.globalAlpha = 0.5; g.fillStyle = '#fff1c4';
+    fine(90, (x, y) => { g.fillRect(x - 1, y - 2, 2, 1.2); });                                                              // pebble highlights
+    g.globalAlpha = 0.3; g.strokeStyle = hex(pal.groundDark); g.lineWidth = 1.6;
+    fine(10, (x, y) => { g.beginPath(); g.moveTo(x, y); g.lineTo(x + 14, y + 6); g.lineTo(x + 20, y + 20); g.moveTo(x + 14, y + 6); g.lineTo(x + 30, y + 2); g.stroke(); });   // cracked earth
+  } else {
+    g.globalAlpha = 0.45; g.fillStyle = '#c4e0f6';
+    fine(9, (x, y) => { g.beginPath(); g.ellipse(x, y, 20 + (x % 9), 9 + (y % 5), (x * 3) % 3, 0, 6.3); g.fill(); });      // glassy ice patches
+    g.globalAlpha = 0.3; g.strokeStyle = '#ffffff'; g.lineWidth = 2;
+    fine(8, (x, y) => { g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + 40, y - 6, x + 90, y + 4); g.stroke(); });    // old ski tracks
+  }
   g.globalAlpha = 1;
   return finish(c, true);
 }
@@ -118,6 +138,26 @@ export function makeRoadTexture(width: number, shoulder: number, laneCount: numb
     g.fillRect(x0 + rng() * (x1 - x0), rng() * H, 1.6, 1.6);
   }
   g.globalAlpha = 1;
+  // asphalt character: repair patches, oil stains and hairline cracks (tile in y)
+  {
+    const wy = (fn: (oy: number) => void): void => { for (const oy of [-H, 0, H]) fn(oy); };
+    for (let i = 0; i < 5; i++) {
+      const x = x0 + rng() * (x1 - x0 - 3 * px), y = rng() * H, w = (1.2 + rng() * 2.2) * px, h = (1 + rng() * 2.4) * py;
+      g.globalAlpha = 0.09 + rng() * 0.07; g.fillStyle = rng() > 0.5 ? '#000000' : '#ffffff';
+      wy((oy) => g.fillRect(x, y + oy, w, h));
+    }
+    for (let i = 0; i < 4; i++) {
+      const x = x0 + (0.15 + rng() * 0.7) * (x1 - x0), y = rng() * H;
+      g.globalAlpha = 0.22; g.fillStyle = '#0b0c10';
+      wy((oy) => { g.beginPath(); g.ellipse(x, y + oy, (0.3 + rng() * 0.4) * px, (0.5 + rng() * 0.8) * py, rng() * 3, 0, 6.3); g.fill(); });
+    }
+    g.globalAlpha = 0.2; g.strokeStyle = '#0b0c10'; g.lineWidth = 1.4;
+    for (let i = 0; i < 4; i++) {
+      const x = x0 + rng() * (x1 - x0), y = rng() * H;
+      wy((oy) => { g.beginPath(); g.moveTo(x, y + oy); g.lineTo(x + (rng() - 0.5) * 20, y + oy + 18); g.lineTo(x + (rng() - 0.5) * 30, y + oy + 40); g.stroke(); });
+    }
+    g.globalAlpha = 1;
+  }
   // asphalt edge shadow
   g.fillStyle = 'rgba(0,0,0,0.22)';
   g.fillRect(x0, 0, 0.18 * px, H); g.fillRect(x1 - 0.18 * px, 0, 0.18 * px, H);

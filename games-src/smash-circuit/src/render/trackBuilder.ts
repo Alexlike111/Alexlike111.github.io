@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config';
 import type { TrackGeometry } from '../types';
 import { GeoBuilder, concat } from './geo';
+import { buildBoards, buildRacingLine, patchGroundMacro } from './dressing';
 import type { Materials } from './materials';
 import type { ThemePalette } from './palette';
 import { GROUND_TILE, ROAD_TILE, makeGroundTexture, makeRoadTexture } from './textures';
@@ -42,6 +43,7 @@ export function buildTrackVisual(track: TrackGeometry, pal: ThemePalette, mats: 
     for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * size / GROUND_TILE, uv.getY(i) * size / GROUND_TILE);
     const tex = makeGroundTexture(def.theme, pal);
     const mat = new THREE.MeshToonMaterial({ map: tex, gradientMap: mats.gradient });
+    patchGroundMacro(mat, pal);
     const m = new THREE.Mesh(geo, mat);
     m.position.set((minX + maxX) / 2, 0, (minY + maxY) / 2);
     m.receiveShadow = true;
@@ -227,6 +229,15 @@ export function buildTrackVisual(track: TrackGeometry, pal: ThemePalette, mats: 
       group.add(m);
       disposables.push(geo);
     }
+  }
+
+  // ---- dressing (dressing.ts): skid-worn racing line, sponsor boards along the start straight
+  {
+    const line = buildRacingLine(track, pal);
+    group.add(line);
+    disposables.push(line.geometry, line.material as THREE.Material);
+    const boards = buildBoards(track, pal, mats);
+    if (boards) { group.add(boards); disposables.push(boards.geometry); }
   }
 
   return {

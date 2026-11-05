@@ -12,7 +12,7 @@ export interface PlateOpts {
   /** disc colour (default white) and digit colour (default near-black) */
   bg?: number;
   fg?: number;
-  /** outline colour of the disc (default dark) */
+  /** outline ring colour (none by default: it costs triangles) */
   rim?: number;
   /** tint the disc with the car paint (aPaint) instead of a fixed colour */
   paint?: boolean;
@@ -30,14 +30,14 @@ export function plateRadius(num: number, s = 1): number {
  * `s` scales everything (1 = digits 0.5 m tall).
  */
 export function numberPlate(b: GeoBuilder, num: number, x: number, y: number, z: number, s = 1, o: PlateOpts = {}): void {
-  const bg = o.bg ?? 0xffffff, fg = o.fg ?? 0x16181e, rim = o.rim ?? 0x16181e;
+  const bg = o.bg ?? 0xffffff, fg = o.fg ?? 0x16181e;
   const str = String(num);
   const n = str.length;
   const h = 0.5 * s, w = 0.3 * s, t = 0.085 * s, gap = 0.07 * s;
   const W = n * w + (n - 1) * gap;
   const R = plateRadius(num, s);
-  b.cyl(R + 0.05 * s, R + 0.05 * s, 0.03, 14, { pos: [x, y + 0.015, z], color: rim, noBottom: true });
-  b.cyl(R, R, 0.02, 14, { pos: [x, y + 0.04, z], color: bg, paint: o.paint ? 1 : 0, noBottom: true });
+  if (o.rim !== undefined) b.cyl(R + 0.05 * s, R + 0.05 * s, 0.03, 10, { pos: [x, y + 0.015, z], color: o.rim, noBottom: true });
+  b.cyl(R, R, 0.02, 10, { pos: [x, y + 0.04, z], color: bg, paint: o.paint ? 1 : 0, noBottom: true });
   const top = y + 0.058;
   for (let i = 0; i < n; i++) {
     const seg = GLYPHS[str[i]] ?? '';

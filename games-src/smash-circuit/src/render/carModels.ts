@@ -122,7 +122,7 @@ function gravel(): ModelGeo {
   b.box(1.55, 0.07, 1.12, { pos: [-0.3, 1.5, 0], color: 0xffffff });                   // white roof (livery)
   b.box(0.5, 0.14, 0.5, { pos: [0.2, 1.58, 0], color: DARK });                          // roof scoop
   b.box(0.5, 0.06, 0.16, { pos: [0.2, 1.66, 0], color: 0xffffff, paint: P });
-  numberPlate(b, 22, -0.62, 1.535, 0, 0.9, { bg: DARK, fg: 0xffffff, rim: AMBER });     // dark roundel on the white roof
+  numberPlate(b, 22, -0.62, 1.535, 0, 0.9, { bg: DARK, fg: 0xffffff });     // dark roundel on the white roof
   return {
     wheels: W,
     body: b.build(),
@@ -252,6 +252,7 @@ function brawler(): ModelGeo {
 function glintHood(): THREE.BufferGeometry {
   const b = g().box(1.2, 0.06, 1.05, { pos: [0.95, 0.76, 0], color: 0xffffff, paint: P })
     .box(0.4, 0.04, 0.5, { pos: [0.75, 0.8, 0], color: DARK });
+  sym((sd) => b.box(1.1, 0.012, 0.09, { pos: [0.95, 0.795, sd * 0.42], color: DARK }));          // twin racing stripes
   numberPlate(b, 5, 1.3, 0.79, 0, 0.6);
   return b.build();
 }
