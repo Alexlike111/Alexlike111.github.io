@@ -209,7 +209,7 @@ export class GameRenderer {
   }
 
   private trackFps(dt: number): void {
-    if (dt <= 0 || dt > 0.5) return;
+    if (dt <= 0 || dt > 0.5 || this.warming) return;   // the menu warm-up's own hitches must not push auto-quality down
     const inst = 1 / dt;
     this.fpsAvg += (inst - this.fpsAvg) * Math.min(1, dt * 2.5);
     this.sinceChange += dt;
