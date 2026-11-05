@@ -1,7 +1,7 @@
 // AI driver: follows the spline with a racing-line bias, brakes by upcoming curvature, avoids and passes cars,
 // makes small human mistakes and recovers when stuck. PURE (no physics, no DOM). Deterministic given the rng.
 import { CONFIG } from '../config';
-import type { AiPersonality, CarInput, CarState, CarStats, OilSlick, TrackGeometry } from '../types';
+import type { AiPersonality, CarInput, CarState, CarStats, OilSlick, TrackDef, TrackGeometry } from '../types';
 import { driftSteerForCurvature, latLimit, steerForCurvature } from './carModel';
 import { DRIFT_HOLD, DRIFT_NONE } from './drift';
 
@@ -17,6 +17,27 @@ function clamp(v: number, lo: number, hi: number): number { return v < lo ? lo :
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
 
 export const DEFAULT_PERSONALITY: AiPersonality = { skill: 0.7, aggression: 0.4, laneOffset: 0, mistakeRate: 0.05 };
+
+/** Shared by the rivals of one race: only one rammer at a time may go for the human. */
+export interface AiShared { owner: number; until: number }
+
+/** A prop a rammer may want to hit: where it sits along the road and across it. */
+interface Smashable { s: number; lat: number }
+const SMASH_CACHE = new WeakMap<TrackDef, Smashable[]>();
+function smashables(track: TrackGeometry): Smashable[] {
+  let list = SMASH_CACHE.get(track.def);
+  if (list) return list;
+  const half = track.def.width / 2;
+  list = [];
+  for (const pr of track.def.props) {
+    if (!A.smashKinds.includes(pr.type)) continue;
+    const n = track.nearest(pr.x, pr.y);
+    if (Math.abs(n.lateral) <= half + 1.6) list.push({ s: n.s, lat: n.lateral });
+  }
+  list.sort((a, b) => a.s - b.s);
+  SMASH_CACHE.set(track.def, list);
+  return list;
+}
 
 type MistakeKind = 'lateBrake' | 'wide' | 'twitch';
 
@@ -47,6 +68,10 @@ export class AiDriver {
   hazards: OilSlick[] | null = null;
   /** The driver's own car (set by the Sim): cornering limit, downforce, brakes, size. null = the reference car. */
   car: CarStats | null = null;
+  /** Attack token shared by the rivals of one race (set by the Sim). null = no coordination. */
+  shared: AiShared | null = null;
+  /** true while a rammer is going for a car (debug / telemetry). */
+  attacking = false;
 
   private readonly rng: () => number;
   private out: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
@@ -67,6 +92,16 @@ export class AiDriver {
   private turnDir = 0;                        // latched turn-round direction of the off-road recovery (0 = none)
   private readonly nearExtra: number[] = [];   // extra clearance (m) on top of the car-to-car clearance (oil slicks, wide cars)
   private readonly nearLen: number[] = [];     // half length sum (m) of us and that car (follow gap)
+  private readonly nearPlayer: boolean[] = [];  // that neighbour is the human (rammer prey)
+
+  // personality
+  private attackUntil = 0;            // driver time until which the current attack runs
+  private attackReady = 0;            // driver time from which the next attack may start
+  private launchState = 0;            // 0 = not yet seen, 1 = holding the grid column, 2 = free
+  private launchLat = 0;
+  private launchS = 0;
+  private blockLat = 0;               // lateral line a blocker is covering
+  private blockUntil = 0;             // driver time until which it keeps that line (one move, no weaving)
 
   // errors
   private mistake: Mistake | null = null;
@@ -113,6 +148,8 @@ export class AiDriver {
     this.markTime = 0;
     this.mistake = null;
     this.offset = 0;
+    this.launchState = 2;
+    this.attackUntil = 0;
   }
 
   think(car: CarState, others: CarState[], track: TrackGeometry, dt: number, hintS: number): CarInput {
@@ -144,6 +181,7 @@ export class AiDriver {
 
     // ---------- progress watchdog
     if (!this.markInit) { this.markInit = true; this.markS = s; this.markTime = 0; this.roadS = s; this.exitS = s; this.exitSide = 0; }
+    if (this.launchState === 0) { this.launchState = 1; this.launchLat = lat; this.launchS = s; this.offset = lat; }   // keep the grid column off the line
     const wallLine = half + CONFIG.destruction.wallOffset;
     if (Math.abs(lat) <= half) { this.roadS = s; this.exitSide = 0; }
     else if (this.exitSide === 0 && Math.abs(lat) > wallLine) { this.exitS = s; this.exitSide = lat > 0 ? 1 : -1; }
@@ -269,10 +307,39 @@ export class AiDriver {
     target += wideOffset;
 
     // ---------- other cars: pick the free lateral line closest to the wanted one
-    const desired = clamp(target, -maxOff, maxOff);
-    const clear = A.passClearance - A.passClearanceAggr * p.aggression;
+    let desired = clamp(target, -maxOff, maxOff);
+    const style = p.style ?? 'racer';
+    const clear = A.passClearance - A.passClearanceAggr * p.aggression + (p.style === 'racer' ? A.cleanClearBonus : 0);
     const stubborn = p.aggression > 0.75 ? 0.55 : 1;           // aggressive drivers hold their line more
     const nCar = this.collectNearby(car, others, track, s, av);
+    // personality: the grid column is kept for the first metres; a blocker covers a follower; a rammer hunts a car, else a prop
+    if (this.launchState === 1) {
+      const travel = wrap2(s - this.launchS, L);
+      let jammed = false;   // a (nearly) parked car ahead in our column: the grid column is no longer worth keeping
+      for (let i = 0; i < nCar; i++) if (this.nearDs[i] > 0 && this.nearDs[i] < 16 && this.nearSpeed[i] < 3 && Math.abs(this.nearLat[i] - lat) < 2.8) jammed = true;
+      if (travel > A.launchHold || travel < -8 || jammed) this.launchState = 2;
+      else desired = clamp(this.launchLat, -maxOff, maxOff);
+    }
+    // personalities only act on open road: no bend within the look-ahead plus a braking cushion (rammers must not dive at a hairpin)
+    let kAim = 0;
+    if (style !== 'racer') for (let d = 4; d <= A.personalityLook; d += 6) kAim = Math.max(kAim, Math.abs(track.sampleAt(s + d).curvature));
+    let ramJ = -1;
+    this.attacking = false;
+    if (!recovering && this.launchState !== 1) {
+      if (style === 'blocker') {
+        if (kAim < A.blockMaxCurv) desired = this.blockLine(car, others, track, s, lat, desired, maxOff);
+      } else if (style === 'rammer') {
+        ramJ = this.pickRam(car, others, nCar, lat, kAim);
+        if (ramJ >= 0) {
+          this.attacking = true;
+          const d = lat - this.nearLat[ramJ];
+          desired = this.nearLat[ramJ] + (d < 0 ? -1 : 1) * A.ramAimOffset;
+        } else if (kAim < A.smashMaxCurv && this.attackUntil <= this.time) {
+          const sm = this.pickSmash(track, s);
+          if (sm) desired = clamp(sm.lat, -(half - A.smashEdge), half - A.smashEdge);
+        }
+      }
+    }
     let followCap = Infinity;
     let blockGap = Infinity;          // gap to the closest car that blocks us (m)
     if (nCar > 0) {
@@ -281,14 +348,18 @@ export class AiDriver {
       for (let k = -1; k < K; k++) {
         const c = k < 0 ? desired : -maxOff + (2 * maxOff * k) / (K - 1);
         let cost = Math.abs(c - desired) + A.lineHysteresis * Math.abs(c - this.offset);
-        for (let j = 0; j < nCar; j++) cost += A.carPenalty * stubborn * this.nearW[j] * overlap(c, this.nearLat[j], clear + this.nearExtra[j]);
+        for (let j = 0; j < nCar; j++) {
+          if (j === ramJ) continue;                                            // the prey is aimed at, not avoided
+          if (style === 'blocker' && this.nearDs[j] < -1.5 && this.nearSpeed[j] < 90) continue;   // covering the follower, not dodging it
+          cost += A.carPenalty * stubborn * this.nearW[j] * overlap(c, this.nearLat[j], clear + this.nearExtra[j]);
+        }
         if (cost < bestCost - 1e-6) { bestCost = cost; bestC = c; }
       }
       target = bestC;
       // a car that still blocks the chosen line: keep behind it
       for (let j = 0; j < nCar; j++) {
         const ds = this.nearDs[j];
-        if (ds <= 0) continue;
+        if (ds <= 0 || j === ramJ) continue;
         // judge both where we want to go and where we physically are (we cannot teleport sideways)
         const ovLine = overlap(target, this.nearLat[j], clear + this.nearExtra[j]);
         const ovNow = ds < A.closeFollow ? overlap(lat, this.nearLat[j], (clear + this.nearExtra[j]) * 0.9) : 0;
@@ -348,13 +419,18 @@ export class AiDriver {
     steer = clamp(steer - fx.steerPull + steerTwitch, -1, 1);
 
     // ---------- speed command
-    let vT = scan.vAllowed;
+    let vT = scan.vAllowed * (this.attacking ? A.attackSpeedMul : 1);
     vT = Math.min(vT, followCap, this.speedCap);
     if (car.offRoad && Math.abs(lat) > half) vT = Math.min(vT, A.offroadSpeedCap);
     if (recovering) {
       vT = Math.min(vT, A.recoverSpeed + dist * 0.4);   // creep back through the gap
       if (Math.abs(alpha) > 1.5) vT = av > 4 ? 0 : Math.min(vT, 2.5);       // the road is behind: slow right down and turn round (never roll away at full recover speed)
     } else if (Math.abs(headErr) > 1.5 && av > 4) vT = 0;       // facing the wrong way: stop first
+    // on the outside of a bend and closer to the wall than the margin: ease off a little (the planned line already keeps laneMargin)
+    if (!recovering && Math.abs(lat) > half - A.wallMargin) {
+      const kw = track.sampleAt(s + Math.max(4, look * 0.5)).curvature;
+      if (Math.abs(kw) > 0.01 && Math.sign(kw) * lat < 0) vT *= A.wallLift;
+    }
     // tight corner side by side: the car on the outside lifts instead of being squeezed into the wall
     if (nCar > 0 && !recovering) {
       const kc = track.sampleAt(s + Math.max(4, look * 0.5)).curvature;
@@ -466,6 +542,7 @@ export class AiDriver {
       // wider cars need more room to pass (the clearance is tuned for two reference-width cars)
       this.nearExtra[n] = ((car.width ?? C.width) + (o.width ?? C.width)) / 2 - C.width;
       this.nearLen[n] = ((car.length ?? C.length) + (o.length ?? C.length)) / 2;
+      this.nearPlayer[n] = o.isPlayer && !o.wrecked;
       n++;
     }
     const oils = this.hazards;
@@ -484,10 +561,80 @@ export class AiDriver {
         this.nearSpeed[n] = 99;               // never a speed cap: steer around it
         this.nearExtra[n] = o.radius - 0.9;
         this.nearLen[n] = C.length;
+        this.nearPlayer[n] = false;
         n++;
       }
     }
     return n;
+  }
+
+  /**
+   * Rammer: picks the car to go for (the human first; any car when there is no human) among the neighbours just ahead or alongside.
+   * An attack lasts attackTime, then the rammer cools down; only one rammer at a time attacks the human (shared token).
+   * Returns the index into the near arrays, or -1.
+   */
+  private pickRam(car: CarState, others: CarState[], nCar: number, lat: number, kAim: number): number {
+    const t = this.time;
+    const running = t < this.attackUntil;
+    if (!running && (t < this.attackReady || kAim > A.attackMaxCurv || car.health < A.attackMinHealth || car.offRoad || car.wrecked)) return -1;
+    if (running && (kAim > A.attackMaxCurv * 1.5 || car.offRoad)) { this.attackUntil = 0; return -1; }
+    let human = false;
+    for (let i = 0; i < others.length; i++) if (others[i].isPlayer) { human = true; break; }
+    let bj = -1, bs = 0;
+    for (let j = 0; j < nCar; j++) {
+      if (this.nearSpeed[j] > 90) continue;                       // oil slick
+      if (human && !this.nearPlayer[j]) continue;                  // with a human on the grid the rammers hunt the human only
+      const ds = this.nearDs[j];
+      if (ds < -2 || ds > A.ramRange || Math.abs(this.nearLat[j] - lat) > A.ramAside) continue;
+      const score = (this.nearPlayer[j] ? 2 : 1) * (1.2 - ds / (A.ramRange + 5));
+      if (score > bs) { bs = score; bj = j; }
+    }
+    if (bj < 0) {
+      if (running) { this.attackUntil = 0; this.attackReady = t + A.attackCooldown * 0.4; }
+      return -1;
+    }
+    if (!running) {
+      const sh = this.shared;
+      if (this.nearPlayer[bj] && sh) {
+        if (sh.owner >= 0 && sh.owner !== car.id && sh.until > t) return -1;   // another rammer is on the human
+        sh.owner = car.id; sh.until = t + A.attackTime;
+      }
+      this.attackUntil = t + A.attackTime;
+      this.attackReady = this.attackUntil + A.attackCooldown;
+    }
+    return bj;
+  }
+
+  /** Rammer: the nearest smashable prop just ahead that is worth a detour (its lateral position), or null. */
+  private pickSmash(track: TrackGeometry, s: number): Smashable | null {
+    const list = smashables(track);
+    const L = track.length;
+    let best: Smashable | null = null, bestD = Infinity;
+    for (let i = 0; i < list.length; i++) {
+      let d = list[i].s - s;
+      if (d < 0) d += L;
+      if (d >= A.smashRange[0] && d <= A.smashRange[1] && d < bestD) { bestD = d; best = list[i]; }
+    }
+    return best;
+  }
+
+  /** Blocker: the line that covers the closest follower (one move, then hold), or `desired` when nobody is close behind. */
+  private blockLine(car: CarState, others: CarState[], track: TrackGeometry, s: number, lat: number, desired: number, maxOff: number): number {
+    const L = track.length;
+    let fLat = 0, fDs = -Infinity;
+    for (let i = 0; i < others.length; i++) {
+      const o = others[i];
+      if (o.finished || o.wrecked) continue;
+      const dx = o.x - car.x, dy = o.y - car.y;
+      if (dx * dx + dy * dy > A.blockBehind[1] * A.blockBehind[1] * 1.5) continue;
+      const on = track.nearest(o.x, o.y, s);
+      const ds = wrap2(on.s - s, L);
+      if (ds > -A.blockBehind[0] || ds < -A.blockBehind[1] || Math.abs(on.lateral - lat) > A.blockLateral) continue;
+      if (ds > fDs) { fDs = ds; fLat = on.lateral; }
+    }
+    if (fDs === -Infinity) return desired;
+    if (this.time >= this.blockUntil && Math.abs(fLat - this.blockLat) > 0.8) { this.blockLat = fLat; this.blockUntil = this.time + A.blockHold; }
+    return clamp(this.blockLat, -maxOff, maxOff);
   }
 
   private updateMistakes(h: number, p: AiPersonality): void {

@@ -90,11 +90,15 @@ export interface CarSetup {
   startDamage?: Partial<ZoneHp>;
 }
 
+/** Driving character: clean racer (default), rammer (seeks the player and smashables), blocker (defends the line). */
+export type AiStyle = 'racer' | 'rammer' | 'blocker';
+
 export interface AiPersonality {
   skill: number;        // 0..1 how close to optimal line/speed
   aggression: number;   // 0..1 willingness to ram / overtake
   laneOffset: number;   // -1..1 preferred lateral offset on track
   mistakeRate: number;  // 0..1 chance per second of small error
+  style?: AiStyle;      // absent = 'racer'
 }
 
 export interface CarState {
@@ -162,6 +166,8 @@ export interface TrackDef {
   points: Vec2[];          // closed Catmull-Rom control points, clockwise or ccw
   props: PropDef[];        // decorative destructible props placed near the road
   wallStyle: 'concrete' | 'tires' | 'fence';
+  /** Reverse layout of another track: the id of the forward track (`t1r` -> `t1`). Absent on forward tracks. */
+  reverseOf?: string;
 }
 
 export interface PropDef { type: PropType; x: number; y: number; angle: number }

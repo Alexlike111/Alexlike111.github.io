@@ -17,7 +17,7 @@ import { missingHp } from './sim/damage';
 import { DriftTracker, driftCoins } from './sim/drift';
 import * as carModel from './sim/carModel';
 import { Sim } from './sim/sim';
-import { trackById } from './track/tracks';
+import { baseTrackId, trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, TrackDef, UpgradeBranch } from './types';
 import { HudExtras } from './ui/hud';
 import { UI, type UiHandlers } from './ui/ui';
@@ -279,7 +279,7 @@ export class Game {
   startRace(trackId: string, career?: { cup: Cup; idx: number }): void {
     if (this.state === 'ad' || this.continuing) return;
     const def = trackById(trackId);
-    if (!def || (!career && !this.save.unlockedTracks.includes(def.id))) return;
+    if (!def || (!career && !this.save.unlockedTracks.includes(baseTrackId(def.id)))) return;   // a reverse layout opens with its forward track
     // first race on a touch device: a one-time, skippable controls picker (Buttons highlighted)
     if (this.input.touchActive && !this.save.settings.controlsPicked && !this.pickerOpen) {
       this.pickerOpen = true;
@@ -287,7 +287,7 @@ export class Game {
       this.ui.showControlsPicker(() => { this.pickerOpen = false; this.startRace(trackId, career); });
       return;
     }
-    const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(def.id));
+    const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(baseTrackId(def.id)));   // rival difficulty follows the base track
     const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
     const player = makePlayerSetup(this.save, 'Player');
     const run = this.save.career.run;

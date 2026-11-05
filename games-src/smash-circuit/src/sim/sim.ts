@@ -8,7 +8,7 @@ import type {
   BoostPad, CarInput, CarSetup, CarState, DestructibleKind, DestructibleState, GhostData, ISim, ItemBox, OilSlick, RaceState, SimEvent,
   SimOptions, TrackGeometry,
 } from '../types';
-import { AiDriver, DEFAULT_PERSONALITY } from './ai';
+import { AiDriver, DEFAULT_PERSONALITY, type AiShared } from './ai';
 import { AiItemUser } from './aiItems';
 import { PowerUpSystem } from './powerups';
 import { assistedInput } from './assist';
@@ -64,6 +64,8 @@ export class Sim implements ISim {
 
   private readonly itemUsers: (AiItemUser | null)[];
   private readonly drivers: (AiDriver | null)[];
+  /** attack token of the rammers (one at a time goes for the human) */
+  private readonly aiShared: AiShared = { owner: -1, until: 0 };
   private readonly others: CarState[][];
   private readonly byId = new Map<number, SimCar>();
   private readonly playerIndex: number;
@@ -114,6 +116,7 @@ export class Sim implements ISim {
         const personality = setups[i].ai ?? DEFAULT_PERSONALITY;
         this.drivers[i] = new AiDriver(personality, makeRng(Math.floor(rng() * 4294967296) ^ (setups[i].id * 2654435761)));
         this.drivers[i]!.car = setups[i].stats;   // plans with its own car: cornering limit, brakes, ceiling, size
+        this.drivers[i]!.shared = this.aiShared;
       }
     }
     this.others = this.cars.map((c) => this.cars.filter((o) => o !== c));
@@ -121,7 +124,7 @@ export class Sim implements ISim {
     this.pads = this.powerups.pads; this.boxes = this.powerups.boxes; this.oils = this.powerups.oils;
     for (const d of this.drivers) if (d) d.hazards = this.oils;
     this.itemUsers = setups.map((c, i) => this.drivers[i]
-      ? new AiItemUser(c.ai?.skill ?? DEFAULT_PERSONALITY.skill, makeRng(Math.floor(rng() * 4294967296) ^ (c.id * 40503)))
+      ? new AiItemUser(c.ai?.skill ?? DEFAULT_PERSONALITY.skill, makeRng(Math.floor(rng() * 4294967296) ^ (c.id * 40503)), c.ai?.style)
       : null);
     for (const u of this.itemUsers) if (u) u.oils = this.oils;
 

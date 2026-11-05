@@ -265,7 +265,7 @@ describe('Sim: player, damage and destruction', () => {
     while (t < 300 && !sim.cars.slice(1).every((c) => c.finished)) { sim.update(DT); t += DT; }
     sim.drainEvents();
     expect(sim.cars.slice(1).every((c) => c.finished)).toBe(true);
-    expect(sim.respawns).toBeLessThanOrEqual(1);
+    expect(sim.respawns).toBeLessThanOrEqual(2);              // one grid car right behind the parked car backs out; with the rival personalities a second jam on lap 2 is possible
     expect(sim.cars[0].health).toBeGreaterThan(0.5);        // AI mostly avoid a parked car
   }, 120000);
 });
