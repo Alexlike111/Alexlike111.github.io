@@ -39,7 +39,10 @@ interface BridgeLike extends Emitter {
   leaderboards?: {
     type?: string;
     setScore(id: string, score: number): Promise<unknown>;
+    getEntries?(id: string): Promise<unknown>;
+    showNativePopup?(id: string): Promise<unknown>;
   };
+  player?: { id?: string | null };
 }
 
 function B(): BridgeLike | null {
@@ -66,6 +69,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 
 const INIT_TIMEOUT_MS = 8000;
 const STORAGE_TIMEOUT_MS = 8000;   // one storage.get / storage.set may not hang the save queue longer than this
+const LEADERBOARD_TIMEOUT_MS = 8000;   // setScore / getEntries / the native popup may not hang the UI longer than this
 // Ad watchdogs. The Bridge reports loading -> opened -> closed | failed. If it silently skips an ad
 // (minimum delay, no fill) and emits nothing, the game must not hang, so:
 //  - nothing at all within AD_OPEN_WAIT_MS            -> treat as "not shown", resolve;
@@ -114,6 +118,15 @@ function markReady(): void {
   for (const fn of whenReadyQueue.splice(0)) { try { fn(); } catch { /* ignore */ } }
   for (const fn of lateInitListeners) { try { fn(); } catch { /* ignore */ } }
 }
+
+/** How the platform handles leaderboards (Bridge `leaderboards.type`): `none` = hide every leaderboard control. */
+export type LeaderboardMode = 'none' | 'in_game' | 'native' | 'native_popup';
+/** One normalised row of an in-game leaderboard. `score` is whatever was submitted (here: best lap in ms, smaller is better). */
+export interface LeaderboardRow { rank: number; name: string; score: number; isPlayer: boolean }
+export type LeaderboardResult =
+  | { status: 'ok'; rows: LeaderboardRow[] }
+  | { status: 'unavailable' }   // no Bridge, not initialised, or the platform does not hand out entries (not `in_game`)
+  | { status: 'failed' };       // the read was rejected or timed out: offer a retry
 
 export type LoadStatus = 'ok' | 'empty' | 'failed';
 export interface LoadResult { status: LoadStatus; values: Record<string, unknown> }
@@ -308,15 +321,75 @@ export const platform = {
 
   /** Hide leaderboard UI / skip submissions when the platform has none. */
   leaderboardAvailable(): boolean {
-    try {
-      const t = B()?.leaderboards?.type;
-      return ready && !!t && t !== 'not_available';
-    } catch { return false; }
+    return platform.leaderboardMode() !== 'none';
   },
 
-  async submitScore(id: string, score: number): Promise<void> {
-    if (!platform.leaderboardAvailable()) return;
-    try { await B()!.leaderboards!.setScore(id, score); } catch (e) { console.warn('[platform] setScore failed', e); }
+  /** `leaderboards.type` mapped to the four cases the game cares about; anything unknown or not ready is `none`. */
+  leaderboardMode(): LeaderboardMode {
+    try {
+      const t = B()?.leaderboards?.type;
+      if (!ready || (t !== 'in_game' && t !== 'native' && t !== 'native_popup')) return 'none';
+      return t;
+    } catch { return 'none'; }
+  },
+
+  /** Submit a score. Never throws, never hangs longer than LEADERBOARD_TIMEOUT_MS. Resolves true when the platform accepted it. */
+  async submitScore(id: string, score: number): Promise<boolean> {
+    if (!platform.leaderboardAvailable() || !Number.isFinite(score)) return false;
+    try {
+      return await withTimeout(Promise.resolve(B()!.leaderboards!.setScore(id, score)).then(() => true), LEADERBOARD_TIMEOUT_MS, false);
+    } catch (e) {
+      console.warn('[platform] setScore failed', e);
+      return false;
+    }
+  },
+
+  /**
+   * Top `limit` rows of leaderboard `id`, for the game's own leaderboard view. Only the `in_game` type hands out entries
+   * (`native` platforms draw their own board, `native_popup` has showLeaderboardPopup): everything else is `unavailable`.
+   * Rows are sorted by the platform's rank, names are plain text (escape before using as HTML). Never throws.
+   */
+  async leaderboardTop(id: string, limit = 10): Promise<LeaderboardResult> {
+    const b = B();
+    const lb = b?.leaderboards;
+    if (!b || !lb || platform.leaderboardMode() !== 'in_game' || typeof lb.getEntries !== 'function') return { status: 'unavailable' };
+    try {
+      const FAIL = Symbol('timeout');
+      const res = await withTimeout(Promise.resolve(lb.getEntries(id)), LEADERBOARD_TIMEOUT_MS, FAIL as unknown);
+      if (res === FAIL || !Array.isArray(res)) return { status: 'failed' };
+      const me = b.player?.id != null ? String(b.player.id) : null;
+      const rows: LeaderboardRow[] = [];
+      res.forEach((raw, i) => {
+        if (!raw || typeof raw !== 'object') return;
+        const e = raw as { id?: unknown; name?: unknown; score?: unknown; rank?: unknown };
+        const score = Number(e.score);
+        if (!Number.isFinite(score)) return;
+        const rank = Number(e.rank);
+        rows.push({
+          rank: Number.isFinite(rank) && rank > 0 ? Math.floor(rank) : i + 1,
+          name: typeof e.name === 'string' ? e.name.trim().slice(0, 32) : '',
+          score,
+          isPlayer: me !== null && e.id != null && String(e.id) === me,
+        });
+      });
+      rows.sort((a, c) => a.rank - c.rank);
+      return { status: 'ok', rows: rows.slice(0, Math.max(0, limit)) };
+    } catch (e) {
+      console.warn('[platform] getEntries failed', e);
+      return { status: 'failed' };
+    }
+  },
+
+  /** `native_popup` platforms (e.g. Facebook): open the platform's own leaderboard overlay. false = not possible or it failed. */
+  async showLeaderboardPopup(id: string): Promise<boolean> {
+    const lb = B()?.leaderboards;
+    if (platform.leaderboardMode() !== 'native_popup' || !lb || typeof lb.showNativePopup !== 'function') return false;
+    try {
+      return await withTimeout(Promise.resolve(lb.showNativePopup(id)).then(() => true), LEADERBOARD_TIMEOUT_MS, false);
+    } catch (e) {
+      console.warn('[platform] showNativePopup failed', e);
+      return false;
+    }
   },
 
   gameReady(): void {
