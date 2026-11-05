@@ -523,6 +523,50 @@ try {
     }
     await ctx.close();
   }
+
+  // ---- retention: daily missions panel (badge, login claim) and the garage paint shop (preview + buy), phone portrait
+  for (const [w, h, name] of [[390, 844, 'portrait'], [844, 390, 'landscape']]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(`http://localhost:${PORT}/?debug`);
+    await page.waitForFunction(() => window.__game && window.__game.state === 'menu', null, { timeout: 30000 });
+    const badge = await page.$eval('[data-act=missions] .d-badge', (e) => Number(e.textContent)).catch(() => 0);
+    check(`[daily ${name}] menu Daily button shows an unclaimed badge`, badge >= 1, `badge=${badge}`);
+    await page.click('[data-act=missions]');
+    await page.waitForSelector('.daily-panel', { timeout: 5000 });
+    const rows = await page.$$eval('.daily-panel .d-mis', (l) => l.length);
+    check(`[daily ${name}] missions panel lists 3 missions and a 7-day calendar`, rows === 3 && (await page.$$eval('.d-day', (l) => l.length)) === 7, `rows=${rows}`);
+    const box = await page.$eval('.daily-panel', (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; });
+    check(`[daily ${name}] panel fits the screen`, box.l >= 0 && box.r <= w + 0.5 && box.t >= 0 && box.b <= h + 0.5, JSON.stringify(box));
+    await page.screenshot({ path: path.join(OUT, `daily-${name}.png`) });
+    const m0 = await page.evaluate(() => window.__game.save.money);
+    await page.click('[data-act=claimLogin]');
+    const m1 = await page.evaluate(() => window.__game.save.money);
+    check(`[daily ${name}] login reward adds coins`, m1 > m0, `${m0} -> ${m1}`);
+    await page.click('.d-head [data-act=dailyClose]');
+    // garage paint shop
+    await page.evaluate(() => { window.__game.save.money = 5000; });
+    await page.click('[data-act=garage]');
+    await page.click('[data-act=gtab][data-tab=paint]');
+    await page.waitForSelector('.cos-pane', { timeout: 5000 });
+    await page.click('[data-act=cosPick][data-type=paint][data-id=gold]');
+    await page.waitForSelector('.cos-buy', { timeout: 5000 });
+    await sleep(300);
+    await page.screenshot({ path: path.join(OUT, `paint-${name}-preview.png`) });
+    await page.click('[data-act=cosBuy]');
+    const eq = await page.evaluate(() => { const g = window.__game.save; return g.cosmetics && g.cosmetics.paint[g.car]; });
+    check(`[daily ${name}] paint shop previews and buys a premium paint`, eq === 'gold', String(eq));
+    await page.click('[data-act=cosPick][data-type=livery][data-id=stripes]');
+    await page.click('[data-act=cosBuy]');
+    const lv = await page.evaluate(() => { const g = window.__game.save; return g.cosmetics && g.cosmetics.livery[g.car]; });
+    check(`[daily ${name}] livery bought and equipped`, lv === 'stripes', String(lv));
+    await sleep(300);
+    await page.screenshot({ path: path.join(OUT, `paint-${name}.png`) });
+    check(`[daily ${name}] no page errors`, errors.length === 0, errors.slice(0, 2).join(' | '));
+    await ctx.close();
+  }
 } catch (e) {
   check('player checks ran to completion', false, String(e && e.stack || e));
 } finally {
