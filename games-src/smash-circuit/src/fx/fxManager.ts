@@ -394,27 +394,28 @@ export class FxManager {
   }
 
   /**
-   * Material flavour on top of the normal chunks: wood splinters (long, thin, spinning), concrete / stone pebbles, plastic shards,
-   * rubber crumbs. Drawn from the shared debris pool, small, short-lived, and skipped when the pool is crowded or on the low preset.
+   * Material flavour on top of the normal 2-3 debris chunks (which stay the only debris-pool pieces of a break): flecks thrown from
+   * the break in the material's colours, drawn as small solid particles from the pooled smoke system (so they follow the quality
+   * preset's particle share and the pool cap, and never touch the debris budget). Wood and straw throw splinters, concrete / stone /
+   * tarmac pebbles, plastic bright shards, rubber dark crumbs, foliage leaves.
    */
   private materialExtras(mat: FxMaterial, x: number, z: number, vx: number, vz: number, power: number): void {
     const M = MATERIAL_FX[mat];
-    if (this.share <= 0 || this.debris.active > this.debris.max * FX.extraDebrisRoom) return;
+    if (this.share <= 0) return;
     const sp = this.share * power;
-    const fling = (n: number, sx: number, sy: number, sz: number, up: [number, number], side: number, spin: number, life: number): void => {
-      for (let i = 0; i < n; i++) {
+    const fling = (n: number, size: number, up: [number, number], side: number, life: number, grav: number): void => {
+      for (let i = 0; i < n * 3; i++) {
         const a = this.rng() * Math.PI * 2, v = this.rnd(0.4, 1) * side;
-        this.debris.spawn({
-          x: x + this.rnd(-0.4, 0.4), y: 0.5 + this.rnd(0, 0.4), z: z + this.rnd(-0.4, 0.4),
-          vx: vx * 0.8 + Math.cos(a) * v, vy: this.rnd(up[0], up[1]), vz: vz * 0.8 + Math.sin(a) * v,
-          sx: sx * this.rnd(0.8, 1.25), sy: sy * this.rnd(0.8, 1.25), sz: sz * this.rnd(0.8, 1.25),
-          color: this.pick(M.colors), life, spin,
-        });
+        this.smoke.spawn(
+          x + this.rnd(-0.4, 0.4), 0.5 + this.rnd(0, 0.4), z + this.rnd(-0.4, 0.4),
+          vx * 0.8 + Math.cos(a) * v, this.rnd(up[0], up[1]), vz * 0.8 + Math.sin(a) * v,
+          { life: this.rnd(life * 0.7, life), size0: size * this.rnd(0.8, 1.25), size1: size * 0.5, color: this.pick(M.colors), alpha: 1, drag: 0.5, gravity: grav, mode: 1 },
+        );
       }
     };
-    fling(extraCount(M.splinters, sp, this.rng()), 1.1, 0.07, 0.1, [5, 10], 7, 2.4, 1.3);
-    fling(extraCount(M.pebbles, sp, this.rng()), 0.22, 0.2, 0.22, [4, 8], 8, 1.6, 1.1);
-    fling(extraCount(M.shards, sp, this.rng()), 0.3, 0.04, 0.36, [4, 9], 7, 2.2, 1.2);
+    fling(extraCount(M.splinters, sp, this.rng()), 0.2, [5, 10], 7, 0.9, 22);
+    fling(extraCount(M.pebbles, sp, this.rng()), 0.26, [4, 8], 8, 0.8, 24);
+    fling(extraCount(M.shards, sp, this.rng()), 0.22, [4, 9], 7, 0.85, 20);
   }
 
   private onPartOff(ev: Extract<SimEvent, { type: 'partOff' }>, ctx: FxContext): void {

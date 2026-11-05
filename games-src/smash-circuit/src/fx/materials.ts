@@ -8,7 +8,7 @@ export type FxMaterial = 'concrete' | 'metal' | 'wood' | 'plastic' | 'rubber' | 
 export interface MaterialFx {
   /** dust colour of the puff (null = the theme's own dust) */
   dust: number | null;
-  /** extra pieces on top of the normal 2-3 chunks: [min, max], drawn from the shared debris pool (skipped when it is crowded) */
+  /** extra fleck groups on top of the normal 2-3 debris chunks: [min, max] (x3 particles each), drawn from the pooled smoke particles */
   splinters: [number, number];   // thin, long, spinning: wood
   pebbles: [number, number];     // small, dense, dark: concrete, stone, tarmac
   shards: [number, number];      // small flat bright pieces: plastic

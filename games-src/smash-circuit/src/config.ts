@@ -400,7 +400,6 @@ export const CONFIG = {
       shakeFromBreak: { wall: 0.2, guardrail: 0.12, road: 0.28, curb: 0.03, prop: 0.05 } as Record<string, number>, // trauma per break at distance 0
       dustBurst: [6, 9] as [number, number],          // dust puffs per wall / guardrail break
       // ---- appended: material variety, cascade shake cap, braking smoke ----
-      extraDebrisRoom: 0.7,    // material extras (splinters, pebbles, shards) are skipped while the debris pool is fuller than this
       breakShakeCap: 0.45,     // trauma that breaks may add within ~0.4 s: a cascade of 9 segments shakes like one big hit, not nine
       breakShakeDecay: 1.2,    // per s
       brakeSmokeSpeed: 14,     // m/s above which a hard stop (brake > 0.85) smokes the front tyres
