@@ -125,3 +125,75 @@ describe('loop seams (audit AU4)', () => {
     expect(Math.abs(out[out.length - 1])).toBeLessThan(0.01);
   });
 });
+
+describe('music: menu <-> race crossfade and volume', () => {
+  type Priv = { startLoops(): void; musicMode: string; musicLevel(): number; buffers: Map<string, unknown> };
+  const car = { x: 0, y: 0 } as never;
+  const withMusic = (): { am: AudioManager; p: Priv } => {
+    const am = makeAudio();
+    const p = am as unknown as Priv;
+    p.buffers.set('music', { name: 'music' });
+    p.buffers.set('music_menu', { name: 'music_menu' });
+    p.startLoops();
+    return { am, p };
+  };
+  const names = (): string[] => started.map((s) => s.name);
+
+  it('starts with the menu loop, switches to the race loop when a car is live, and back after a short delay', () => {
+    const { am, p } = withMusic();
+    expect(names()).toContain('music_menu');
+    expect(names()).not.toContain('music');
+    am.update(car, 0.016);
+    expect(p.musicMode).toBe('race');
+    expect(names()).toContain('music');
+    am.update(null, 0.2);
+    expect(p.musicMode).toBe('race');                 // a short gap (one frame, an ad) does not switch
+    am.update(null, 0.2);
+    expect(p.musicMode).toBe('menu');
+  });
+
+  it('the pause menu keeps the current track', () => {
+    const { am, p } = withMusic();
+    am.update(car, 0.016);
+    am.setGameplayPaused(true);
+    am.update(null, 5);
+    expect(p.musicMode).toBe('race');
+    am.setGameplayPaused(false);
+    am.update(null, 1);
+    expect(p.musicMode).toBe('menu');
+  });
+
+  it('a track restarts from the top only after it has been faded out for a while', () => {
+    const { am } = withMusic();
+    am.update(car, 0.016);
+    const raceStarts = (): number => names().filter((n) => n === 'music').length;
+    expect(raceStarts()).toBe(1);
+    am.update(null, 0.5);                              // -> menu
+    am.update(car, 0.5);                               // back after 0.5 s: still audible, keeps playing
+    expect(raceStarts()).toBe(1);
+    am.update(null, 0.5);                              // -> menu
+    for (let i = 0; i < 6; i++) am.update(null, 0.5);  // 3 s away
+    am.update(car, 0.016);
+    expect(raceStarts()).toBe(2);
+  });
+
+  it('startLoops runs on every unlock gesture without restarting the music', () => {
+    const { p } = withMusic();
+    const n = names().length;
+    p.startLoops(); p.startLoops();
+    expect(names().length).toBe(n);
+  });
+
+  it('music volume scales the music bus, 0 silences it, pause ducks it', () => {
+    const { am, p } = withMusic();
+    const full = p.musicLevel();
+    am.setMusicVolume(0.5);
+    expect(p.musicLevel()).toBeCloseTo(full * 0.5, 6);
+    am.setMusicVolume(0);
+    expect(p.musicLevel()).toBe(0);
+    am.setMusicVolume(Number.NaN);
+    expect(p.musicLevel()).toBeCloseTo(full, 6);       // junk falls back to full
+    am.setGameplayPaused(true);
+    expect(p.musicLevel()).toBeCloseTo(full * 0.45, 6);
+  });
+});

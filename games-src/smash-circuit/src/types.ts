@@ -270,6 +270,8 @@ export interface SaveData {
     rivals?: RivalMode;
     /** model for RivalMode 'pick' */
     rivalCar?: string;
+    /** music volume 0..1 (absent = 1) */
+    musicVol?: number;
   };
   ghosts: Record<string, GhostData>;
   carColor: number;

@@ -760,6 +760,7 @@ export class UI {
     else if (k === 'controls') { s.controls = controlsOr(v); s.controlsPicked = true; }
     else if (k === 'camera') s.camera = v as SaveData['settings']['camera'];
     else if (k === 'muted') s.muted = v === '1';
+    else if (k === 'musicVol') s.musicVol = Math.min(1, Math.max(0, Number(v) || 0));
     else if (k === 'rivals') { s.rivals = rivalModeOr(v); if (s.rivals === 'pick' && !s.rivalCar) s.rivalCar = carIdOr(this.save?.car); }
     this.sfx('click');
     this.settings = s;
@@ -895,6 +896,13 @@ export class UI {
       `<button class="${o.v === cur ? 'on' : ''}" data-act="set" data-k="${k}" data-v="${o.v}" aria-pressed="${o.v === cur}"><span>${esc(o.label)}</span></button>`).join('')}</div>`;
   }
 
+  /** the music volume setting snapped to the nearest step of the segmented control (absent = full) */
+  private musicStep(v: number | undefined): number {
+    const steps = [0, 0.35, 0.7, 1];
+    const x = v === undefined ? 1 : v;
+    return steps.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
+  }
+
   /** 'auto' shows as what it resolves to: rotating on touch devices, fixed north-up elsewhere */
   private cameraShown(c: SaveData['settings']['camera']): 'rotating' | 'fixed' {
     return c === 'auto' ? (this.touchMode ? 'rotating' : 'fixed') : c;
@@ -921,6 +929,9 @@ export class UI {
           { v: 'rotating', label: t('settings.camera.rotating') }, { v: 'fixed', label: t('settings.camera.fixed') },
         ]), t('settings.camera.hint'))}
         ${row(st.muted ? icon('speakerOff') : icon('speakerOn'), t('settings.sound'), toggle('muted', !st.muted))}
+        ${row(icon('speakerOn'), t('settings.music'), this.seg('musicVol', String(this.musicStep(st.musicVol)), [
+          { v: '0', label: t('ui.off') }, { v: '0.35', label: t('settings.music.low') }, { v: '0.7', label: t('settings.music.mid') }, { v: '1', label: t('settings.music.high') },
+        ]))}
         ${row(icon('trophy'), t('rivals.title'), this.seg('rivals', rivalModeOr(st.rivals), RIVAL_MODES.map((m) => ({ v: m, label: t('rivals.short.' + m) }))), t('rivals.' + rivalModeOr(st.rivals) + '.hint'))}
         ${rivalModeOr(st.rivals) === 'pick' ? `<div class="srow s-cars">${carGrid('rivalCar', carIdOr(st.rivalCar ?? this.save?.car), CONFIG.render.carColors[2], 'g-strip')}</div>` : ''}
       </div>`);

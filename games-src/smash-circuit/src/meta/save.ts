@@ -134,6 +134,7 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
   // rival field: only stored values are kept (absent = the default, see rivalModeOr)
   if (st.rivals !== undefined && rivalModeOr(st.rivals) === st.rivals) out.settings.rivals = st.rivals as SaveData['settings']['rivals'];
   if (isCarId(st.rivalCar)) out.settings.rivalCar = st.rivalCar;
+  if (typeof st.musicVol === 'number' && Number.isFinite(st.musicVol)) out.settings.musicVol = Math.min(1, Math.max(0, st.musicVol));
   // v1 counted races only globally: they were all driven in the starter car
   if (!isObj(c.carRaces) && out.racesFinished > 0) out.carRaces[CONFIG.cars.starter] = out.racesFinished;
   for (const k of Object.keys(out.carRaces)) out.carRaces[k] = Math.floor(out.carRaces[k]);
