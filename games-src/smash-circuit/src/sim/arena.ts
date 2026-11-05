@@ -196,7 +196,7 @@ export class ArenaMatch {
       const loss = prev - c.health;
       this.prevHealth.set(c.id, c.health);
       if (loss <= 1e-4) continue;
-      let hitter: CarState | null = null, bd = ARENA.hitRange;
+      let hitter: CarState | null = null, bd: number = ARENA.hitRange;
       for (const o of cars) {
         if (o === c || this.dead.has(o.id)) continue;
         const d = Math.hypot(o.x - c.x, o.y - c.y);

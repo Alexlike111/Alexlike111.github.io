@@ -243,6 +243,25 @@ export const EN: Dict = {
   'results.drift': 'Drift bonus',
   'tut.key.repair': 'R repairs the car, P pauses',
   'tut.ok': 'Got it',
+  // ---- Demolition Arena (src/ui/arena.ts)
+  'arena.title': 'Demolition Arena',
+  'arena.menu': 'Arena',
+  'arena.score': 'Score',
+  'arena.time': 'Time',
+  'arena.left': 'Cars left',
+  'arena.combo': 'Combo x{n}',
+  'arena.goal': 'Ram the rivals! Last car standing wins.',
+  'arena.wreck': 'WRECKED!',
+  'arena.endTime': 'Time is up!',
+  'arena.endLast': 'Last car standing!',
+  'arena.endWrecked': 'You are wrecked!',
+  'arena.wrecks': 'Wrecks',
+  'arena.damage': 'Damage dealt',
+  'arena.props': 'Props smashed',
+  'arena.coins': 'Coins earned',
+  'arena.best': 'Best score',
+  'arena.again': 'Again',
+  'arena.toMenu': 'Menu',
 };
 
 export const RU: Dict = {
@@ -484,6 +503,25 @@ export const RU: Dict = {
   'results.drift': 'Бонус за дрифт',
   'tut.key.repair': 'R: ремонт, P: пауза',
   'tut.ok': 'Понятно',
+  // ---- Demolition Arena (src/ui/arena.ts)
+  'arena.title': 'Арена разрушения',
+  'arena.menu': 'Арена',
+  'arena.score': 'Очки',
+  'arena.time': 'Время',
+  'arena.left': 'Машин осталось',
+  'arena.combo': 'Комбо x{n}',
+  'arena.goal': 'Тарань соперников! Побеждает последний на ходу.',
+  'arena.wreck': 'РАЗБИТ!',
+  'arena.endTime': 'Время вышло!',
+  'arena.endLast': 'Ты последний на ходу!',
+  'arena.endWrecked': 'Твоя машина разбита!',
+  'arena.wrecks': 'Разбито машин',
+  'arena.damage': 'Нанесено урона',
+  'arena.props': 'Снесено объектов',
+  'arena.coins': 'Монет заработано',
+  'arena.best': 'Рекорд',
+  'arena.again': 'Ещё раз',
+  'arena.toMenu': 'Меню',
 };
 
 const DICTS: Record<Lang, Dict> = { en: EN, ru: RU };
