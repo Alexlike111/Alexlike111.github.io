@@ -7,14 +7,19 @@
 // rattle, one-pole/biquad low-passed, DC-blocked, soft-clipped, normalised to a per-class RMS and capped at
 // -3 dBFS. The output is written as .ogg (primary) + .mp3 (Safari fallback) into public/sfx/ and a demo mix
 // into e2e/out/audio/. Final assets are plain audio files; this script is only the (offline) authoring tool.
-// NOTE: docs/AUDIO.md explains the platform rule about synthesised audio - replace with recordings if the
-// platform reviewer rejects these.
+// NOTE: LEGACY dev fallback. public/sfx now holds RECORDED CC0 sounds built by scripts/make-recorded.mjs and this
+// script would overwrite them with synthesised placeholders (platform rule 3.3.2, see docs/AUDIO.md), so it refuses to
+// run unless ALLOW_PLACEHOLDER_SFX=1.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+if (process.env.ALLOW_PLACEHOLDER_SFX !== '1') {
+  console.error('make-impacts.mjs: refusing to overwrite the recorded sounds in public/sfx with synthesised placeholders (set ALLOW_PLACEHOLDER_SFX=1 to force; see docs/AUDIO.md).');
+  process.exit(1);
+}
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SFX = join(ROOT, 'public', 'sfx');
 const DEMO = join(ROOT, 'e2e', 'out', 'audio');

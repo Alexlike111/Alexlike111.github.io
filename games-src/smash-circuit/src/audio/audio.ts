@@ -58,7 +58,7 @@ const MIX = {
 const LOOP_SEAM: Record<'engine' | 'skid' | 'music' | 'music_menu' | 'scrape', { crop: number; xfade: number; raw?: boolean }> = {
   engine: { crop: 0, xfade: 0.04 },    // equal-power crossfade tail -> head
   skid: { crop: 0.055, xfade: 0.05 }, // drop the faded edges first, then crossfade
-  scrape: { crop: 0, xfade: 0 },       // already crossfaded by scripts/make-impacts.mjs
+  scrape: { crop: 0, xfade: 0 },       // already crossfaded by scripts/make-recorded.mjs
   music: { crop: 0, xfade: 0, raw: true },       // seamless by construction (scripts/make-recorded.mjs crossfades the seam); used as decoded
   music_menu: { crop: 0, xfade: 0, raw: true },  // (no baked copy: a 90 s stereo buffer is ~33 MB, do not duplicate it)
 };
