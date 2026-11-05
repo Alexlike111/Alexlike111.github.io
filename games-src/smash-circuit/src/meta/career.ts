@@ -86,7 +86,8 @@ export function sanitizeCareer(v: unknown): CareerSave {
     for (const cup of CUPS) {
       const c = (v.cups as Record<string, unknown>)[cup.id];
       if (!isObj(c)) continue;
-      const rec: CupRecord = { done: c.done === true, best: int(c.best, 0, CONFIG.race.cars, 0), claimed: int(c.claimed, 0, 1e8, 0) };
+      const done = c.done === true;
+      const rec: CupRecord = { done, best: done ? int(c.best, 0, CONFIG.race.cars, 0) : 0, claimed: int(c.claimed, 0, 1e8, 0) };
       if (rec.done || rec.best > 0 || rec.claimed > 0) out.cups[cup.id] = rec;
     }
   }
@@ -135,14 +136,18 @@ export function standings(results: number[][]): Standing[] {
   return rows;
 }
 
-/** Turns "place per car id" (index = car id, 0 = player) into a clean 1..n permutation; the player keeps `playerPlace` when it is free. */
+/**
+ * Turns "place per car id" (index = car id, 0 = player) into a clean 1..n permutation. The player keeps `playerPlace` (it was
+ * announced at the line); the AIs fill the other places in the order of their reported place (ties: lower car id first).
+ */
 export function normalizePlaces(placeById: number[], playerPlace: number): number[] {
   const n = CONFIG.race.cars;
-  const keys = Array.from({ length: n }, (_, d) => ({ d, p: d === 0 ? playerPlace : (placeById[d] ?? n + 1) }));
-  // the player wins ties against a car reporting the same place (the player's place was announced at the line)
-  keys.sort((a, b) => a.p - b.p || (a.d === 0 ? -1 : b.d === 0 ? 1 : a.d - b.d));
+  const mine = Math.max(1, Math.min(n, Math.floor(playerPlace) || n));
+  const others = Array.from({ length: n - 1 }, (_, i) => i + 1).sort((a, b) => (placeById[a] ?? n + 1) - (placeById[b] ?? n + 1) || a - b);
   const out = new Array<number>(n).fill(n);
-  keys.forEach((k, i) => { out[k.d] = i + 1; });
+  out[0] = mine;
+  let slot = 1;
+  for (const d of others) { if (slot === mine) slot++; out[d] = slot++; }
   return out;
 }
 
