@@ -12,7 +12,7 @@ import { CONFIG } from '../config';
 import { DRIFT_AUTO, DRIFT_HOLD, DRIFT_NONE } from '../sim/drift';
 import type { CarInput } from '../types';
 import {
-  boxRect, driftRequest, followHome, joyGeom, slideAxis, stickAxis, tiltAxis, tiltSteerDeg, touchLayout,
+  boxRect, driftRequest, followHome, joyGeom, slideAxis, slideFullPx, steerZone, stickAxis, tiltAxis, tiltSteerDeg, touchLayout,
   type BtnName, type ControlScheme,
 } from './schemes';
 
@@ -210,11 +210,11 @@ export class InputController {
         stickP = p;
         if (scheme === 'joystick') {
           const R = joyGeom(W, H).r;
-          tSteer = stickAxis(p.x - p.homeX, R, R * C.joyDead);
+          tSteer = stickAxis(p.x - p.homeX, R / this.sens, R * C.joyDead);
           if (p.y - p.homeY > R * C.joyBrakePull) tBrake = 1;   // pulled down past the brake line (fixed stick: no re-anchoring)
         } else {
-          p.homeX = followHome(p.x, p.homeX, C.slideFull * W);
-          tSteer = slideAxis(p.x, p.homeX, W);
+          p.homeX = followHome(p.x, p.homeX, slideFullPx(this.sens));
+          tSteer = slideAxis(p.x, p.homeX, this.sens);
         }
         steerSet = true;
         continue;
@@ -230,14 +230,22 @@ export class InputController {
     // auto drift: how long a digital steer has been held in one direction
     const dDir = Math.sign(btnTarget);
     if (dDir !== 0 && dDir === this.digDir) this.digHeld += dt; else { this.digHeld = 0; this.digDir = dDir; }
-    const bRate = btnTarget === 0 || (this.btnSteer !== 0 && Math.sign(btnTarget) !== Math.sign(this.btnSteer)) ? C.buttonSteerReturn : C.buttonSteerRise;
-    this.btnSteer += clamp(btnTarget - this.btnSteer, -bRate * dt, bRate * dt);
+    if (btnTarget === 0) {
+      const bRate = C.buttonSteerReturn;
+      this.btnSteer += clamp(-this.btnSteer, -bRate * dt, bRate * dt);
+    } else {
+      // touch-down jumps to the tap steer (scaled by sensitivity), a hold then ramps to full lock (sensitivity never caps it)
+      const tap = btnTarget * Math.min(1, C.buttonTapSteer * this.sens);
+      if (Math.sign(this.btnSteer) !== btnTarget || Math.abs(this.btnSteer) < Math.abs(tap)) this.btnSteer = tap;
+      const up = (1 - C.buttonTapSteer) / C.buttonRampS * dt;
+      this.btnSteer += clamp(btnTarget - this.btnSteer, -up, up);
+    }
     if (Math.abs(this.btnSteer) < 1e-3 && btnTarget === 0) this.btnSteer = 0;
 
     // tilt
     if (scheme === 'tilt' && this.tiltRaw !== null && this.tiltCenter !== null) {
       const deg = tiltSteerDeg(this.tiltRaw.beta, this.tiltRaw.gamma, this.tiltCenter.beta, this.tiltCenter.gamma, this.tiltAng);
-      this.tiltSteer += (tiltAxis(deg) - this.tiltSteer) * Math.min(1, C.tiltSmooth * dt);
+      this.tiltSteer += (tiltAxis(deg * this.sens) - this.tiltSteer) * Math.min(1, C.tiltSmooth * dt);
     } else this.tiltSteer = 0;
 
     let throttle = kbThrottle;
@@ -247,9 +255,10 @@ export class InputController {
 
     const tiltUse = scheme === 'tilt' && this.kbSteer === 0 && kbTarget === 0 && !steerSet && this.btnSteer === 0;
     let steer: number, rawTouch = 0, digital = false;
-    if (steerSet) { steer = tSteer * this.sens; rawTouch = tSteer; }
-    else if (this.btnSteer !== 0) { steer = this.btnSteer * this.sens; rawTouch = this.btnSteer; digital = true; }
-    else if (tiltUse) { steer = this.tiltSteer * this.sens; rawTouch = this.tiltSteer; }
+    // sensitivity already scaled the throw of each source (slide / stick / tilt / button tap), so full lock is always reachable
+    if (steerSet) { steer = tSteer; rawTouch = tSteer; }
+    else if (this.btnSteer !== 0) { steer = this.btnSteer; rawTouch = this.btnSteer; digital = true; }
+    else if (tiltUse) { steer = this.tiltSteer; rawTouch = this.tiltSteer; }
     else steer = this.kbSteer;
 
     this.brakeEl.classList.toggle('down', tBrake > 0 && this.brakeEl.offsetParent !== null);
@@ -464,7 +473,7 @@ export class InputController {
       this.knobEl.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
       return;
     }
-    const R = C.slideFull * W;
+    const R = slideFullPx(this.sens);
     let cx: number, cy: number, kx = 0;
     if (p) { cx = p.homeX; cy = p.startY ?? p.homeY; kx = clamp(p.x - p.homeX, -R, R); }
     else { cx = W * 0.27; cy = H - Math.min(W, H) * 0.3; }
@@ -530,6 +539,8 @@ export class InputController {
       kind = 'sbtn';
     } else if (target?.closest('button, a, input, select, [data-ui]')) {
       return; // HUD / menu controls keep their own behaviour
+    } else if (scheme === 'buttons' && steerZone(e.clientX, e.clientY, W, H) !== 0) {
+      kind = 'sbtn';   // the whole lower-left block steers (no dead gaps around the arrows)
     } else if (scheme === 'joystick') {
       // fixed stick: a touch within grab radius of its centre takes it (one finger)
       const g = joyGeom(W, H);

@@ -517,18 +517,19 @@ export const CONFIG = {
     touchSteerCurve: 0.6,      // touch steer = offset^this (offset 0..1 between dead zone and full lock): more authority at small finger offsets
                                // (one-finger play: 10% of the full-lock distance already gives 25% steer, half the distance 66%)
     itemFlickUp: 0.55,         // GAS thumb moved up by this many button sizes = use item (re-arms at half)
-    driftSteer: 0.8,           // touch: |steer| from which the input layer asks for the auto drift (no DRIFT button)
-    driftHoldS: 0.25,          // touch: a digital steer (button / tap zone) must be held this long to ask for it
+    driftSteer: 0.95,          // touch: |steer| from which the input layer asks for the auto drift (no DRIFT button)
+    driftHoldS: 0.55,          // touch: a digital steer (button / tap zone) must be held this long to ask for it
     // ---- audit #4 / #15 ----
     gasDeadBand: 0.25,         // GAS finger: dead band around its landing x, in button sizes (no steering jump on touch-down)
     gasDeadBandMin: 0.1,       // ... but never smaller than this (landing near the right screen edge has little room)
     pullHold: 0.15,            // s a steering finger must stay below the brake line before auto-gas brakes
     // ---- control schemes (src/input/schemes.ts) ----
-    buttonSteerRise: 10,       // 1/s: steer buttons ramp to full lock in 0.1 s
+    buttonTapSteer: 0.55,      // steer buttons / tap zones: a touch-down jumps straight to this steer (a tap = a clear but partial turn)
+    buttonRampS: 0.35,         // s: a held button then ramps from the tap steer to full lock
     buttonSteerReturn: 14,     // 1/s: and back to centre
-    slideFull: 0.15,           // Slide: finger offset (fraction of screen width) for full lock
-    slideDead: 0.012,          // Slide: dead band (fraction of screen width)
-    slideCurve: 0.8,           // Slide / Joystick response exponent
+    slideFullPx: 76,           // Slide: finger travel (CSS px) for full lock at sensitivity 1 (the slider divides it: more sens = shorter throw)
+    slideDeadPx: 4,            // Slide: dead band (CSS px)
+    slideCurve: 1.0,           // Slide / Joystick response exponent (1 = linear)
     joyRadius: 0.16,           // Joystick ring radius, fraction of min(screen w,h)
     joyDead: 0.1,              // Joystick dead band, fraction of the radius
     joyGrab: 1.5,              // Joystick: a touch within this x radius of its centre grabs it
@@ -631,7 +632,7 @@ export const CONFIG = {
   drift: {
     minSpeed: 11,             // m/s (~40 km/h): a held drift (Space / DRIFT button) starts above this
     autoSpeed: 16.7,          // m/s (~60 km/h): a hard touch steer starts a drift above this
-    autoSteer: 0.8,           // |steer| that counts as a hard touch steer (80% of full lock)
+    autoSteer: 0.95,          // |steer| that counts as a hard touch steer (95% of full lock)
     brakeTapSpeed: 15,        // m/s: brake + hard steer at speed starts a drift (player, keyboard)
     brakeTapSteer: 0.6,
     brakeTapMax: 0.3,         // s: only a short brake TAP starts a drift (on release); ordinary braking into a corner never does

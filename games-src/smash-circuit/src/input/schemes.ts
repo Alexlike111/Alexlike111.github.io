@@ -72,9 +72,27 @@ export function stickAxis(dx: number, full: number, dead: number, curve = C.slid
   return mag === 0 ? 0 : Math.sign(dx) * Math.pow(mag, curve);
 }
 
-/** Slide scheme: steering from the horizontal offset to the touch-down point (fractions of the screen width). */
-export function slideAxis(x: number, homeX: number, W: number): number {
-  return stickAxis(x - homeX, C.slideFull * W, C.slideDead * W);
+/** Full-lock finger travel (px) of the Slide scheme: the sensitivity slider scales the THROW, never caps the output. */
+export const slideFullPx = (sens = 1): number => C.slideFullPx / Math.max(0.1, sens);
+
+/** Slide scheme: steering from the horizontal offset (CSS px) to the touch-down point; full lock at `slideFullPx(sens)`. */
+export function slideAxis(x: number, homeX: number, sens = 1): number {
+  return stickAxis(x - homeX, slideFullPx(sens), C.slideDeadPx);
+}
+
+/**
+ * Buttons scheme hit zone: the whole lower-left block spanning both steer buttons (no dead gaps); -1 = left, 1 = right, 0 = none.
+ * The block reaches from the left edge to the right edge of the right button (plus a gap) and from the bottom edge up to
+ * half a button above the buttons.
+ */
+export function steerZone(x: number, y: number, W: number, H: number): -1 | 0 | 1 {
+  const L = touchLayout(W, H, 'buttons');
+  const a = L.steerL, b = L.steerR;
+  if (!a || !b) return 0;
+  const gap = b.off - a.off - a.w;
+  const edge = b.off + b.w + gap;
+  if (x < 0 || x > edge || y < H - (a.b + a.h * 1.5)) return 0;
+  return x < a.off + a.w + gap / 2 ? -1 : 1;
 }
 
 /** Drag the home point along when the finger passes full lock, so coming back is instant. Returns the new home X. */

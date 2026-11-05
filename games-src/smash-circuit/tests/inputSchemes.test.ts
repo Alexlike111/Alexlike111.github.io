@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CONTROL_SCHEMES, controlsOr, sensOr, touchLayout, boxRect, slideAxis, followHome, stickAxis, tiltSteerDeg, tiltAxis, autoDriftScheme, driftRequest, joyGeom,
+  CONTROL_SCHEMES, controlsOr, sensOr, touchLayout, boxRect, slideAxis, slideFullPx, steerZone, followHome, stickAxis, tiltSteerDeg, tiltAxis, autoDriftScheme, driftRequest, joyGeom,
   type ControlScheme, type Rect,
 } from '../src/input/schemes';
 import { sanitizeSave } from '../src/meta/save';
@@ -66,22 +66,35 @@ describe('scheme settings', () => {
     expect(sanitizeSave({ version: 2, settings: { controls: 'finger', controlsPicked: true } }, {}).settings.controls).toBe('buttons');
   });
   it('auto drift request: analog steers ask at once, digital ones after the hold time', () => {
-    expect(driftRequest(0.85, 0, false)).toBe(true); expect(driftRequest(-0.85, 0, false)).toBe(true);
-    expect(driftRequest(0.7, 5, false)).toBe(false);
-    expect(driftRequest(1, 0.1, true)).toBe(false); expect(driftRequest(1, 0.3, true)).toBe(true);
+    expect(driftRequest(0.96, 0, false)).toBe(true); expect(driftRequest(-0.96, 0, false)).toBe(true);
+    expect(driftRequest(0.9, 5, false)).toBe(false);
+    expect(driftRequest(1, 0.3, true)).toBe(false); expect(driftRequest(1, 0.6, true)).toBe(true);
     expect(driftRequest(0, 5, true)).toBe(false);
   });
 });
 
 describe('slide / stick maths', () => {
   it('is symmetric, has a small dead band and reaches full lock', () => {
-    const W = 390;
-    expect(slideAxis(200, 200, W)).toBe(0);
-    expect(slideAxis(203, 200, W)).toBe(0);
-    expect(slideAxis(200 + W * 0.15, 200, W)).toBe(1);
-    expect(slideAxis(200 - W * 0.15, 200, W)).toBe(-1);
-    expect(slideAxis(230, 200, W)).toBeCloseTo(-slideAxis(170, 200, W), 6);
-    expect(slideAxis(230, 200, W)).toBeGreaterThan(0.3);   // comfortable: 30 px already steers noticeably
+    expect(slideAxis(200, 200)).toBe(0);
+    expect(slideAxis(203, 200)).toBe(0);
+    expect(slideAxis(276, 200)).toBe(1);
+    expect(slideAxis(124, 200)).toBe(-1);
+    expect(slideAxis(230, 200)).toBeCloseTo(-slideAxis(170, 200), 6);
+    expect(slideAxis(238, 200)).toBeCloseTo((38 - 4) / (76 - 4), 6);   // linear
+  });
+  it('sensitivity scales the throw: full lock stays reachable at every sensitivity', () => {
+    for (const s of [0.5, 1, 1.5]) expect(slideAxis(200 + slideFullPx(s) + 0.01, 200, s)).toBe(1);
+    expect(slideFullPx(0.5)).toBeGreaterThan(slideFullPx(1)); expect(slideFullPx(1.5)).toBeLessThan(slideFullPx(1));
+  });
+  it('buttons: the quadrant block has no dead gaps', () => {
+    const W = 390, H = 844, L = touchLayout(W, H, 'buttons');
+    const a = boxRect(L.steerL!, W, H), b = boxRect(L.steerR!, W, H);
+    expect(steerZone(a.x + a.w / 2, a.y + a.h / 2, W, H)).toBe(-1);
+    expect(steerZone(b.x + b.w / 2, b.y + b.h / 2, W, H)).toBe(1);
+    expect(steerZone((a.x + a.w + b.x) / 2 - 1, a.y + a.h / 2, W, H)).toBe(-1);   // the gap between them
+    expect(steerZone((a.x + a.w + b.x) / 2 + 1, a.y + a.h / 2, W, H)).toBe(1);
+    expect(steerZone(a.x + a.w / 2, a.y - a.h * 0.2, W, H)).not.toBe(0);           // just above the arrows
+    expect(steerZone(a.x + a.w / 2, H * 0.3, W, H)).toBe(0);
   });
   it('the home point follows a finger beyond full lock', () => {
     expect(followHome(400, 200, 60)).toBe(340); expect(followHome(230, 200, 60)).toBe(200); expect(followHome(100, 200, 60)).toBe(160);
