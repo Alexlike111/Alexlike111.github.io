@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'e2e', 'out', 'player');
 mkdirSync(OUT, { recursive: true });
-const PORT = 4400 + Math.floor(Math.random() * 400);
+const PORT = 21000 + Math.floor(Math.random() * 8000);
 const version = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 
 const results = [];
@@ -19,7 +19,7 @@ const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' });
-await sleep(2500);
+for (let i = 0; i < 120; i++) { await sleep(500); try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ } }
 const browser = await chromium.launch();
 
 async function openRace(ctxOpts, label) {
