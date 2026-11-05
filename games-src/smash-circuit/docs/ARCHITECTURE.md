@@ -106,10 +106,12 @@ export class GameRenderer {
   frame(sim: ISim, events: SimEvent[], frameDt: number): void;  // sync meshes (interpolate with sim.alpha), process events -> debris/particles/shake, camera follow player, render
   showMenuScene(colorIndex: number): void;   // pretty idle scene for menus (player car slowly orbiting / track flyover)
   setQuality(q: Quality | 'auto'): void; resize(): void; readonly fps: number; dispose(): void;
+  /** idle-time warm-up behind the menu: caches the track visual + decor of each def (likely track first) and, from a throwaway sim, links the race shader programs with compileAsync; stops when a race loads */
+  warmUp(defs: TrackDef[], makeSim: (def: TrackDef) => ISim): void;
 }
 ```
 Cartoon low-poly: bright saturated palette, flat/Lambert/Toon shading, one directional light with shadows (quality), hemisphere light. Cars procedurally built from boxes/cylinders (body, cabin, 4 wheels with front steering, bumpers, hood, doors, spoiler, mirrors as separate meshes so parts can fly off), 8 colours from CONFIG.render.carColors; damage visuals: dents/darkening by zone, smoke and sparks from effects, detached parts. Destructibles: InstancedMesh per kind; broken → hide instance + spawn 2–3 debris (pool, max 60, life 1.5 s, fade 0.5 s, simple ballistic visual motion, no physics); road chunk broken → dark hole decal + slab debris; crack visuals by `crack`. Particles pooled (InstancedMesh or Points): tyre smoke on drift, dust off-road, sparks on scrape/impact, smoke when damaged; skid marks as pooled quads on ground. Camera: orthographic, follows player with look-ahead, zoom out with speed, screen shake on big impacts; works portrait 390×844 and landscape. Ghost car: translucent. Auto quality: drop level when FPS < 50 for 3 s.
-Debug: `window.__render = { fps, drawCalls, debrisActive }`.
+Debug: `window.__render = { fps, drawCalls, debrisActive, triangles, programs, load, warm, inspect() }` (`load` = ms of the last loadRace by phase, `warm` = ms of the menu warm-up by piece). Built track visuals are kept per track (`CONFIG.render.visCacheMax`, LRU) so a retry or a warmed-up track skips the build. `node e2e/perf.mjs` measures boot, click-to-GO, frame cost on a CPU-throttled phone and the program count; `node e2e/inspect.mjs` prints the draw-call / triangle breakdown.
 
 ### E — Platform, i18n, meta, UI, input, audio (`src/platform/bridge.ts`, `src/i18n.ts`, `src/meta/*`, `src/ui/*`, `src/input/input.ts`, `src/audio/audio.ts`, `public/sfx/*`)
 ```ts
