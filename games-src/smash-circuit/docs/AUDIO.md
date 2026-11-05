@@ -29,8 +29,8 @@ to run without `ALLOW_PLACEHOLDER_SFX=1` because they would overwrite the record
 ## Format
 - `name.ogg` (Vorbis, primary) and `name.mp3` (fallback: Safari / iOS where decodeAudioData cannot read Ogg).
   `AudioManager` picks `ogg` when `canPlayType('audio/ogg; codecs="vorbis"')` is truthy, else `mp3`.
-- 44.1 kHz. SFX are mono (ogg q3, mp3 80 kbps). Music is stereo, 64 kbps in both formats. Short sounds are peak-limited below -1.5 dBFS
-  with a soft-knee limiter (no hard clipping); loops are peak-capped at -2/-3 dBFS.
+- 44.1 kHz. SFX are mono (ogg q3, mp3 80 kbps). Music is stereo, 64 kbps in both formats. Short sounds are soft-limited to -3 dBFS before encoding (the lossy encode can overshoot by a few dB, the master limiter covers it)
+  with a soft-knee limiter (no hard clipping); loops are peak-capped at -3 dBFS (music -4.6).
 - Loops (`engine`, `skid`, `scrape`, `music`, `music_menu`) are seamless: `scrape` and `music` have their seam crossfaded in the file,
   `engine` and `skid` are crossfaded at load by `seamlessLoop()` in `audio.ts`, `music_menu` is a Kenney loop used as delivered.
 - Total: 2.8 MB for everything (ogg + mp3 of 41 sounds); the player downloads only one format.

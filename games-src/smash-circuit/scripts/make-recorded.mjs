@@ -75,8 +75,8 @@ const RECIPES = {
   engine: { layers: [L('@racing/engine.ogg')], rms: -14, peak: -3, trim: false, limit: false },
   skid: { layers: [L('@racing/skid.ogg')], rms: -16, peak: -3, trim: false, limit: false },
   scrape: { layers: [L('Foley Sounds/stoneDrag2.ogg', { from: 0.06, len: 1.37 }), L('Foley Sounds/platesSlide3.ogg', { at: 0.2, g: -9 })], loop: 0.18, rms: -21, peak: -3, trim: false, limit: false },
-  music: { layers: [L('@music')], stereo: true, trim: true, loop: 2.0, rms: -17, peak: -2, trimTail: true, limit: false },
-  music_menu: { layers: [L('Music Loops/Flowing Rocks.ogg')], stereo: true, trim: false, rms: -17, peak: -2, limit: false },
+  music: { layers: [L('@music')], stereo: true, trim: true, loop: 2.0, rms: -17, peak: -3, trimTail: true, limit: false },
+  music_menu: { layers: [L('Music Loops/Flowing Rocks.ogg')], stereo: true, trim: false, rms: -18, peak: -3 },
   // ---- collisions: Kenney "Impact Sounds" (layered); the game trims every family to its own target level
   impact_light_1: { layers: [L('Impact Sounds/impactMetal_light_001.ogg')] },
   impact_light_2: { layers: [L('Impact Sounds/impactMetal_light_002.ogg')] },
@@ -100,17 +100,17 @@ const RECIPES = {
   debris_1: { layers: [L('Foley Sounds/stonesHit1.ogg'), L('Impact Sounds/impactGlass_light_002.ogg', { at: 0.12, g: -8 })], len: 0.5, fade: [0, 0.08] },
   debris_2: { layers: [L('Foley Sounds/stonesHit2.ogg'), L('Foley Sounds/platesHit5.ogg', { at: 0.1, g: -10, hp: 600 })], len: 0.5, fade: [0, 0.08] },
   // ---- UI, race flow
-  click: { layers: [L('UI Audio/click3.ogg')], rms: -17, peak: -2, trim: true },
-  buy: { layers: [L('RPG Audio/handleCoins.ogg', { len: 0.7 }), L('Interface Sounds/confirmation_001.ogg', { at: 0.18, g: -3 })], len: 0.7, fade: [0, 0.12], rms: -14, peak: -2 },
+  click: { layers: [L('UI Audio/click3.ogg')], rms: -17, peak: -3, trim: true },
+  buy: { layers: [L('RPG Audio/handleCoins.ogg', { len: 0.7 }), L('Interface Sounds/confirmation_001.ogg', { at: 0.18, g: -3 })], len: 0.7, fade: [0, 0.12], rms: -14, peak: -3 },
   error: { layers: [L('Interface Sounds/error_003.ogg')], len: 0.4, fade: [0, 0.08], rms: -15, peak: -3 },
-  countdown: { layers: [L('Digital Audio/pepSound3.ogg')], len: 0.24, fade: [0, 0.05], rms: -11, peak: -2 },
-  go: { layers: [L('Digital Audio/powerUp8.ogg')], len: 0.5, fade: [0, 0.1], rms: -11, peak: -2 },
-  finish: { layers: [L('Music Jingles/jingles-steel_03.ogg'), L('Music Jingles/jingles-hit_09.ogg', { g: -4 })], len: 1.6, fade: [0, 0.2], rms: -12, peak: -2 },
+  countdown: { layers: [L('Digital Audio/pepSound3.ogg')], len: 0.24, fade: [0, 0.05], rms: -11, peak: -3 },
+  go: { layers: [L('Digital Audio/powerUp8.ogg')], len: 0.5, fade: [0, 0.1], rms: -11, peak: -3 },
+  finish: { layers: [L('Music Jingles/jingles-steel_03.ogg'), L('Music Jingles/jingles-hit_09.ogg', { g: -4 })], len: 1.6, fade: [0, 0.2], rms: -12, peak: -3 },
   lap: { layers: [L('Interface Sounds/confirmation_002.ogg')], len: 0.5, fade: [0, 0.1], rms: -15, peak: -3 },
   pickup: { layers: [L('Digital Audio/powerUp3.ogg'), L('Foley Sounds/pickup2.ogg', { g: -6, len: 0.5 })], len: 0.8, fade: [0, 0.15], rms: -15, peak: -3 },
   nitro: { layers: [L('Sci-Fi Sounds/thrusterFire_000.ogg', { from: 0.3, len: 1.5 }), L('Foley Sounds/woosh3.ogg', { g: -5 })], len: 1.4, fade: [0.04, 0.5], rms: -15, peak: -3 },
   boost: { layers: [L('Foley Sounds/woosh3.ogg'), L('Foley Sounds/woosh5.ogg', { at: 0.05, g: -4 })], len: 0.7, fade: [0, 0.2], rms: -15, peak: -3 },
-  shockwave: { layers: [L('Sci-Fi Sounds/lowFrequency_explosion_001.ogg'), L('Sci-Fi Sounds/explosionCrunch_000.ogg', { at: 0.02, g: -6 })], len: 1.2, fade: [0, 0.35], rms: -13, peak: -2 },
+  shockwave: { layers: [L('Sci-Fi Sounds/lowFrequency_explosion_001.ogg'), L('Sci-Fi Sounds/explosionCrunch_000.ogg', { at: 0.02, g: -6 })], len: 1.2, fade: [0, 0.35], rms: -13, peak: -3 },
   oil: { layers: [L('Sci-Fi Sounds/slime_000.ogg'), L('Foley Sounds/drip1.ogg', { at: 0.3, g: -5 })], len: 0.7, fade: [0, 0.15], rms: -16, peak: -3 },
   shield: { layers: [L('Sci-Fi Sounds/forceField_001.ogg')], len: 0.9, fade: [0.01, 0.2], rms: -17, peak: -3 },
   shieldpop: { layers: [L('Impact Sounds/impactGlass_medium_001.ogg'), L('Sci-Fi Sounds/forceField_003.ogg', { at: 0.02, g: -9, len: 0.4 })], len: 0.5, fade: [0, 0.1], rms: -15, peak: -3 },
@@ -130,7 +130,7 @@ function level(name, chs, r) {
   const fam = name.replace(/_\d+$/, '');
   const targetDb = r.rms != null ? r.rms : FAM_RMS[fam] ? dB(FAM_RMS[fam]) : null;
   const win = r.rms == null && FAM_RMS[fam] ? 0.3 : null;
-  const ceil = lin(r.peak ?? -1.5);
+  const ceil = lin(r.peak ?? -3);
   const g0 = ceil / Math.max(1e-6, peakOf(chs));
   const scaled = (g) => chs.map((d) => { const o = new Float32Array(d.length); for (let i = 0; i < d.length; i++) o[i] = d[i] * g; return o; });
   const meas = (o) => rmsOf(win ? cut(o, 0, win) : o);
