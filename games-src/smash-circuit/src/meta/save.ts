@@ -5,13 +5,17 @@ import { platform } from '../platform/bridge';
 import type { GhostData, GhostFrame, SaveData, UpgradeLevels } from '../types';
 import { CAR_IDS, carIdOr, isCarId, rivalModeOr } from './cars';
 import { controlsOr, sensOr } from '../input/schemes';
+import { defaultCareer, sanitizeCareer } from './career';
+
+/** Current save schema. v1: one global upgrade record; v2: per-car upgrades; v3: career (cups, stars, run). */
+export const SAVE_VERSION = 3;
 
 export const SAVE_KEY_CORE = 'sc_core';
 export const SAVE_KEY_GHOSTS = 'sc_ghosts';
 
 export function defaultSave(): SaveData {
   return {
-    version: 2,
+    version: SAVE_VERSION,
     money: CONFIG.economy.startMoney,
     car: CONFIG.cars.starter,
     carUpgrades: {},
@@ -24,6 +28,7 @@ export function defaultSave(): SaveData {
     ghosts: {},
     carColor: 0,
     racesFinished: 0,
+    career: defaultCareer(),
   };
 }
 
@@ -107,7 +112,7 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
   if (isObj(ghosts)) for (const id of trackIds) { const gd = sanitizeGhost(id, ghosts[id]); if (gd) g[id] = gd; }
 
   const out: SaveData = {
-    version: 2,
+    version: SAVE_VERSION,
     money: Math.floor(num(c.money, d.money, 0, 1e9)),
     car: carIdOr(c.car),
     carUpgrades,
@@ -130,6 +135,8 @@ export function sanitizeSave(core: unknown, ghosts: unknown): SaveData {
     ghosts: g,
     carColor: Math.floor(num(c.carColor, 0, 0, CONFIG.render.carColors.length - 1)),
     racesFinished: Math.floor(num(c.racesFinished, 0, 0, 1e9)),
+    // v3: a v1/v2 save has no career record -> an empty one (coins, cars and upgrades are carried over above)
+    career: sanitizeCareer(c.career),
   };
   // rival field: only stored values are kept (absent = the default, see rivalModeOr)
   if (st.rivals !== undefined && rivalModeOr(st.rivals) === st.rivals) out.settings.rivals = st.rivals as SaveData['settings']['rivals'];

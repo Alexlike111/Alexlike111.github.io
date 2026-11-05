@@ -1,4 +1,6 @@
 // Localisation: English (default / fallback) + Russian. Every player-visible string lives here.
+import { CAREER_EN, CAREER_RU } from './i18n.career';
+
 export type Lang = 'en' | 'ru';
 export type LangSetting = Lang | 'auto';
 
@@ -11,6 +13,7 @@ export const EN: Dict = {
   'menu.play': 'Play',
   'menu.garage': 'Garage',
   'menu.settings': 'Settings',
+  ...CAREER_EN,   // career mode strings (src/i18n.career.ts)
   'ui.back': 'Back',
   'ui.tapAgain': 'Tap again',
   'ui.notEnough': 'Not enough coins',
@@ -256,6 +259,7 @@ export const RU: Dict = {
   'menu.play': 'Играть',
   'menu.garage': 'Гараж',
   'menu.settings': 'Настройки',
+  ...CAREER_RU,
   'ui.back': 'Назад',
   'ui.tapAgain': 'Нажми ещё раз',
   'ui.notEnough': 'Не хватает монет',

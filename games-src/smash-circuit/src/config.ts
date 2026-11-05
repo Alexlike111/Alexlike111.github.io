@@ -466,6 +466,23 @@ export const CONFIG = {
       scaleJitter: 0.05,         // per-race random spread of the power/grip multiplier (fraction)
     },
   },
+  // ---- career mode: cups, points, stars, rewards (module: src/meta/career.ts) ----
+  career: {
+    /** championship points by finishing place (index 0 = 1st); a place beyond the table scores 0 */
+    points: [10, 8, 6, 5, 4, 3, 2, 1] as number[],
+    /** total stars needed to open cup k (the previous cup must also have been completed once) */
+    unlockStars: [0, 5, 13, 22] as number[],
+    /** coins for the final cup standing: base per cup x factor by final position (4th and below: `otherFactor`) */
+    cupBonusBase: [1000, 1700, 2500, 3600] as number[],
+    cupBonusFactor: [1, 0.6, 0.35] as number[],
+    cupBonusOtherFactor: 0.12,
+    /** one-time coins for every star earned for the first time */
+    starBonus: 80,
+    /** AI strength shift per cup (>1 = stronger rivals): applied on top of the track tier */
+    ai: { skillShift: 0.8, statShift: 0.6 },
+    /** health at the finish (0..1) counted as "no heavy damage" */
+    cleanHealth: 0.6,
+  },
   audio: {
     master: 0.8, music: 0.32, sfx: 0.9,
     engineGain: 0.5, engineRateMin: 0.55, engineRateMax: 2.1,   // playbackRate range over rpm 0..1
