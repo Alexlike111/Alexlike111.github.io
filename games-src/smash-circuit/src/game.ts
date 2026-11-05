@@ -16,7 +16,7 @@ import { DriftTracker, driftCoins } from './sim/drift';
 import * as carModel from './sim/carModel';
 import { Sim } from './sim/sim';
 import { trackById } from './track/tracks';
-import type { CarInput, CarState, SaveData, SimEvent, UpgradeBranch } from './types';
+import type { CarInput, CarState, SaveData, SimEvent, TrackDef, UpgradeBranch } from './types';
 import { UI, type UiHandlers } from './ui/ui';
 
 export type GameState = 'boot' | 'menu' | 'racing' | 'paused' | 'finishing' | 'results' | 'ad';
@@ -137,6 +137,17 @@ export class Game {
     if (this.saveStatus === 'failed') this.scheduleReload(true);
     this.lastT = performance.now();
     this.raf = requestAnimationFrame(this.loop);
+    // behind the menu, in idle time: build the unlocked tracks' visuals (newest first) and compile the race shaders (audit #23)
+    const warmDefs = this.save.unlockedTracks.map((id) => trackById(id)).filter((d) => !!d).reverse();
+    this.renderer.warmUp?.(warmDefs, (def) => this.warmSim(def));
+  }
+
+  /** A throwaway sim for the renderer warm-up: same field as a real start, never raced. */
+  private warmSim(def: TrackDef): Sim {
+    const idx = Math.max(0, CONFIG.meta.trackOrder.indexOf(def.id));
+    const player = makePlayerSetup(this.save, 'Player');
+    const cars = [player, ...makeOpponents(idx, player.stats, 1, this.save.carColor, rivalChoiceOf(this.save))];
+    return new Sim({ track: def, cars, seed: 1 });
   }
 
   // ------------------------------------------------------------------ save loading (audit #1)

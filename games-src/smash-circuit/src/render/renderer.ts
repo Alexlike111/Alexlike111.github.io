@@ -1,8 +1,9 @@
 // GameRenderer: owns the WebGL renderer and the whole scene. Reads ISim state only; never mutates the sim.
 import * as THREE from 'three';
 import { CONFIG, type Quality } from '../config';
+import { buildTrackGeometry } from '../track/spline';
 import { FxManager } from '../fx/fxManager';
-import type { CarState, ISim, SimEvent } from '../types';
+import type { CarState, ISim, SimEvent, TrackDef } from '../types';
 import { CameraRig } from './camera';
 import { CarFleets, disposeCarGeometries, getCarGeometries, type CarPose } from './car';
 import { buildDecor, type DecorVisual } from './decor';
@@ -16,6 +17,7 @@ import { wallVisual } from './structures';
 import { buildTrackVisual, type TrackVisual } from './trackBuilder';
 import { clamp } from './util';
 
+const programCount = (gl: THREE.WebGLRenderer): number => gl.info.programs?.length ?? 0;
 const QUALITY_ORDER: Quality[] = ['low', 'medium', 'high'];
 
 interface RaceScene {
@@ -36,6 +38,15 @@ export interface RenderDebug {
   fps: number; drawCalls: number; debrisActive: number; triangles: number; quality: Quality; particles: number; breaksShown: number;
   /** ms spent in JS preparing a frame (sync, fx, camera) before the draw submit */
   cpuMs: number;
+  /** ms of the last loadRace by phase (track, decor, destr, fleet, rest, compile, first = first draw); a cached track shows no track / decor */
+  load?: Record<string, number>;
+  /** ms of the idle-time warm-up behind the menu by piece (visual:<track>, scene, programs, textures, total); absent until it finished */
+  warm?: Record<string, number>;
+  /** linked shader programs so far: it should not grow at race start once the menu warm-up ran */
+  programs?: number;
+  programList?: () => string[];
+  /** triangle budget per mesh name for what the main pass draws (see GameRenderer.inspect) */
+  inspect?: () => { name: string; tris: number; instances: number; cast: boolean }[];
   /** race camera state for tests: azimuth (0 = north-up), view half size (m), and a ground point (physics x, y) projected to NDC */
   camera?: { azimuth: number; halfW: number; halfH: number; project(x: number, y: number): { x: number; y: number } };
 }
@@ -53,8 +64,10 @@ export class GameRenderer {
   private fx: FxManager;
   private menu: MenuScene;
   private race: RaceScene | null = null;
-  /** last race's static visuals (track mesh + decor), kept so a retry on the same track does not rebuild them */
-  private visCache: { key: string; track: TrackVisual; decor: DecorVisual } | null = null;
+  /** built static visuals (track mesh + decor) per track, oldest first: a retry or a track warmed up in the menu does not rebuild them */
+  private visCache = new Map<string, { track: TrackVisual; decor: DecorVisual }>();
+  private warming = false;
+  private warmed = false;
   private mode: 'menu' | 'race' = 'menu';
   private poses: CarPose[] = [];
   private byId = new Map<number, CarPose>();
@@ -117,6 +130,8 @@ export class GameRenderer {
       this.ro.observe(canvas);
     }
     canvas.addEventListener('webglcontextlost', this.onLost);
+    this.debug.inspect = () => this.inspect();
+    this.debug.programList = () => (this.gl.info.programs ?? []).map((p) => p.name + '|' + p.cacheKey.length + '|' + p.cacheKey.slice(0, 600));
     window.__render = this.debug;
   }
 
@@ -248,47 +263,66 @@ export class GameRenderer {
   private unloadRace(): void {
     if (!this.race) return;
     this.scene.remove(this.race.group);
-    this.race.destr.dispose();
-    this.dropVisCache();
-    this.visCache = { key: this.race.visKey, track: this.race.track, decor: this.race.decor };
-    this.race.fleet.dispose();
-    this.race.marker.dispose();
-    this.race.powerups.dispose();
+    this.releaseRace(this.race);
     this.race = null;
     this.fx.clear();
   }
 
-  private dropVisCache(): void {
-    if (!this.visCache) return;
-    this.visCache.decor.dispose();
-    this.visCache.track.dispose();
-    this.visCache = null;
+  /** free what belongs to one race; the (expensive) track visual and decor go back into the per-track cache */
+  private releaseRace(rs: RaceScene): void {
+    rs.destr.dispose();
+    this.storeVis(rs.visKey, rs.track, rs.decor);
+    rs.fleet.dispose();
+    rs.marker.dispose();
+    rs.powerups.dispose();
   }
 
-  loadRace(sim: ISim): void {
-    this.stopMenuLoop();
-    this.unloadRace();
+  private dropVisCache(): void {
+    for (const v of this.visCache.values()) { v.decor.dispose(); v.track.dispose(); }
+    this.visCache.clear();
+  }
+
+  /** newest last; the oldest entries beyond CONFIG.render.visCacheMax are freed */
+  private storeVis(key: string, track: TrackVisual, decor: DecorVisual): void {
+    const old = this.visCache.get(key);
+    if (old && (old.track !== track || old.decor !== decor)) { old.decor.dispose(); old.track.dispose(); }
+    this.visCache.delete(key);
+    this.visCache.set(key, { track, decor });
+    while (this.visCache.size > CONFIG.render.visCacheMax) {
+      const k = this.visCache.keys().next().value as string;
+      const v = this.visCache.get(k)!;
+      v.decor.dispose(); v.track.dispose();
+      this.visCache.delete(k);
+    }
+  }
+
+  /** Everything one race scene is made of, not yet attached to the scene (loadRace activates it; warmUp only compiles it). */
+  private buildRace(sim: ISim, prof?: Record<string, number>): RaceScene {
     const def = sim.track.def;
     const pal = PALETTES[def.theme];
-    this.applyPalette(pal);
-    this.dirty = true;
     const group = new THREE.Group();
     const visKey = JSON.stringify(def);
+    let tp = performance.now();
+    const lap = (k: string): void => { if (!prof) return; const n = performance.now(); prof[k] = +(n - tp).toFixed(1); tp = n; };
     let track: TrackVisual, decor: DecorVisual;
-    if (this.visCache && this.visCache.key === visKey) {
-      ({ track, decor } = this.visCache);   // same track again (retry / restart): reuse the built meshes
-      this.visCache = null;
+    const hit = this.visCache.get(visKey);
+    if (hit) {
+      ({ track, decor } = hit);   // same track again (retry / restart) or warmed up in the menu: reuse the built meshes
+      this.visCache.delete(visKey);
       decor.setDensity(CONFIG.render.decorDensity[this.level]);
     } else {
-      this.dropVisCache();
       track = buildTrackVisual(sim.track, pal, this.mats);
+      lap('track');
       decor = buildDecor(sim.track, pal, this.mats, track.exclusions, CONFIG.render.decorDensity[this.level]);
+      lap('decor');
     }
     const destr = new DestructibleRenderer(sim.destructibles, def, pal, this.mats);
     destr.setWallShadows(this.level === 'high');
+    lap('destr');
     // one instanced fleet per car model on the grid (a Same-as-mine field is one fleet, a Mixed field up to 8)
     const fleet = new CarFleets(this.mats, sim.cars.map((c) => c.modelId));
     fleet.setBlobShadows(!CONFIG.render.quality[this.level].shadows);
+    lap('fleet');
     const ghostMat = this.mats.ghost;
     ghostMat.color.setHex(CONFIG.render.car.ghostColor);
     ghostMat.opacity = CONFIG.render.car.ghostOpacity;
@@ -300,12 +334,25 @@ export class GameRenderer {
     const marker = new PlayerMarker();
     const powerups = new PowerUpVisuals(sim, Math.max(CONFIG.race.cars, sim.cars.length));
     group.add(track.group, powerups.group, decor.group, destr.group, destr.rubble, fleet.group, ghost, marker.group);
+    return { sim, group, pal, track, decor, destr, fleet, marker, ghost, powerups, visKey };
+  }
+
+  loadRace(sim: ISim): void {
+    this.stopMenuLoop();
+    this.unloadRace();
+    const pal = PALETTES[sim.track.def.theme];
+    this.applyPalette(pal);
+    this.dirty = true;
+    const prof: Record<string, number> = {};
+    const t0 = performance.now();
+    const rs = this.buildRace(sim, prof);
+    const { decor, destr, fleet, marker, group } = rs;
     this.scene.add(group);
-    this.race = { sim, group, pal, track, decor, destr, fleet, marker, ghost, powerups, visKey };
+    this.race = rs;
     this.menu.group.visible = false;
     this.mode = 'race';
     this.rig.setMenu(false);
-    this.fx.setTheme(pal, wallVisual(def));
+    this.fx.setTheme(pal, wallVisual(sim.track.def));
     this.fx.clear();
     this.poses = sim.cars.map((c) => ({ x: c.x, y: c.y, angle: c.angle, state: c }));
     this.byId.clear();
@@ -320,7 +367,11 @@ export class GameRenderer {
     fleet.update(this.poses, 0);
     marker.update(0, player.x, player.y, player.angle, true, this.metresPerPixel());
     this.placeSun(player.x, player.y);
+    const tc = performance.now();
     this.precompile();
+    prof.compile = +(performance.now() - tc).toFixed(1);
+    prof.total = +(performance.now() - t0).toFixed(1);
+    this.debug.load = prof;
   }
 
   /**
@@ -333,6 +384,98 @@ export class GameRenderer {
     const sh = this.sun.castShadow;
     this.sun.castShadow = !sh;
     try { this.gl.compile(this.scene, cam); } finally { this.sun.castShadow = sh; }
+  }
+
+
+  // ------------------------------------------------------------------ warm-up behind the menu (audit #23)
+
+  /**
+   * Idle-time warm-up while the menu is up. Builds the track visual + decor of each of `defs` into the cache (one idle slot per
+   * piece, likely track first) and, for the first one, a whole race scene from a throwaway sim: its shader programs are compiled
+   * with compileAsync (KHR_parallel_shader_compile) and its textures uploaded, then the scene is dropped again. The first real
+   * loadRace then finds its meshes cached and its programs linked instead of stalling on both. Stops as soon as a race loads.
+   */
+  warmUp(defs: TrackDef[], makeSim: (def: TrackDef) => ISim): void {
+    if (this.warming || this.warmed || this.disposed || !defs.length) return;
+    this.warming = true;
+    this.runWarm(defs, makeSim)
+      .catch((e: unknown) => { console.warn('[render] warm-up failed', e); })
+      .finally(() => { this.warming = false; });
+  }
+
+  private canWarm(): boolean { return !this.disposed && !this.race && this.mode === 'menu'; }
+
+  /** resolves when the browser is idle (a menu has nothing else to do), after a short delay at the latest */
+  private idleSlot(): Promise<void> {
+    return new Promise((res) => {
+      const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+      if (w.requestIdleCallback) w.requestIdleCallback(() => res(), { timeout: 400 });
+      else setTimeout(res, 50);
+    });
+  }
+
+  private async runWarm(defs: TrackDef[], makeSim: (def: TrackDef) => ISim): Promise<void> {
+    const t0 = performance.now();
+    const prof: Record<string, number> = {};
+    let programs = false;
+    for (const def of defs) {
+      const key = JSON.stringify(def);
+      if (!this.visCache.has(key)) {
+        await this.idleSlot();
+        if (!this.canWarm()) return;
+        const geo = buildTrackGeometry(def);
+        const pal = PALETTES[def.theme];
+        const ts = performance.now();
+        const track = buildTrackVisual(geo, pal, this.mats);
+        await this.idleSlot();
+        if (!this.canWarm()) { track.dispose(); return; }
+        const decor = buildDecor(geo, pal, this.mats, track.exclusions, CONFIG.render.decorDensity[this.level]);
+        this.storeVis(key, track, decor);
+        prof['visual:' + def.id] = +(performance.now() - ts).toFixed(1);
+      }
+      if (!programs) {
+        programs = true;
+        await this.warmPrograms(def, makeSim, prof);
+        if (!this.canWarm()) return;
+      }
+    }
+    prof.total = +(performance.now() - t0).toFixed(1);
+    this.warmed = true;
+    this.debug.warm = prof;
+  }
+
+  /** build one race scene off-screen, link its programs without blocking, upload its textures, drop it */
+  private async warmPrograms(def: TrackDef, makeSim: (def: TrackDef) => ISim, prof: Record<string, number>): Promise<void> {
+    await this.idleSlot();
+    if (!this.canWarm()) return;
+    const sim = makeSim(def);
+    let rs: RaceScene | null = null;
+    try {
+      const tb = performance.now();
+      rs = this.buildRace(sim);
+      prof.scene = +(performance.now() - tb).toFixed(1);
+      const cam = this.rig.camera;
+      // programs for the other shadow state are only submitted here (they link in parallel); the current state is awaited
+      const tc = performance.now();
+      // (the particle / debris / skid materials live in the permanent fx group, which loadRace's own precompile would otherwise link)
+      const roots = [rs.group, this.fx.group];
+      const sh = this.sun.castShadow;
+      this.sun.castShadow = !sh;
+      try { for (const r of roots) this.gl.compile(r, cam, this.scene); } finally { this.sun.castShadow = sh; }
+      await Promise.all(roots.map((r) => this.gl.compileAsync(r, cam, this.scene)));
+      prof.programs = +(performance.now() - tc).toFixed(1);
+      await this.idleSlot();
+      if (!this.canWarm()) return;
+      const tu = performance.now();
+      rs.group.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material & { map?: THREE.Texture | null } | undefined;
+        if (m && !Array.isArray(m) && m.map) this.gl.initTexture(m.map);
+      });
+      prof.textures = +(performance.now() - tu).toFixed(1);
+    } finally {
+      if (rs) this.releaseRace(rs);
+      sim.dispose();
+    }
   }
 
   /** Garage / menu turntable: the car `modelId` (default: keep the current one) in paint `colorIndex`. */
@@ -457,7 +600,9 @@ export class GameRenderer {
     this.fx.update(dt, this.rig.camera);
     this.placeSun(tgt.x, tgt.z);
     this.debug.cpuMs += (performance.now() - t0 - this.debug.cpuMs) * 0.1;
+    const tr = performance.now();
     this.gl.render(this.scene, this.rig.camera);
+    if (this.debug.load && this.debug.load.first === undefined) this.debug.load.first = +(performance.now() - tr).toFixed(1);
     this.dirty = false;
     this.publish();
   }
@@ -489,6 +634,7 @@ export class GameRenderer {
     d.particles = this.fx.smoke.active + this.fx.sparks.active;
     d.breaksShown = this.race?.destr.brokenShown ?? 0;
     d.quality = this.level;
+    d.programs = programCount(this.gl);
     const rig = this.rig;
     d.camera = { azimuth: rig.viewAz, halfW: rig.halfW, halfH: rig.halfH, project: (x, y) => rig.project(x, y) };
   }
