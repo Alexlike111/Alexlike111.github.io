@@ -19,7 +19,7 @@ const check = (name, ok, detail) => { results.push({ name, ok: !!ok, detail }); 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' });
-await sleep(2500);
+for (let i = 0; i < 240; i++) { try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ } await sleep(500); }
 const browser = await chromium.launch();
 
 async function openRace(ctxOpts, label) {

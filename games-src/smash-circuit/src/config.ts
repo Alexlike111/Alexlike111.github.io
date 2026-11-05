@@ -315,6 +315,7 @@ export const CONFIG = {
     autoQualityUpWindow: 12,
     autoQualityUpCooldown: 45, // s after a drop before a step up (and a drop within it after a step up caps the level)
     autoQualityWindow: 3,      // s of low FPS before the level drops
+    visCacheMax: 3,            // built track visuals (mesh + decor) kept per track for retries and the menu warm-up
     decorDensity: { low: 0.4, medium: 0.75, high: 1 },          // share of decor instances shown (trees, flowers, ...)
     skidCapacity: { low: 160, medium: 420, high: 800 },         // skid mark quads
     particleCapacity: 900,     // smoke/dust/confetti pool at particles = 1
