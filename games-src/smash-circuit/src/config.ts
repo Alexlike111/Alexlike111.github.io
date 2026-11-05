@@ -179,6 +179,12 @@ export const CONFIG = {
     // each step, a car corner within `gap` m of a wall / guardrail face sliding along it at >= scrape.minSpeed wears the
     // piece by scrape[kind] hp per metre (and makes sparks); independent of the solver impulse
     scrapeGap: 0.15,
+    // ---- appended: overkill cascade (audit X4) ----
+    // damage beyond the hp a piece had left is not thrown away: `carry` of it is passed on to each neighbour (wall / guardrail
+    // segments along the barrier; props within `propRadius` m), which passes on `carry` of ITS overkill, up to `depth` links.
+    // Neighbours go down in a domino ripple, `delay` s per link. `maxOverkill` (x maxHp) bounds one hit; `maxQueued` bounds the queue.
+    // Locked walls (anti-shortcut) never take part.
+    cascade: { carry: 0.5, depth: 4, delay: 0.05, propRadius: 3.2, maxOverkill: 3, maxQueued: 48 },
   },
   race: {
     cars: 8,                   // [3.3]
