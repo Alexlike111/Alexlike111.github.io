@@ -464,6 +464,7 @@ export class GameRenderer {
       try { for (const r of roots) this.gl.compile(r, cam, this.scene); } finally { this.sun.castShadow = sh; }
       // never wait forever (lost context, a driver that never reports the link): the warm-up is an optimisation only
       const linked = Promise.all(roots.map((r) => this.gl.compileAsync(r, cam, this.scene)));
+      linked.catch(() => { /* an optimisation only: the real loadRace compiles whatever is missing */ });
       await Promise.race([linked, new Promise<void>((res) => setTimeout(res, 6000))]);
       prof.programs = +(performance.now() - tc).toFixed(1);
       await this.idleSlot();
