@@ -60,7 +60,9 @@
 
 /* the extra row on the track-select bar and the results button */
 .ui-root .pr-btn.pr-lb { grid-column: 1 / -1; min-height: max(2.8em, 44px); grid-template-rows: auto; justify-content: center; text-align: center; }
-.ui-root .res-lb { margin-top: 0.5em; width: 100%; }
+.ui-root .res-pair.has-lb { display: flex; }
+.ui-root .res-pair.has-lb > .btn { flex: 1 1 0; min-width: 0; }
+.ui-root .res-pair.has-lb > .btn.round { flex: none; }
 
 @media (max-height: 460px) {
   .ui-root .lb-card { gap: 0.4em; padding: 0.55em 0.7em 0.7em; }

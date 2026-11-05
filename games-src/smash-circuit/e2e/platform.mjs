@@ -49,7 +49,11 @@ const STUB = (lbType) => `
 })();`;
 
 const srv = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: 'ignore' });
-await sleep(2500);
+// wait until the preview server answers (a fixed sleep is too short on a busy machine / CI runner)
+for (let i = 0; i < 120; i++) {
+  try { if ((await fetch(`http://localhost:${PORT}/`)).ok) break; } catch { /* not up yet */ }
+  await sleep(500);
+}
 const browser = await chromium.launch();
 
 async function open(lbType, viewport = { width: 1280, height: 720 }) {

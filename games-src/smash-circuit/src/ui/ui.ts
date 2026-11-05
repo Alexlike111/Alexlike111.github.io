@@ -986,11 +986,11 @@ export class UI {
         ${r.unlocked ? `<div class="unlock">${icon('flag')}<span>${esc(t('results.unlocked', { track: unlockName }))}</span></div>` : ''}
         ${dbl}
         <button class="btn big orange" data-act="retry">${icon('restart')}<span>${esc(t('results.again'))}</span></button>
-        <div class="pair res-pair">
+        <div class="pair res-pair${this.h.leaderboardAvailable?.() ? ' has-lb' : ''}">
           ${r.nextTrack ? `<button class="btn green" data-act="nextTrack" data-id="${esc(r.nextTrack)}"><span>${esc(t('results.next'))}</span>${icon('arrowR')}</button>` : ''}
           <button class="btn grey" data-act="continue"><span>${esc(t('results.continue'))}</span>${r.nextTrack ? '' : icon('arrowR')}</button>
+          ${this.h.leaderboardAvailable?.() ? `<button class="btn round blue res-lb" data-act="leaderboard" aria-label="${esc(t('lb.title'))}">${icon('trophy')}</button>` : ''}
         </div>
-        ${this.h.leaderboardAvailable?.() ? `<button class="btn blue sm res-lb" data-act="leaderboard">${icon('trophy')}<span>${esc(t('lb.title'))}</span></button>` : ''}
       </div>
     </div></div>`;
   }

@@ -163,3 +163,6 @@ Not applicable (TypeScript, Vite, Three.js; no Unity).
 - No automated test runs against the real Bridge or the Playgama QA tool; `tests/platform*.test.ts` use a mocked Bridge.
 - The e2e suite does not play a full ad round trip in a browser (the Bridge is the local no-op copy there).
 - A rewarded free repair and a revive are deliberately not offered (see 2.2.4).
+- **missing:** the `window.__game` debug hook (money, time scale, `forceFinish`) is also enabled by a `?debug` query on any host (`Game.debugAllowed`), and the build label is shown in production.
+  Audit #24 wanted both dev-only; `e2e/player-checks.mjs` and `e2e/platform.mjs` currently open the preview with `?debug`, so that needs the e2e scripts to switch to a localhost-only hook first. Until then a player can cheat coins and leaderboard times from the console (any client-side game can be cheated that way).
+- **owner:** turn on score protection for the three SaaS leaderboards in the console (the console lists the settings per board) and keep the score order ascending.
