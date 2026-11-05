@@ -1,0 +1,78 @@
+# Release gates for Smash Circuit (games-src/smash-circuit). Mirrors `npm run release`:
+# typecheck -> unit tests -> build (+ source checks) -> player-view e2e -> release check.
+# It does NOT deploy anything. Owner blockers (placeholder SaaS token, synthesized audio) only warn on
+# push; run the workflow by hand with "strict" ticked to see them fail the build before a real release.
+name: Smash Circuit
+
+on:
+  push:
+    paths:
+      - 'games-src/smash-circuit/**'
+      - '.github/workflows/smash-circuit.yml'
+  pull_request:
+    paths:
+      - 'games-src/smash-circuit/**'
+      - '.github/workflows/smash-circuit.yml'
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: 'Fail on open owner actions (placeholders, synthesized audio)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: smash-circuit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: games-src/smash-circuit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: games-src/smash-circuit/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build (runs the source checks as prebuild)
+        run: npm run build
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Player-view e2e
+        run: npm run e2e:player
+
+      - name: Release check
+        run: npm run check-release
+
+      - name: Release check (strict, manual runs only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.strict }}
+        run: npm run check-release:strict
+
+      - name: Keep e2e screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smash-circuit-e2e
+          path: games-src/smash-circuit/e2e/out/player
+          if-no-files-found: ignore
+          retention-days: 7
