@@ -233,7 +233,7 @@ export const CONFIG = {
     horizon: [40, 260] as [number, number],   // m look-ahead window for the speed profile [min, max]
     // per-track multiplier on the planned cornering speed (difficulty ramp). > 1 because the AI plans for the centre line while the road is wide enough
     // for a larger-radius racing line; with skill 1 the top AI laps t1/t2/t3 in ~26.5/30.5/33 s (a clean crude-bot human: 27.2/30.7/33.3)
-    trackSpeed: { t1: 1.09, t2: 1.12, t3: 1.14 } as Record<string, number>,
+    trackSpeed: { t1: 1.09, t2: 1.12, t3: 1.14, t1r: 1.09, t2r: 1.12, t3r: 1.14 } as Record<string, number>,
     dragMaxSpeed: 12,          // m/s: above this a car that is not gaining speed is cornering / at its limit, not pushing something (no jink)
     dragTime: 2,               // s of pinned throttle without gaining speed before the AI jinks sideways
     shedTime: 0.9,             // s that jink lasts
@@ -261,6 +261,27 @@ export const CONFIG = {
     recoverAhead: 3,           // m past the gap it aims for on the way back in
     recoverOut: 2.5,           // m outside the wall line it first lines up at, in front of the gap
     recoverSpeed: 5,           // m/s base speed when driving back through the gap (+0.4 per m of distance)
+    // ---- appended: rival personalities (clean racer / rammer / blocker) and pack manners ----
+    launchHold: 30,            // m after the line a car keeps its grid column (no cutting across the pack at the start)
+    wallMargin: 1.2,           // m from the road edge: on the outside of a bend, closer than this lifts the speed target ...
+    wallLift: 0.94,            // ... to this fraction (the planned line already keeps laneMargin from the edge)
+    ramRange: 22,              // m: a rammer only picks a target this far ahead (or alongside)
+    ramAside: 4.5,             // m: ... and within this lateral distance
+    ramAimOffset: 0.55,        // m the rammer aims past the target's centre line, towards itself, so the hit lands on the flank / bumper
+    attackTime: 3.2,           // s one attack lasts
+    attackCooldown: 6,         // s between two attacks of one rammer
+    attackMinHealth: 0.3,      // a rammer with less health than this drives clean
+    attackMaxCurv: 0.02,       // no attacks in bends tighter than R 50 m
+    attackSpeedMul: 1.04,      // a rammer's speed target while attacking (it needs a little pace to close in)
+    smashRange: [8, 42] as [number, number],   // m ahead in which a rammer looks for a prop to smash
+    smashKinds: ['barrel', 'crate', 'hayBale', 'tireStack'] as string[],
+    smashEdge: 0.4,            // m inside the road edge: where a rammer aims at a run-off prop
+    smashMaxCurv: 0.02,
+    blockBehind: [3, 20] as [number, number],  // m: a blocker covers a follower this far behind
+    blockLateral: 5,           // m: ... and no further aside than this
+    blockHold: 1.4,            // s a blocker holds its covering line (one move, no weaving)
+    blockMaxCurv: 0.006,       // only on straights
+    cleanClearBonus: 0.3,      // m of extra pass clearance of a clean racer
   },
   upgrades: {
     maxLevel: 5,
@@ -445,6 +466,8 @@ export const CONFIG = {
       statScale: [[0.92, 1.04], [1.0, 1.12], [1.14, 1.28]] as [number, number][],  // AI power/grip multiplier range per track (rivals on later tracks are upgraded cars)
       followPlayer: 0.35,        // share of the player's upgrade advantage the AI mirrors
       aggression: [0.15, 0.85] as [number, number],
+      rammers: [1, 2, 2] as number[],    // rivals that hunt the human and props, per track index (the most aggressive drivers)
+      blockers: [0, 1, 1] as number[],   // rivals that defend the line (the strongest of the others)
       laneSpread: 0.6,
       mistakeBase: 0.9,          // mistakeRate = (1 - skill) * mistakeBase
       skillJitter: 0.1,          // per-race random +-skillJitter/2 on top of the ranked skill
