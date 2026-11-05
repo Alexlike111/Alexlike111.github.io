@@ -679,6 +679,29 @@ export const CONFIG = {
     // cosmetic badges per car (never a lock): races driven for 1 / 2 stars, wins for 3 stars
     badge: { races1: 1, races2: 5, wins3: 3 },
   },
+  // ---- in-race HUD juice (src/ui/hud.ts, src/ui/hudLogic.ts): minimap, gaps, position flash, smash combo, takedown ----
+  hud: {
+    mapRedrawS: 1 / 30,        // minimap redraw interval (s of frame time)
+    gapRefreshS: 0.12,         // gap chips refresh interval
+    gapMinSpeed: 8,            // m/s: the gap divides by at least this speed (a stopped car must not show infinity)
+    gapMaxS: 60,               // gaps above this many seconds are hidden
+    gapCloseEps: 0.04,         // s per refresh: the gap changed by more than this = closing / opening
+    placeDebounceS: 0.35,      // a new place must hold this long before the "P3 -> P2" flash
+    placeStartGraceS: 2.5,     // no position flash during the start scramble (s after GO)
+    placeFlashMs: 1500,
+    comboWindowS: 1.5,         // each smash within this many seconds of the previous one extends the chain
+    comboStep: 0.5,            // multiplier gained per chained smash ...
+    comboMax: 3,               // ... up to this
+    comboShowFrom: 2,          // the "xN COMBO!" banner shows from this chain length
+    comboHoldMs: 700,          // the banner stays this long after the chain ends
+    floatMs: 900,              // world "+N" float life
+    floatMax: 8,               // pooled floats
+    takedownWindowS: 2.5,      // a rival wrecked within this long of a contact with the player is a takedown
+    takedownContactR: 5,       // m: both cars within this distance of the impact point = a contact between them
+    takedownCooldownS: 10,     // the same rival cannot be taken down again within this (no farming)
+    takedownCoins: 20,         // bonus coins for a takedown (goes through the same per-race smash cap)
+    takedownMs: 1700,
+  },
   rivals: {
     default: 'mixed' as RivalMode,
     // a rival car's speed is scaled by its pace relative to the player's model, clamped here (fairness with any combination)

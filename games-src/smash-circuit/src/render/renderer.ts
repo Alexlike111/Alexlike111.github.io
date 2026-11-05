@@ -482,6 +482,13 @@ export class GameRenderer {
     return [...acc.values()].sort((a, b) => b.tris - a.tris);
   }
 
+  /** Screen position (fractions 0..1 of the canvas, y down) of a physics ground point under the current race camera, or null. */
+  worldToScreen(x: number, y: number, h = 0.8): { x: number; y: number } | null {
+    if (this.mode !== 'race') return null;
+    const p = this.rig.project(x, y, h);
+    return { x: (p.x + 1) / 2, y: (1 - p.y) / 2 };
+  }
+
   private publish(): void {
     const d = this.debug, info = this.gl.info.render;
     d.fps = this.fpsAvg; d.drawCalls = info.calls; d.triangles = info.triangles;
