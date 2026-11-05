@@ -62,8 +62,8 @@ p{margin:0;font-weight:700;font-size:clamp(14px,2.4vw,18px);max-width:520px;line
 // ---------- i18n (en default, ru if the browser is Russian) ----------
 const LANG = /^ru/i.test(navigator.language || '') ? 'ru' : 'en';
 const T = {
-  en: { tag: 'Swallow everything smaller than your pit. Undermine the towers, beat the other pits. 60 seconds.', how: 'Move with the mouse or finger. Arrows / WASD also work. P or Esc pauses, M mutes.', play: 'Play', resume: 'Resume', menu: 'Menu', paused: 'Paused', over: 'Round over', again: 'Play again', place: 'Place', size: 'Size', score: 'Score', best: 'Best', next: 'Next round', round: 'Round', total: 'Career total', career: 'Career over', dead: 'Swallowed! Back in a moment…', kill: 'SWALLOWED!', tower: 'TOWER DOWN!' },
-  ru: { tag: 'Глотай всё, что меньше твоей ямы. Подрывай башни и обгоняй остальные ямы. 60 секунд.', how: 'Двигай мышью или пальцем. Стрелки и WASD тоже работают. P или Esc: пауза, M: звук.', play: 'Играть', resume: 'Продолжить', menu: 'Меню', paused: 'Пауза', over: 'Раунд окончен', again: 'Ещё раз', place: 'Место', size: 'Размер', score: 'Счёт', best: 'Лучший счёт', next: 'Следующий раунд', round: 'Раунд', total: 'Итог за три раунда', career: 'Три раунда пройдены', dead: 'Тебя съели! Возврат через секунду…', kill: 'СЪЕДЕНО!', tower: 'БАШНЯ РУХНУЛА!' },
+  en: { tag: 'Swallow everything smaller than your pit. Undermine the towers, beat the other pits. 60 seconds.', how: 'Move with the mouse or finger. Arrows / WASD also work. P pauses (or the pause button), M mutes.', play: 'Play', resume: 'Resume', menu: 'Menu', paused: 'Paused', over: 'Round over', again: 'Play again', place: 'Place', size: 'Size', score: 'Score', best: 'Best', next: 'Next round', round: 'Round', total: 'Career total', career: 'Career over', dead: 'Swallowed! Back in a moment…', kill: 'SWALLOWED!', tower: 'TOWER DOWN!' },
+  ru: { tag: 'Глотай всё, что меньше твоей ямы. Подрывай башни и обгоняй остальные ямы. 60 секунд.', how: 'Двигай мышью или пальцем. Стрелки и WASD тоже работают. P: пауза (или кнопка на экране), M: звук.', play: 'Играть', resume: 'Продолжить', menu: 'Меню', paused: 'Пауза', over: 'Раунд окончен', again: 'Ещё раз', place: 'Место', size: 'Размер', score: 'Счёт', best: 'Лучший счёт', next: 'Следующий раунд', round: 'Раунд', total: 'Итог за три раунда', career: 'Три раунда пройдены', dead: 'Тебя съели! Возврат через секунду…', kill: 'СЪЕДЕНО!', tower: 'БАШНЯ РУХНУЛА!' },
 };
 const L = T[LANG];
 const $ = (id) => document.getElementById(id);
@@ -588,7 +588,7 @@ addEventListener('pointercancel', () => { pressed = false; aim = null; });
 addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (KEY[k]) { down.add(k); e.preventDefault(); }
-  if (k === 'p' || k === 'escape') { if (S.mode === 'play' || S.mode === 'pause') togglePause(); }
+  if (k === 'p') { if (S.mode === 'play' || S.mode === 'pause') togglePause(); }
   if (k === 'm') { save.muted = !save.muted; persist(); }
   if ((k === ' ' || k === 'enter') && (S.mode === 'menu' || S.mode === 'result')) { e.preventDefault(); startGame(); }
 });
