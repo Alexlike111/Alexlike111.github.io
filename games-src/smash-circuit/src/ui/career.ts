@@ -117,7 +117,7 @@ export function cupPageHtml(s: SaveData, cupId: string, header: string, map: (tr
 
   const brief = finished
     ? `<section class="panel c-brief done">
-        <div class="c-brief-h"><span class="ph">${esc(t('cup.final'))}</span></div>
+        <div class="c-brief-h"><span class="ph">${esc(t('career.completed'))}</span></div>
         <p class="c-big">${icon('trophy')}<span>${esc(t('career.podium.you', { ord: ordinal(rowsData!.find((r) => r.driver === 0)!.pos) }))}</span></p>
         <button class="btn big green" data-act="cRestart">${icon('restart')}<span>${esc(t('cup.again'))}</span></button>
       </section>`

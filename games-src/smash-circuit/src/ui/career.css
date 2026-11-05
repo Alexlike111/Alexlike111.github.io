@@ -133,6 +133,7 @@
 /* ------------------------------------------------------------ main menu additions */
 .ui-root .menu-top { display: flex; align-items: center; gap: 0.6em; }
 .ui-root .menu-top .btn.round { min-height: 44px; }
+@media (max-aspect-ratio: 5/4) { .ui-root .menu-main { padding-top: 3.6em; } }
 .ui-root .btn.career-btn { justify-content: flex-start; gap: 0.7em; padding-left: 0.9em; text-align: left; }
 .ui-root .btn.career-btn .ic { width: 1.7em; height: 1.7em; }
 .ui-root .btn.career-btn .cb-t { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; line-height: 1.05; }
