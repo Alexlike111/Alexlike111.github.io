@@ -572,17 +572,20 @@ function toolSample(id: string, u: number, v: number, load: number): number {
       return 0;
     }
     case 'axe': {
-      // ash haft (lit upper edge), steel head: dark poll, a sheen band, bright bit
-      if (inR(-2.4, 19, -0.95, 0.95)) return lc(v < -0.35 ? TC.woodHi : v > 0.45 ? WS : W_);
-      if (inR(-2.4, -0.6, -1.4, 1.4)) return lc(WS);                                // knob
-      if (u >= 11.6 && u < 22.2) {
-        const top = u < 14.5 ? -2.2 : u < 17 ? -2.4 : -2.4 - (u - 17) * 0.95;
-        const bot = u < 14.5 ? 2.2 : u < 17 ? 2.4 : 2.4 + (u - 17) * 0.75;
-        if (v >= top && v <= bot) {
-          if (u > 20.8) return lc(TC.steelHi);                                      // cutting edge catches the light
-          if (u < 14.5) return lc(TC.steelDk);                                      // poll
-          if (Math.abs(v + 0.4 - (u - 16) * 0.25) < 0.55) return lc(TC.steelHi);    // sheen band across the head
-          return lc(v < -0.2 ? TC.steel : TC.steelSh);
+      // felling axe: ash haft with a swelled knob, and at its end a steel head set ACROSS the haft —
+      // a short square poll on the back (-v), the eye around the haft, and a bearded bit flaring toward the cutting edge (+v, the swing direction)
+      if (inR(-2.6, -0.4, -1.5, 1.5)) return lc(WS);                                                     // knob
+      if (inR(-0.4, 19.6, -0.9, 0.9)) return lc(v < -0.3 ? TC.woodHi : v > 0.45 ? WS : W_);              // haft
+      if (inR(15.4, 19.6, -3.6, -1.6)) return lc(v < -3 ? TC.steel : TC.steelDk);                       // poll
+      if (inR(15.4, 19.6, -1.6, 1.6)) return lc(Math.abs(v) < 0.9 && u > 16.2 && u < 18.8 ? TC.steelSh : TC.steelDk); // eye/cheek around the haft
+      if (v >= 1.6 && v < 6.2) {
+        const k = (v - 1.6) / 4.6;                                   // 0 at the cheek, 1 at the edge
+        const lo = 15.6 - k * k * 3.4, hi = 19.4 + k * 0.9;          // the beard sweeps back toward the hand, the toe a little forward
+        if (u >= lo && u < hi) {
+          if (v > 5.3) return lc(TC.steelHi);                                                            // honed edge
+          if (u < lo + 0.8) return lc(TC.steelSh);                                                       // shaded beard line
+          if (Math.abs((u - lo) - (v - 1.6) * 0.55 - 1.2) < 0.55) return lc(TC.steelHi, 0.95);           // sheen across the cheek
+          return lc(u > hi - 0.8 ? TC.steelHi : TC.steel, 1 - k * 0.05);
         }
       }
       return 0;
