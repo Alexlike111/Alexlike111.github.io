@@ -146,7 +146,7 @@ function canClimb(x: number, feetY: number): boolean {
   let top = -1;
   for (let k = 1; k <= 36; k++) if (!hard(feetY - k)) { top = feetY - k; break; }
   if (top < 0) return false;
-  for (let k = 0; k < PH_CRAWL; k++) if (hard(top - k)) return false;
+  for (let k = 0; k < PH - 2; k++) if (hard(top - k)) return false;
   return true;
 }
 /** a wall the scramble cannot reach: no free cell within 36 rows above the feet in column x */
@@ -181,19 +181,11 @@ export function stepPlayer(inp: MoveIn) {
   events.steps.length = 0; events.landed = 0;
   if (!pl.alive) { pl.vx *= 0.9; return; }
   const tired = pl.stamina < 0.05;
-  // crawling: under a ceiling lower than the full height (but >= 20 cells) the hero drops to a crawl (lookahead 3 cells each side); he stands up again as soon as there is room
-  if (pl.onGround || pl.h < PH) {
-    if (pl.onGround) {
-      const xc0 = Math.round(pl.x - PW / 2);
-      const room = headroom(xc0 + 1, xc0 + PW - 2, FLOOR_Y(pl.y));
-      if (pl.h >= PH && room < PH) pl.h = PH_CRAWL;
-      else if (pl.h < PH && room >= PH) pl.h = PH;
-    }
-  }
+  pl.h = PH; // no crouch/crawl: the hero always stands; a passage must be dug to full height (1.7 m)
   const crawl = pl.h < PH;
   const run = inp.run && !tired && Math.abs(inp.moveX) > 0.1 && !crawl;
   const deep = pl.sink;
-  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1) * (crawl ? 0.5 : 1); // cells/s (4.25 m/s run, 2 m/s walk, 1 m/s crawling)
+  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1) * (crawl ? 0.5 : 1); // cells/s (4.25 m/s run, 2 m/s walk)
   const target = inp.moveX * speed;
   const acc = pl.onGround ? 14 : 4;
   pl.vx += (target - pl.vx) * Math.min(1, dt * acc);

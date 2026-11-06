@@ -188,7 +188,7 @@ function updateEnclosure() {
   pitSince = pl.alive && pitDepth() >= 1.2 ? (pitSince < 0 ? G.realTime : pitSince) : -1;
 }
 // one-time shelter tips, per game: each shows once, one at a time, while its condition holds (the tip keeps its text on screen for its own time)
-const TIP_PIT = 'Землянка: прокопай вбок камеру, а шахту накрой брусьями или блоками — тёплый воздух уходит вверх';
+const TIP_PIT = 'Землянка: камера и ход — в полный рост (~1,8 м). Шахту накрой брусьями или блоками — тёплый воздух уходит вверх';
 const TIP_CLOSED = 'Закрыто. Разведи костёр (6) — станет тепло';
 const TIP_IGLOO = 'Иглу: два ряда блоков стоймя по краям, сверху плоские блоки внахлёст к центру, последний — замковый';
 const tipSeen = new Set<string>();
@@ -221,11 +221,9 @@ function hint(): string | null {
   if (hintT > 0 && hintText) return hintText;
   advanceTutorial();
   const mob = G.mobile;
-  // one-shot tips: door mode after the first placed beam, crawling once the shelter stage is reached
+  // one-shot tip: door mode after the first placed beam
   if (!tipDoorDone && tool.built.has('wood')) { tipDoorDone = true; tipDoorUntil = G.realTime + 7; }
-  if (!tipCrawlDone && tutorial >= 4) { tipCrawlDone = true; tipCrawlUntil = G.realTime + 7; if (G.realTime < tipDoorUntil) tipCrawlUntil = tipDoorUntil + 7; }
   if (G.realTime < tipDoorUntil) return mob ? 'Дверь: на кнопке поворота выбери режим «дверь» — проходима, но держит ветер и тепло' : 'Дверь: нажми R, пока не будет режим «дверь» — проходима, но держит ветер и тепло';
-  if (G.realTime < tipCrawlUntil) return 'В низком ходе герой ползёт сам (медленнее): снежная нора и иглу — это лаз, а не зал';
   const shelter = shelterTip();
   if (shelter) return shelter;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
