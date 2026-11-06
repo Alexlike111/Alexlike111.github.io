@@ -2,7 +2,7 @@
 // usage: node scripts/artifact.mjs <out.html>
 import { readFileSync, writeFileSync } from 'node:fs';
 const out = process.argv[2];
-let s = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');
+let s = readFileSync(process.argv[3] || new URL('../dist/index.html', import.meta.url), 'utf8');
 const title = (s.match(/<title>[\s\S]*?<\/title>/) || ['<title>SNOWCRAFT</title>'])[0];
 s = s.replace(/<title>[\s\S]*?<\/title>/, '')
   .replace(/<!doctype html>/i, '').replace(/<\/?html[^>]*>/gi, '').replace(/<\/?head[^>]*>/gi, '').replace(/<\/?body[^>]*>/gi, '')

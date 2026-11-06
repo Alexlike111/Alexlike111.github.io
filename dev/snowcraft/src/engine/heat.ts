@@ -17,11 +17,13 @@ export const wind = new Float32Array(TW * TH);   // m/s, + = east
 export const sky = new Uint8Array(TW * TH);      // 1 = open to sky
 
 /** Suggested addHeat() powers (units: ≈ °C/s of one air tile with no losses). */
-export const HEAT_POWER = { torch: 5, campfire: 60, furnace: 110, stove: 140, lantern: 1.5, player: 1 };
+export const HEAT_POWER = { torch: 6, campfire: 90, furnace: 150, stove: 210, lantern: 2, player: 1 };
 
 // ---- tuning ----
-const K_AIR = 3.0;            // effective conductivity of air tiles (convection)
-const RS_BASE = 0.7;          // sky-open relaxation rate to ambient (1/s)
+const K_AIR = 6.0;            // effective conductivity of air tiles (convective mixing)
+const AIR_CAP = 2.0;          // effective heat capacity of an air tile (air + furniture + humidity)
+const RS_SURF = 0.12;         // the exposed surface tile of a column relaxes towards ambient too
+const RS_BASE = 0.5;          // sky-open relaxation rate to ambient (1/s)
 const RS_WIND = 0.12;         // + per m/s of local wind
 const RG_SOLID = 0.0015;      // relaxation of enclosed/solid tiles to the geothermal profile (1/s)
 const RG_AIR = 0.004;         // same for enclosed air
@@ -44,10 +46,11 @@ const colTop = new Int16Array(TW);        // first blocking tile row of each col
 const chunkClock = new Float32Array(CW * CHN).fill(-1);
 
 // per-material helper tables
-const KK = new Float32Array(256), SRC = new Float32Array(256);
+const KK = new Float32Array(256), SRC = new Float32Array(256), CAPT = new Float32Array(256);
 for (let m = 0; m < 256; m++) {
   const ph = PHASE[m];
   KK[m] = (m === 0 || ph === P_GAS || ph === P_FIRE || ph === P_EMPTY) ? K_AIR : COND[m];
+  CAPT[m] = (m === 0 || ph === P_GAS || ph === P_FIRE || ph === P_EMPTY) ? AIR_CAP : CAP[m];
   SRC[m] = (HEAT[m] === HEAT[m] && ph !== P_LIQUID) ? HEAT[m] * POWER_PER_HEAT : 0;
 }
 
@@ -75,7 +78,7 @@ function refreshTile(tx: number, ty: number) {
   for (let j = 0; j < TS; j++, i += W - TS) {
     for (let k = 0; k < TS; k++, i++) {
       const m = mat[i];
-      sk += KK[m]; sc += CAP[m]; sp += SRC[m];
+      sk += KK[m]; sc += CAPT[m]; sp += SRC[m];
       if (WIND[m] >= 0.9) nb++;
       if (PHASE[m] === P_LIQUID) { if (m === MAT.LAVA) lv++; else wt++; }
       if (flags[i] & F_BURN) sp += BURN_POWER;
@@ -309,6 +312,9 @@ export function stepHeat(dt: number): void {
       } else {
         const p = (watN[t] >= 8 && prof < -1) ? -1 : prof;
         T += (p - T) * (blk[t] ? RG_SOLID : RG_AIR) * dt;
+        const dpt = ty - colTop[tx];
+        if (dpt === 0) T += (amb - T) * RS_SURF * dt;            // exposed surface follows the air
+        else if (dpt === 1) T += (amb - T) * (RS_SURF * 0.25) * dt;
       }
       const e = srcP[t] * dt + pend[t];
       if (e !== 0) { T += e * ic; pend[t] = 0; }
