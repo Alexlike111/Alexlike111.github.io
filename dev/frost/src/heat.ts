@@ -31,7 +31,7 @@ const MARGIN = 8;          // heat cells simulated beyond G.win
 // The solver integrates at most every HEAT_DT real seconds, using the accumulated dt (heat is slow: time constants of seconds).
 // Explicit conduction stays stable for any sub-step <= 0.1 s (fastest cell rate ~1.5 1/s), so 20 Hz is well inside the limit.
 const HEAT_DT = 0.05;
-const COMP_STRIDE = 4;     // composition: each heat row is re-read every COMP_STRIDE solver runs (power of two)
+const COMP_STRIDE = 8;     // composition: each heat row is re-read every 8 solver runs (~0.4 s; the surface and phase passes keep their own rhythm)
 const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_EVERY solver runs
 
 // ---------------- per-material tables ----------------
@@ -68,7 +68,7 @@ const ic = new Float32Array(HW * HH).fill(1);      // 1 / cap
 const air = new Uint8Array(HW * HH);               // 1 = air-like cell (cap <= 2)
 const gR = new Float32Array(HW * HH);              // conductance of the pair (h, h+1)
 const gD = new Float32Array(HW * HH);              // conductance of the pair (h, h+HW)
-// per-cell relaxation rates (1/s) derived from wind / sky / composition in windPass
+// per-cell relaxation rates (1/s): vR / sR from the wind and sky pass, gndR from the composition
 const vR = new Float32Array(HW * HH);              // ventilation towards ambient
 const sR = new Float32Array(HW * HH);              // sky cooling of exposed snow towards ambient-2
 const gndR = new Float32Array(HW * HH);            // deep ground relaxing towards GROUND_T
@@ -91,6 +91,8 @@ function compose(hx: number, hy: number) {
   // conduction coefficients only follow a real change of the mean conductivity / capacity (queued for applyDirty)
   if (nk !== kk[h] || nc !== cap[h]) { kk[h] = nk; cap[h] = nc; dirty[nDirty++] = h; }
   nSol[h] = ns; nSnow[h] = nsn; nWat[h] = nw; nGnd[h] = ng; sDens[h] = nsn ? (sd / nsn) | 0 : 0;
+  // deep ground relaxes towards GROUND_T (static geometry, so it is decided with the composition)
+  gndR[h] = ng >= 8 && hy * HS + 2 > groundY[Math.min(W - 1, hx * HS + 2)] + GROUND_DEEP ? GROUND_RATE : 0;
 }
 
 /** conduction coefficients of one heat cell: its own 1/C, air flag, and the pairs it owns (right, down) and the pairs ending in it (left, up).
@@ -132,7 +134,7 @@ export function initHeat() {
   for (let h = 0; h < HW * HH; h++) dirty[h] = h;   // every cell: start from exact coefficients
   nDirty = HW * HH; applyDirty();
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) T[hy * HW + hx] = profileT(hx, hy);
-  WND.fill(0); vR.fill(0); sR.fill(0); gndR.fill(0); meltAcc.fill(0); prevValid = false;
+  WND.fill(0); vR.fill(0); sR.fill(0); meltAcc.fill(0); prevValid = false;
 }
 
 // ---------------- window ----------------
@@ -195,7 +197,6 @@ function windPass() {
         vR[h] = 0;
         sR[h] = ns < 16 && nSnow[h] >= 4 && hy > hy0 && sky[h - HW] ? SKY_COOL : 0;   // sky radiative cooling of the exposed surface
       }
-      gndR[h] = nGnd[h] >= 8 && hy * HS + 2 > groundY[Math.min(W - 1, hx * HS + 2)] + GROUND_DEEP ? GROUND_RATE : 0;
       if (ns >= 8) open = 0;
     }
   }
