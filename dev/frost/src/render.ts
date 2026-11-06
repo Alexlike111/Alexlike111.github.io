@@ -8,6 +8,7 @@ import { G } from './state';
 import { W, H, CH, CW, CHH, HW, HH, mat, dens, bond, flags, body, gpuDirty } from './world';
 import { P, PK } from './particles';
 import { T, WND } from './heat';
+import { pl } from './player';
 import { prof, pnow, pend } from './prof';
 
 const VS = `#version 300 es
@@ -432,7 +433,8 @@ void main(){
     vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
     if(m==6) lit = max(lit, uAmb*.82 + pl);                               // bark and boughs under the crown never go black
     else if(m==7) lit = max(lit, uAmb*.62 + pl);
-    else if(m==11 || m==13) lit = max(lit, uAmb*1.05 + pl) + vec3(.085,.058,.032)*(1.-uDay);   // placed timber stays readable at night (a touch warmer / brighter)
+    else if(m==11 || m==13) lit = max(lit, uAmb*1.4 + pl) + vec3(.14,.1,.058)*(1.-uDay);   // placed timber stays readable at night (a touch warmer / brighter)
+    else if(m==1 && (fl&32)!=0) lit = max(lit, uAmb*1.2 + pl) + vec3(.045,.058,.09)*(1.-uDay);   // placed snow block: a night floor, so its courses and joints still read
     else if(m==5 && (fl&64)!=0) lit = lit*1.2 + uAmb*.15;
     col = alb*lit;
     if(m==1 && hasN>.5 && depth<2.2){
@@ -488,6 +490,7 @@ uniform float uTime, uDay, uStorm, uWind, uFog;
 uniform int uXray, uStormL;
 uniform vec3 uAmb, uSkyTop, uSkyHor;
 uniform vec4 uBody;
+uniform vec3 uHero;     // personal light (night): hero centre in cells (xy), reach in cells (z)
 out vec4 fragColor;
 
 // coverage of one spruce silhouette (tv = (x - tree x, height, ground y, present)); tone 0..1 = position inside the tier (for light tips)
@@ -713,6 +716,13 @@ void main(){
   float asp = uRes.x/uRes.y;
   float dd = length((sUV-.5)*vec2(asp,1.));
   if(openA>.004) col += background(sUV, sOff, bgL)*openA;
+#ifdef NIGHT
+  // personal light at night: starlight on the snow and the built walls around the hero, a faint cool halo within ~1.5 m, never a torch.
+  // Only what is not open sky (the sky itself stays dark; the hero's own rim carries the silhouette against it). Screen pass, so it follows the hero every frame.
+  float hk = (1.-uDay)*(1.-uStorm);
+  float hd = length(wp-uHero.xy)/uHero.z, hl = 1.-smoothstep(.1,1.,hd);
+  col += vec3(.15,.21,.35)*(hl*hl*hk*.7)*(1.-openA);
+#endif
 
   // low drifting snow hugging the local ground when it blows (> ~6 m/s)
 #ifdef DRIFT
@@ -1017,7 +1027,7 @@ export class Renderer {
     let v = this.scrV.get(f);
     if (!v) {
       const p = this.compile(VS, fsScr(this.half, this.colOK, f), 'screen');
-      v = { p, u: this.locs(p, ['uWorld', 'uHeat', 'uCell', 'uAux', 'uCol', 'uOrg', 'uCellSz', 'uRes', 'uCam', 'uView', 'uVis', 'uTime', 'uDay', 'uStorm', 'uWind', 'uFog', 'uXray', 'uOct', 'uStormL', 'uAmb', 'uSkyTop', 'uSkyHor', 'uBody']) };
+      v = { p, u: this.locs(p, ['uWorld', 'uHeat', 'uCell', 'uAux', 'uCol', 'uOrg', 'uCellSz', 'uRes', 'uCam', 'uView', 'uVis', 'uTime', 'uDay', 'uStorm', 'uWind', 'uFog', 'uXray', 'uOct', 'uStormL', 'uAmb', 'uSkyTop', 'uSkyHor', 'uBody', 'uHero']) };
       this.scrV.set(f, v);
     }
     return v;
@@ -1367,6 +1377,7 @@ export class Renderer {
     gl.uniform3f(u.uAmb, this.amb[0], this.amb[1], this.amb[2]);
     gl.uniform3f(u.uSkyTop, this.top[0], this.top[1], this.top[2]); gl.uniform3f(u.uSkyHor, this.hor[0], this.hor[1], this.hor[2]);
     gl.uniform4f(u.uBody, L.sbx, L.sby, L.mbx, L.mby);
+    gl.uniform3f(u.uHero, pl.x, pl.y - 17, 30);   // hero's body centre (feet at pl.y, ~34 cells tall); 1.5 m reach
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (prof.on) { pend('scrSubmit', t); if (pr) { this.sync(false); pend('gpuScr', t); } t = pnow(); }
 

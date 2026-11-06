@@ -1,17 +1,17 @@
 import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crates, CELL, body, flags, treeId, F_TREE, isGranular } from './world';
 import { G, FORCE } from './state';
 import { P } from './particles';
-import { initHeat, stepHeat, tempAt } from './heat';
+import { initHeat, stepHeat, tempAt, surf } from './heat';
 import { stepSim } from './sim';
 import { initBodies, stepBodies, allBodies, initPhysics, spawnStressTest } from './phys';
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud } from './tools';
+import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud, beamModesLine } from './tools';
 import { plural } from './ru';
 import { Renderer } from './render';
 import { Input } from './input';
-import { UI, HudData } from './ui';
+import { UI, HudData, Enclosure } from './ui';
 import { Sound } from './audio';
 import { prof, pnow, pend } from './prof';
 import { createBench, makeReport } from './bench';
@@ -107,6 +107,7 @@ function newGame(seed = 20261106 + Math.floor(Math.random() * 1000)) {
   resetPlayer(sx, sy - 1);
   renderer.invalidate();
   P.n = 0; ended = false; paused = false; tutorial = 0; tipCrawlUntil = tipDoorUntil = -1; tipCrawlDone = tipDoorDone = false;
+  tipSeen.clear(); tipShow = null; pitSince = -1; enclNext = 0; enclNow = { st: 'none', ang: null }; pocketNow = new Set();
   updateCamera(0, true);
   // pre-warm weather / heat
   for (let k = 0; k < 30; k++) { weather(0.1); stepHeat(0.1); }
@@ -118,14 +119,104 @@ function advanceTutorial() {
   else if (tutorial < 3 && crates.some((c) => c.opened)) tutorial = 3;
   else if (tutorial === 3 && (inv.blocks.length > 0 || inv.logs > 0 || tool.built.size > 0 || pl.shelter > 0.7)) tutorial = 4;
 }
+// ---------------- shelter status: the air pocket around the hero and the pit he stands in (read at 4 Hz) ----------------
+const ENCL_CAP = 3000;                                            // air cells searched; a pocket this big with no sky reached reads «большая полость»
+const topStamp = new Uint32Array(W), topRow = new Int32Array(W); // per-column cache of topOf(), valid for one reading (topCall)
+let topCall = 0;
+/** first row of column x that holds anything but air or needles (H when the column is open to the top) */
+function topOf(x: number): number {
+  if (topStamp[x] === topCall) return topRow[x];
+  let y = 0;
+  while (y < H && (mat[y * W + x] === M.AIR || mat[y * W + x] === M.NEEDLE)) y++;
+  topStamp[x] = topCall; topRow[x] = y;
+  return y;
+}
+/** flood fill over air from the hero's body (nearest cell first). A cell with nothing solid above it in its column is open to the sky:
+ *  the first one reached gives the arrow toward the opening; a fill that ends with none is a closed pocket (its cells come back for the fire check). */
+function enclosureAt(): { enc: Enclosure; pocket: Set<number> } {
+  topCall++;
+  const x0 = Math.round(pl.x);
+  let s0 = -1;
+  for (const yy of [pl.y - pl.h * 0.6, pl.y - pl.h * 0.3, pl.y - 2, pl.y - pl.h + 3]) {   // body centre first, then other parts of the body
+    const y = Math.round(yy);
+    if (inb(x0, y) && (mat[y * W + x0] === M.AIR || mat[y * W + x0] === M.NEEDLE)) { s0 = y * W + x0; break; }
+  }
+  if (s0 < 0) return { enc: { st: 'none', ang: null }, pocket: new Set() };
+  const sx = s0 % W, sy = (s0 - sx) / W;
+  const seen = new Set<number>([s0]), q: number[] = [s0];
+  const add = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    const j = y * W + x;
+    if (seen.has(j) || (mat[j] !== M.AIR && mat[j] !== M.NEEDLE)) return;
+    seen.add(j); q.push(j);
+  };
+  // standing in the open: no arrow. Otherwise the first sky cell proves the pocket open; the search runs on a little longer
+  // so the arrow can point at the highest sky cell it reached (the mouth of a shaft or the gap in a roof, not the shaft beside the hero)
+  let first = -1, mouth = -1, mouthY = H;
+  for (let k = 0; k < q.length; k++) {
+    const i = q[k], x = i % W, y = (i - x) / W;
+    if (y < topOf(x)) {
+      if (i === s0) return { enc: { st: 'open', ang: null }, pocket: seen };
+      if (first < 0) first = k;
+      if (y < mouthY) { mouthY = y; mouth = i; }
+    }
+    if (first >= 0 && k - first > 350) break;
+    if (first < 0 && q.length > ENCL_CAP) return { enc: { st: 'big', ang: null }, pocket: seen };
+    add(x + 1, y); add(x - 1, y); add(x, y + 1); add(x, y - 1);
+  }
+  if (first >= 0) { const mx = mouth % W, my = (mouth - mx) / W; return { enc: { st: 'open', ang: Math.atan2(my - sy, mx - sx) * 180 / Math.PI }, pocket: seen }; }
+  return { enc: { st: 'closed', ang: null }, pocket: seen };
+}
+/** metres the hero's feet are below the ground within 3 m either side. The ground is the quarter of the columns that stand highest:
+ *  a dug pit (and a tree top or a single post) does not lift it, so flat snow reads about 0 and a pit reads its depth */
+const pitCols = new Int16Array(121);
+function pitDepth(): number {
+  const cx = Math.round(pl.x);
+  let n = 0;
+  for (let x = Math.max(0, cx - 60); x <= Math.min(W - 1, cx + 60); x++) pitCols[n++] = surf[x];
+  const ground = pitCols.subarray(0, n).sort();
+  return (pl.y + 1 - ground[Math.floor(n / 4)]) * CELL;
+}
+let enclNow: Enclosure = { st: 'none', ang: null }, pocketNow = new Set<number>(), enclNext = 0;
+let pitSince = -1;   // real time the hero first stood at least 1.2 m down in a pit (-1: not in one)
+/** shelter readings, throttled to 4 Hz: the enclosure chip, the pocket for the fire check, and how long the hero has stood in a deep pit */
+function updateEnclosure() {
+  if (G.realTime < enclNext) return;
+  enclNext = G.realTime + 0.25;
+  const r = enclosureAt();
+  enclNow = r.enc; pocketNow = r.pocket;
+  pitSince = pl.alive && pitDepth() >= 1.2 ? (pitSince < 0 ? G.realTime : pitSince) : -1;
+}
+// one-time shelter tips, per game: each shows once, one at a time, while its condition holds (the tip keeps its text on screen for its own time)
+const TIP_PIT = 'Землянка: прокопай вбок камеру, а шахту накрой брусьями или блоками — тёплый воздух уходит вверх';
+const TIP_CLOSED = 'Закрыто. Разведи костёр (6) — станет тепло';
+const TIP_IGLOO = 'Иглу: два ряда блоков стоймя по краям, сверху плоские блоки внахлёст к центру, последний — замковый';
+const tipSeen = new Set<string>();
+let tipShow: { text: string; until: number } | null = null;
+/** the tip on screen, else the first unseen tip whose condition holds now (null = none) */
+function shelterTip(): string | null {
+  if (tipShow && G.realTime < tipShow.until) return tipShow.text;
+  const show = (key: string, text: string): string | null => {
+    if (tipSeen.has(key)) return null;
+    tipSeen.add(key); tipShow = { text, until: G.realTime + Math.max(5, text.length * 0.08 + 1) };
+    return text;
+  };
+  // a lit fire whose flame air lies inside the pocket
+  const fireInPocket = (f: { x: number; y: number }) => { for (let dy = 1; dy <= 3; dy++) for (let dx = -1; dx <= 1; dx++) if (pocketNow.has((Math.round(f.y) - dy) * W + Math.round(f.x) + dx)) return true; return false; };
+  if (pitSince >= 0 && G.realTime - pitSince > 5) { const t = show('pit', TIP_PIT); if (t) return t; }
+  if (enclNow.st === 'closed' && !G.fires.some((f) => f.lit && fireInPocket(f))) { const t = show('closed', TIP_CLOSED); if (t) return t; }
+  const id = TOOLS[tool.cur].id;
+  if (id === 'saw' || id === 'block') { const t = show('igloo', TIP_IGLOO); if (t) return t; }
+  return null;
+}
 let hintSig = '', hintLast = '', hintLastT = -99;
 /** tool messages: live <= 2.5 s; any successful action (snow dug / thrown, inventory or build change, tool switch) wipes a stale message at once; the same refusal is not repeated for 4 s while a button is held */
 function hint(): string | null {
   const sig = `${tool.cur}|${Math.round(tool.load)}|${inv.logs}|${inv.branches}|${inv.matches}|${inv.food}|${inv.crackers}|${inv.blocks.length}|${tool.built.size}`;
   if (sig !== hintSig) { if (hintSig) { hintT = 0; hintText = null; } hintSig = sig; }
   if (tool.msg) {
-    const m = tool.msg; tool.msg = '';
-    if (m !== hintLast || G.realTime - hintLastT > 4) { hintText = m; hintT = 2.5; hintLast = m; hintLastT = G.realTime; }
+    const m = tool.msg, sec = tool.msgSec; tool.msg = ''; tool.msgSec = 2.5;
+    if (m !== hintLast || G.realTime - hintLastT > 4) { hintText = m; hintT = sec; hintLast = m; hintLastT = G.realTime; }
   }
   if (hintT > 0 && hintText) return hintText;
   advanceTutorial();
@@ -135,6 +226,8 @@ function hint(): string | null {
   if (!tipCrawlDone && tutorial >= 4) { tipCrawlDone = true; tipCrawlUntil = G.realTime + 7; if (G.realTime < tipDoorUntil) tipCrawlUntil = tipDoorUntil + 7; }
   if (G.realTime < tipDoorUntil) return mob ? 'Дверь: на кнопке поворота выбери режим «дверь» — проходима, но держит ветер и тепло' : 'Дверь: нажми R, пока не будет режим «дверь» — проходима, но держит ветер и тепло';
   if (G.realTime < tipCrawlUntil) return 'В низком ходе герой ползёт сам (медленнее): снежная нора и иглу — это лаз, а не зал';
+  const shelter = shelterTip();
+  if (shelter) return shelter;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
   if (tutorial === 1) return mob ? '«Положить»: бросить снег из лопаты туда, куда целишься' : 'ПКМ: бросить снег из лопаты туда, куда целишься';
   if (tutorial === 2) return mob ? 'Найди ящик под оранжевой вешкой, подкопай и жми «Взять»' : 'Найди ящик под оранжевой вешкой, подкопай к нему и жми E';
@@ -263,7 +356,9 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   let fk = 0, nf: typeof G.fires[number] | null = null, nfd = 1e9;
   for (const f of G.fires) if (f.lit) { const d = Math.hypot(f.x - x, f.y - 6 - y); if (d < nfd) { nfd = d; nf = f; } fk += Math.pow(Math.max(0, 1 - d / 240), 1.3); }
   fk = Math.min(1, fk);
-  sL = [Math.min(1.15, base * 0.94 + 0.5 * fk), Math.min(1.15, base * 0.99 + 0.26 * fk), Math.min(1.15, base * 1.06 + 0.04 * fk)];
+  // night: starlight on the parka lifts the sprite a little (in the dark it sat at ~55 % and sank into the snow); a cool lift, not a torch
+  const nk = Math.max(0, Math.min(1, 1 - G.daylight));
+  sL = [Math.min(1.15, base * 0.94 + 0.5 * fk + 0.12 * nk), Math.min(1.15, base * 0.99 + 0.26 * fk + 0.15 * nk), Math.min(1.15, base * 1.06 + 0.04 * fk + 0.2 * nk)];
   // ---- pose ----
   let vf = pl.face;
   if (aim && pl.alive && Math.abs(aim[0] - x) > 3) vf = aim[0] > x ? 1 : -1;
@@ -404,7 +499,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   if (nf && nfd < 320) { rimLx = Math.abs(nf.x - x) < 4 ? 0 : nf.x > x ? 1 : -1; rimStr = Math.min(1, 0.4 + (1 - nfd / 320) * 1.2); rimWarm = true; }
   const tod = ((G.time / 60) % 24 + 24) % 24;
   const skyX = G.daylight > 0.25 ? Math.sign(12.5 - tod) || 1 : Math.sign(0.5 - Math.max(0, Math.min(1, ((tod - 17 + 24) % 24) / 14))) || -1;
-  const skyStr = 0.28 + 0.2 * (1 - G.daylight);
+  const skyStr = 0.28 + 0.2 * (1 - G.daylight), nightRim = 0.5 * nk;
   const rw: C3 = rimWarm ? [255, 168, 86] : [168, 200, 255];
   for (let y = 1; y < SPH - 1; y++) for (let x2 = 1; x2 < SPW - 1; x2++) {
     const i = y * SPW + x2;
@@ -420,6 +515,8 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
       const c2 = !filled(i + skyX) ? skyStr : !filled(i - SPW) ? skyStr * 0.6 : 0;
       if (c2 > rs) { rs = c2; wr = false; }
     }
+    // night: a faint cool rim all round the silhouette, so the dark parka reads against dark snow and dark sky
+    if (nightRim > rs && (!filled(i - 1) || !filled(i + 1) || !filled(i - SPW) || !filled(i + SPW))) { rs = nightRim; wr = false; }
     if (rs > 0) {
       const cc = wr ? rw : [168, 200, 255] as C3;
       const p = src[i], pr = p & 255, pg = (p >> 8) & 255, pb = (p >> 16) & 255;
@@ -428,9 +525,16 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     }
   }
   void N;
+  // the sprite's filled box in world cells (tool and arm included): the overlay labels keep out of it
+  let qx0 = SPW, qy0 = SPH, qx1 = -1, qy1 = -1;
+  for (let yy = 0; yy < SPH; yy++) for (let xx = 0; xx < SPW; xx++) {
+    if (spBuf[yy * SPW + xx] >>> 24) { if (xx < qx0) qx0 = xx; if (xx > qx1) qx1 = xx; if (yy < qy0) qy0 = yy; if (yy > qy1) qy1 = yy; }
+  }
+  const ox = Math.round(x) - SOX + shakeX, oy = Math.round(y) - SOY + shakeY;
+  heroBox.ok = qx1 >= 0; heroBox.x0 = ox + qx0; heroBox.y0 = oy + qy0; heroBox.x1 = ox + qx1 + 1; heroBox.y1 = oy + qy1 + 1;
   spCtx.putImageData(spImg, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(spCanvas, Math.round(x) - SOX + shakeX, Math.round(y) - SOY + shakeY);
+  ctx.drawImage(spCanvas, ox, oy);
 }
 const mix3c = (a: C3, b: C3, t: number): C3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
@@ -486,17 +590,84 @@ function drawContactShadow() {
 }
 
 // ---------------- aim overlay: ghosts, reticles, live verdicts, throw and fall previews ----------------
-// Verdict colours are the ghost palette (rgb triplets: green ok, yellow weak, red refused). Labels are Jura 11 css px with a dark halo,
+// Verdict colours are the ghost palette (rgb triplets: green ok, yellow weak, red refused). Labels are Jura 12 css px with a dark halo,
 // drawn in world units (px = one css px in world units), so they keep their size at any zoom.
 const OV_GREEN = '110,230,150', OV_YELLOW = '255,190,70', OV_RED = '255,92,60';
 const OV_TXT = 'rgb(234,243,251)', OV_BAD = 'rgb(255,150,120)', OV_DARK = 'rgba(8,14,26,0.78)';
 const OV_TAU = Math.PI * 2;
+const OV_FONT = 12, OV_LINE = 15, OV_GAP = 4;   // label font, line pitch and gap from a ghost box (css px)
+type Box = { x0: number; y0: number; x1: number; y1: number };
+/** the hero sprite's filled box in world cells (drawPlayer sets it each frame, tool and arm included): labels keep out of it */
+const heroBox = { ok: false, x0: 0, y0: 0, x1: 0, y1: 0 };
+/** label boxes placed in this frame's overlay: a new label avoids them, so labels stack instead of overlapping */
+const ovPlaced: Box[] = [];
 let ovFontStr = '', ovFontPx = -1;
+function ovFont(px: number) {
+  if (px !== ovFontPx) { ovFontPx = px; ovFontStr = `500 ${OV_FONT * px}px Jura, "Segoe UI", system-ui, sans-serif`; }
+  ctx.font = ovFontStr;
+}
 function ovText(s: string, x: number, y: number, col: string, px: number, align: CanvasTextAlign = 'center', base: CanvasTextBaseline = 'bottom') {
-  if (px !== ovFontPx) { ovFontPx = px; ovFontStr = `500 ${11 * px}px Jura, "Segoe UI", system-ui, sans-serif`; }
-  ctx.font = ovFontStr; ctx.textAlign = align; ctx.textBaseline = base;
-  ctx.lineJoin = 'round'; ctx.lineWidth = 2.6 * px; ctx.strokeStyle = 'rgba(8,14,26,0.85)'; ctx.strokeText(s, x, y);
+  ovFont(px); ctx.textAlign = align; ctx.textBaseline = base;
+  ctx.lineJoin = 'round'; ctx.lineWidth = 3 * px; ctx.strokeStyle = 'rgba(8,14,26,0.9)'; ctx.strokeText(s, x, y);
   ctx.fillStyle = col; ctx.fillText(s, x, y);
+}
+/** A label block beside a box (a ghost). Takes the first spot in `order` that is on screen and clear of the hero, the box and the labels
+ *  placed so far; if none is clear it stacks above the placed labels (unless `stack` is off: then nothing is drawn and false comes back).
+ *  A label that sits off its box gets a short leader line. */
+function ovLabel(lines: { s: string; col: string }[], g: Box, px: number, order: ('above' | 'below' | 'right' | 'left')[], stack = true): boolean {
+  if (!lines.length) return false;
+  ovFont(px);
+  let W = 0; for (const l of lines) W = Math.max(W, ctx.measureText(l.s).width);
+  const LH = OV_LINE * px, H = LH * lines.length, gap = OV_GAP * px;
+  const cx = (g.x0 + g.x1) / 2, cy = (g.y0 + g.y1) / 2;
+  const cand = (k: string): Box => k === 'above' ? { x0: cx - W / 2, y0: g.y0 - gap - H, x1: cx + W / 2, y1: g.y0 - gap }
+    : k === 'below' ? { x0: cx - W / 2, y0: g.y1 + gap, x1: cx + W / 2, y1: g.y1 + gap + H }
+    : k === 'right' ? { x0: g.x1 + gap, y0: cy - H / 2, x1: g.x1 + gap + W, y1: cy + H / 2 }
+    : { x0: g.x0 - gap - W, y0: cy - H / 2, x1: g.x0 - gap, y1: cy + H / 2 };
+  const hit = (a: Box, b: Box, m: number) => a.x0 < b.x1 + m && a.x1 > b.x0 - m && a.y0 < b.y1 + m && a.y1 > b.y0 - m;
+  const vx0 = G.cam.x - cssW / 2 / G.cam.zoom, vx1 = G.cam.x + cssW / 2 / G.cam.zoom, vy0 = G.cam.y - cssH / 2 / G.cam.zoom, vy1 = G.cam.y + cssH / 2 / G.cam.zoom;
+  const clear = (b: Box) => b.x0 >= vx0 && b.x1 <= vx1 && b.y0 >= vy0 && b.y1 <= vy1 && !(heroBox.ok && hit(b, heroBox, 2 * px)) && !ovPlaced.some((p) => hit(b, p, px));
+  let B: Box | null = null, kind = '';
+  for (const k of order) { const b = cand(k); if (clear(b)) { B = b; kind = k; break; } }
+  if (!B) {                                     // nothing clear beside the box: stack above the labels already placed (the hero is the last thing to give way)
+    if (!stack) return false;
+    let b = cand('above'); kind = 'stack';
+    for (let n = 0; n < 8; n++) { const p = ovPlaced.find((q) => hit(b, q, px)); if (!p) break; b = { x0: b.x0, x1: b.x1, y0: p.y0 - gap - H, y1: p.y0 - gap }; }
+    B = b;
+  }
+  const box: Box = B;
+  ovPlaced.push(box);
+  // leader line when the label sits off its box (more than the usual gap away)
+  const dx = Math.max(0, box.x0 - g.x1, g.x0 - box.x1), dy = Math.max(0, box.y0 - g.y1, g.y0 - box.y1);
+  if (Math.hypot(dx, dy) > gap * 1.5) {
+    const ax = Math.min(Math.max((box.x0 + box.x1) / 2, g.x0), g.x1), ay = Math.min(Math.max((box.y0 + box.y1) / 2, g.y0), g.y1);
+    const lx = Math.min(Math.max(cx, box.x0), box.x1), ly = Math.min(Math.max(cy, box.y0), box.y1);
+    ctx.setLineDash([]); ctx.lineCap = 'round';
+    ctx.lineWidth = 2.6 * px; ctx.strokeStyle = OV_DARK; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(lx, ly); ctx.stroke();
+    ctx.lineWidth = px; ctx.strokeStyle = 'rgba(234,243,251,0.8)'; ctx.stroke();
+  }
+  // text: centred over its box, or flush with the ghost when it sits beside it
+  const align: CanvasTextAlign = kind === 'right' ? 'left' : kind === 'left' ? 'right' : 'center';
+  const tx = kind === 'right' ? box.x0 : kind === 'left' ? box.x1 : (box.x0 + box.x1) / 2;
+  for (let i = 0; i < lines.length; i++) ovText(lines[i].s, tx, box.y0 + i * LH, lines[i].col, px, align, 'top');
+  return true;
+}
+/** Where a beam or door has to stand: a small marker on the first solid surface under each column, scanned down from its foot. */
+function ovSupportMarks(xs: number[], yb: number, px: number) {
+  for (const x of xs) {
+    const cx = Math.round(x), y0 = Math.round(yb);
+    let ys = -1;
+    for (let y = y0; y < y0 + 40 && inb(cx, y); y++) {
+      const i = idx(cx, y), m = mat[i];
+      if (m !== M.AIR && m !== M.NEEDLE && !(m === M.SNOW && isGranular(i))) { ys = y; break; }
+    }
+    if (ys < 0) continue;
+    ctx.setLineDash([2.4 * px, 2 * px]); ctx.lineWidth = 1.4 * px; ctx.strokeStyle = 'rgba(143,211,255,0.9)';
+    ctx.beginPath(); ctx.moveTo(cx, y0); ctx.lineTo(cx, ys); ctx.stroke(); ctx.setLineDash([]);
+    const r = 3 * px;
+    ctx.beginPath(); ctx.moveTo(cx, ys - r); ctx.lineTo(cx + r, ys); ctx.lineTo(cx, ys + r); ctx.lineTo(cx - r, ys); ctx.closePath();
+    ctx.fillStyle = 'rgb(143,211,255)'; ctx.fill(); ctx.lineWidth = 1.6 * px; ctx.strokeStyle = OV_DARK; ctx.stroke();
+  }
 }
 const needTxt: string[] = [];   // "Нужно N брёвен" by count: built once, so the frame loop does not allocate it
 function needLogsTxt(n: number): string { return needTxt[n] ??= `Нужно ${n} ${plural(n, 'бревно', 'бревна', 'брёвен')}`; }
@@ -525,23 +696,39 @@ function restsOn(g: { x0: number; y0: number; w: number; h: number }): string {
   }
   return 'опора';
 }
-/** Block / beam ghost with its live verdict: the refusals place() gives, in the same order, shown before the click. Beam: mode name beside it. */
+/** Block / beam ghost with its live verdict: the refusals place() gives, in the same order, shown before the click. Beam: mode name beside it.
+ *  A refused door shows the clear opening it needs (dashed); a beam that would hang shows its support points under its ends (under the foot for a post or door). */
 function ovGhost(beam: boolean, ax: number, ay: number, px: number) {
   const g = ghostMargin(beam ? 'beam' : 'block', ax, ay);
-  const need = beam ? beamShape().logs : 1;
+  const bs = beam ? beamShape() : null;
+  const need = bs ? bs.logs : 1;
   const have = beam ? inv.logs >= need : inv.blocks.length > 0;
   const mg = g.blocked ? 0 : g.margin;
   const rgb = !have || g.blocked || mg <= 0.02 ? OV_RED : mg < 0.35 ? OV_YELLOW : OV_GREEN;
   ctx.fillStyle = `rgba(${rgb},0.35)`; ctx.fillRect(g.x0, g.y0, g.w, g.h);
   ctx.lineWidth = px * 1.2; ctx.strokeStyle = OV_DARK; ctx.strokeRect(g.x0 - px * 1.1, g.y0 - px * 1.1, g.w + px * 2.2, g.h + px * 2.2);
   ctx.lineWidth = px * 1.6; ctx.strokeStyle = `rgba(${rgb},0.95)`; ctx.strokeRect(g.x0, g.y0, g.w, g.h);
+  const box: Box = { x0: g.x0, y0: g.y0, x1: g.x0 + g.w, y1: g.y0 + g.h };
+  const hung = have && !g.blocked && mg <= 0.02;     // no support path: place() refuses a beam here, a block is not refused (it would crumble)
   let s = '', col = OV_BAD;
   if (g.blocked) s = g.reason;
   else if (!have) s = beam ? needLogsTxt(need) : 'нет блоков: вырежь пилой';
-  else if (mg <= 0.02) s = 'повиснет: нужна опора';         // no support path (place() refuses a beam here; a block is not refused)
+  else if (hung) s = 'повиснет: нужна опора';
   else if (beam) { s = restsOn(g); col = `rgb(${rgb})`; }
-  if (s) ovText(s, g.x0 + g.w / 2, g.y0 - 3 * px, col, px);
-  if (beam) ovText(BEAM_MODE_NAMES[tool.rot % BEAM_MODES], g.x0 + g.w + 4 * px, g.y0 + g.h / 2, OV_TXT, px, 'left', 'middle');
+  const refused = g.blocked || hung;
+  if (g.door && refused) {                           // the clear opening a standing hero needs: the body's width (PW) by the door's height, dashed, centred on the door
+    const cx = g.x0 + g.w / 2;
+    ctx.setLineDash([3 * px, 2.4 * px]); ctx.lineWidth = px * 1.4; ctx.strokeStyle = 'rgba(234,243,251,0.95)';
+    ctx.strokeRect(cx - PW / 2, g.y0, PW, g.h); ctx.setLineDash([]);
+  }
+  if (hung) ovSupportMarks(bs && !bs.vert ? [g.x0 + 2, g.x0 + g.w - 3] : [g.x0 + g.w / 2], g.y0 + g.h, px);
+  const lines: { s: string; col: string }[] = [];
+  if (s) lines.push({ s, col });
+  if (g.door && refused) lines.push({ s: 'нужен проём 1,8 м × 0,5 м без преград', col: OV_TXT });
+  // the mode name beside the beam; with no free side it heads the status block instead (no leader line through the text)
+  const mode = { s: BEAM_MODE_NAMES[tool.rot % BEAM_MODES], col: OV_TXT };
+  if (beam && !ovLabel([mode], box, px, ['right', 'left'], false)) lines.unshift(mode);
+  ovLabel(lines, box, px, ['above', 'below', 'right', 'left']);
 }
 /** Saw reticle: green when a cut here would make a block, red when not, with the density and the reason (the same tests saw() runs). */
 function ovSaw(ax: number, ay: number, px: number) {
@@ -630,6 +817,7 @@ function ovFall(ax: number, ay: number, px: number) {
 function drawOverlay(aim: [number, number] | null) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, fx.width, fx.height);
+  ovPlaced.length = 0;   // labels are placed afresh each frame
   const s = G.cam.zoom * dpr;
   ctx.setTransform(s, 0, 0, s, (cssW / 2 - G.cam.x * G.cam.zoom) * dpr + (Math.random() - 0.5) * shake * dpr, (cssH / 2 - G.cam.y * G.cam.zoom) * dpr + (Math.random() - 0.5) * shake * dpr);
   ctx.imageSmoothingEnabled = false;
@@ -853,9 +1041,9 @@ function frameBody(now: number) {
   // tools
   if (s.toolSelect >= 0 && s.toolSelect < TOOLS.length) { tool.cur = s.toolSelect; sound.uiClick(); }
   if (s.rotatePressed) {
-    const bm = TOOLS[tool.cur].id === 'beam';
-    tool.rot = bm ? (((tool.rot % BEAM_MODES) + 1) % BEAM_MODES) : (tool.rot + 1) % 2;
-    if (bm) tool.msg = 'Режим: ' + BEAM_MODE_NAMES[tool.rot] + (tool.rot === 4 ? ' — стоит в проёме, держит ветер и тепло' : '');
+    const bm = TOOLS[tool.cur].id === 'beam', back = !bench.active && input.state.rotateBack;   // Shift+R: the previous mode
+    tool.rot = bm ? (((tool.rot % BEAM_MODES) + (back ? BEAM_MODES - 1 : 1)) % BEAM_MODES) : (tool.rot + 1) % 2;
+    if (bm) { tool.msg = beamModesLine(); tool.msgSec = 4; }   // every mode, the current one in brackets
     else if (TOOLS[tool.cur].id === 'block') tool.msg = 'Блок: ' + (tool.rot % 2 ? 'стоймя' : 'плашмя');
     sound.uiClick();
   }
@@ -910,6 +1098,7 @@ function frameBody(now: number) {
   if (!pl.alive && !ended) { ended = true; sound.death(); setTimeout(() => ui.showEnd(false, pl.cause, { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }), 1400); }
   void nightsSurvived;
   hintT -= realDt;
+  updateEnclosure();   // shelter status at 4 Hz: the chip below and the shelter tips in hint() read it
   // HUD
   const h: HudData = {
     core: pl.core, food: pl.food, stamina: pl.stamina, wet: pl.wet,
@@ -921,6 +1110,7 @@ function frameBody(now: number) {
     inv: { logs: inv.logs, branches: inv.branches, matches: inv.matches, food: inv.food + inv.crackers, blocks: inv.blocks.length, snowshoes: inv.snowshoes, thermos: inv.thermos },
     hint: hint(), shovelLoad: Math.min(1, tool.load / 46), waiting: G.timeScale > 2,
     ...toolHud(),
+    encl: enclNow,
   };
   pt = pnow();
   ui.update(h);

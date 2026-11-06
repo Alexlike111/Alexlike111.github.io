@@ -18,7 +18,11 @@ export interface HudData {
   beamMode: string;   // beam shape name, e.g. «брус 1 м»
   shovelN: number;    // cells in the shovel
   shovelMax: number;
+  encl: Enclosure;    // the air pocket the hero stands in (main.ts enclosureAt, 4 Hz)
 }
+/** closed: the air pocket reaches no open sky; open: it does (ang = degrees, screen axes, toward the nearest opening, null when standing in it);
+ *  big: the pocket is larger than the search cap and no sky was reached; none: the hero's cell is solid (no reading) */
+export interface Enclosure { st: 'closed' | 'open' | 'big' | 'none'; ang: number | null }
 
 /** campfire fuel bar scale: 4 game hours = full */
 const FIRE_FULL_MIN = 240;
@@ -232,6 +236,9 @@ export class UI {
   private gaugeQ = { food: 1, stamina: 1, wet: 0, shelter: 0 };
   private retUntil = 0;
   private warnTime!: Cached;
+  private enclChip!: HTMLElement;   // «Укрытие: закрыто ✓» under the УКРЫТИЕ gauge
+  private enclTxt!: Cached;
+  private enclArr!: SVGElement;
   private toasts!: HTMLElement;
   private hintCard: HTMLElement;
   private hintText: HTMLElement;
@@ -384,6 +391,12 @@ export class UI {
     col.appendChild(this.gauge('stamina', 'СИЛЫ', 'bolt'));
     col.appendChild(this.gauge('wet', 'СЫРОСТЬ', 'drop'));
     col.appendChild(this.gauge('shelter', 'УКРЫТИЕ', 'hut'));
+    // enclosure status under the УКРЫТИЕ gauge: a closed roof, or the open top with an arrow toward the nearest opening
+    this.enclChip = el('div', 'encl', '<span class="encl-t"></span><svg class="encl-arr" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8.5M6.5 2.5 10 6l-3.5 3.5"/></svg>');
+    this.enclTxt = this.enclChip.querySelector('.encl-t') as Cached;
+    this.enclArr = this.enclChip.querySelector('.encl-arr') as unknown as SVGElement;
+    this.enclChip.hidden = true;
+    col.appendChild(this.enclChip);
     col.insertAdjacentHTML('beforeend', '<i class="rivet r1"></i><i class="rivet r2"></i><i class="rivet r3"></i><i class="rivet r4"></i>');
     box.appendChild(col);
     this.hud.appendChild(box);
@@ -754,6 +767,16 @@ export class UI {
     this.setGauge('stamina', h.stamina, false);
     this.setGauge('wet', h.wet, true);
     this.setGauge('shelter', h.shelter, false, true);
+    // ---- enclosure chip (main.ts reads the air pocket at 4 Hz; the chip only follows it)
+    const en = h.encl;
+    this.m('encl', en.st + '|' + (en.ang == null ? '' : String(Math.round(en.ang / 5))), () => {
+      const c = this.enclChip;
+      c.hidden = en.st === 'none';
+      c.dataset.st = en.st;
+      this.txt(this.enclTxt, en.st === 'closed' ? 'Укрытие: закрыто ✓' : en.st === 'open' ? 'открыто сверху — закрой крышей' : en.st === 'big' ? 'Укрытие: большая полость' : '');
+      if (en.st === 'open' && en.ang != null) { c.dataset.arrow = '1'; this.enclArr.style.transform = `rotate(${en.ang.toFixed(0)}deg)`; }
+      else delete c.dataset.arrow;
+    });
 
     // ---- wind dial
     const w = Math.abs(h.wind);
@@ -871,10 +894,10 @@ export class UI {
     this.m('hint', hint, () => {
       if (hint) this.hintText.textContent = hint;
       this.hintCard.classList.toggle('on', !!hint);
-      // fades to 35 % after 4 s so it never hides the work; any change restores it
+      // fades after 4 s, or ~80 ms per character for a long tip (the igloo scheme needs reading time), so it never hides the work; any change restores it
       window.clearTimeout(this.hintTid);
       this.hintCard.classList.remove('dim');
-      if (hint) this.hintTid = window.setTimeout(() => this.hintCard.classList.add('dim'), 4000);
+      if (hint) this.hintTid = window.setTimeout(() => this.hintCard.classList.add('dim'), Math.max(4000, hint.length * 80));
     });
   }
 

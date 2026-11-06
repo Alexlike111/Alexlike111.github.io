@@ -225,6 +225,17 @@ body { position: fixed; inset: 0; width: 100%; }
   padding: 0.2em 0.45em 0.22em; border-radius: 0.2em; background: rgba(2, 5, 10, 0.72); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(143, 211, 255, 0.14);
 }
 .g-val i { font-style: normal; color: var(--frost-3); font-size: 0.85em; }
+/* enclosure status under the УКРЫТИЕ gauge: a closed roof reads ice-white, an open top glows ember with an arrow toward the opening */
+.encl {
+  display: flex; align-items: center; gap: 0.45em; padding-top: calc(var(--gap) * 0.5); border-top: 1px solid rgba(143, 211, 255, 0.1);
+  font: 600 max(10.5px, 0.74em) / 1.2 var(--font-ui); letter-spacing: 0.03em; color: var(--ice); transition: color 0.4s;
+}
+.encl[hidden] { display: none; }
+.encl[data-st='open'] { color: var(--ember); }
+.encl[data-st='big'] { color: var(--frost-2); }
+.encl-t { min-width: 0; }
+.encl-arr { display: none; flex: none; width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.35s var(--ease); }
+.encl[data-arrow] .encl-arr { display: block; }
 .g-tube { grid-column: 1 / 4; position: relative; display: block; height: 1.3em; }
 .g-tube::before, .g-tube::after {
   content: ''; position: absolute; top: -2px; bottom: -2px; width: 0.75em; z-index: 3;
@@ -868,6 +879,9 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .g-ico .ico { width: 14px; height: 14px; }
   .g-val { grid-column: 2; padding: 0; background: none; box-shadow: none; font-size: 11px; font-weight: 600; }
   .g-val i { display: none; }
+  /* phone: the enclosure line wraps under the gauge row, small and without the rule above it */
+  .gauges { flex-wrap: wrap; row-gap: 3px; }
+  .encl { flex: 0 0 100%; padding: 1px 1px 0; border-top: 0; font-size: 10px; gap: 0.3em; }
   .g-tube { height: 8px; grid-column: 1 / 3; }
   .g-tube::before, .g-tube::after { width: 4px; top: -1px; bottom: -1px; }
   .g-glass { left: 3px; right: 3px; }

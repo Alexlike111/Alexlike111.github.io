@@ -18,7 +18,8 @@ export const TOOLS = [
 ] as const;
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
-export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' as string, built: new Set<string>() };
+// msgSec: how long the next tool message stays on the hint card (seconds); autoTipped: the one-time auto-throw explanation was shown this game
+export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, autoTipped: false, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
 /** E / «Взять» feeds a campfire this close (cells, 2 m); the HUD fuel chip shows at the same distance */
 export const FEED_R = 40;
@@ -33,7 +34,7 @@ let fireId = 1;
 
 export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
-  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' });
+  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5, autoTipped: false });
   tool.built.clear();
   G.fires.length = 0; laid.length = 0; loadWarned = false; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
 }
@@ -260,7 +261,14 @@ export function throwLoad(ax: number, ay: number, auto: boolean) {
   const [sx, sy] = shoulder();
   let ux: number, uy: number, sp: number;
   // a throw aimed back into the snow being dug (or right at his feet / on a touch screen, where the aim is the dig spot) is tossed clear automatically
-  if (!auto) { const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1; if (G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai))) auto = true; }
+  if (!auto) {
+    const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1;
+    if (G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai))) {
+      auto = true;
+      // explained once per game, and only where the key is the right-click the text names (touch throws have no such key)
+      if (!G.mobile && !tool.autoTipped) { tool.autoTipped = true; say('Снег из ямы летит сам за спину; ПКМ дальше 1 м — бросок туда, куда целишься'); tool.msgSec = 4.5; }
+    }
+  }
   if (auto) { const p = planSpoil(sx, sy); ux = p.ux; uy = p.uy; sp = p.sp; }
   else {
     const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy));
@@ -337,6 +345,12 @@ export const BEAM_MODE_NAMES = ['брус 1 м', 'брус 2 м', 'стойка 
  *  Two logs, like a 2 m upright (36 cells of plank is 1.8 logs). */
 export const DOOR_H = 36;
 export function beamShape() { const s = ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; return s === 4 ? { vert: true, len: DOOR_H, logs: 2, door: true } : { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1, door: false }; }
+/** the R line: every beam mode in cycle order, the current one in brackets, e.g. «брус 1 м · [брус 2 м] · стойка 1 м · стойка 2 м · дверь 1,8 м» */
+export function beamModesLine(): string {
+  const cur = beamModeIndex();
+  const line = BEAM_MODE_NAMES.map((n, i) => (i === cur ? `[${n.replace(' (проходимая)', '')}]` : n.replace(' (проходимая)', ''))).join(' · ');
+  return cur === 4 ? line + ' — проходима, держит ветер и тепло' : line;
+}
 const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.DOOR]: 'дверь', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
 /** placement classes of a world cell: 0 free (air, boughs, loose snow / ash: displaced), 1 rigid snow, 2 hard (rock, timber, ice, water, fallen bodies, world edge) */
 function pcls(x: number, y: number): number {

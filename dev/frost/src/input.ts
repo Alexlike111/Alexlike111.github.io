@@ -11,6 +11,7 @@ export interface InputState {
   waitHeld: boolean;         // T held / "Ждать" toggle
   firePressed: boolean;      // F
   rotatePressed: boolean;    // R / rotate button
+  rotateBack: boolean;       // edge with rotatePressed: Shift+R cycles the beam mode backwards
   xrayPressed: boolean;      // X
   pausePressed: boolean;     // Esc / pause button
   toolSelect: number;        // -1 or 0..5 edge (keys 1–6, wheel cycles, tapping a tool tag)
@@ -25,7 +26,7 @@ export class Input {
     moveX: 0, jump: false, run: false,
     aimX: 0, aimY: 0, hasAim: false,
     primary: false, secondaryPressed: false, interactPressed: false, eatPressed: false,
-    waitHeld: false, firePressed: false, rotatePressed: false, xrayPressed: false,
+    waitHeld: false, firePressed: false, rotatePressed: false, rotateBack: false, xrayPressed: false,
     pausePressed: false, toolSelect: -1,
   };
   /** true when a touch UI should be shown (coarse pointer or a touch was seen) */
@@ -82,7 +83,7 @@ export class Input {
   endFrame(): void {
     const s = this.state;
     s.secondaryPressed = false; s.interactPressed = false; s.eatPressed = false;
-    s.firePressed = false; s.rotatePressed = false; s.xrayPressed = false;
+    s.firePressed = false; s.rotatePressed = false; s.rotateBack = false; s.xrayPressed = false;
     s.pausePressed = false; s.toolSelect = -1;
     if (this.jumpLatch && !this.jumpBtn) { this.jumpLatch = false; this.recompute(); }
   }
@@ -211,7 +212,7 @@ export class Input {
           this.qTimer = window.setTimeout(() => { this.qTimer = 0; if (this.keys.has('KeyQ') && this.onWheelKey && !overlay) { this.qWheel = true; this.onWheelKey('open'); } }, 200);
           break;
         case 'KeyF': s.firePressed = true; break;
-        case 'KeyR': s.rotatePressed = true; break;
+        case 'KeyR': s.rotatePressed = true; s.rotateBack = e.shiftKey; break;
         case 'KeyX': s.xrayPressed = true; break;
         case 'Escape': s.pausePressed = true; break;
         default:
