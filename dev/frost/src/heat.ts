@@ -31,6 +31,8 @@ const MARGIN = 8;          // heat cells simulated beyond G.win
 // The solver integrates at most every HEAT_DT real seconds, using the accumulated dt (heat is slow: time constants of seconds).
 // Explicit conduction stays stable for any sub-step <= 0.1 s (fastest cell rate ~1.5 1/s), so 20 Hz is well inside the limit.
 const HEAT_DT = 0.05;
+const COMP_STRIDE = 4;     // composition: each heat row is re-read every COMP_STRIDE solver runs (power of two)
+const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_EVERY solver runs
 
 // ---------------- per-material tables ----------------
 const SK = new Float32Array(1024), SC = new Float32Array(1024);
@@ -257,10 +259,10 @@ export function stepHeat(dt: number) {
   // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
   for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
-  for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) compose(hx, hy);
+  for (let hy = hy0 + (tick & (COMP_STRIDE - 1)); hy <= hy1; hy += COMP_STRIDE) for (let hx = hx0; hx <= hx1; hx++) compose(hx, hy);
   applyDirty();
   pend('hCompose', pt); pt = pnow();
-  if ((tick & 1) === 0) windPass();
+  if (tick % WIND_EVERY === 0) windPass();
   pend('hWind', pt); pt = pnow();
   for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) {
     const h = hy * HW + hx;
