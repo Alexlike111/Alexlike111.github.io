@@ -17,15 +17,16 @@ const clampX = (x: number) => (x < 1 ? 1 : x > W - 2 ? W - 2 : x);
 const POLE_OFFS = [1, -1, 2, -2, 3, -3, 4, -4];
 
 // ---------- zones ----------
-// Near zone = the view plus 1/8 of its size on each side (1.25x the view). G.win (2x the view) is the far zone:
-// it still gets the automaton and the slow pass, just less often, so far snow stays consistent with the near snow.
+// Near zone = the view plus 1/8 of its size on each side (1.25x the view), run every frame. The rest of G.win (2x the view)
+// is the far zone: its automaton chunks run every 8th frame and its slow-pass columns every 16th (over the near rows only).
+// Nothing is frozen: every visit covers the real time since the last one, and mass only moves between cells, never created.
 const NEAR_K = 0.625;     // near half-size as a share of the G.win half-size (G.win = view +- view)
 const FAR_CA_EVERY = 8;   // far chunks run the automaton every 8th frame (power of two)
 const SLOW_NEAR = 10;     // near columns are visited by the slow pass every 10th frame ...
 const SLOW_FAR = 16;      // ... far columns every 16th; each visit covers the frames since the last one (time-scaled)
 let nX0 = 0, nX1 = -1, nY0 = 0, nY1 = -1;
 let slowNear = 0, slowFar = 0;
-/** Near-zone rectangle in cells, from the camera centre and G.win's (unclamped) half-size. Allocation-free. */
+/** Near-zone rectangle in cells: camera centre +- NEAR_K x the view half-size (taken from the larger side, so world-edge clamping of G.win does not shrink it). Allocation-free. */
 function updateNear() {
   const w = G.win, c = G.cam;
   const vx = Math.max(c.x - w.x0, w.x1 - c.x), vy = Math.max(c.y - w.y0, w.y1 - c.y);
