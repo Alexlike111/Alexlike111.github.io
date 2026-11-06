@@ -18,8 +18,13 @@ export const TOOLS = [
 ] as const;
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
-export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' as string, built: new Set<string>() };
+export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' as string, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
+/** E / «Взять» feeds a campfire this close (cells, 2 m); the HUD fuel chip shows at the same distance */
+export const FEED_R = 40;
+/** a campfire this close (4 m) gets «Подойди ближе к костру» instead of the generic E hint */
+const FIRE_NEAR_R = 80;
+export const SHOVEL_MAX = 46; // cells the shovel holds before it throws
 export const BLOCK_CAP = 8;
 const PW_HALF = 5; // half body width (cells)
 let sfx: Sound | null = null;
@@ -28,12 +33,12 @@ let fireId = 1;
 
 export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
-  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' });
+  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' });
   tool.built.clear();
-  G.fires.length = 0; loadWarned = false; fireLatch = false; placeLatch = false;
+  G.fires.length = 0; loadWarned = false; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
 }
 
-const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
+export const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
 export function inReach(x: number, y: number) { const [sx, sy] = shoulder(); return Math.hypot(x - sx, y - sy) <= REACH; }
 /** Clamp aim to reach along the ray from the shoulder; stop at the first rigid non-target cell. */
 export function reachPoint(ax: number, ay: number): [number, number] {
@@ -130,7 +135,7 @@ function dig(ax: number, ay: number): number {
   return n;
 }
 // ---- spoil throw: ballistic planner ----
-const CLUMP_G = 196, CLUMP_LIFE = 4;
+export const CLUMP_G = 196, CLUMP_LIFE = 4;
 /** Where a clump thrown from (sx,sy) with velocity (vx,vy) comes to rest: mirrors stepParticles (1 cell steps, first non-air cell stops it). */
 export function simulateClump(sx: number, sy: number, vx: number, vy: number): [number, number] {
   let x = sx, y = sy;
@@ -281,7 +286,7 @@ function blockRect(ax: number, ay: number) {
   return { x0, y0, w, h };
 }
 /** What a saw cut at the aim would see: share of snow cells in the block rectangle, mean density, share of weakly bonded cells. */
-function sawProbe(ax: number, ay: number) {
+export function sawProbe(ax: number, ay: number) {
   const { x0, y0, w, h } = blockRect(ax, ay);
   let ok = 0, sum = 0, weak = 0;
   const tot = w * h;
@@ -297,6 +302,9 @@ export function sawCheck(ax: number, ay: number): { ok: boolean; avg: number } {
   const p = sawProbe(ax, ay);
   return { ok: p.good, avg: p.avg };
 }
+let sawX0 = -99, sawY0 = -99; // block corner of the cut in progress
+/** Share of the current cut done, 0..1 (0 when none). It drains slowly after release, so a cut can be resumed. */
+export function sawProgress(): number { return tool.sawNeed > 0 ? Math.min(1, tool.sawT / tool.sawNeed) : 0; }
 function saw(ax: number, ay: number, dt: number) {
   if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
   if (inv.blocks.length >= BLOCK_CAP) { say(`Больше ${BLOCK_CAP} ${plural(BLOCK_CAP, 'блока', 'блоков', 'блоков')} не унести. Сложи их`); return; }
@@ -305,9 +313,13 @@ function saw(ax: number, ay: number, dt: number) {
   if (!pr.solid) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
   const avg = pr.avg;
   if (!pr.good) { say(`Снег рыхлый (${Math.round(avg)} кг/м³). Пиле нужен плотный наст от 170: сними лопатой верхний пух на 20–30 см или утрамбуй ногами. X — рентген плотности`); tool.sawT = 0; return; }
+  // a cut resumes only at the same spot: moving the saw to another block starts it over
+  if (Math.abs(x0 - sawX0) > 3 || Math.abs(y0 - sawY0) > 3) tool.sawT = 0;
+  sawX0 = x0; sawY0 = y0;
+  tool.sawNeed = 1.0 + avg / 500;
   tool.sawT += dt;
   if (Math.random() < dt * 4) { sfx?.sawStroke(); spawn(PK.DUST, ax, ay, (Math.random() - 0.5) * 20, -10, 0.6, 1, 0, 0); }
-  if (tool.sawT < 1.0 + avg / 500) return;
+  if (tool.sawT < tool.sawNeed) return;
   tool.sawT = 0;
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { if (inb(x, y) && mat[idx(x, y)] === M.SNOW && !body[idx(x, y)]) set(x, y, M.AIR); }
   inv.blocks.push(Math.round(avg));
@@ -450,10 +462,10 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
 }
 
 // ---------------- axe ----------------
-const isTrunkOf = (i: number, tid: number) => mat[i] === M.WOOD && (flags[i] & F_TREE) !== 0 && treeId[i] === tid && body[i] === 0;
+export const isTrunkOf = (i: number, tid: number) => mat[i] === M.WOOD && (flags[i] & F_TREE) !== 0 && treeId[i] === tid && body[i] === 0;
 const isTreeOf = (i: number, tid: number) => (mat[i] === M.WOOD || mat[i] === M.NEEDLE) && (flags[i] & F_TREE) !== 0 && treeId[i] === tid && body[i] === 0;
 /** Trunk cells of tree `tid` in row y near column cx, left to right. */
-function trunkRow(y: number, cx: number, tid: number): number[] {
+export function trunkRow(y: number, cx: number, tid: number): number[] {
   const xs: number[] = [];
   if (y < 0 || y >= H) return xs;
   for (let x = Math.max(0, cx - 10); x <= Math.min(W - 1, cx + 10); x++) if (isTrunkOf(idx(x, y), tid)) xs.push(x);
@@ -490,6 +502,7 @@ function dismantleBeam(i0: number, cx: number, cy: number) {
   say(`+${logs} ${plural(logs, 'бревно', 'бревна', 'брёвен')}`);
   markStruct(cx - 30, cy - 30, cx + 30, cy + 30);
 }
+let notchTid = -1, notchY = -1, notchTotal = 0; // standing tree being notched: its band size before the first hit
 function chop(ax: number, ay: number) {
   let cx = Math.round(ax), cy = Math.round(ay);
   // fallen tree / beam body?
@@ -554,6 +567,10 @@ function chop(ax: number, ay: number) {
   const xc = (hitRow[0] + hitRow[hitRow.length - 1]) / 2;
   if (Math.abs(xc - pl.x) < 1.5) { tool.cool = 0.4; say('Руби с другой стороны'); sfx?.chop(false); return; } // standing in line with the trunk
   const away = xc > pl.x ? 1 : -1;               // the tree falls away from the player; the notch is on the player's side
+  // notch progress: trunk cells in the 3-row band now vs at the first hit on this tree (a new tree or a new height starts from its own count)
+  let bandBefore = 0;
+  for (let dy = -1; dy <= 1; dy++) bandBefore += trunkRow(cy + dy, cx, tid).length;
+  if (notchTid !== tid || Math.abs(notchY - cy) > 3) { notchTid = tid; notchY = cy; notchTotal = bandBefore; }
   for (let dy = -1; dy <= 1; dy++) {
     const y = cy + dy, xs = trunkRow(y, cx, tid);
     if (!xs.length) continue;
@@ -567,7 +584,10 @@ function chop(ax: number, ay: number) {
   // severed? every row of the 3-row band must be cut through
   let left = 0;
   for (let dy = -1; dy <= 1; dy++) left += trunkRow(cy + dy, cx, tid).length;
-  if (left > 0) { say('Подруби ещё'); return; }
+  if (left > 0) {
+    const pct = Math.max(1, Math.min(99, Math.round(((notchTotal - left) / Math.max(1, notchTotal)) * 100)));
+    say(`Подруби ещё (${pct}%)`); return;
+  }
   // trunk above the band (this tree only)
   let seed = -1;
   for (let y = cy - 2; y >= Math.max(0, cy - 12) && seed < 0; y--) { const xs = trunkRow(y, cx, tid); if (xs.length) seed = idx(xs[0], y); }
@@ -618,7 +638,26 @@ export function feedFire(f: Fire): boolean {
   }
   if (inv.logs > 0) { inv.logs--; f.fuel += 120; sfx?.place(true); say('+2 часа огня'); return true; }
   if (inv.branches > 0) { inv.branches--; f.fuel += 35; sfx?.place(true); say('+35 минут огня'); return true; }
-  say('Нечем подкинуть'); return false;
+  say('Нечем подкинуть: нужно бревно (+2 ч) или 2 хвороста (+35 мин)'); return false;
+}
+/** The campfire nearest to the hero's feet (cells), or null when none is burning or lit. */
+export function nearestFire(): { f: Fire; d: number } | null {
+  let best: { f: Fire; d: number } | null = null;
+  for (const f of G.fires) { const d = Math.hypot(f.x - pl.x, f.y - pl.y); if (!best || d < best.d) best = { f, d }; }
+  return best;
+}
+/** Beam shape index 0..4 as BEAM_MODE_NAMES lists it (R cycles it; blocks only toggle 0 / 1). */
+function beamModeIndex(): number { return ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; }
+/** Live readouts for the HUD: nearest fire, cut progress, beam shape name, shovel load in cells. */
+export function toolHud() {
+  const nf = nearestFire();
+  return {
+    fire: nf ? { fuel: nf.f.fuel, lit: nf.f.lit, d: nf.d, near: nf.d <= FEED_R } : null,
+    sawP: sawProgress(),
+    beamMode: BEAM_MODE_NAMES[beamModeIndex()].replace(' (проходимая)', ''),
+    shovelN: Math.round(tool.load),
+    shovelMax: SHOVEL_MAX,
+  };
 }
 export function stepFires(dt: number) {
   const gm = dt * G.timeScale; // game minutes
@@ -697,7 +736,9 @@ export function interact(): boolean {
   // fire nearby?
   // (if feeding is not possible, fall through to crates / loose logs; feedFire leaves its reason in tool.msg)
   tool.msg = '';
-  for (const f of G.fires) if (Math.hypot(f.x - pl.x, f.y - pl.y) < 30 && feedFire(f)) return true;
+  const nf = nearestFire();
+  if (nf && nf.d <= FEED_R && feedFire(nf.f)) return true;
+  const nearMiss = !!nf && nf.d <= FIRE_NEAR_R;   // a fire within 4 m but beyond the 2 m feed radius: say how close to come
   // crate nearby (player body box within 6 cells of the crate box AND an air path to the lid)?
   let buried = -1; // cm of digging still needed to the nearest crate that is close but under snow
   for (const c of crates) {
@@ -741,7 +782,7 @@ export function interact(): boolean {
       if (wood > 10) { inv.logs += Math.max(1, Math.round(wood / 80)); removeBody(rec, false); sfx?.pickup(); say('Подобрал брёвна'); return true; }
     }
   }
-  if (!tool.msg) say('E: открыть ящик, подбросить в костёр, подобрать брёвна — рядом ничего нет');
+  if (!tool.msg) say(nearMiss ? 'Подойди ближе к костру (до 2 м)' : 'E: открыть ящик, подбросить в костёр, подобрать брёвна — рядом ничего нет');
   return false;
 }
 export function eat(): boolean {
@@ -784,5 +825,5 @@ export function useSecondary(ax: number, ay: number) {
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);
 }
-export function idleTool(dt: number) { fireLatch = false; placeLatch = false; stallT = 0; lastDigN = -1; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
+export function idleTool(dt: number) { fireLatch = false; placeLatch = false; stallT = 0; lastDigN = -1; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 0.25); }
 export { CELL };

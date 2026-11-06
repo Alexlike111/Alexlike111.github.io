@@ -1,4 +1,4 @@
-import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crates, CELL } from './world';
+import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crates, CELL, body, flags, treeId, F_TREE, isGranular } from './world';
 import { G, FORCE } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt } from './heat';
@@ -7,7 +7,8 @@ import { initBodies, stepBodies, allBodies, initPhysics, spawnStressTest } from 
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck } from './tools';
+import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud } from './tools';
+import { plural } from './ru';
 import { Renderer } from './render';
 import { Input } from './input';
 import { UI, HudData } from './ui';
@@ -484,6 +485,148 @@ function drawContactShadow() {
   ctx.restore();
 }
 
+// ---------------- aim overlay: ghosts, reticles, live verdicts, throw and fall previews ----------------
+// Verdict colours are the ghost palette (rgb triplets: green ok, yellow weak, red refused). Labels are Jura 11 css px with a dark halo,
+// drawn in world units (px = one css px in world units), so they keep their size at any zoom.
+const OV_GREEN = '110,230,150', OV_YELLOW = '255,190,70', OV_RED = '255,92,60';
+const OV_TXT = 'rgb(234,243,251)', OV_BAD = 'rgb(255,150,120)', OV_DARK = 'rgba(8,14,26,0.78)';
+const OV_TAU = Math.PI * 2;
+let ovFontStr = '', ovFontPx = -1;
+function ovText(s: string, x: number, y: number, col: string, px: number, align: CanvasTextAlign = 'center', base: CanvasTextBaseline = 'bottom') {
+  if (px !== ovFontPx) { ovFontPx = px; ovFontStr = `500 ${11 * px}px Jura, "Segoe UI", system-ui, sans-serif`; }
+  ctx.font = ovFontStr; ctx.textAlign = align; ctx.textBaseline = base;
+  ctx.lineJoin = 'round'; ctx.lineWidth = 2.6 * px; ctx.strokeStyle = 'rgba(8,14,26,0.85)'; ctx.strokeText(s, x, y);
+  ctx.fillStyle = col; ctx.fillText(s, x, y);
+}
+const needTxt: string[] = [];   // "Нужно N брёвен" by count: built once, so the frame loop does not allocate it
+function needLogsTxt(n: number): string { return needTxt[n] ??= `Нужно ${n} ${plural(n, 'бревно', 'бревна', 'брёвен')}`; }
+
+/** Beyond the 2 m reach: the limit as a faint dashed ring round the shoulder, and a hollow dot at the cursor (the reticle sits on the ring, at the clamped point). */
+function ovReach(aim: [number, number], px: number) {
+  const [sx, sy] = shoulder();
+  ctx.setLineDash([3 * px, 3 * px]);
+  ctx.lineWidth = px * 2.2; ctx.strokeStyle = 'rgba(8,14,26,0.2)';
+  ctx.beginPath(); ctx.arc(sx, sy, REACH, 0, OV_TAU); ctx.stroke();
+  ctx.lineWidth = px; ctx.strokeStyle = 'rgba(214,236,255,0.55)';
+  ctx.beginPath(); ctx.arc(sx, sy, REACH, 0, OV_TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineWidth = px * 2; ctx.strokeStyle = 'rgba(8,14,26,0.5)';
+  ctx.beginPath(); ctx.arc(aim[0], aim[1], 3 * px, 0, OV_TAU); ctx.stroke();
+  ctx.lineWidth = px; ctx.strokeStyle = 'rgba(234,243,251,0.85)';
+  ctx.beginPath(); ctx.arc(aim[0], aim[1], 3 * px, 0, OV_TAU); ctx.stroke();
+}
+/** What a beam rests on: placed timber (posts, or a beam on posts) reads «на столбах»; snow, ground or rock under it reads «опора». */
+function restsOn(g: { x0: number; y0: number; w: number; h: number }): string {
+  const yb = g.y0 + g.h;
+  for (let x = g.x0; x < g.x0 + g.w; x++) {
+    if (!inb(x, yb)) continue;
+    const i = idx(x, yb);
+    if (!body[i] && (mat[i] === M.PLANK || mat[i] === M.DOOR)) return 'на столбах';
+  }
+  return 'опора';
+}
+/** Block / beam ghost with its live verdict: the refusals place() gives, in the same order, shown before the click. Beam: mode name beside it. */
+function ovGhost(beam: boolean, ax: number, ay: number, px: number) {
+  const g = ghostMargin(beam ? 'beam' : 'block', ax, ay);
+  const need = beam ? beamShape().logs : 1;
+  const have = beam ? inv.logs >= need : inv.blocks.length > 0;
+  const mg = g.blocked ? 0 : g.margin;
+  const rgb = !have || g.blocked || mg <= 0.02 ? OV_RED : mg < 0.35 ? OV_YELLOW : OV_GREEN;
+  ctx.fillStyle = `rgba(${rgb},0.35)`; ctx.fillRect(g.x0, g.y0, g.w, g.h);
+  ctx.lineWidth = px * 1.2; ctx.strokeStyle = OV_DARK; ctx.strokeRect(g.x0 - px * 1.1, g.y0 - px * 1.1, g.w + px * 2.2, g.h + px * 2.2);
+  ctx.lineWidth = px * 1.6; ctx.strokeStyle = `rgba(${rgb},0.95)`; ctx.strokeRect(g.x0, g.y0, g.w, g.h);
+  let s = '', col = OV_BAD;
+  if (g.blocked) s = g.reason;
+  else if (!have) s = beam ? needLogsTxt(need) : 'нет блоков: вырежь пилой';
+  else if (mg <= 0.02) s = 'повиснет: нужна опора';         // no support path (place() refuses a beam here; a block is not refused)
+  else if (beam) { s = restsOn(g); col = `rgb(${rgb})`; }
+  if (s) ovText(s, g.x0 + g.w / 2, g.y0 - 3 * px, col, px);
+  if (beam) ovText(BEAM_MODE_NAMES[tool.rot % BEAM_MODES], g.x0 + g.w + 4 * px, g.y0 + g.h / 2, OV_TXT, px, 'left', 'middle');
+}
+/** Saw reticle: green when a cut here would make a block, red when not, with the density and the reason (the same tests saw() runs). */
+function ovSaw(ax: number, ay: number, px: number) {
+  const vert = tool.rot % 2 === 1, w = vert ? 5 : 10, h = vert ? 10 : 5;
+  const rx = Math.round(ax - w / 2), ry = Math.round(ay - h / 2);
+  const sc = sawCheck(ax, ay);
+  ctx.setLineDash([]); ctx.lineWidth = px * 3; ctx.strokeStyle = OV_DARK; ctx.strokeRect(rx, ry, w, h);
+  ctx.lineWidth = px * 1.5; ctx.strokeStyle = `rgba(${sc.ok ? OV_GREEN : OV_RED},0.95)`; ctx.setLineDash([1.4, 1]); ctx.strokeRect(rx, ry, w, h); ctx.setLineDash([]);
+  if (tool.sawT > 0) { const f = sawProgress(); ctx.fillStyle = OV_DARK; ctx.fillRect(rx - px, ry - 2.6, w + px * 2, 1.4); ctx.fillStyle = 'rgba(255,200,120,0.95)'; ctx.fillRect(rx, ry - 2.3, w * f, 0.8); }
+  const cx = rx + w / 2;
+  let y = ry - 10 * px;                                   // labels stack upwards from the progress bar
+  if (sc.avg > 0) { ovText(`${Math.round(sc.avg)} кг/м³`, cx, y, sc.ok ? OV_TXT : OV_BAD, px); y -= 13 * px; }
+  if (!sc.ok) {
+    const p = sawProbe(ax, ay);
+    ovText(!p.solid ? 'здесь не снег или пустота' : p.avg < 170 ? 'рыхлый: нужен наст от 170' : 'слабо спечён: пила не возьмёт', cx, y, OV_BAD, px);
+  }
+}
+
+// shovel throw (RMB): where the load lands, chosen the way throwLoad() chooses (touch, aim near the body or into firm snow = auto spoil by planSpoil)
+const TH = { mode: -1, k0: 0, k1: 0, k2: 0, k3: 0, k4: 0, ok: false, lx: 0, ly: 0, n: 0, arc: new Float32Array(2 * 130) };
+function ovThrow(aim: [number, number], px: number) {
+  const ax = aim[0], ay = aim[1], [sx, sy] = shoulder();
+  const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1;
+  const auto = G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai));
+  // the manual landing depends on the aim cell; the auto spoil ignores the aim, so it is re-planned only when the hero moves or every 0.5 s
+  const mode = auto ? 1 : 0;
+  const k0 = auto ? pl.x | 0 : Math.round(ax), k1 = auto ? pl.y | 0 : Math.round(ay);
+  const k2 = auto ? tool.digDir : sx | 0, k3 = auto ? pl.face : sy | 0, k4 = auto ? (G.frame / 30) | 0 : 0;
+  if (TH.mode !== mode || TH.k0 !== k0 || TH.k1 !== k1 || TH.k2 !== k2 || TH.k3 !== k3 || TH.k4 !== k4) {
+    TH.mode = mode; TH.k0 = k0; TH.k1 = k1; TH.k2 = k2; TH.k3 = k3; TH.k4 = k4;
+    let vx: number, vy: number;
+    if (auto) { const t0 = performance.now(); const p = planSpoil(sx, sy); (window as any).__planMs = ((window as any).__planMs ?? []).concat([performance.now() - t0]); vx = p.ux * p.sp; vy = p.uy * p.sp - 25; }
+    else { const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy)), sp = 95 + Math.min(60, L * 1.2); vx = dx / L * sp; vy = dy / L * sp - 25; }
+    const [lx, ly] = simulateClump(sx, sy, vx, vy);
+    TH.ok = ly < 1e4; TH.lx = lx; TH.ly = ly;
+    // flight path: gravity and 1/30 s steps as in stepParticles, up to the landing
+    let x = sx, y = sy, wx = vx, wy = vy, n = 1;
+    TH.arc[0] = x; TH.arc[1] = y;
+    if (TH.ok) for (let t = 0; t < CLUMP_LIFE && n < 130; t += 1 / 30) {
+      wy += CLUMP_G / 30; x += wx / 30; y += wy / 30;
+      TH.arc[2 * n] = x; TH.arc[2 * n + 1] = y; n++;
+      if (Math.hypot(x - lx, y - ly) < 1.2) break;
+    }
+    TH.n = n;
+  }
+  if (!TH.ok) return;
+  const col = TH.mode ? '255,190,110' : '190,228,255';
+  ctx.beginPath(); ctx.moveTo(TH.arc[0], TH.arc[1]);
+  for (let k = 1; k < TH.n; k++) ctx.lineTo(TH.arc[2 * k], TH.arc[2 * k + 1]);
+  ctx.setLineDash([]); ctx.lineWidth = px * 2.2; ctx.strokeStyle = 'rgba(8,14,26,0.2)'; ctx.stroke();
+  ctx.setLineDash([2.6 * px, 2.2 * px]); ctx.lineWidth = px; ctx.strokeStyle = `rgba(${col},0.9)`; ctx.stroke(); ctx.setLineDash([]);
+  ctx.lineWidth = px * 2; ctx.strokeStyle = OV_DARK; ctx.beginPath(); ctx.arc(TH.lx, TH.ly, 3.2 * px, 0, OV_TAU); ctx.stroke();
+  ctx.lineWidth = px; ctx.strokeStyle = `rgba(${col},0.95)`; ctx.beginPath(); ctx.arc(TH.lx, TH.ly, 2.8 * px, 0, OV_TAU); ctx.stroke();
+  if (TH.mode) ovText('авто', TH.lx, TH.ly + 6 * px, OV_TXT, px, 'center', 'top');
+}
+
+// axe over a standing trunk: dashed arrow from its base in the direction it falls (chop() drops it away from the hero), as long as the tree is tall
+const FA = { cx: -1, cy: -1, f: -1, ok: false, bx: 0, by: 0, tx: 0 };
+function ovFall(ax: number, ay: number, px: number) {
+  const cx = Math.round(ax), cy = Math.round(ay), f = G.frame >> 4;
+  if (FA.cx !== cx || FA.cy !== cy || FA.f !== f) {
+    FA.cx = cx; FA.cy = cy; FA.f = f; FA.ok = false;
+    const i = inb(cx, cy) ? idx(cx, cy) : -1;
+    if (i >= 0 && isTrunkOf(i, treeId[i])) {
+      const tid = treeId[i], hit = trunkRow(cy, cx, tid);
+      if (hit.length) {
+        const xc = (hit[0] + hit[hit.length - 1]) / 2;
+        if (Math.abs(xc - pl.x) >= 1.5) {                   // in line with the trunk: chop() refuses, no direction
+          let base = cy; while (base < H - 1 && base - cy < 240 && trunkRow(base + 1, cx, tid).length) base++;
+          let top = cy; while (top > 0 && cy - top < 240 && trunkRow(top - 1, cx, tid).length) top--;
+          FA.ok = true; FA.bx = xc; FA.by = base + 1; FA.tx = xc + (xc > pl.x ? 1 : -1) * (base - top + 1);
+        }
+      }
+    }
+  }
+  if (!FA.ok) return;
+  const { bx, by, tx } = FA, d = Math.sign(tx - bx), hs = 5 * px;
+  ctx.setLineDash([]); ctx.lineWidth = px * 2.2; ctx.strokeStyle = OV_DARK;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, by); ctx.stroke();
+  ctx.setLineDash([3 * px, 2.4 * px]); ctx.lineWidth = px * 1.2; ctx.strokeStyle = 'rgba(143,211,255,0.95)';
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, by); ctx.stroke(); ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(tx - d * hs, by - hs * 0.6); ctx.lineTo(tx, by); ctx.lineTo(tx - d * hs, by + hs * 0.6); ctx.stroke();
+  ovText('падает', tx, by - 4 * px, OV_TXT, px);
+}
+
 function drawOverlay(aim: [number, number] | null) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, fx.width, fx.height);
@@ -504,32 +647,24 @@ function drawOverlay(aim: [number, number] | null) {
     ctx.fillStyle = g; ctx.fillRect(f.x - 90, f.y - 95, 180, 100);
     ctx.restore();
   }
-  // aim reticle & ghost (dark under-stroke so they read on white snow)
+  // aim: reach limit, reticle, ghost with its live verdict, and the throw / fall previews
   if (aim && pl.alive) {
     const [ax, ay] = reachPoint(aim[0], aim[1]);
     const id = TOOLS[tool.cur].id;
     const px = 1 / G.cam.zoom;                 // one screen pixel in world cells
-    const dark = 'rgba(8,14,26,0.78)';
-    if (id === 'block' || id === 'beam') {
-      const g = ghostMargin(id === 'beam' ? 'beam' : 'block', ax, ay);
-      const have = id === 'beam' ? inv.logs > 0 : inv.blocks.length > 0;
-      const mg = g.blocked ? 0 : g.margin;
-      const rgb = !have || g.blocked || mg <= 0.02 ? '255,92,60' : mg < 0.35 ? '255,190,70' : '110,230,150';
-      ctx.fillStyle = `rgba(${rgb},0.35)`; ctx.fillRect(g.x0, g.y0, g.w, g.h);
-      ctx.lineWidth = px * 1.2; ctx.strokeStyle = dark; ctx.strokeRect(g.x0 - px * 1.1, g.y0 - px * 1.1, g.w + px * 2.2, g.h + px * 2.2);
-      ctx.lineWidth = px * 1.6; ctx.strokeStyle = `rgba(${rgb},0.95)`; ctx.strokeRect(g.x0, g.y0, g.w, g.h);
-    } else if (id === 'saw') {
-      const vert = tool.rot % 2 === 1; const w = vert ? 5 : 10, h = vert ? 10 : 5;
-      const rx = Math.round(ax - w / 2), ry = Math.round(ay - h / 2);
-      ctx.setLineDash([]); ctx.lineWidth = px * 3; ctx.strokeStyle = dark; ctx.strokeRect(rx, ry, w, h);
-      ctx.lineWidth = px * 1.5; ctx.strokeStyle = 'rgba(214,234,255,0.95)'; ctx.setLineDash([1.4, 1]); ctx.strokeRect(rx, ry, w, h); ctx.setLineDash([]);
-      if (tool.sawT > 0) { const f = Math.min(1, tool.sawT / 1.6); ctx.fillStyle = dark; ctx.fillRect(rx - px, ry - 2.6, w + px * 2, 1.4); ctx.fillStyle = 'rgba(255,200,120,0.95)'; ctx.fillRect(rx, ry - 2.3 + 0, w * f, 0.8); }
-    } else {
-      const bite = id === 'shovel' ? shovelBite(ax, ay) : { rx: 2.5, ry: 2.5 }, near = inReach(aim[0], aim[1]);
-      ctx.lineWidth = px * 3; ctx.strokeStyle = near ? dark : 'rgba(8,14,26,0.45)';
-      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, Math.PI * 2); ctx.stroke();
+    const near = inReach(aim[0], aim[1]);
+    if (!near) ovReach(aim, px);
+    if (id === 'block' || id === 'beam') ovGhost(id === 'beam', ax, ay, px);
+    else if (id === 'saw') ovSaw(ax, ay, px);
+    else {
+      const bite = id === 'shovel' ? shovelBite(ax, ay) : { rx: 2.5, ry: 2.5 };
+      ctx.setLineDash([]);
+      ctx.lineWidth = px * 3; ctx.strokeStyle = near ? OV_DARK : 'rgba(8,14,26,0.45)';
+      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, OV_TAU); ctx.stroke();
       ctx.lineWidth = px * 1.5; ctx.strokeStyle = near ? 'rgba(240,248,255,0.95)' : 'rgba(235,244,255,0.5)';
-      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, OV_TAU); ctx.stroke();
+      if (id === 'shovel' && tool.load > 0) ovThrow(aim, px);
+      else if (id === 'axe') ovFall(ax, ay, px);
     }
   }
   // crate pole flags flutter (cheap)
@@ -785,6 +920,7 @@ function frameBody(now: number) {
       count: t.id === 'beam' ? inv.logs : t.id === 'block' ? inv.blocks.length : t.id === 'fire' ? Math.min(inv.matches, inv.logs, Math.floor(inv.branches / 2)) : undefined })),
     inv: { logs: inv.logs, branches: inv.branches, matches: inv.matches, food: inv.food + inv.crackers, blocks: inv.blocks.length, snowshoes: inv.snowshoes, thermos: inv.thermos },
     hint: hint(), shovelLoad: Math.min(1, tool.load / 46), waiting: G.timeScale > 2,
+    ...toolHud(),
   };
   pt = pnow();
   ui.update(h);

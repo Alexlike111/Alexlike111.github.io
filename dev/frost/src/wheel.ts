@@ -8,7 +8,8 @@ export interface WheelItem {
   label: string;
   icon: string;            // inline <svg> markup
   badge?: string;          // small count pill
-  sub?: string;            // hub caption while the item is highlighted
+  bar?: number;            // 0..1 live meter along the item's foot (shovel load, cut progress, fire fuel); absent = none
+  sub?: string;            // hub caption while the item is highlighted (or selected, when nothing is)
   cls?: string;            // sel | on | off | empty | urgent
 }
 
@@ -25,7 +26,7 @@ export class Wheel {
   private ring: HTMLElement;
   private hubName: HTMLElement;
   private hubSub: HTMLElement;
-  private nodes: { root: HTMLElement; badge: HTMLElement; label: HTMLElement; ico: HTMLElement }[] = [];
+  private nodes: { root: HTMLElement; badge: HTMLElement; label: HTMLElement; ico: HTMLElement; bar: HTMLElement }[] = [];
   private items: WheelItem[] = [];
   private title: string;
   private subTitle: string;
@@ -89,11 +90,14 @@ export class Wheel {
         b.style.setProperty('--ux', Math.cos(a).toFixed(4));
         b.style.setProperty('--uy', Math.sin(a).toFixed(4));
         b.style.setProperty('--d', `${i * 6}ms`);
-        b.innerHTML = '<span class="wi-ico"></span><span class="wi-label"></span><span class="wi-badge mono"></span>';
+        b.innerHTML = '<span class="wi-ico"></span><span class="wi-label"></span><span class="wi-badge mono"></span><span class="wi-bar"><i></i></span>';
         this.ring.appendChild(b);
-        this.nodes.push({ root: b, badge: b.querySelector('.wi-badge') as HTMLElement, label: b.querySelector('.wi-label') as HTMLElement, ico: b.querySelector('.wi-ico') as HTMLElement });
+        this.nodes.push({
+          root: b, badge: b.querySelector('.wi-badge') as HTMLElement, label: b.querySelector('.wi-label') as HTMLElement,
+          ico: b.querySelector('.wi-ico') as HTMLElement, bar: b.querySelector('.wi-bar') as HTMLElement,
+        });
       });
-      this.items = items.map((x) => ({ ...x, icon: '', label: '', badge: undefined, cls: undefined }));
+      this.items = items.map((x) => ({ ...x, icon: '', label: '', badge: undefined, cls: undefined, bar: undefined }));
       this.items.forEach((x, i) => { x.id = items[i].id; });
     }
     items.forEach((it, i) => {
@@ -102,6 +106,12 @@ export class Wheel {
       if (o.label !== it.label) { n.label.textContent = it.label; o.label = it.label; }
       const bd = it.badge ?? '';
       if ((o.badge ?? '') !== bd) { n.badge.textContent = bd; n.badge.style.display = bd ? '' : 'none'; o.badge = bd; }
+      const bar = it.bar === undefined ? -1 : Math.round(Math.min(1, Math.max(0, it.bar)) * 40) / 40;
+      if ((o.bar ?? -1) !== bar) {
+        o.bar = bar < 0 ? undefined : bar;
+        n.bar.style.display = bar < 0 || bar <= 0.02 ? 'none' : 'block';
+        (n.bar.firstElementChild as HTMLElement).style.transform = `scaleX(${Math.max(0, bar)})`;
+      }
       o.sub = it.sub;
       const c = it.cls ?? '';
       if ((o.cls ?? '') !== c) {
@@ -221,7 +231,9 @@ export class Wheel {
 
   private paintHub(i: number): void {
     const it = i >= 0 ? this.items[i] : null;
-    this.hubName.textContent = it ? it.label : this.title;
-    this.hubSub.textContent = it ? (it.sub ?? '') : this.subTitle;
+    // nothing highlighted: the selected item's name and caption (the beam's shape, a fire's fuel) rather than the generic title
+    const sel = it ? null : this.items.find((x) => (x.cls ?? '').split(' ').includes('sel')) ?? null;
+    this.hubName.textContent = it ? it.label : sel ? sel.label : this.title;
+    this.hubSub.textContent = it ? (it.sub ?? '') : sel ? (sel.sub || this.subTitle) : this.subTitle;
   }
 }

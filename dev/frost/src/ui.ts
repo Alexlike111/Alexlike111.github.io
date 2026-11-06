@@ -12,6 +12,22 @@ export interface HudData {
   hint: string | null;
   shovelLoad: number; // 0..1
   waiting: boolean;
+  // live readouts (tools.ts toolHud)
+  fire: { fuel: number; lit: boolean; d: number; near: boolean } | null; // nearest campfire; fuel in game minutes; near = within the 2 m feed radius
+  sawP: number;       // share of the current cut done, 0..1
+  beamMode: string;   // beam shape name, e.g. «брус 1 м»
+  shovelN: number;    // cells in the shovel
+  shovelMax: number;
+}
+
+/** campfire fuel bar scale: 4 game hours = full */
+const FIRE_FULL_MIN = 240;
+/** campfire fuel as the player reads it: «~3 ч», «~40 мин», «потух», «прогорел» */
+function fireText(f: NonNullable<HudData['fire']>): string {
+  if (f.fuel <= 0) return 'прогорел';
+  if (!f.lit) return 'потух';
+  if (f.fuel >= 60) return `~${Math.round(f.fuel / 60)} ч`;
+  return `~${Math.max(1, Math.round(f.fuel))} мин`;
 }
 
 // ---------------------------------------------------------------- icons
@@ -248,7 +264,9 @@ export class UI {
   private clockWait!: HTMLElement;
   private chips: Record<string, { root: HTMLElement; n: Cached; l: Cached }> = {};
   private belt!: HTMLElement;
-  private tags: { root: HTMLElement; name: Cached; key: Cached; count: Cached; load: HTMLElement }[] = [];
+  private tags: { root: HTMLElement; name: Cached; key: Cached; count: Cached; sub: Cached; load: HTMLElement }[] = [];
+  private fireChip!: HTMLElement;
+  private fireChipN!: Cached;
   private beltSig = '';
   private btnWait!: HTMLElement;
   // radial wheels (touch layout buttons / Q on PC)
@@ -387,6 +405,11 @@ export class UI {
       chips.appendChild(root);
       this.chips[k] = { root, n: root.querySelector('.chip-n') as Cached, l: root.querySelector('.chip-l') as Cached };
     }
+    // campfire fuel, shown only while the hero stands within the 2 m feed radius
+    this.fireChip = el('div', 'chip c-fire pri hidden', `${ico('fire')}<span class="chip-l">Костёр:</span><span class="chip-n mono"></span>`);
+    this.fireChip.title = 'Костёр: сколько горит. Подкинуть: E / «Взять»';
+    this.fireChipN = this.fireChip.querySelector('.chip-n') as Cached;
+    chips.appendChild(this.fireChip);
     // phone: only non-zero items are listed; this chip opens the full row for a few seconds
     const more = el('button', 'chip more', '<span>…</span>');
     more.type = 'button';
@@ -501,13 +524,13 @@ export class UI {
       const root = el('button', `tag tag-${t.id}`);
       root.type = 'button';
       root.tabIndex = -1;
-      root.innerHTML = `<i class="tag-hole"></i><span class="tag-key mono"></span>${ico(TOOL_ICON[t.id] ?? 'block', 'tag-ico')}<span class="tag-name"></span><span class="tag-count mono"></span><span class="tag-load"><i></i></span>`;
+      root.innerHTML = `<i class="tag-hole"></i><span class="tag-key mono"></span>${ico(TOOL_ICON[t.id] ?? 'block', 'tag-ico')}<span class="tag-name"></span><span class="tag-count mono"></span><span class="tag-sub"></span><span class="tag-load"><i></i></span>`;
       root.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.input.pressTool(i); });
       root.addEventListener('mousedown', (e) => e.preventDefault());
       this.belt.appendChild(root);
       this.tags.push({
         root, name: root.querySelector('.tag-name') as Cached, key: root.querySelector('.tag-key') as Cached,
-        count: root.querySelector('.tag-count') as Cached, load: root.querySelector('.tag-load i') as HTMLElement,
+        count: root.querySelector('.tag-count') as Cached, sub: root.querySelector('.tag-sub') as Cached, load: root.querySelector('.tag-load i') as HTMLElement,
       });
     });
     this.input.toolCount = tools.length || 6;
@@ -628,11 +651,35 @@ export class UI {
 
   private toolItems(): WheelItem[] {
     const h = this.lastH; if (!h) return [];
-    return h.tools.map((t, i) => ({
-      id: String(i), label: t.name, icon: ico(TOOL_ICON[t.id] ?? 'block'),
-      badge: t.count === undefined ? undefined : String(t.count), sub: TOOL_SUB[t.id] ?? '',
-      cls: [i === h.tool ? 'sel' : '', t.enabled ? '' : 'off', t.count === 0 ? 'empty' : '', t.id === 'fire' ? 'fire' : ''].filter(Boolean).join(' '),
-    }));
+    return h.tools.map((t, i) => {
+      const bar = this.toolBar(t.id, h);
+      const live = t.id === 'fire' && h.fire ? `Костёр: ${fireText(h.fire)}` : this.liveSub(t.id, h);
+      return {
+        id: String(i), label: t.name, icon: ico(TOOL_ICON[t.id] ?? 'block'),
+        badge: t.count === undefined ? undefined : String(t.count), sub: live || TOOL_SUB[t.id] || '',
+        bar: bar > 0.02 ? bar : undefined,
+        cls: [i === h.tool ? 'sel' : '', t.enabled ? '' : 'off', t.count === 0 ? 'empty' : '', t.id === 'fire' ? 'fire' : ''].filter(Boolean).join(' '),
+      };
+    });
+  }
+
+  /** Live caption for a tool ('' = none): shovel load, cut progress, beam shape, campfire fuel. Shared by the belt tags and the wheel. */
+  private liveSub(id: string, h: HudData): string {
+    if (id === 'shovel') return h.shovelN >= 40 ? 'за спину' : h.shovelN > 0 ? `${h.shovelN}/${h.shovelMax}` : '';   // near the auto-dump (44) the label says where the snow goes
+    if (id === 'saw') return this.sawLive(h) ? `Пилю… ${Math.round(h.sawP * 100)}%` : '';
+    if (id === 'beam') return h.beamMode;
+    if (id === 'fire') return h.fire ? fireText(h.fire) : '';
+    return '';
+  }
+  /** a cut in progress is shown only while the saw is in hand: a half-finished cut elsewhere waits quietly (it drains slowly) */
+  private sawLive(h: HudData): boolean { return h.sawP > 0.005 && h.tools[h.tool]?.id === 'saw'; }
+  /** Meter 0..1 for a tool, quantised to 1/40 so the bar is not redrawn for tiny changes (0 = hidden). */
+  private toolBar(id: string, h: HudData): number {
+    const q = (v: number) => Math.round(clamp(v, 0, 1) * 40) / 40;
+    if (id === 'shovel') return q(h.shovelLoad);
+    if (id === 'saw') return this.sawLive(h) ? q(h.sawP) : 0;
+    if (id === 'fire') return h.fire ? q(h.fire.fuel / FIRE_FULL_MIN) : 0;
+    return 0;
   }
 
   private actItems(): WheelItem[] {
@@ -783,25 +830,35 @@ export class UI {
         g.root.classList.toggle('empty', t.count === 0);
         g.root.setAttribute('aria-pressed', String(i === h.tool));
       });
-      if (t.id === 'shovel') {
-        const l = Math.round(clamp(h.shovelLoad, 0, 1) * 40) / 40;
-        this.m('load', l, () => {
-          g.load.style.transform = `scaleX(${l})`;
-          g.root.classList.toggle('loaded', l > 0.02);
-          g.root.classList.toggle('full', l > 0.85);
-        });
-      }
+      // live line under the name (shovel load, cut %, beam shape, fire fuel) and the 4 px meter under it
+      this.txt(g.sub, this.liveSub(t.id, h));
+      const bar = this.toolBar(t.id, h);
+      this.m('tb' + i, bar, () => {
+        g.load.style.transform = `scaleX(${bar})`;
+        g.root.classList.toggle('loaded', bar > 0.02);
+        g.root.classList.toggle('full', t.id === 'shovel' && bar > 0.85);
+      });
     });
 
     // ---- touch cluster: the tool button shows the current tool + count; the actions button carries the urgent / waiting state
     const ct = h.tools[h.tool];
     if (ct) {
       this.m('cbtool', ct.id, () => { this.cbToolIco.innerHTML = ico(TOOL_ICON[ct.id] ?? 'block'); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
-      const cnt = ct.count === undefined ? '' : String(ct.count);
-      this.m('cbcnt', cnt, () => { this.cbToolBadge.textContent = cnt; this.cbToolBadge.style.display = cnt ? '' : 'none'; this.cbTool.classList.toggle('empty', ct.count === 0); });
-      if (ct.id === 'shovel') { const l = Math.round(clamp(h.shovelLoad, 0, 1) * 40) / 40; this.m('cbload', l, () => { this.cbToolLoad.style.transform = `scaleX(${l})`; this.cbTool.classList.toggle('loaded', l > 0.02); this.cbTool.classList.toggle('full', l > 0.85); }); }
-      else this.m('cbload', -1, () => { this.cbTool.classList.remove('loaded', 'full'); });
+      // badge: the count, or the live number while the shovel carries snow / the saw cuts
+      const live = ct.id === 'shovel' && h.shovelN > 0 ? String(h.shovelN) : ct.id === 'saw' && h.sawP > 0.005 ? `${Math.round(h.sawP * 100)}%` : '';
+      const cnt = live || (ct.count === undefined ? '' : String(ct.count));
+      this.m('cbcnt', cnt, () => { this.cbToolBadge.textContent = cnt; this.cbToolBadge.style.display = cnt ? '' : 'none'; this.cbToolBadge.classList.toggle('live', !!live); this.cbTool.classList.toggle('empty', ct.count === 0); });
+      const bar = this.toolBar(ct.id, h);
+      this.m('cbload', ct.id + bar, () => { this.cbToolLoad.style.transform = `scaleX(${bar})`; this.cbTool.classList.toggle('loaded', bar > 0.02); this.cbTool.classList.toggle('full', ct.id === 'shovel' && bar > 0.85); });
     }
+    // campfire chip: fuel of the fire the hero stands by (inside the 2 m feed radius); an unlit fire says so
+    const fn = h.fire && h.fire.near ? h.fire : null;
+    const fct = fn ? fireText(fn) : '';
+    this.m('firechip', fct + (fn && !fn.lit ? '!' : ''), () => {
+      this.fireChip.classList.toggle('hidden', !fn);
+      this.fireChip.classList.toggle('warn', !!fn && !fn.lit);
+      this.txt(this.fireChipN, fct);
+    });
     this.m('cbacts', (hungry && !eatNone ? 1 : 0) + (waiting ? 2 : 0) + (this.xrayMode ? 4 : 0), () => {
       this.cbActs.classList.toggle('urgent', hungry && !eatNone);
       this.cbActs.classList.toggle('on', waiting || this.xrayMode > 0);

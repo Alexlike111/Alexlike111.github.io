@@ -310,6 +310,7 @@ body { position: fixed; inset: 0; width: 100%; }
 .chip.warn { border-color: rgba(255, 171, 69, 0.6); }
 .chip.warn .ico, .chip.warn .chip-n { color: var(--ember); }
 .chip.hidden { display: none !important; }
+.chip.c-fire .ico { color: var(--ember); }
 .chip.more { display: none; }
 
 /* weather log: a pencilled line on ruled paper, one ember underline */
@@ -408,10 +409,16 @@ body { position: fixed; inset: 0; width: 100%; }
 .tag-name { font: 700 max(11px, 0.78em) / 1 var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--frost-3); white-space: nowrap; }
 .tag-count { position: absolute; right: 0.5em; top: 0.85em; font: 600 max(10.5px, 0.8em) / 1 var(--font-mono); color: var(--frost); }
 .tag-count:empty { display: none; }
-.tag-load { display: none; position: absolute; left: 0.7em; right: 0.7em; bottom: 0.38em; height: 0.28em; border-radius: 0.1em; background: rgba(2, 5, 10, 0.8); overflow: hidden; }
+/* live line under the name: shovel load, cut %, beam shape, campfire fuel (hidden when empty) */
+.tag-sub { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 max(9.5px, 0.7em) / 1.1 var(--font-ui); letter-spacing: 0.03em; color: var(--frost-3); }
+.tag-sub:not(:empty) { display: block; }
+.tag.sel .tag-sub { color: var(--ice); }
+/* 4 px meter at the foot of the tag (in flow, so it never covers the live line) */
+.tag-load { display: none; margin-top: auto; width: calc(100% - 1.3em); height: 4px; flex: none; border-radius: 2px; background: rgba(2, 5, 10, 0.8); overflow: hidden; }
 .tag.loaded .tag-load { display: block; }
 .tag-load i { display: block; height: 100%; transform-origin: 0 50%; transform: scaleX(0); background: var(--ice); transition: transform 0.25s linear; }
 .tag.full .tag-load i { background: var(--frost); }
+.tag-fire .tag-load i { background: var(--ember-2); }
 .tag:hover { border-color: var(--plate-line-hi); color: var(--frost); }
 .tag.sel { transform: translateY(-0.45em); border-color: var(--frost); color: var(--frost); box-shadow: inset 0 1px 0 var(--plate-inset), inset 0 0 0 0.22em rgba(3, 6, 11, 0.4), 0 0 0 1px rgba(234, 243, 251, 0.35), 0 0 1.6em rgba(143, 211, 255, 0.28), 0 0.7em 1.4em var(--shade); }
 .tag.sel .tag-name { color: var(--frost); }
@@ -549,7 +556,9 @@ body { position: fixed; inset: 0; width: 100%; }
 .cb-badge { position: absolute; right: -4px; top: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: var(--night-1); border: 1px solid var(--plate-line-hi); font: 600 10.5px / 1 var(--font-mono); color: var(--frost); pointer-events: none; }
 .cb-badge:empty { display: none; }
 .cb-tool.empty .cb-badge { color: var(--frost-4); }
-.cb-load { display: none; position: absolute; left: 24%; right: 24%; bottom: 6px; height: 3px; border-radius: 2px; background: rgba(2, 5, 10, 0.8); overflow: hidden; }
+.cb-load { display: none; position: absolute; left: 24%; right: 24%; bottom: 6px; height: 4px; border-radius: 2px; background: rgba(2, 5, 10, 0.8); overflow: hidden; }
+.cb-badge.live { color: var(--ice); border-color: var(--ice-2); }
+.cb-tool.fire .cb-load i { background: var(--ember-2); }
 .cb-tool.loaded .cb-load { display: block; }
 .cb-load i { display: block; height: 100%; transform-origin: 0 50%; transform: scaleX(0); background: var(--ice); transition: transform 0.25s linear; }
 .cb-tool.full .cb-load i { background: var(--frost); }
@@ -601,6 +610,9 @@ body { position: fixed; inset: 0; width: 100%; }
 .wi-ico { display: grid; place-items: center; }
 .wi-ico .ico { width: 1.95em; height: 1.95em; }
 .wi-label { font: 700 max(10.5px, 0.76em) / 1 var(--font-ui); letter-spacing: -0.02em; white-space: nowrap; color: var(--frost-2); }
+.wi-bar { display: none; position: absolute; left: 22%; right: 22%; bottom: 7px; height: 3px; border-radius: 2px; background: rgba(2, 5, 10, 0.8); overflow: hidden; }
+.wi-bar i { display: block; height: 100%; transform-origin: 0 50%; transform: scaleX(0); background: var(--ice); transition: transform 0.25s linear; }
+.wheel-item.fire .wi-bar i { background: var(--ember-2); }
 .wi-badge { position: absolute; right: -3px; top: -3px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: var(--night-1); border: 1px solid var(--plate-line-hi); font: 600 11px / 1 var(--font-mono); color: var(--frost); }
 .wi-badge:empty { display: none; }
 .wheel-item.hot { transform: translate(calc(var(--ux) * var(--R)), calc(var(--uy) * var(--R))) scale(1.12); border-color: var(--frost); color: var(--frost); box-shadow: inset 0 1px 0 var(--plate-inset), 0 0 1.4em rgba(143, 211, 255, 0.5), 0 0.4em 1em rgba(0, 0, 0, 0.5); }
@@ -824,7 +836,8 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
    ------------------------------------------------------------------ */
 @media (max-height: 460px) {
   :root {
-    --wl: 252px; --wr: 168px; --gap: 5px;
+    /* --wr = the real right cluster (clock + two round buttons, or the temperature plate: ~211 px); the top-centre flow (hint card, chips) stops short of it */
+    --wl: 252px; --wr: 216px; --gap: 5px;
     --plate-a: rgba(26, 43, 66, 0.62); --plate-b: rgba(7, 13, 23, 0.68);
     --shade: rgba(0, 0, 0, 0.32);
   }
@@ -948,7 +961,7 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
 }
 /* narrowest phones (667 px and below): shave another few percent off the HUD */
 @media (max-height: 460px) and (max-width: 700px) {
-  :root { --wl: 236px; --wr: 160px; }
+  :root { --wl: 236px; --wr: 216px; }
   .thermo-body { height: 92px; }
   .gauge, .gauge + .gauge { width: 42px; height: 38px; padding: 4px 4px; }
   .g-val { font-size: 10.5px; }
