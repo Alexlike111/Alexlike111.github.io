@@ -41,6 +41,7 @@ export class Input {
   private keys = new Set<string>();
   private stickX = 0;
   private stickJump = false;
+  private jumpBtn = false;
   private stickRun = false;
   private waitToggle = false;
   private touchId: number | null = null;
@@ -94,6 +95,7 @@ export class Input {
       case 'pause': s.pausePressed = true; break;
     }
   }
+  setJumpHeld(on: boolean): void { this.jumpBtn = on; this.recompute(); }
   pressTool(i: number): void { this.state.toolSelect = i; this.currentTool = i; }
   toggleWait(): void { this.waitToggle = !this.waitToggle; this.recompute(); }
   setWait(on: boolean): void { this.waitToggle = on; this.recompute(); }
@@ -111,7 +113,7 @@ export class Input {
     this.keys.clear();
     this.state.primary = false;
     this.touchId = null;
-    this.stickX = 0; this.stickJump = false; this.stickRun = false;
+    this.stickX = 0; this.stickJump = false; this.stickRun = false; this.jumpBtn = false;
     this.recompute();
   };
 
@@ -121,7 +123,7 @@ export class Input {
     if (k.has('KeyA') || k.has('ArrowLeft')) kx -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) kx += 1;
     s.moveX = kx !== 0 ? kx : this.stickX;
-    s.jump = k.has('KeyW') || k.has('Space') || k.has('ArrowUp') || this.stickJump;
+    s.jump = k.has('KeyW') || k.has('Space') || k.has('ArrowUp') || this.stickJump || this.jumpBtn;
     s.run = k.has('ShiftLeft') || k.has('ShiftRight') || this.stickRun;
     s.waitHeld = k.has('KeyT') || this.waitToggle;
   }

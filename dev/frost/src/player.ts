@@ -138,6 +138,15 @@ function headroom(xa: number, xb: number, feetY: number, look = 3): number {
   return best;
 }
 const FLOOR_Y = (y: number) => Math.round(y);
+// is there a ledge within 34 cells above the feet in column x, with standing room on top?
+function canClimb(x: number, feetY: number): boolean {
+  const hard = (yy: number) => { if (!inb(x, yy)) return true; const i = idx(x, yy); return !!body[i] || (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)); };
+  let top = -1;
+  for (let k = 1; k <= 36; k++) if (!hard(feetY - k)) { top = feetY - k; break; }
+  if (top < 0) return false;
+  for (let k = 0; k < PH_CRAWL; k++) if (hard(top - k)) return false;
+  return true;
+}
 
 export interface MoveIn { moveX: number; jump: boolean; run: boolean; working: boolean; dt: number; }
 export const events = { steps: [] as { dens: number; run: boolean; sink: number }[], landed: 0 };
@@ -166,7 +175,12 @@ export function stepPlayer(inp: MoveIn) {
   if (Math.abs(inp.moveX) > 0.1) pl.face = inp.moveX > 0 ? 1 : -1;
   // gravity
   pl.vy += 196 * dt;
-  if (inp.jump && pl.onGround && !crawl && pl.stamina > 0.08) { pl.vy = -JUMP_V * (1 - deep * 0.5); pl.onGround = false; pl.stamina -= 0.06; }
+  // only loose powder actually around the body weakens the jump (the firm walls of a pit or shaft do not)
+  let loose = 0, looseN = 0;
+  { const xa = Math.round(pl.x - PW / 2) + 1, xb = xa + PW - 3;
+    for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y); y += 3) for (let x = xa; x <= xb; x += 2) { looseN++; if (inb(x, y)) { const i = idx(x, y); if (mat[i] === M.SNOW && isGranular(i)) loose++; } } }
+  const looseF = looseN ? loose / looseN : 0;
+  if (inp.jump && pl.onGround && !crawl && pl.stamina > 0.04) { pl.vy = -JUMP_V * (1 - looseF * 0.35); pl.onGround = false; pl.stamina -= 0.05; }
   // ---- horizontal move with step-up ----
   let nx = pl.x + pl.vx * dt;
   const dirx = Math.sign(nx - pl.x);
@@ -189,6 +203,10 @@ export function stepPlayer(inp: MoveIn) {
       let free = stepH <= 7;
       if (free) for (let y = Math.round(pl.y - pl.h - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y)) && !boughSnow(idx(lead, y))) { free = false; break; }
       if (free) { pl.y -= stepH; pushT = 0; }
+      else if (inp.jump && !crawl && stepH <= 34 && pl.stamina > 0.02 && canClimb(lead, Math.round(pl.y))) {
+        // scramble: jump held against a wall up to ~1.7 m high with room on top -> pull himself up it
+        pl.vy = Math.min(pl.vy, -42); pl.stamina -= dt * 0.06; pushT = 0; stuckT = 0;
+      }
       else {
         // a thin snow pillar (<= 2 cells wide) in the way gives way after 0.3 s of pushing
         let thin = true, any = false;
