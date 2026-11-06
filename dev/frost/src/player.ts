@@ -188,9 +188,10 @@ export function stepPlayer(inp: MoveIn) {
   // breath vapour
   pl.breathT -= dt;
   if (pl.breathT <= 0) {
-    pl.breathT = run ? 0.9 : 2.2 + Math.random();
+    pl.breathT = run ? 0.8 : 1.6 + Math.random() * 0.8;
     const hx = pl.x + pl.face * 4, hy = pl.y - PH + 6;
-    for (let k = 0; k < 4; k++) spawn(PK.BREATH, hx, hy, pl.face * (10 + Math.random() * 8), -2 + Math.random() * 3, 1.4, 1, 0, 0);
+    const nb = pl.airT < -15 ? 9 : 5;
+    for (let k = 0; k < nb; k++) spawn(PK.BREATH, hx + Math.random() * 2, hy + Math.random() * 2, pl.face * (8 + Math.random() * 12), -3 + Math.random() * 4, 1.2 + Math.random() * 0.8, 1, 0, 0);
   }
 }
 

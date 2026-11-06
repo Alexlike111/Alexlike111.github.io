@@ -710,10 +710,10 @@ export class Renderer {
           case PK.SMOKE: sz = (3 + (1 - lr) * 6) * m; hd = 0; r = 0.35; g = 0.35; b = 0.37; a = 0.4 * sstep(0, 0.3, lr) * Math.min(1, (1 - lr) * 8 + 0.2); break;
           case PK.STEAM: sz = (2 + (1 - lr) * 5) * m; hd = 0; a = 0.25 * lr; break;
           case PK.CHIP: sz = 1.2; hd = 1; r = 0.45; g = 0.3; b = 0.15; a = 1; break;
-          case PK.BREATH: sz = (2.4 + (1 - lr) * 3.2) * m * (0.85 + 0.3 * s); hd = 0; r = 0.96; g = 0.985; b = 1; a = 0.6 * Math.min(1, (1 - lr) * 7 + 0.15) * lr; break; // soft white puff, 2-4 cells, fading
+          case PK.BREATH: sz = (3.6 + (1 - lr) * 4.4) * m * (0.85 + 0.3 * s); hd = 0.55; r = 0.96; g = 0.985; b = 1; a = 0.7 * Math.min(1, (1 - lr) * 7 + 0.15) * lr; break; // soft white puff, 2-4 cells, fading
           default: sz = (0.8 + s * 1.0 + (1 - lr) * 0.5) * m; hd = 0.3 + 0.4 * s; r = 0.94; g = 0.97; a = (0.5 + 0.3 * s) * lr; break; // DUST: small, varied spray
         }
-        if (!add) { r *= tn[0]; g *= tn[1]; b *= tn[2]; }
+        if (!add) { if (k === PK.BREATH || k === PK.DUST) { r *= 0.35 + 0.65 * tn[0]; g *= 0.35 + 0.65 * tn[1]; b *= 0.35 + 0.65 * tn[2]; } else { r *= tn[0]; g *= tn[1]; b *= tn[2]; } }   // vapour / spray stay readable at night
         buf[o] = x; buf[o + 1] = y; buf[o + 2] = add ? -sz : sz; buf[o + 3] = hd;
         buf[o + 4] = r; buf[o + 5] = g; buf[o + 6] = b; buf[o + 7] = a;
         o += 8;

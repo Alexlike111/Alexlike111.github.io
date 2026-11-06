@@ -447,13 +447,12 @@ function drawFireBase() {
 }
 /** soft elliptical contact shadow on the snow under the feet */
 function drawContactShadow() {
-  if (!pl.alive && pl.vy !== 0) return;
-  const x = pl.x, y = pl.y + 0.4;
+  const x = pl.x, y = pl.y + 1;
   let lift = 0; if (!pl.onGround) { for (let k = 0; k < 40; k++) { if (mat[idx(x | 0, Math.min(H - 1, (y | 0) + k))] !== M.AIR) { lift = k; break; } lift = 40; } }
   const k = Math.max(0, 1 - lift / 30);
   if (k <= 0.02) return;
-  const a = (0.26 + 0.14 * G.daylight) * k, rx = 9.5 * (0.7 + 0.3 * k);
-  ctx.save(); ctx.translate(x, y + lift); ctx.scale(1, 0.2);
+  const a = (0.42 + 0.16 * G.daylight) * k, rx = 13 * (0.7 + 0.3 * k);
+  ctx.save(); ctx.translate(x, y + lift); ctx.scale(1, 0.22);
   const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
   g.addColorStop(0, `rgba(14,26,58,${a})`); g.addColorStop(0.6, `rgba(14,26,58,${a * 0.55})`); g.addColorStop(1, 'rgba(14,26,58,0)');
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();

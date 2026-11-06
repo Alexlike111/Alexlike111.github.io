@@ -129,7 +129,7 @@ export function generate(s = 20261106) {
       const i = idx(x, y);
       const deep = y - g;
       if (y >= H - 6) { mat[i] = M.BEDROCK; continue; }
-      const rocky = fbm(x * 0.05 + y * 0.07, 2) > 0.68 && deep > 6;
+      const rocky = (fbm(x * 0.021 + 13.7, 3) * 0.6 + fbm(y * 0.09 + x * 0.004 + 71.3, 2) * 0.4) > 0.66 && deep > 6;
       mat[i] = rocky || deep > 70 ? M.ROCK : M.DIRT;
     }
     // frozen lake
