@@ -175,11 +175,11 @@ function toolSample(id: string, u: number, v: number, load: number): number {
       if (inR(-3.6, 0.2, -2.4, -1.2) || inR(-3.6, 0.2, 1.2, 2.4)) return lc(W_);
       if (inR(-1.8, 16, -0.8, 0.8)) return lc(v > 0.1 ? WS : W_);                                  // shaft
       if (inR(15, 18.5, -1.5, 1.5)) return lc(PAL.steelSh);                                         // socket
-      if (inR(18.5, 28, -4.4, -3.2)) return lc(PAL.steelHi);                                        // blade top edge
-      if (inR(18.5, 27, -3.2, 3.2)) return lc(u > 24 ? PAL.steel : PAL.steel, 1 - (u - 18.5) * 0.012);
-      if (inR(18.5, 28, 3.2, 4.4)) return lc(PAL.steelSh);
-      if (inR(28, 29.6, -2.6, 2.6)) return lc(PAL.steel);                                           // rounded tip
-      if (load > 0 && u > 18.5 && u < 27.5 && v < -4.4 && v > -4.4 - (1.5 + load * 4.2) * Math.sin((u - 18.5) / 9 * Math.PI)) return lc([238, 244, 252] as C3);
+      if (u >= 18.5 && u < 29) {                                                                    // spade blade, tapering to a rounded tip
+        const hw = 3.6 - Math.max(0, u - 24.5) * 0.75;
+        if (hw > 0.4 && v >= -hw && v < hw) return lc(v < -hw + 1.1 ? PAL.steelHi : v > hw - 1.1 ? [74, 88, 104] as C3 : [118, 134, 152] as C3, 1 - (u - 18.5) * 0.01);
+      }
+      if (load > 0 && u > 19 && u < 28 && v < -3.2 && v > -3.2 - (1.2 + load * 4.4) * Math.sin((u - 19) / 9 * Math.PI)) return lc([238, 244, 252] as C3);
       return 0;
     case 'saw': {
       if (inR(-1, 5.5, -1.7, 1.7)) return lc([48, 46, 52] as C3);                                   // handle
@@ -193,12 +193,13 @@ function toolSample(id: string, u: number, v: number, load: number): number {
     case 'axe': {
       if (inR(-2.4, 19, -0.9, 0.9)) return lc(v > 0.05 ? WS : W_);                                  // haft
       if (inR(-2.4, -0.4, -1.3, 1.3)) return lc(WS);                                                // knob
-      if (u >= 13 && u < 21.5) {
-        const t = (u - 13) / 8.5, top = -2.2 - 3.4 * t, bot = 2.0 + 2.4 * t;
+      if (u >= 12 && u < 22) {                                                                      // poll, cheek, flared bit
+        const top = u < 14.5 ? -2.2 : u < 17 ? -2.4 : -2.4 - (u - 17) * 0.95;
+        const bot = u < 14.5 ? 2.2 : u < 17 ? 2.4 : 2.4 + (u - 17) * 0.75;
         if (v >= top && v <= bot) {
-          if (u > 20) return lc(PAL.steelHi);                                                       // cutting edge
-          if (u < 14.8) return lc(PAL.steelSh);                                                     // poll
-          return lc(v < -0.4 ? PAL.steel : [120, 132, 144] as C3);
+          if (u > 21) return lc(PAL.steelHi);                                                       // cutting edge
+          if (u < 14.5) return lc([70, 80, 92] as C3);                                              // poll
+          return lc(v < -0.2 ? [132, 146, 160] as C3 : [88, 100, 114] as C3);
         }
       }
       return 0;
@@ -247,7 +248,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   spBuf.fill(0);
   const dim = (c: C3, k: number): C3 => [c[0] * k, c[1] * k, c[2] * k];
   // ---- back arm (limp / swinging), behind the torso ----
-  const shY = -26 + spBob + spDrop, shX = vf * 0.5;
+  const shY = -24 + spBob + spDrop, shX = vf * 0.5;
   const swingB = pl.alive ? Math.sin(ph + Math.PI) * 0.6 * amt : 0.15;
   const armL = 9;
   {
