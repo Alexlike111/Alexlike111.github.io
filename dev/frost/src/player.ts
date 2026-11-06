@@ -415,8 +415,9 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   pl.shiver = pl.core < SHIVER_ON && pl.food > 0.01 ? Math.min(1, (SHIVER_ON - pl.core) / SHIVER_RAMP) : 0;
   met += pl.shiver * SHIVER_W * (moving > 0.1 || pl.work > 0 ? 0.5 : 1); // exercise heat overlaps with shivering
   if (pl.food <= 0.001) met *= 0.6;
-  // losses
-  const insul = 1 + pl.wet * 1.4;
+  // losses: wet clothes conduct more heat (x1.5 at half wet, x2 soaked); a hungry body loses a little more (ramps in below a 30 % gauge)
+  const hungry = Math.min(1, Math.max(0, (0.3 - pl.food) / 0.3));
+  const insul = (1 + pl.wet * WET_K) * (1 + HUNGER_LOSS * hungry);
   const loss = (33 - pl.feelT) * LOSS_K * insul - rad;
   const net = met - loss;
   pl.core += (net * dtG) / 243000;
