@@ -566,14 +566,14 @@ function ovThrow(aim: [number, number], px: number) {
   const ax = aim[0], ay = aim[1], [sx, sy] = shoulder();
   const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1;
   const auto = G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai));
-  // the manual landing depends on the aim cell; the auto spoil ignores the aim, so it is re-planned only when the hero moves or every 0.5 s
+  // the manual landing depends on the aim cell; the auto spoil ignores the aim, so it is re-planned only when the hero moves or about once a second (planSpoil: 1-6 ms)
   const mode = auto ? 1 : 0;
   const k0 = auto ? pl.x | 0 : Math.round(ax), k1 = auto ? pl.y | 0 : Math.round(ay);
-  const k2 = auto ? tool.digDir : sx | 0, k3 = auto ? pl.face : sy | 0, k4 = auto ? (G.frame / 30) | 0 : 0;
+  const k2 = auto ? tool.digDir : sx | 0, k3 = auto ? pl.face : sy | 0, k4 = auto ? (G.frame / 60) | 0 : 0;
   if (TH.mode !== mode || TH.k0 !== k0 || TH.k1 !== k1 || TH.k2 !== k2 || TH.k3 !== k3 || TH.k4 !== k4) {
     TH.mode = mode; TH.k0 = k0; TH.k1 = k1; TH.k2 = k2; TH.k3 = k3; TH.k4 = k4;
     let vx: number, vy: number;
-    if (auto) { const t0 = performance.now(); const p = planSpoil(sx, sy); (window as any).__planMs = ((window as any).__planMs ?? []).concat([performance.now() - t0]); vx = p.ux * p.sp; vy = p.uy * p.sp - 25; }
+    if (auto) { const p = planSpoil(sx, sy); vx = p.ux * p.sp; vy = p.uy * p.sp - 25; }
     else { const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy)), sp = 95 + Math.min(60, L * 1.2); vx = dx / L * sp; vy = dy / L * sp - 25; }
     const [lx, ly] = simulateClump(sx, sy, vx, vy);
     TH.ok = ly < 1e4; TH.lx = lx; TH.ly = ly;
