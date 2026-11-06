@@ -1,5 +1,5 @@
 // Tools: shovel, snow saw, axe, beams, snow blocks, campfire; crates, eating.
-import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
+import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_BLOCK, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
 import { G, Fire } from './state';
 import { plural } from './ru';
 import { pl } from './player';
@@ -448,7 +448,7 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
       let y = c.y - 1; while (y > 0 && mat[idx(c.x, y)] !== M.AIR) y--;
       if (y > g.y0 - 12 && y > 0) set(c.x, y, mat[i], dens[i], 0, F_DIST);
     }
-    if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST);
+    if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST | F_BLOCK);
     else { set(c.x, c.y, door ? M.DOOR : M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
   if (kind === 'beam') inv.logs -= bs.logs;

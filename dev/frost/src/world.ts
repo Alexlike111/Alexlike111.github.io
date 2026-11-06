@@ -21,6 +21,7 @@ export const F_WET = 2;    // wet snow / slush
 export const F_TREE = 4;   // part of a standing tree
 export const F_VERT = 8;   // vertical beam / grain orientation
 export const F_DRIFT = 16; // wind-packed
+export const F_BLOCK = 32; // placed snow block (sawn and laid by the player; render draws courses/joints)
 
 export const BOND_SOLID = 48; // snow with bond >= this is rigid
 

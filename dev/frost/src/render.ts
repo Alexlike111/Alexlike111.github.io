@@ -194,6 +194,10 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     float d1 = 1.-exp(-depth/16.), d2 = 1.-exp(-depth/52.);
     b = mix(b, vec3(.36,.56,.79), d1*.5);
     b = mix(b, vec3(.17,.31,.53), d2*.55);
+    if((fl&32)!=0){                                                        // placed block (F_BLOCK): cut from dense wind slab, so a touch denser, bluer and finer than the snow around it
+      b = mix(b, b*vec3(.88,.93,1.04), .5)*.95;
+      b += (vn(vec2(cf.x*.45, cf.y*.45))-.5)*.035;                          // fine cut grain
+    }
     return b*strat2;
   }
   if(m==2){
@@ -397,6 +401,25 @@ void main(){
         alb += wallF*cutg*.028;
         alb = mix(alb, alb*vec3(.9,.95,1.03), wallF*.4);
       }
+    }
+    if(m==1 && (fl&32)!=0){
+      // placed block: a lighter top course; a fine joint where it meets another block cut at a different density or plain snow; the inside face of an igloo (air on one side, roof above it) darkens into the hollow
+      if(mUp==0) alb = mix(alb, vec3(.98,.99,1.), .28);
+      float jt = 0.;
+      for(int k=0;k<4;k++){
+        ivec2 o = k==0 ? ivec2(1,0) : k==1 ? ivec2(-1,0) : k==2 ? ivec2(0,1) : ivec2(0,-1);
+        vec4 nb = fetchW(c+o);
+        int nm = int(nb.r);
+        if(nm==1){ jt = max(jt, (int(nb.a)&32)!=0 ? (abs(nb.g*4.-dn)>6. ? .6 : 0.) : .35); }
+      }
+      alb *= 1.-.3*jt;
+      bool hollow = false;
+      for(int s=0;s<2;s++){
+        int sd = s==0 ? 1 : -1;
+        if(mAt(c+ivec2(sd,0))!=0) continue;                                 // air beside this cell
+        for(int j=2;j<=24;j+=4) if(mAt(c+ivec2(sd,-j))!=0){ hollow = true; break; }   // ...with a roof somewhere above it
+      }
+      if(hollow && mUp!=0) alb = mix(alb, alb*vec3(.8,.85,.95), .8);
     }
     #ifdef LIGHTS
     vec3 pl = pointLights(wp, c, n, hasN, hh);
@@ -1089,7 +1112,8 @@ export class Renderer {
       let i = y * W + x0, o = i * 4;
       for (let x = 0; x < w; x++, i++, o += 4) {
         const d = dens[i] >> 2;
-        t[o] = mat[i]; t[o + 1] = d > 255 ? 255 : d; t[o + 2] = bond[i]; t[o + 3] = flags[i] | (body[i] ? 32 : 0);
+        // flags byte as stored; bit 32 = F_BLOCK (placed snow block). Rigid-body cells are not marked here: the shader never read that bit.
+        t[o] = mat[i]; t[o + 1] = d > 255 ? 255 : d; t[o + 2] = bond[i]; t[o + 3] = flags[i];
       }
     }
   }
