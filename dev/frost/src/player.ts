@@ -64,7 +64,7 @@ function crumble(x0: number, x1: number, y0: number, y1: number, all: boolean): 
   }
   return n;
 }
-let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkT = 0, trunkMsgT = -99;
+let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkSince = -1, trunkMsgT = -99, highMsgT = -99;
 /** what blocks the lead column this step: 0 nothing, 1 snow, 2 tree trunk / stump, 3 placed timber / crate, 4 ground / rock / ice */
 let blockKind = 0;
 
@@ -149,6 +149,29 @@ function canClimb(x: number, feetY: number): boolean {
   for (let k = 0; k < PH_CRAWL; k++) if (hard(top - k)) return false;
   return true;
 }
+/** a wall the scramble cannot reach: no free cell within 36 rows above the feet in column x */
+function wallTooTall(x: number, feetY: number): boolean {
+  for (let k = 1; k <= 36; k++) {
+    const yy = feetY - k;
+    if (!inb(x, yy)) return false;
+    const i = idx(x, yy);
+    if (!(body[i] || (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)))) return false;
+  }
+  return true;
+}
+/** rows of air below the feet in column x (up to 24; 25 = no floor within that) */
+function airBelow(x: number, feetY: number): number {
+  for (let k = 1; k <= 24; k++) if (solid(x, feetY + k)) return k - 1;
+  return 25;
+}
+/** -1 / +1 when the hero is on a lip: one side of the body stands over a drop of 20+ cells, the other side is still on firm ground; 0 otherwise */
+function lipDir(): number {
+  const fy = Math.round(pl.y), xc = Math.round(pl.x);
+  const dl = airBelow(xc - 4, fy), dr = airBelow(xc + 4, fy);
+  if (dr >= 20 && dl <= 3) return 1;
+  if (dl >= 20 && dr <= 3) return -1;
+  return 0;
+}
 
 export interface MoveIn { moveX: number; jump: boolean; run: boolean; working: boolean; dt: number; }
 export const events = { steps: [] as { dens: number; run: boolean; sink: number }[], landed: 0 };
@@ -174,6 +197,8 @@ export function stepPlayer(inp: MoveIn) {
   const target = inp.moveX * speed;
   const acc = pl.onGround ? 14 : 4;
   pl.vx += (target - pl.vx) * Math.min(1, dt * acc);
+  // hovering on a lip (centre over a 20+ cell drop): a small push toward the drop so he falls in instead of balancing on the edge
+  if (pl.onGround && !crawl) { const d = lipDir(); if (d) pl.vx += d * 4; }
   if (Math.abs(inp.moveX) > 0.1) pl.face = inp.moveX > 0 ? 1 : -1;
   // gravity
   pl.vy += 196 * dt;
@@ -189,7 +214,7 @@ export function stepPlayer(inp: MoveIn) {
   const x00 = pl.x;
   let blockedSnow = false;
   blockKind = 0;
-  if (dirx === 0) { pushT = 0; trunkT = 0; }
+  if (dirx === 0) { pushT = 0; trunkSince = -1; }
   if (dirx !== 0) {
     const lead = Math.round(nx + dirx * PW / 2 - (dirx > 0 ? 1 : 0));
     let blockedAt = -1;
@@ -210,6 +235,8 @@ export function stepPlayer(inp: MoveIn) {
         pl.vy = Math.min(pl.vy, -42); pl.stamina -= dt * 0.06; pushT = 0; stuckT = 0;
       }
       else {
+        // jump held against a wall he cannot scramble up (taller than the limit): say so, and what to do
+        if (inp.jump && !crawl && wallTooTall(lead, Math.round(pl.y)) && G.realTime - highMsgT > 5) { highMsgT = G.realTime; tool.msg = 'Слишком высоко — вырежь ступеньку лопатой в стене'; }
         // a thin snow pillar (<= 2 cells wide) in the way gives way after 0.3 s of pushing
         let thin = true, any = false;
         for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y) - 1; y++) {
@@ -228,15 +255,15 @@ export function stepPlayer(inp: MoveIn) {
           const k = m === M.WOOD && (flags[i] & F_TREE) ? 2 : m === M.SNOW ? 1 : (m === M.PLANK || m === M.WOOD || m === M.CRATE) ? 3 : 4;
           if (blockKind === 0 || k === 2 || (k === 3 && blockKind !== 2)) blockKind = k;
         }
+        // trunk: timed in game (real) seconds, not by the frame count, so the hint shows ~0.3 s after the push starts at any frame rate
         if (blockKind === 2 && Math.abs(inp.moveX) > 0.1) {
-          trunkT += dt;
-          if (trunkT > 0.25 && G.realTime - trunkMsgT > 4) { trunkMsgT = G.realTime; tool.msg = stepH <= 14 ? 'Ствол на пути — руби топором (3) или прыгай' : 'Ствол на пути — руби топором (3)'; }
-        }
+          if (trunkSince < 0) trunkSince = G.realTime;
+          if (G.realTime - trunkSince > 0.3 && G.realTime - trunkMsgT > 4) { trunkMsgT = G.realTime; tool.msg = stepH <= 14 ? 'Ствол на пути — руби топором (3) или прыгай' : 'Ствол на пути — руби топором (3)'; }
+        } else trunkSince = -1;
         if (any && thin && Math.abs(inp.moveX) > 0.1) {
           pushT += dt;
           if (pushT > 0.3) { pushT = 0; crumble(lead - dirx * 2, lead + dirx * 2, Math.round(pl.y - pl.h), Math.round(pl.y) - 2, false); }
         } else pushT = 0;
-        if (blockKind !== 2) trunkT = 0;
         // push rigid bodies
         const bi = inb(lead, blockedAt) ? idx(lead, blockedAt) : -1;
         if (bi >= 0 && body[bi]) { const rec = bodyAtIndex(bi); if (rec) impulseAt(rec, lead, blockedAt, dirx * 30 * dt * 60, 0); }
@@ -244,7 +271,7 @@ export function stepPlayer(inp: MoveIn) {
       }
     }
   }
-  if (blockKind === 0) trunkT = 0;
+  if (blockKind === 0) trunkSince = -1;
   pl.x = Math.max(PW, Math.min(W - PW, nx));
   // wading through powder that overlaps the body
   const waded = wade(pl.x, Math.round(pl.y - pl.h), Math.round(pl.y) - 2);
@@ -418,5 +445,5 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
 export function die(cause: string) { if (!pl.alive) return; pl.alive = false; pl.cause = cause; }
 
 export function resetPlayer(x: number, y: number) {
-  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH }); G.player.h = PH; stuckT = 0; pushT = 0; trunkT = 0; hungerLvl = 2;
+  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH }); G.player.h = PH; stuckT = 0; pushT = 0; trunkSince = -1; hungerLvl = 2;
 }

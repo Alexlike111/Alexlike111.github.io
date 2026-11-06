@@ -49,17 +49,27 @@ function say(m: string) { tool.msg = m; }
 let lastNothingT = -99, loadWarned = false;
 /** Shovel bite at the aim: a round scoop (r 4.5), or - aiming near-horizontally at body height, i.e. into a wall / tunnel face - a tall ellipse 5 wide x 10 high
  *  (still <= 46 cells), so a crawl tunnel (20 cells high) takes two stacked scoops per 5 cells of length (~8-10 scoops per metre). */
-export function shovelBite(ax: number, ay: number): { rx: number; ry: number; tunnel: boolean } {
+export function shovelBite(ax: number, ay: number): { rx: number; ry: number; tunnel: boolean; shaft?: boolean } {
   const dx = ax - pl.x, dy = ay - (pl.y - pl.h * 0.5); // slope measured from the middle of the body (crawling or standing)
   const tun = Math.abs(dx) >= 6 && (pl.h < 34 || Math.abs(dy) <= Math.abs(dx) * 0.6) && ay >= pl.y - pl.h - 2 && ay <= pl.y + 1; // crawling: any aim at body height ahead is a tunnel bite
-  return tun ? { rx: 2.5, ry: 5, tunnel: true } : { rx: 4.5, ry: 4.5, tunnel: false };
+  if (tun) return { rx: 2.5, ry: 5, tunnel: true };
+  // starting a shaft (aim below the feet, close by): a wide flat scoop, so the shaft top is ~11+ cells wide and the hero can drop in
+  if (ay > pl.y && Math.abs(ax - pl.x) <= 14) return { rx: 6, ry: 3.5, tunnel: false, shaft: true };
+  return { rx: 4.5, ry: 4.5, tunnel: false };
 }
-function dig(ax: number, ay: number) {
-  const { rx, ry, tunnel } = shovelBite(ax, ay);
+let stallT = 0, stallMsgT = -99, lastDigN = -1;
+/** shovel held but going nowhere: the aim is beyond the 2 m reach, or the bites find nothing to take, for ~1 s */
+function shovelStall(dt: number, beyond: boolean) {
+  stallT = beyond || lastDigN === 0 ? stallT + dt : 0;
+  if (stallT > 1 && G.realTime - stallMsgT > 4) { stallMsgT = G.realTime; say('Дальше не достать — спрыгни в яму и копай изнутри'); }
+}
+/** Returns the cells taken (0 = nothing in reach), or -1 when the load was thrown instead. */
+function dig(ax: number, ay: number): number {
+  const { rx, ry, tunnel, shaft } = shovelBite(ax, ay);
   tool.tun = tunnel; tool.digDir = ax >= pl.x ? 1 : -1;
   let n = 0, sum = 0, hard = 0;
   const cap = 46 - tool.load;
-  if (cap <= 2 || (tunnel && cap < 36 && tool.load > 0)) { throwLoad(ax, ay, true); return; } // tunnel: empty the blade before a full-size bite does not fit
+  if (cap <= 2 || (tunnel && cap < 36 && tool.load > 0)) { throwLoad(ax, ay, true); return -1; } // tunnel: empty the blade before a full-size bite does not fit
   // tunnel bite: a 5 x 10 slab (squared-off ellipse, offsets -2..2 x -5..4) that hugs the face - slid from the body outwards along the aim line to the first spot where it is nearly full of snow
   const offs: number[] = [];
   if (tunnel) {
@@ -86,15 +96,21 @@ function dig(ax: number, ay: number) {
     set(x, y, M.AIR);
   };
   if (tunnel) { for (let k = 0; k < offs.length; k += 2) take(ax + offs[k], Math.round(ay) + offs[k + 1]); }
-  else for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
-    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1) continue;
-    take(Math.round(ax + dx), Math.round(ay + dy));
+  else {
+    // shaft scoop: whole rows, the rows nearest the aim line first, so a capped bite keeps its widest (surface) rows
+    const dys: number[] = [];
+    if (shaft) { dys.push(0); for (let k = 1; k <= 4; k++) dys.push(-k, k); }
+    else for (let dy = -ry; dy <= ry; dy++) dys.push(dy);
+    for (const dy of dys) for (let dx = -rx; dx <= rx; dx++) {
+      if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1) continue;
+      take(Math.round(ax + dx), Math.round(ay + dy));
+    }
   }
   if (n === 0) {
     const i = inb(ax | 0, ay | 0) ? idx(ax | 0, ay | 0) : 0;
     if (mat[i] === M.ICE || mat[i] === M.DIRT || mat[i] === M.ROCK) { say('Лопата не берёт мёрзлую землю и лёд'); sfx?.uiDeny(); }
     else if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say('Тут нечего копать — целься в снег в пределах 2 м'); }
-    return;
+    return 0;
   }
   tool.bite = n;
   const h = hard / n;
@@ -111,6 +127,7 @@ function dig(ax: number, ay: number) {
     spawn(PK.DUST, ax + (Math.random() - 0.5) * 4, ay + (Math.random() - 0.5) * 3, Math.cos(a) * sp, Math.sin(a) * sp, clump ? 0.6 + Math.random() * 0.5 : 0.45 + Math.random() * 0.6, clump ? 1.8 + Math.random() * 0.8 : 0.9 + Math.random() * 0.6, 0, 0);
   }
   markStruct(ax - 8, ay - 8, ax + 8, ay + 8);
+  return n;
 }
 // ---- spoil throw: ballistic planner ----
 const CLUMP_G = 196, CLUMP_LIFE = 4;
@@ -744,10 +761,17 @@ export function usePrimary(ax: number, ay: number, dt: number) {
   const [x, y] = reachPoint(ax, ay);
   const id = TOOLS[tool.cur].id;
   if (id === 'saw') { if (tool.cool <= 0) saw(x, y, dt); return; }
+  if (id === 'shovel') {
+    if (tool.cool <= 0) {
+      if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; }
+      else lastDigN = dig(x, y);
+    }
+    shovelStall(dt, !inReach(ax, ay)); // after the bite, so the reach hint is the message shown
+    return;
+  }
   if (tool.cool > 0) return;
   if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; return; }
-  if (id === 'shovel') dig(x, y);
-  else if (id === 'axe') chop(x, y);
+  if (id === 'axe') chop(x, y);
   else if (id === 'beam') { if (placeLatch) return; placeLatch = true; place('beam', x, y); }
   else if (id === 'block') { if (placeLatch) return; placeLatch = true; place('block', x, y); }
   else if (id === 'fire') { if (fireLatch) return; fireLatch = true; placeFire(x, y); tool.cool = 0.6; } // one fire per press
@@ -760,5 +784,5 @@ export function useSecondary(ax: number, ay: number) {
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);
 }
-export function idleTool(dt: number) { fireLatch = false; placeLatch = false; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
+export function idleTool(dt: number) { fireLatch = false; placeLatch = false; stallT = 0; lastDigN = -1; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
 export { CELL };
