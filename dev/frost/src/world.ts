@@ -96,6 +96,8 @@ export const crates: Crate[] = [];
 export const trees: TreeInfo[] = [];
 export const groundY = new Int16Array(W); // initial ground surface
 export let START_X = 600;
+const DRIFT_DX = 190; // big lee drift (dugout site) this far east of the start
+let DRIFT_X = 750;
 
 function freshDens(tC: number) { return Math.round(67.9 + 51.25 * Math.exp(tC / 2.59)); }
 export { freshDens };
@@ -104,7 +106,7 @@ export function generate(s = 20261106) {
   setSeed(s);
   mat.fill(0); dens.fill(0); bond.fill(0); flags.fill(0); body.fill(0); treeId.fill(0); beamId.fill(0);
   crates.length = 0; trees.length = 0;
-  START_X = 560;
+  START_X = 560; DRIFT_X = START_X + DRIFT_DX;
   // ground profile: rolling hills, a ridge, a frozen lake hollow
   const lakeA = 1500, lakeB = 1780;
   for (let x = 0; x < W; x++) {
@@ -139,9 +141,12 @@ export function generate(s = 20261106) {
   for (let x = 0; x < W; x++) {
     let top = groundY[x];
     for (let y = top - 1; y > 0; y--) { if (mat[idx(x, y)] === M.AIR) { top = y + 1; break; } }
+    const driftK = Math.exp(-(((x - DRIFT_X) / (x < DRIFT_X ? 75 : 48)) ** 2));
     const slope = (groundY[Math.min(W - 1, x + 6)] - groundY[Math.max(0, x - 6)]) / 12; // >0: ground going down to the east (lee)
     let depth = 2.3 + (fbm(x * 0.008 + 7, 4) - 0.5) * 1.4 + Math.max(0, slope) * 2.6;
     depth += 2.0 * Math.exp(-(((x - 1250) / 90) ** 2)) + 1.8 * Math.exp(-(((x - 820) / 60) ** 2)) + 1.6 * Math.exp(-(((x - 2260) / 70) ** 2));
+    // big lee drift for a dugout near the start: gentle windward ramp (west), steeper lee face (east); total depth ~3.2-3.5 m at the crest
+    depth = depth * (1 - driftK) + (3.25 + (fbm(x * 0.03 + 3, 2) - 0.5) * 0.5) * driftK; // blend toward a ~3.0-3.5 m deep drift (ground slope no longer adds on top)
     if (x > lakeA && x < lakeB) depth *= 0.55;
     const cells = Math.max(6, Math.round(depth / CELL));
     for (let k = 0; k < cells; k++) {
@@ -150,8 +155,12 @@ export function generate(s = 20261106) {
       const fromTop = cells - k; // cells below the surface
       mat[i] = M.SNOW;
       if (fromTop <= 4) { dens[i] = 75 + ((rnd() * 20) | 0); bond[i] = 0; }
-      else if (fromTop <= 9) { dens[i] = 150 + ((rnd() * 30) | 0); bond[i] = 30 + ((rnd() * 15) | 0); }
-      else { const t = Math.min(1, (fromTop - 9) / 30); dens[i] = 230 + Math.round(t * 120 + rnd() * 25); bond[i] = 110 + Math.round(t * 120); if (slope > 0.15 || depth > 2) flags[i] |= F_DRIFT, dens[i] = Math.min(400, dens[i] + 40); }
+      else if (fromTop <= 24) { dens[i] = 190 + ((rnd() * 40) | 0); bond[i] = 60 + ((rnd() * 30) | 0); } // cuttable middle layer (saw works once the top ~20 cm of powder is dug off)
+      else {
+        const t = Math.min(1, (fromTop - 24) / 30); dens[i] = 235 + Math.round(t * 115 + rnd() * 25); bond[i] = 115 + Math.round(t * 115);
+        if (slope > 0.15 || depth > 2) flags[i] |= F_DRIFT, dens[i] = Math.min(400, dens[i] + 40);
+        if (driftK > 0.25) bond[i] = Math.max(bond[i], 140 + Math.round(t * 60)); // well sintered lower part: a dug cave holds
+      }
       if (k === 0) { dens[i] = 260; bond[i] = 90; } // depth hoar-ish base
     }
   }
@@ -161,7 +170,7 @@ export function generate(s = 20261106) {
     const forest = fbm(x * 0.004 + 99, 3);
     const gap = forest > 0.52 ? 26 + rnd() * 40 : 160 + rnd() * 220;
     x += gap | 0;
-    if (x > W - 60 || (x > lakeA - 20 && x < lakeB + 20) || Math.abs(x - START_X) < 70) continue;
+    if (x > W - 60 || (x > lakeA - 20 && x < lakeB + 20) || Math.abs(x - START_X) < 70 || Math.abs(x - DRIFT_X) < 110) continue;
     plantTree(x, 110 + ((rnd() * 140) | 0));
   }
   // boulders
@@ -184,7 +193,20 @@ export function generate(s = 20261106) {
   for (let i = 0; i < awake.length; i++) { awake[i] = 0; gpuDirty[i] = 1; }
 }
 
-function surfaceAt(x: number) { for (let y = 0; y < H; y++) if (mat[idx(x, y)] !== M.AIR && mat[idx(x, y)] !== M.NEEDLE) return y; return H; }
+/** Top of the snow/ground at column x. Ignores tree trunks/boughs, snow lying on boughs and marker poles (spawns land on the snow, not the crown). */
+function surfaceAt(x: number) {
+  for (let y = 0; y < H; y++) {
+    const i = idx(x, y), m = mat[i];
+    if (m === M.AIR || m === M.NEEDLE || m === M.POLE || (m === M.WOOD && (flags[i] & F_TREE))) continue;
+    if (m === M.SNOW) { // snow resting on a bough is not the ground
+      let yy = y; while (yy < H - 1 && mat[idx(x, yy)] === M.SNOW) yy++;
+      const b = idx(x, yy);
+      if (mat[b] === M.NEEDLE || (mat[b] === M.WOOD && (flags[b] & F_TREE))) { y = yy - 1; continue; }
+    }
+    return y;
+  }
+  return H;
+}
 export { surfaceAt };
 
 /** Snow/ground surface row at x: top of the unbroken SNOW/DIRT/ROCK/ICE column resting on the ground (trees, boughs and crates ignored). */

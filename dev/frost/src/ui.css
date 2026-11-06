@@ -445,8 +445,8 @@ body { position: fixed; inset: 0; width: 100%; }
    Context hint: pencil note on a frosted card
    ------------------------------------------------------------------ */
 .hint {
-  position: absolute; left: 50%; bottom: calc(var(--pad-b) + var(--u) * 9.6); max-width: min(34em, calc(100vw - 2 * var(--u) * 16));
-  transform: translate(-50%, 0.6em) rotate(-0.7deg); opacity: 0; transition: opacity 0.3s, transform 0.4s var(--ease), bottom 0.3s var(--ease);
+  position: relative; display: none; margin-top: 0.5em; max-width: min(34em, 100%);
+  transform: rotate(-0.7deg); opacity: 1; transition: opacity 0.6s;
   padding: 0.7em 1.25em 0.75em; border-radius: 0.25em; text-align: center;
   background:
     radial-gradient(circle at 12% 0, rgba(255, 255, 255, 0.2), transparent 40%),
@@ -459,7 +459,8 @@ body { position: fixed; inset: 0; width: 100%; }
 }
 .hint::before { content: ''; position: absolute; top: -0.55em; left: 50%; width: 3.2em; height: 1em; margin-left: -1.6em; transform: rotate(2deg); background: rgba(210, 232, 248, 0.28); border: 1px solid rgba(220, 240, 255, 0.25); }
 .hint::after { content: ''; position: absolute; left: 1.25em; right: 1.25em; bottom: 0.38em; height: 1px; background: repeating-linear-gradient(90deg, rgba(234, 243, 251, 0.45) 0 6px, transparent 6px 9px); }
-.hint.on { opacity: 1; transform: translate(-50%, 0) rotate(-0.7deg); }
+.hint.on { display: block; animation: warn-in 0.5s var(--ease); }
+.hint.dim { opacity: 0.35; }
 
 /* ------------------------------------------------------------------
    Toasts
@@ -559,10 +560,7 @@ body { position: fixed; inset: 0; width: 100%; }
 [data-input='touch'] .chip-l { display: none; }
 [data-input='touch'] .belt { padding-top: 0.5em; gap: 4px; }
 [data-input='touch'] .xray { left: 50%; translate: -50% 0; bottom: calc(var(--pad-b) + 76px); }
-@media (min-height: 461px) {
-  [data-input='touch'] .hint { bottom: calc(var(--pad-b) + 88px); }
-  [data-input='touch'] .ui-root.has-xray .hint, [data-input='touch'].has-xray .hint { bottom: calc(var(--pad-b) + 150px); }
-}
+
 
 /* ------------------------------------------------------------------
    Rotate-the-phone gate (portrait on touch devices)
@@ -833,10 +831,10 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .toast { padding: 0.35em 0.8em 0.35em 1em; font-size: 11.5px; }
   /* the pencil note rides in the top-centre flow, never over the player */
   .hint {
-    position: relative; left: auto; bottom: auto; display: none; max-width: 100%; padding: 0.4em 0.8em 0.45em; font-size: 11px; line-height: 1.3; opacity: 1;
+    margin-top: 0; max-width: 100%; padding: 0.4em 0.8em 0.45em; font-size: 11px; line-height: 1.3;
     transform: rotate(-0.4deg); background: rgba(10, 18, 30, 0.66); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
   }
-  .hint.on { display: block; transform: rotate(-0.4deg); animation: warn-in 0.5s var(--ease); }
+  .hint.dim { opacity: 0.35; }
   .hint::before, .hint::after { display: none; }
 
   /* belt: compact tags, bottom centre */
@@ -850,7 +848,7 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .stick:not(.active) { opacity: 0.5; }
 
   /* bottom right: 2x3 glass strip, 48 px keys */
-  .actions { grid-template-columns: repeat(2, 58px); grid-auto-rows: 48px; gap: 4px; }
+  .actions { grid-template-columns: repeat(2, 60px); grid-auto-rows: 48px; gap: 4px; }
   .abtn {
     border-radius: 13px; gap: 1px; padding-top: 1px; border-width: 1px; border-color: rgba(190, 228, 255, 0.4);
     background: linear-gradient(165deg, rgba(34, 54, 80, 0.5), rgba(7, 13, 23, 0.56)); box-shadow: inset 0 1px 0 var(--plate-inset);
@@ -891,7 +889,7 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .end .card { width: min(40em, 100%); padding: 0.9em 1.4em 1em; }
   .end-medal { display: none; }
   .end .card-title { font-size: 1.35em; margin: 0.25em 0 0; }
-  .note { margin: 0.8em auto 0.7em; padding: 0.7em 1em 0.8em; }
+  .note { margin: 1em auto 0.7em; padding: 1em 1em 0.8em; }
   .cause { font-size: 0.98em; line-height: 1.4; }
   .ro { padding: 0.4em 0.3em 0.4em; gap: 0.3em; }
   .ro-val { font-size: 1.6em; }

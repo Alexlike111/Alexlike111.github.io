@@ -7,7 +7,7 @@ import { initBodies, stepBodies, allBodies, setEngine, engine, spawnStressTest }
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach } from './tools';
+import { TOOLS, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck } from './tools';
 import { Renderer } from './render';
 import { Input } from './input';
 import { UI, HudData } from './ui';
@@ -99,15 +99,25 @@ function newGame() {
   for (let k = 0; k < 30; k++) { weather(0.1); stepHeat(0.1); }
 }
 
+/** Tutorial chain: 0 move+dig, 1 throw, 2 find a crate, 3 choose a shelter, 4 fire inside + wait for night, 5 (fire lit) wait. Advances on real events. */
+function advanceTutorial() {
+  if (tutorial < 5 && tool.built.has('fire')) tutorial = 5;
+  else if (tutorial < 3 && crates.some((c) => c.opened)) tutorial = 3;
+  else if (tutorial === 3 && (inv.blocks.length > 0 || inv.logs > 0 || tool.built.size > 0 || pl.shelter > 0.7)) tutorial = 4;
+}
 function hint(): string | null {
   if (tool.msg) { const m = tool.msg; if (hintT <= 0) { hintText = m; hintT = 3.2; tool.msg = ''; } }
   if (hintT > 0) return hintText;
+  advanceTutorial();
   const mob = G.mobile;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
   if (tutorial === 1) return mob ? '«Положить»: бросить снег из лопаты туда, куда целишься' : 'ПКМ: бросить снег из лопаты туда, куда целишься';
-  if (tutorial === 2) return 'Найди ящики под оранжевыми вешками. Там еда и спички';
+  if (tutorial === 2) return mob ? 'Найди ящик под оранжевой вешкой, подкопай и жми «Взять»' : 'Найди ящик под оранжевой вешкой, подкопай к нему и жми E';
+  if (tutorial === 3) return 'Укрытие: землянка (копай в сугроб), иглу (пила по насту, ПКМ), дом (топор по ели, 4)';
+  if (tutorial === 4) return mob ? 'Разведи костёр внутри (кнопка 6) и жди ночь («Ждать»)' : 'Разведи костёр внутри (6) и жди ночь (T)';
   if (pl.core < 35.5 && G.fires.length === 0) return 'Ты замерзаешь. Уйди от ветра в укрытие и разведи костёр (6)';
   if (pl.wet > 0.4) return 'Одежда мокрая и плохо греет. Посуши её у огня';
+  if (tutorial === 5 && G.daylight > 0.2 && G.fires.length > 0) return mob ? 'Подкидывай брёвна в огонь («Взять»), жди ночь («Ждать»)' : 'Подкидывай брёвна в огонь (E), жди ночь (T)';
   return null;
 }
 
@@ -504,23 +514,24 @@ let aimWorld: [number, number] | null = null;
 let waitToggle = false;
 function frame(now: number) {
   requestAnimationFrame(frame);
-  let dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
-  fpsAcc += dt; fpsN++;
+  const realDt = Math.max(0, Math.min(0.25, (now - last) / 1000)); last = now; // wall clock: game time, survival, fires, weather
+  const dt = Math.min(0.05, realDt);                                          // physics / CA / bodies step (2 substeps when the frame is slow)
+  fpsAcc += realDt; fpsN++;
   if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; if (fps < 40 && G.quality === 1) { lowFpsT++; if (lowFpsT > 3) { G.quality = 0; resize(); } } else lowFpsT = 0; }
   const s = input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
   if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
   if (ended) { // after win/death: world keeps living in the background but ignores game input
-    G.realTime += dt; G.frame++; updateCamera(dt); stepHeat(dt); stepSim(dt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
+    G.realTime += realDt; G.frame++; updateCamera(realDt); stepHeat(realDt); stepSim(dt, realDt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
   }
-  G.realTime += dt; G.frame++;
+  G.realTime += realDt; G.frame++;
   // waiting (time compression) only when calm: not moving, sheltered or by a fire
   if (s.waitHeld !== waitToggle) waitToggle = s.waitHeld;
   const canWait = pl.alive && Math.abs(s.moveX) < 0.1 && !s.primary;
-  G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, dt * 3);
-  G.time += dt * G.timeScale;
-  const { day, warn } = weather(dt);
+  G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, realDt * 3);
+  G.time += realDt * G.timeScale;
+  const { day, warn } = weather(realDt);
   // aim
   if (s.hasAim) aimWorld = renderer.screenToWorld(s.aimX, s.aimY);
   // tools
@@ -529,27 +540,29 @@ function frame(now: number) {
   if (s.xrayPressed) { G.xray = (G.xray + 1) % 4; (ui as any).setXray?.(G.xray); }
   let working = false;
   if (pl.alive) {
-    if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], dt); working = true; if (tutorial === 0 && tool.load > 0) tutorial = 1; }
-    else idleTool(dt);
+    if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], realDt); working = true; if (tutorial === 0 && tool.load > 0) tutorial = 1; }
+    else idleTool(realDt);
     if (s.secondaryPressed && aimWorld) { useSecondary(aimWorld[0], aimWorld[1]); if (tutorial === 1) tutorial = 2; }
-    if (s.interactPressed) { if (!interact()) sound.uiDeny(); else if (tutorial === 2) tutorial = 3; }
+    if (s.interactPressed) { if (!interact()) sound.uiDeny(); }
     if (s.eatPressed) eat();
     if (s.firePressed && aimWorld) placeFire(aimWorld[0], aimWorld[1]);
   }
-  stepPlayer({ moveX: s.moveX, jump: s.jump, run: s.run, working, dt });
-  for (const st of events.steps) sound.footstep(st.dens, tempAt(pl.x | 0, pl.y | 0), st.run, st.sink);
-  if (events.landed > 120) { sound.thump(80); shake = 1; }
-  stepBody(dt, Math.abs(s.moveX), s.run);
-  // world
-  updateCamera(dt);
-  stepFires(dt);
-  stepHeat(dt);
-  stepSim(dt);
-  const br = stepBodies(dt);
-  for (const im of br.impacts) { if (im.massKg > 20 && Math.abs(im.x - pl.x) < 300) { sound.thump(im.massKg); shake = Math.min(3, shake + im.massKg / 200); } }
-  const sr = stepStructure(dt);
-  if (sr.collapsed > 30) { sound.collapse(Math.min(1, sr.collapsed / 400)); shake = Math.min(3, shake + 0.8); }
-  shake *= Math.pow(0.02, dt);
+  stepBody(realDt, Math.abs(s.moveX), s.run); // survival runs on wall-clock time
+  updateCamera(realDt);
+  stepFires(realDt);
+  stepHeat(realDt);
+  const nSub = realDt > 0.05 ? 2 : 1;
+  for (let sub = 0; sub < nSub; sub++) {
+    stepPlayer({ moveX: s.moveX, jump: s.jump, run: s.run, working, dt });
+    for (const st of events.steps) sound.footstep(st.dens, tempAt(pl.x | 0, pl.y | 0), st.run, st.sink);
+    if (events.landed > 120) { sound.thump(80); shake = 1; }
+    stepSim(dt, realDt / nSub);
+    const br = stepBodies(dt);
+    for (const im of br.impacts) { if (im.massKg > 20 && Math.abs(im.x - pl.x) < 300) { sound.thump(im.massKg); shake = Math.min(3, shake + im.massKg / 200); } }
+    const sr = stepStructure(dt);
+    if (sr.collapsed > 30) { sound.collapse(Math.min(1, sr.collapsed / 400)); shake = Math.min(3, shake + 0.8); }
+  }
+  shake *= Math.pow(0.02, realDt);
   // falling slab / log hitting the player
   // (bodies stamped over the player's head push the player down via collision; heavy impact = injury → cold)
   // lights
@@ -563,7 +576,7 @@ function frame(now: number) {
   if (G.time >= 3 * 1440 + 8.5 * 60 && !ended && pl.alive) { ended = true; sound.dawn(); ui.showEnd(true, '', { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }); }
   if (!pl.alive && !ended) { ended = true; sound.death(); setTimeout(() => ui.showEnd(false, pl.cause, { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }), 1400); }
   void nightsSurvived;
-  hintT -= dt;
+  hintT -= realDt;
   // HUD
   const h: HudData = {
     core: pl.core, food: pl.food, stamina: pl.stamina, wet: pl.wet,
@@ -617,5 +630,6 @@ boot();
   interact: () => interact(),
   eat: () => eat(),
   fps: () => fps,
+  sawCheck, tutorial: () => tutorial,
 };
 void PW; void dens; void bond;

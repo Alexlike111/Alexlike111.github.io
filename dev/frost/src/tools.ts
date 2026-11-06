@@ -43,6 +43,7 @@ export function reachPoint(ax: number, ay: number): [number, number] {
 function say(m: string) { tool.msg = m; }
 
 // ---------------- shovel ----------------
+let lastNothingT = -99;
 function dig(ax: number, ay: number) {
   const r = 4.5;
   let n = 0, sum = 0, hard = 0;
@@ -57,7 +58,12 @@ function dig(ax: number, ay: number) {
     n++; sum += dens[i]; hard += bond[i] / 255 * Math.min(1, dens[i] / 400);
     set(x, y, M.AIR);
   }
-  if (n === 0) { const i = inb(ax | 0, ay | 0) ? idx(ax | 0, ay | 0) : 0; if (mat[i] === M.ICE || mat[i] === M.DIRT || mat[i] === M.ROCK) { say('Лопата не берёт мёрзлую землю и лёд'); sfx?.uiDeny(); } return; }
+  if (n === 0) {
+    const i = inb(ax | 0, ay | 0) ? idx(ax | 0, ay | 0) : 0;
+    if (mat[i] === M.ICE || mat[i] === M.DIRT || mat[i] === M.ROCK) { say('Лопата не берёт мёрзлую землю и лёд'); sfx?.uiDeny(); }
+    else if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say('Тут нечего копать — целься в снег в пределах 2 м'); }
+    return;
+  }
   const h = hard / n;
   tool.loadDens = (tool.loadDens * tool.load + sum) / (tool.load + n);
   tool.load += n;
@@ -117,18 +123,31 @@ function blockRect(ax: number, ay: number) {
   const x0 = Math.round(ax - w / 2), y0 = Math.round(ay - h / 2);
   return { x0, y0, w, h };
 }
-function saw(ax: number, ay: number, dt: number) {
-  if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
-  if (inv.blocks.length >= 4) { say('Больше 4 блоков не унести. Сложи их'); return; }
+/** What a saw cut at the aim would see: share of snow cells in the block rectangle, mean density, share of weakly bonded cells. */
+function sawProbe(ax: number, ay: number) {
   const { x0, y0, w, h } = blockRect(ax, ay);
-  let ok = 0, sum = 0, tot = w * h, weak = 0;
+  let ok = 0, sum = 0, weak = 0;
+  const tot = w * h;
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     if (!inb(x, y)) continue; const i = idx(x, y);
     if (mat[i] === M.SNOW && !body[i]) { ok++; sum += dens[i]; if (bond[i] < BOND_SOLID) weak++; }
   }
-  if (ok < tot * 0.85) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
-  const avg = sum / ok;
-  if (weak > tot * 0.2 || avg < 170) { say(`Снег рыхлый (${Math.round(avg)} кг/м³), блок развалится. Ищи наст плотнее 170 и спёкшийся`); tool.sawT = 0; return; }
+  const avg = ok ? sum / ok : 0;
+  return { solid: ok >= tot * 0.85, avg, good: ok >= tot * 0.85 && weak <= tot * 0.2 && avg >= 170 };
+}
+/** Cheap check for the reticle: would the saw cut a block here right now? avg = mean density (kg/m³) of the snow under the block outline. */
+export function sawCheck(ax: number, ay: number): { ok: boolean; avg: number } {
+  const p = sawProbe(ax, ay);
+  return { ok: p.good, avg: p.avg };
+}
+function saw(ax: number, ay: number, dt: number) {
+  if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
+  if (inv.blocks.length >= 4) { say('Больше 4 блоков не унести. Сложи их'); return; }
+  const { x0, y0, w, h } = blockRect(ax, ay);
+  const pr = sawProbe(ax, ay);
+  if (!pr.solid) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
+  const avg = pr.avg;
+  if (!pr.good) { say(`Снег рыхлый (${Math.round(avg)} кг/м³). Пиле нужен плотный наст от 170: сними лопатой верхний пух на 20–30 см или утрамбуй ногами. X — рентген плотности`); tool.sawT = 0; return; }
   tool.sawT += dt;
   if (Math.random() < dt * 4) { sfx?.sawStroke(); spawn(PK.DUST, ax, ay, (Math.random() - 0.5) * 20, -10, 0.6, 1, 0, 0); }
   if (tool.sawT < 1.0 + avg / 500) return;
@@ -359,9 +378,9 @@ export function placeFire(ax: number, ay: number) {
   if (Math.abs(ax - pl.x) < 16) { ax = pl.x + (Math.abs(ax - pl.x) > 2 ? Math.sign(ax - pl.x) : pl.face) * 26; ay = pl.y - 30; pushed = true; }
   let x = Math.round(ax), y = Math.round(ay);
   if (!inb(x, y)) return;
-  while (y < H - 2 && mat[idx(x, y)] === M.AIR) y++;
+  while (y < H - 2 && (mat[idx(x, y)] === M.AIR || mat[idx(x, y)] === M.NEEDLE)) y++;   // boughs are no ground
   if (pushed) ay = y;
-  if (Math.abs(y - ay) > 30 || !inReach(x, y)) { say('Слишком далеко'); return; }
+  if (Math.abs(y - ay) > 30 || (!pushed && !inReach(x, y))) { say('Слишком далеко'); return; }
   inv.matches--; inv.logs--; inv.branches -= 2;
   G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++ });
   sfx?.ignite();
@@ -434,12 +453,22 @@ export function stepFires(dt: number) {
 export function interact(): boolean {
   // fire nearby?
   // (if feeding is not possible, fall through to crates / loose logs; feedFire leaves its reason in tool.msg)
+  tool.msg = '';
   for (const f of G.fires) if (Math.hypot(f.x - pl.x, f.y - pl.y) < 30 && feedFire(f)) return true;
-  // crate nearby (touching body)?
+  // crate nearby (player body box within 14 cells of the crate box)?
+  let buried = -1; // cm of digging still needed to the nearest crate that is close but under snow
   for (const c of crates) {
     if (c.opened) continue;
-    const dx = Math.max(c.x - pl.x, 0, pl.x - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - PH) - (c.y + c.h));
-    if (dx < 8 && dy < 8) {
+    const dx = Math.max(c.x - (pl.x + 5), 0, (pl.x - 5) - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - PH) - (c.y + c.h));
+    if (!(dx < 14 && dy < 14)) {
+      if (dx < 20 && dy < 70 && pl.y < c.y) { // above the crate with snow between
+        let snow = false;
+        for (let y = Math.round(pl.y); y < c.y && !snow; y++) for (let x = Math.max(c.x, Math.round(pl.x) - 5); x < Math.min(c.x + c.w, Math.round(pl.x) + 6); x++) if (mat[idx(x, y)] === M.SNOW) { snow = true; break; }
+        if (snow) { const cm = Math.max(5, Math.round((dy - 13) * CELL * 100 / 5) * 5); if (buried < 0 || cm < buried) buried = cm; }
+      }
+      continue;
+    }
+    {
       c.opened = true; sfx?.crateOpen();
       const got: string[] = [];
       for (const l of c.loot) {
@@ -456,6 +485,7 @@ export function interact(): boolean {
       return true;
     }
   }
+  if (buried > 0) { say(`Ящик под снегом: докопай ещё ~${buried} см вниз`); return false; }
   // pick up loose logs (beam bodies) nearby
   for (const rec of bodies.values()) {
     if (rec.kind !== 'beam' && rec.kind !== 'debris') continue;
@@ -465,6 +495,7 @@ export function interact(): boolean {
       if (wood > 10) { inv.logs += Math.max(1, Math.round(wood / 80)); removeBody(rec, false); sfx?.pickup(); say('Подобрал брёвна'); return true; }
     }
   }
+  if (!tool.msg) say('E: открыть ящик, подбросить в костёр, подобрать брёвна — рядом ничего нет');
   return false;
 }
 export function eat(): boolean {

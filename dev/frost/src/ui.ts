@@ -169,6 +169,7 @@ export class UI {
   private hintText: HTMLElement;
   private hudTc!: HTMLElement;
   private chipsTid = 0;
+  private hintTid = 0;
   private compactMQ: MediaQueryList | null = null;
   private btnEat!: HTMLElement;
   private warnLine!: Cached;
@@ -232,8 +233,8 @@ export class UI {
     this.hintText = el('span', 'hint-text');
     this.hintCard.appendChild(this.hintText);
     this.hintCard.setAttribute('aria-live', 'polite');
-    this.hud.appendChild(this.hintCard);
-    // phone landscape: the note lives in the top-centre flow (under chips / log), never over the player
+    // the pencil note lives in the top-centre flow (under chips / log), never over the player
+    this.hudTc.insertBefore(this.hintCard, this.toasts);
     try {
       this.compactMQ = window.matchMedia('(max-height: 460px)');
       const fit = () => this.fitCompact();
@@ -248,13 +249,9 @@ export class UI {
   }
 
   // ------------------------------------------------------------ build
-  /** Re-seat things that differ on a phone in landscape: hint card parent, thermometer crop. */
+  /** Re-seat things that differ on a phone in landscape: thermometer crop. */
   private fitCompact(): void {
     const compact = !!this.compactMQ?.matches;
-    const host = compact ? this.hudTc : this.hud;
-    if (this.hintCard.parentElement !== host) {
-      if (compact) this.hudTc.insertBefore(this.hintCard, this.toasts); else this.hud.appendChild(this.hintCard);
-    }
     const svg = this.thermo?.querySelector('.thermo-svg');
     if (svg) svg.setAttribute('viewBox', compact ? '9 6 48 240' : '-28 0 112 252');
     this.thermo?.classList.toggle('compact', compact);
@@ -658,6 +655,10 @@ export class UI {
     this.m('hint', hint, () => {
       if (hint) this.hintText.textContent = hint;
       this.hintCard.classList.toggle('on', !!hint);
+      // fades to 35 % after 4 s so it never hides the work; any change restores it
+      window.clearTimeout(this.hintTid);
+      this.hintCard.classList.remove('dim');
+      if (hint) this.hintTid = window.setTimeout(() => this.hintCard.classList.add('dim'), 4000);
     });
   }
 
@@ -802,9 +803,9 @@ export class UI {
           <div><span class="kk">${keys(['Esc'])}</span><em>пауза</em></div>
         </div>
         <div class="controls controls-touch">
-          <div><span class="tk">${ico('stick')}</span><em><b>Стик</b><i>ход, вверх — прыжок</i></em></div>
-          <div><span class="tk">${ico('shovel')}</span><em><b>Касание</b><i>копать, рубить, строить</i></em></div>
-          <div><span class="tk">${ico('pad')}</span><em><b>Кнопки</b><i>съесть, ждать, взять</i></em></div>
+          <div><span class="tk">${ico('stick')}</span><em><b>Стик</b><i>ход и прыжок</i></em></div>
+          <div><span class="tk">${ico('shovel')}</span><em><b>Касание</b><i>копать, строить</i></em></div>
+          <div><span class="tk">${ico('pad')}</span><em><b>Кнопки</b><i>съесть, ждать</i></em></div>
         </div>
         <div class="title-actions"></div>
       </div>

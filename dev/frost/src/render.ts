@@ -123,7 +123,13 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     b = mix(b, b*vec3(.9,.935,.975), trail*.8);
     b += g*amp;
     b += (vn(vec2(cf.x*.025, cf.y*.9))-.5)*.05*(1.-fresh);                  // thin horizontal strata
-    b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.03*(1.-fresh);
+    float strat2 = 1.;
+    if(bn>=95.){                                                           // old pack: bond grows smoothly with depth -> clean, layer-aligned bands
+      float bq = bn/18.;
+      strat2 = 1.+(hf(vec2(floor(bq), 7.3))-.5)*.3*old;
+      if(fract(bq)<.16) strat2 *= 1.-.16*old;                              // thin firn line between layers
+    }
+    else if(bn>=24.){ float bq = bn/6.; strat2 = 1.+(hf(vec2(floor(bq), 2.9))-.5)*.14*(1.-fresh); }
     if(dn>=140.){
       ivec2 ic = ivec2(cf);
       float hoar = 0.;
@@ -142,7 +148,7 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     float d1 = 1.-exp(-depth/16.), d2 = 1.-exp(-depth/52.);
     b = mix(b, vec3(.36,.56,.79), d1*.5);
     b = mix(b, vec3(.17,.31,.53), d2*.55);
-    return b;
+    return b*strat2;
   }
   if(m==2){
     float s = vn(vec2(cf.x*.12, cf.y*.7));
@@ -176,7 +182,7 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     float st = cf.y/4.5 + vn(vec2(cf.x*.012, cf.y*.08))*1.6;               // thin, nearly horizontal strata
     float si = floor(st), sf = fract(st);
     float tone = hf(vec2(si, 3.7));
-    vec3 b = mix(vec3(.27,.29,.34), vec3(.50,.52,.57), tone*.75+.12);
+    vec3 b = mix(vec3(.24,.238,.255), vec3(.385,.375,.385), tone*.75+.12);
     b *= .84+.32*(vn(cf*.2)*.6+vn(cf*.75)*.4);
     if(sf<.14) b *= .72;                                                   // dark joint line
     else if(sf>.86) b *= 1.1;

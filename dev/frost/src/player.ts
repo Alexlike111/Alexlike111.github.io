@@ -85,7 +85,7 @@ export function stepPlayer(inp: MoveIn) {
   const tired = pl.stamina < 0.05;
   const run = inp.run && !tired && Math.abs(inp.moveX) > 0.1;
   const deep = pl.sink;
-  let speed = (run ? 80 : 34) * (1 - deep * 0.55) * (pl.core < 33 ? 0.7 : 1); // cells/s (4 m/s run, 1.7 walk)
+  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1); // cells/s (4.25 m/s run, 2 m/s walk)
   const target = inp.moveX * speed;
   const acc = pl.onGround ? 14 : 4;
   pl.vx += (target - pl.vx) * Math.min(1, dt * acc);

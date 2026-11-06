@@ -22,6 +22,11 @@ function refund(i: number) {
     pending[c] = Math.min(PENDING_MAX, pending[c] + P.d[i] / Math.max(1, freshDens(G.ambientT)));
   }
 }
+/** Would a grain at air cell (x,y) come to rest on top of a marker pole? (snow must never pile into a standable pillar there) */
+function onPole(x: number, y: number): boolean {
+  let b = y + 1; while (b < H - 2 && mat[idx(x, b)] === M.AIR) b++;
+  return mat[idx(x, b)] === M.POLE;
+}
 /** Place d at the nearest free air cell at/above (x,y) (also tries neighbour columns). */
 function depositNear(x: number, y: number, d: number, fl: number, b: number): boolean {
   x = clampX(x | 0); y = Math.max(1, Math.min(H - 3, y | 0));
@@ -31,7 +36,7 @@ function depositNear(x: number, y: number, d: number, fl: number, b: number): bo
     for (let up = 0; up <= 6; up++) {
       const yy = y - up; if (yy < 1) break;
       const i = idx(xx, yy);
-      if (mat[i] === M.AIR && !body[i]) {
+      if (mat[i] === M.AIR && !body[i] && !onPole(xx, yy)) {
         set(xx, yy, M.SNOW, d, mat[i + W] !== M.AIR ? b : 0, fl);
         if (surf[xx] > yy) surf[xx] = yy;
         return true;
@@ -101,6 +106,10 @@ function moveGrain(i: number, x: number, y: number, m: number): boolean {
     let j = below;
     if (y + 2 < H && canEnter(j + W, m)) j += W;
     swap(i, j); wakeI(j); wakeI(i); return true;
+  }
+  if (mat[below] === M.POLE && m === M.SNOW) { // a grain perched on a marker pole top slides off (no standable snow pillar)
+    const d0 = Math.random() < 0.5 ? -1 : 1;
+    for (let s = 0; s < 2; s++) { const dx = s === 0 ? d0 : -d0; if (canEnter(i + dx, m)) { swap(i, i + dx); wakeI(i + dx); return true; } }
   }
   // cohesion: dry cold fresh snow slides freely (angle of repose ~38°), bonded/wet snow holds steeper
   const b = bond[i];
@@ -287,6 +296,20 @@ export function depositAt(x: number, d: number, fl: number, yHint = -1, b = 0): 
   else { while (y < H - 2 && mat[idx(x, y + 1)] === M.AIR) y++; }
   i = idx(x, y);
   if (mat[i] !== M.AIR || body[i]) return false;
+  if (mat[i + W] === M.POLE) { // never stack snow on a marker pole top: put it on the ground beside the pole instead
+    for (const off of [1, -1, 2, -2, 3, -3, 4, -4]) {
+      const xx = x + off; if (xx < 1 || xx >= W - 1) continue;
+      let yy = Math.min(H - 3, y + 1);
+      if (mat[idx(xx, yy)] !== M.AIR) { while (yy > 1 && mat[idx(xx, yy)] !== M.AIR) yy--; }
+      else { while (yy < H - 2 && mat[idx(xx, yy + 1)] === M.AIR) yy++; }
+      const j = idx(xx, yy);
+      if (mat[j] !== M.AIR || body[j] || mat[j + W] === M.POLE) continue;
+      set(xx, yy, M.SNOW, d, b, fl);
+      if (surf[xx] > yy) surf[xx] = yy;
+      return true;
+    }
+    return false;
+  }
   set(x, y, M.SNOW, d, b, fl | F_DIST * 0);
   if (surf[x] > y) surf[x] = y;
   return true;
@@ -399,10 +422,11 @@ export function stepParticles(dt: number) {
   }
 }
 
-export function stepSim(dt: number) {
-  stepWeather(dt);
+/** dt: physics step (clamped by the caller); dtReal: wall-clock share of this step, used for weather and sintering/compaction so game time does not crawl on slow devices. */
+export function stepSim(dt: number, dtReal: number = dt) {
+  stepWeather(dtReal);
   stepCA();
-  stepSlow(dt);
+  stepSlow(dtReal);
   stepParticles(dt);
 }
 
