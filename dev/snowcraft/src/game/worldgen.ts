@@ -33,15 +33,14 @@ const lichenSpots: { cx: number; w: number }[] = [];   // lichen patches on the 
 
 // ---- land profile: snow-surface control points (x, y) ----
 const CP: [number, number][] = [
-  [0, 112], [26, 118], [48, 134], [60, 148], [90, 166], [130, 178], [170, 186], [210, 196], [250, 206], [290, 214], [317, 218],
-  [323, 264], [372, 264], [400, 255], [430, 243], [445, 238], [470, 245], [500, 256], [530, 266], [556, 272],
+  [0, 112], [26, 118], [48, 134], [60, 148], [90, 166], [130, 178], [170, 186], [210, 196], [250, 206], [290, 226], [312, 246], [330, 262],
+  [345, 264], [372, 264], [400, 255], [430, 243], [445, 238], [470, 245], [500, 256], [530, 266], [556, 272],
   [880, 272], [900, 273], [930, 279], [970, 286], [1010, 291], [1050, 296], [1076, 299],
 ];
 function profile(x: number) {
   let i = 0; while (i < CP.length - 2 && x > CP[i + 1][0]) i++;
   const a = CP[i], b = CP[i + 1], t = clamp((x - a[0]) / Math.max(1, b[0] - a[0]), 0, 1);
-  // the quarry cut near the portal is steep; everything else is eased
-  const s = (a[0] === 317) ? t : 0.5 - 0.5 * Math.cos(Math.PI * t);
+  const s = 0.5 - 0.5 * Math.cos(Math.PI * t);
   return a[1] + (b[1] - a[1]) * s;
 }
 function noiseAmp(x: number) {
@@ -86,7 +85,7 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   SO = (seed % 997) * 13.37;
   surf.fill(0); ground.fill(0); stoneTop.fill(0); deepTop.fill(0); seabed.fill(0); iceTop.fill(0); iceBot.fill(0); snowDepth.fill(0);
   lichenSpots.length = 0;
-  for (let x = 384; x < 548; x += 9) { if (fbm1((x + SO) / 31 + 40, 3) < 0.5 || lichenSpots.some(l => Math.abs(l.cx - x) < 18)) continue; lichenSpots.push({ cx: x, w: 9 + ((x * 7) % 8) }); }
+  for (let x = 384; x < 548; x += 9) { if (fbm1((x + SO) / 31 + 40, 3) < 0.4 || lichenSpots.some(l => Math.abs(l.cx - x) < 15)) continue; lichenSpots.push({ cx: x, w: 9 + ((x * 7) % 8) }); }
 
   buildLand();
   buildSea();
@@ -107,10 +106,9 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
 function buildLand() {
   const hs = new Float32Array(SHORE + 24);
   for (let x = 0; x < hs.length; x++) hs[x] = profile(x) + (fbm1((x + SO) / 17 + 3.3, 3) - 0.5) * 2 * noiseAmp(x) + (fbm1((x + SO) / 63 + 8.1, 2) - 0.5) * noiseAmp(x) * 2.2;
-  // smooth steps except at the quarry cut (x 316..324)
-  for (let x = 1; x < hs.length; x++) if (x < 315 || x > 326) hs[x] = clamp(hs[x], hs[x - 1] - 1.4, hs[x - 1] + 1.4);
-  for (let x = hs.length - 2; x >= 0; x--) if (x < 315 || x > 326) hs[x] = clamp(hs[x], hs[x + 1] - 1.4, hs[x + 1] + 1.4);
   for (let x = 556; x <= 880; x++) hs[x] = LOC.station.y;
+  for (let x = 1; x < hs.length; x++) hs[x] = clamp(hs[x], hs[x - 1] - 1.4, hs[x - 1] + 1.4);
+  for (let x = hs.length - 2; x >= 0; x--) hs[x] = clamp(hs[x], hs[x + 1] - 1.4, hs[x + 1] + 1.4);
   // snow depth: wind-driven (deep in the lee of slopes), smoothed so the snow/ground boundary is not jagged
   const depF = new Float32Array(SHORE);
   for (let x = 0; x < SHORE; x++) {
@@ -118,8 +116,8 @@ function buildLand() {
     const slopeE = (hs[Math.min(hs.length - 1, x + 10)] - hs[Math.max(0, x - 10)]) / 20;      // > 0 when the ground falls away to the east = lee of westerly wind
     let dep: number;
     if (x < 90) dep = 1 + 2 * fbm1(X / 20, 2);                                              // scoured windward cliff
-    else if (x < 317) dep = 2 + clamp(slopeE, 0, 0.7) * 34 + 5 * fbm1(X / 50 + 1, 3);
-    else if (x < 340) dep = 1;
+    else if (x < 300) dep = 2 + clamp(slopeE, 0, 0.7) * 34 + 5 * fbm1(X / 50 + 1, 3);
+    else if (x < 345) dep = 1;
     else if (x < 556) dep = 5 + 11 * ss(0.35, 0.8, fbm1(X / 45 + 4, 3)) + clamp(slopeE, 0, 0.7) * 14;
     else if (x < 890) dep = 15 + 5 * fbm1(X / 70 + 9, 2);
     else dep = Math.max(0, 5 * (fbm1(X / 26 + 2, 3) - 0.38)) * (1 - ss(1010, 1076, x));       // beach: gravel with snow patches
@@ -130,7 +128,7 @@ function buildLand() {
   }
   for (let pass = 0; pass < 3; pass++) {
     const c = depF.slice();
-    for (let x = 0; x < SHORE; x++) { if (x > 314 && x < 328) continue; let a = 0, n = 0; for (let k = -6; k <= 6; k++) { const xx = x + k; if (xx < 0 || xx >= SHORE || (xx > 314 && xx < 328)) continue; a += c[xx]; n++; } depF[x] = a / n; }
+    for (let x = 0; x < SHORE; x++) { let a = 0, n = 0; for (let k = -6; k <= 6; k++) { const xx = x + k; if (xx < 0 || xx >= SHORE) continue; a += c[xx]; n++; } depF[x] = a / n; }
   }
   for (let x = 0; x < SHORE; x++) {
     const X = x + SO, s = surf[x];
@@ -189,8 +187,8 @@ function buildSea() {
   // ---- pack ice: floes separated by cracks, ridges and leads ----
   const j = () => randInt(-2, 2);
   const floes: FloeDef[] = [
-    { x0: 1470, x1: 1511, thick: 14 }, { x0: 1515, x1: 1555 + j(), thick: 20 }, { x0: 1557, x1: 1596, thick: 11 }, { x0: 1615, x1: 1650, thick: 17 },
-    { x0: 1661, x1: 1806, thick: 34 }, { x0: 1810, x1: 1853, thick: 30 }, { x0: 1855, x1: 1895, thick: 22 }, { x0: 1904, x1: 1948, thick: 13 },
+    { x0: 1470, x1: 1511, thick: 14 }, { x0: 1515, x1: 1532, thick: 20 }, { x0: 1536, x1: 1553 + j(), thick: 18 }, { x0: 1557, x1: 1596, thick: 11 }, { x0: 1615, x1: 1650, thick: 17 },
+    { x0: 1661, x1: 1853, thick: 34 }, { x0: 1855, x1: 1895, thick: 22 }, { x0: 1904, x1: 1948, thick: 13 },
   ];
   for (const f of floes) {
     info.floes.push({ x0: f.x0, x1: f.x1, thick: f.thick });
@@ -209,12 +207,12 @@ function buildSea() {
   const thinLead = (x0: number, x1: number) => { worldInfo.iceField.leads.push({ x0, x1, thin: true }); for (let x = x0; x <= x1; x++) { const e = Math.min(x - x0, x1 - x), th = 3 + (e > 1 ? 1 : 0); iceTop[x] = SEA; iceBot[x] = SEA + th; box(x, SEA, x + 1, SEA + th, ICE, 0, 0); } };
   thinLead(1651, 1660); thinLead(1597, 1614);
   info.leads.push({ x0: 1896, x1: 1903, thin: false });
-  info.cracks.push(1513, 1556, 1605, 1655, 1808, 1854, 1900);
-  info.hiddenCracks.push(1808);
+  info.cracks.push(1513, 1534, 1556, 1605, 1655, 1854, 1900);
+  info.hiddenCracks.push(1534);
   // the wide lead is covered by a skin of new ice that is only 2 cells thick in the middle (it will break under a heavy load)
   for (let x = 1603; x <= 1608; x++) { box(x, SEA + 2, x + 1, SEA + 4, AIR); box(x, SEA + 2, x + 1, SEA + 4, WATER); }
   // open sea edge: brash ice chunks
-  for (let k = 0; k < 9; k++) { const x = randInt(1956, 2030), w = randInt(5, 14); box(x, SEA - 2, x + w, SEA + randInt(4, 9), ICE); }
+  for (let k = 0; k < 6; k++) { const x = randInt(1960, 2030), w = randInt(4, 9); box(x, SEA - 2, x + w, SEA + randInt(4, 8), ICE); }
   info.fastX0 = SHORE; info.fastX1 = FAST1; info.packX0 = FAST1; info.packX1 = 1950; info.seaEdgeX = 1950;
 
   // pressure ridges: where floes are pressed together, and a line along the flaw lead
@@ -229,7 +227,7 @@ function buildSea() {
     if (top >= SEA + 1 || mat[top * W + x] !== ICE) { surf[x] = top; continue; }                  // open water / thin ice: no snow
     const X = x + SO, l = lee(x);
     const sast = Math.sin(x * 0.55 + fbm1(X / 7, 2) * 5) * 0.8 + Math.sin(x * 0.19) * 0.7;      // sastrugi
-    let dep = 8 + 9 * fbm1(X / 38 + 6, 3) + 12 * l + sast;
+    let dep = 8 + 9 * fbm1(X / 38 + 6, 3) + 6 * l + sast;
     const scour = ss(0.62, 0.74, fbm1(X / 55 + 31, 3));                                        // glare ice patches
     dep *= 1 - scour * 0.96;
     if (x < SHORE + 14) dep *= 0.5;
@@ -240,7 +238,7 @@ function buildSea() {
     snowDepth[x] = dep; surf[x] = top - dep;
   }
   // hidden crack: snow bridge over the gap
-  for (let x = 1807; x <= 1809; x++) { const yy = iceTop[1804]; for (let y = yy - 5; y <= yy; y++) put(x, y, y < yy - 1 ? SNOW : PACKED, 40); iceTop[x] = SEA; iceBot[x] = SEA; surf[x] = yy - 5; }
+  for (let x = 1533; x <= 1535; x++) { const yy = iceTop[1530]; for (let y = yy - 6; y <= yy; y++) put(x, y, y < yy - 1 ? SNOW : PACKED, 40); iceTop[x] = SEA; iceBot[x] = SEA; surf[x] = yy - 6; }
   // open leads and cracks: surf = water level
   for (let x = 1597; x <= 1614; x++) surf[x] = SEA;
   for (let x = 1949; x < SEA_X1; x++) { surf[x] = mat[(SEA - 2) * W + x] === ICE ? SEA - 2 : SEA; }

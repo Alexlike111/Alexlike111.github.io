@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SNOWCRAFT · лист спрайтов</title>
+  <style>
+    html,body{margin:0;background:#10151f;color:#cfe2f3;font:12px/1.3 ui-monospace,Menlo,Consolas,monospace}
+    h2{margin:18px 10px 6px;font-size:14px;color:#7cc6ee;border-bottom:1px solid #24364c;padding-bottom:3px}
+    .row{display:flex;flex-wrap:wrap;gap:8px;padding:0 10px}
+    .cell{display:flex;flex-direction:column;align-items:center;gap:2px}
+    .cell canvas{image-rendering:pixelated;border:1px solid #24364c}
+    .cell span{font-size:10px;color:#8aa4be;max-width:140px;text-align:center;overflow:hidden;white-space:nowrap}
+    #bar{position:sticky;top:0;background:#0b1018;padding:6px 10px;z-index:3;display:flex;gap:8px;align-items:center}
+    button{background:#1b2a3d;color:#cfe2f3;border:1px solid #35506f;padding:3px 8px;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div id="bar"><b>SNOWCRAFT sprite sheet</b>
+    <button data-bg="snow">снег</button><button data-bg="dusk">сумерки</button><button data-bg="night">ночь</button>
+    <button data-bg="ice">лёд</button><button data-bg="rock">камень</button></div>
+  <div id="root"></div>
+  <script type="module" src="/src/dev/sheet.ts"></script>
+</body>
+</html>

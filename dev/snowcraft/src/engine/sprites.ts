@@ -254,3 +254,109 @@ export function drawFixtureGlow(ctx: CanvasRenderingContext2D, v: View) {
     void hf;
   }
 }
+
+// =====================================================================================================================
+// ART PASS (original pixel art) — helpers shared by src/art/*.ts and game/draw.ts.
+// Text-grid tools: sprites are authored as string rows ('.' / ' ' transparent), assembled by compose() (kit-bash: body + head + legs …),
+// optionally outlined by outline(), then registered with defSprite(). Everything is generated once, lazily cached as canvases.
+export type Rows = string[];
+
+/** Palette shared by all icons / small sprites (single-char keys). */
+export const PAL: Palette = {
+  K: '#1b1726', k: '#2e2a38', l: '#454150', h: '#6c6a7c', H: '#a5a3b6',
+  n: '#f6faff', N: '#c6d6e8', i: '#e4f2ff', I: '#a9d0ee', b: '#5e9bd0', B: '#35618f', v: '#1f3a5c',
+  s: '#dfe6ee', S: '#98a6b8', z: '#5d6b82',
+  w: '#c89a62', W: '#8e5f38', d: '#5a3a22', t: '#d9b27c', T: '#6e4527',
+  r: '#e0482e', R: '#a42c24', o: '#f08a2c', O: '#c4601e', y: '#f4cf5a', Y: '#c9962e',
+  c: '#f2e9d6', C: '#cfc1a2', u: '#8d7c68', U: '#5f5246', x: '#b9a58a',
+  g: '#86cc8c', G: '#3f8a5c', j: '#265c46',
+  m: '#d65a58', M: '#8e2f3a', p: '#f2a4a0', P: '#c8707a',
+  f: '#eebc98', F: '#bb8062', e: '#ff9a2a', E: '#ffd870', q: '#b36ac0', Q: '#7c4290', a: '#58c0b6', A: '#2e7a80', L: '#3a3846',
+};
+
+/** Overlay text-grid layers into one w×h grid; later layers win; '.'/' ' are transparent. Layers: [rows, x, y] (x,y may be negative). */
+export function compose(w: number, h: number, layers: (readonly [Rows, number, number] | null | undefined)[]): Rows {
+  const g: string[][] = Array.from({ length: h }, () => new Array(w).fill('.'));
+  for (const L of layers) {
+    if (!L) continue;
+    const [rows, ox, oy] = L;
+    for (let y = 0; y < rows.length; y++) {
+      const yy = y + oy; if (yy < 0 || yy >= h) continue;
+      const r = rows[y];
+      for (let x = 0; x < r.length; x++) { const ch = r[x]; if (ch === '.' || ch === ' ') continue; const xx = x + ox; if (xx >= 0 && xx < w) g[yy][xx] = ch; }
+    }
+  }
+  return g.map(r => r.join(''));
+}
+/** Mirror horizontally. */
+export const flipRows = (rows: Rows): Rows => { const w = Math.max(...rows.map(r => r.length)); return rows.map(r => r.padEnd(w, '.').split('').reverse().join('')); };
+/** Replace characters (map char → char). */
+export const recolorRows = (rows: Rows, m: Record<string, string>): Rows => rows.map(r => r.replace(/./g, c => m[c] ?? c));
+/** Pad to w×h (transparent) so sprites of different sizes can be composed/aligned. */
+export function padRows(rows: Rows, w: number, h: number, ox = 0, oy = 0): Rows { return compose(w, h, [[rows, ox, oy]]); }
+/** Add a 1-cell outline of char `ch` around every opaque cell (the result is 2 cells larger in both axes). `diag` also outlines diagonals. */
+export function outline(rows: Rows, ch = 'K', diag = false): Rows {
+  const w = Math.max(...rows.map(r => r.length)) + 2, h = rows.length + 2;
+  const g = compose(w, h, [[rows, 1, 1]]).map(r => r.split(''));
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && g[y][x] !== '.' && g[y][x] !== ch;
+  const out = g.map(r => r.slice());
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (g[y][x] !== '.') continue;
+    if (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1) || (diag && (solid(x - 1, y - 1) || solid(x + 1, y - 1) || solid(x - 1, y + 1) || solid(x + 1, y + 1)))) out[y][x] = ch;
+  }
+  return out.map(r => r.join(''));
+}
+/** Outline without growing the grid: only transparent cells inside the existing bounds are painted. */
+export function outlineIn(rows: Rows, ch = 'K'): Rows {
+  const w = Math.max(...rows.map(r => r.length)), h = rows.length;
+  const g = rows.map(r => r.padEnd(w, '.').split(''));
+  const solid = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && g[y][x] !== '.' && g[y][x] !== ' ' && g[y][x] !== ch;
+  const out = g.map(r => r.slice());
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if ((g[y][x] === '.' || g[y][x] === ' ') && (solid(x - 1, y) || solid(x + 1, y) || solid(x, y - 1) || solid(x, y + 1))) out[y][x] = ch;
+  return out.map(r => r.join(''));
+}
+/** Parse "sheet" text: frames separated by a line holding only "---". */
+export function frames(src: string): Rows[] { return src.split(/\r?\n---\r?\n/).map(f => f.replace(/^\r?\n|\r?\n$/g, '').split(/\r?\n/)); }
+
+export function newCanvas(w: number, h: number): HTMLCanvasElement { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+/** Canvas of one sprite frame (cached). Undefined if the key is unknown. */
+export function spriteCanvas(key: string, frame = 0): HTMLCanvasElement | undefined { const s = SPRITES.get(key); return s ? frameCanvas(s, frame) : undefined; }
+export function spriteKeys(prefix = ''): string[] { const o: string[] = []; for (const k of SPRITES.keys()) if (k.startsWith(prefix)) o.push(k); return o; }
+
+const mulCache = new Map<string, HTMLCanvasElement>();
+/** Multiply-tint a canvas keeping its alpha (shading survives). Cached by key. */
+export function tintMultiply(src: HTMLCanvasElement, tint: string, cacheKey?: string): HTMLCanvasElement {
+  const ck = cacheKey ? cacheKey + '|' + tint : '';
+  if (ck) { const c0 = mulCache.get(ck); if (c0) return c0; }
+  const c = newCanvas(src.width, src.height), x = c.getContext('2d')!;
+  x.drawImage(src, 0, 0); x.globalCompositeOperation = 'multiply'; x.fillStyle = tint; x.fillRect(0, 0, c.width, c.height);
+  x.globalCompositeOperation = 'destination-in'; x.drawImage(src, 0, 0);
+  if (ck) { if (mulCache.size > 400) mulCache.clear(); mulCache.set(ck, c); }
+  return c;
+}
+/** Flat-fill canvas silhouette (alpha preserved). */
+export function silhouette(src: HTMLCanvasElement, col: string): HTMLCanvasElement {
+  const c = newCanvas(src.width, src.height), x = c.getContext('2d')!;
+  x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = col; x.fillRect(0, 0, c.width, c.height); return c;
+}
+
+/** Draw a sprite frame with its bottom-centre at (x,y) (view cells). Handy for characters/animals. */
+export function drawSpriteBC(ctx: CanvasRenderingContext2D, key: string, x: number, y: number, o: DrawOpts & { ax?: number } = {}) {
+  const s = SPRITES.get(key); if (!s) return;
+  const ax = o.ax ?? s.w / 2;
+  drawSprite(ctx, key, x - ax, y - s.h, { ...o, ox: ax });
+}
+
+/** Render text-grid rows with a palette into a fresh canvas (no registry). */
+export function rowsCanvas(rows: Rows, pal: Palette): HTMLCanvasElement {
+  const h = rows.length, w = Math.max(...rows.map(r => r.length));
+  const c = newCanvas(w, h), cx = c.getContext('2d')!, img = cx.createImageData(w, h), d = img.data;
+  const cache: Record<string, [number, number, number, number]> = {};
+  for (let y = 0; y < h; y++) for (let x = 0; x < rows[y].length; x++) {
+    const ch = rows[y][x]; if (ch === '.' || ch === ' ') continue;
+    const col = pal[ch]; if (!col) continue;
+    const rgba = cache[ch] ?? (cache[ch] = hexToRgb(col));
+    const o = (y * w + x) * 4; d[o] = rgba[0]; d[o + 1] = rgba[1]; d[o + 2] = rgba[2]; d[o + 3] = rgba[3];
+  }
+  cx.putImageData(img, 0, 0); return c;
+}

@@ -15,12 +15,12 @@ export const LOC = {
   sea: SEA,
   cape: { x0: 60, x1: 360 },
   mine: {
-    portalX: 322, floorA: 264, hA: 28,                   // adit: floor row 264, 28 rows of air above it
-    collapse: [224, 248] as [number, number],            // rubble section on the adit
-    rampTop: 190, rampBot: 105, floorB: 332,             // stairway from the adit down to level B (floor row 332)
-    hut: [196, 246] as [number, number],                 // miner's hut chamber on level B
-    bulkhead: 101, pocket: [68, 101] as [number, number], // sealed methane pocket (west of the bulkhead)
-    lakeRamp: 252, lake: { x0: 268, x1: 376, ice: 372, shore: 364 },
+    portalX: 302, floorA: 264, hA: 28,                   // adit: floor row 264, 28 rows of air above it
+    collapse: [208, 238] as [number, number],            // rubble section on the decline
+    rampTop: 262, rampBot: 177, floorB: 332,             // the decline: stairs (rise 4 / run 5) west-down from the flat adit to level B (floor row 332)
+    hut: [110, 160] as [number, number],                 // miner's hut chamber on level B
+    bulkhead: 96, pocket: [62, 96] as [number, number],  // sealed methane pocket (west of the bulkhead)
+    lake: { x0: 268, x1: 376, ice: 372, shore: 364 },    // sealed cavern deeper down: reached by digging
   },
   summit: { x: 150 },                                    // signal-fire hill on the cape
   cairn: { x: 445, y: 238 },
@@ -278,8 +278,8 @@ function drift(x0: number, x1: number, floorOf: (x: number) => number, h: number
   for (let x = x0; x < x1; x++) { const f = floorOf(x); for (let y = f - h; y < f; y++) { const i = y * W + x; if (mat[i] !== M.BEDROCK) { mat[i] = AIR; aux[i] = 0; flags[i] = 0; } } }
   for (let x = x0; x < x1; x += 4) { const f = floorOf(x); bgBox(x, f - h, x + 4, f, lining); }
 }
-function timberFrame(x: number, floor: number, h: number) {                          // PLANK cap beam in the roof + wooden posts as wall decoration
-  box(x - 1, floor - h, x + 7, floor - h + 4, M.PLANK);
+function timberFrame(x: number, floor: number, h: number, floorOf?: (x: number) => number) {   // PLANK cap beam under the roof (following a sloping roof) + wooden posts as wall decoration
+  for (let xx = x - 1; xx < x + 7; xx++) { const f = floorOf ? floorOf(xx) : floor; box(xx, f - h, xx + 1, f - h + 4, M.PLANK); }
   bgBox(x, floor - h + 4, x + 4, floor, 7);
 }
 function stampMine(T: Terrain) {
@@ -294,32 +294,28 @@ function stampMine(T: Terrain) {
     const yc = s.y(x), t = s.th * (0.5 + 0.5 * Math.sin((x - s.x0) / (s.x1 - s.x0) * Math.PI)) * (0.7 + 0.5 * noise1(x * 0.13));
     for (let y = Math.round(yc - t / 2); y < yc + t / 2; y++) { const i = y * W + x; if (mat[i] === M.STONE || mat[i] === M.DIRT) { mat[i] = M.COAL; aux[i] = 0; } }
   }
-  // soapstone vein crossing the stairway zone and the cut face
-  const sv = (x: number) => 360 - (x - 96) * 0.95;
-  for (let x = 92; x < 150; x++) for (let y = Math.round(sv(x) - 5); y < sv(x) + 5 + 2 * noise1(x * 0.2); y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
-  for (let x = 300; x < 323; x++) for (let y = Math.round(205 + (x - 300) * 1.2); y < 215 + (x - 300) * 1.2; y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
+  // soapstone vein crossing the decline
+  const sv = (x: number) => 340 - (x - 180) * 0.9;
+  for (let x = 176; x < 262; x++) for (let y = Math.round(sv(x) - 5); y < sv(x) + 5 + 2 * noise1(x * 0.2); y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
+  for (let x = 262; x < 300; x++) for (let y = Math.round(206 + (x - 262) * 0.6); y < 214 + (x - 262) * 0.6; y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
 
-  // --- tunnels ---
-  drift(MI.rampTop, MI.portalX + 1, () => FA, HA, 2);                                              // A: the adit
-  drift(MI.rampBot, MI.rampTop, (x) => FA + 4 * Math.floor((MI.rampTop - x) / 5), HA, 2);           // ramp (stairs: rise 4 / run 5)
-  drift(MI.rampBot, MI.lakeRamp, () => FB, HA, 2);                                                 // B
+  // --- tunnels: flat adit + open trench (A), the decline with wooden-topped steps (D), level B with the hut chamber ---
+  const floorD = (x: number) => FA + 4 * Math.floor((MI.rampTop - x) / 5);
+  drift(MI.rampTop, MI.portalX + 46, () => FA, HA, 2);                                             // A: the adit, ending in an open trench where the hill falls away
+  drift(MI.rampBot, MI.rampTop, floorD, HA, 2);                                                    // D: the decline
+  drift(MI.pocket[1], MI.rampBot + 1, () => FB, HA, 2);                                             // B
   box(MI.hut[0], FB - 34, MI.hut[1], FB - HA, AIR);                                                // taller hut chamber
-  drift(MI.lakeRamp, MI.lake.x0 + 26, (x) => Math.min(MI.lake.shore, FB + 4 * Math.floor((x - MI.lakeRamp) / 5)), HA, 3);
-  // the stairs near level B are wooden wedges inside the open space of B
-  for (let x = MI.rampBot; x < MI.rampBot + 40; x++) {
-    const f = FA + 4 * Math.floor((MI.rampTop - x) / 5);
-    if (f < FB) for (let y = f; y < FB; y++) { put(x, y, M.PLANK); }
-  }
+  for (let x = MI.rampBot; x < MI.rampTop; x++) { put(x, floorD(x), M.PLANK); put(x, floorD(x) + 1, M.PLANK); }   // plank treads
   // the coal seams show on the back wall of the tunnels
-  for (const sm of seams) for (let x = Math.max(sm.x0, MI.rampBot - 4); x < Math.min(sm.x1, MI.portalX); x += 4) {
+  for (const sm of seams) for (let x = Math.max(sm.x0, MI.pocket[0]); x < Math.min(sm.x1, MI.portalX); x += 4) {
     const yc = sm.y(x);
     for (let y = Math.floor((yc - sm.th) / 4) * 4; y < yc + sm.th; y += 4) { const tx = x >> 2, ty = y >> 2; if (mat[(ty * 4 + 2) * W + tx * 4 + 2] === AIR && (bg[ty * TW + tx] === 2 || bg[ty * TW + tx] === 1)) bg[ty * TW + tx] = 8; }
   }
-  // collapse: rubble, gravel mostly so a shovel gets through
+  // collapse on the decline: rubble above the steps, gravel mostly so a shovel gets through
   for (let x = c0; x < c1; x++) {
-    const prof = Math.sin((x - c0) / (c1 - c0) * Math.PI);
-    for (let y = FA - HA; y < FA; y++) {
-      const fromFloor = FA - y, i = y * W + x;
+    const prof = Math.sin((x - c0) / (c1 - c0) * Math.PI), f = floorD(x);
+    for (let y = f - HA; y < f; y++) {
+      const fromFloor = f - y, i = y * W + x;
       if (fromFloor > 10 + 15 * prof && fromFloor < HA - 6) continue;       // open gap high up under the ceiling
       const r = rand();
       if (fromFloor > 21 && r < 0.2) put(x, y, M.STONE);                          // boulders and coal only above head height: the way through is gravel and timber
@@ -329,25 +325,22 @@ function stampMine(T: Terrain) {
     }
   }
   // the roof above the cave-in is torn open
-  for (let y = FA - HA - 12; y < FA - HA + 2; y++) for (let x = c0 + 2; x < c1 - 2; x++) { const dx = (x - (c0 + c1) / 2) / 11, dy = (y - (FA - HA - 3)) / 9; if (dx * dx + dy * dy < 1) put(x, y, AIR); }
-  bgBox(c0, FA - HA - 12, c1, FA - HA + 2, 2);
+  { const xm = (c0 + c1) >> 1, ym = floorD(xm) - HA - 3; for (let y = ym - 14; y < ym + 6; y++) for (let x = c0 + 3; x < c1 - 3; x++) { const dx = (x - xm) / 11, dy = (y - ym) / 9; if (dx * dx + dy * dy < 1) put(x, y, AIR); } bgBox(c0, ym - 14, c1, ym + 6, 2); }
   // timber frames (cap beams + posts as wall decoration)
-  for (const fx of [316, 294, 272, 252, 214, 196]) timberFrame(fx, FA, HA);
-  for (const fx of [150, 172]) timberFrame(fx, FB, HA);
+  for (const fx of [284, 270]) timberFrame(fx, FA, HA);
+  for (const fx of [254, 246, 196, 186]) timberFrame(fx, floorD(fx), HA, floorD);
+  timberFrame(168, FB, HA);
   // portal: heavy header and bg posts
-  box(MI.portalX - 8, FA - HA - 2, MI.portalX + 14, FA - HA + 6, M.LOG); bgBox(MI.portalX + 10, FA - HA, MI.portalX + 14, FA, 7); bgBox(MI.portalX - 4, FA - HA, MI.portalX, FA, 7);
-  // --- rails with sleepers, a cart ---
-  const rails = (x0: number, x1: number, f: number, gap: [number, number] | null) => {
+  box(MI.portalX - 6, FA - HA - 2, MI.portalX + 14, FA - HA + 6, M.LOG); bgBox(MI.portalX + 10, FA - HA, MI.portalX + 14, FA, 7); bgBox(MI.portalX - 4, FA - HA, MI.portalX, FA, 7);
+  // --- rails with sleepers on the flat adit, a cart ---
+  const rails = (x0: number, x1: number, f: number) => {
     for (let x = x0; x < x1; x++) {
-      if (gap && x >= gap[0] && x < gap[1]) continue;
       if (mat[(f - 1) * W + x] !== AIR && mat[(f - 1) * W + x] !== M.METAL) continue;
       put(x, f - 1, M.METAL);
-      if (((x >> 2) & 1) === 0 && (x & 3) < 4) { put(x, f, M.PLANK); put(x, f + 1, M.PLANK); }
+      if (((x >> 2) & 1) === 0) { put(x, f, M.PLANK); put(x, f + 1, M.PLANK); }
     }
   };
-  rails(c1, MI.portalX + 52, FA, null);
-  rails(MI.rampTop + 10, c0, FA, null);
-  rails(MI.rampBot + 40, MI.lakeRamp, FB, [MI.hut[0], MI.hut[1]]);
+  rails(MI.rampTop + 12, MI.portalX + 64, FA);
   addFixture('cart', 74, FA / 4 - 2, 4, 2, { data: { loaded: 'coal' } });
   worldInfo.spots.portal = { x: MI.portalX + 4, y: FA - 10 };
   // --- hut chamber: timber lined, floor planks, beams, furniture, chest ---
@@ -355,14 +348,14 @@ function stampMine(T: Terrain) {
   box(h0, FB - 34, h1, FB - 30, M.PLANK);                                                          // ceiling beams
   box(h0, FB, h1, FB + 4, M.PLANK);
   bgBox(h0, FB - 30, h1, FB, 5);
-  // support posts at the ends (decorative, behind the player)
-  for (let x = h0; x < h1; x += 12) bgBox(x, FB - 30, x + 4, FB, 7);
-  addFixture('bed', 50, FB / 4 - 1, 4, 1);
-  addFixture('table', 58, FB / 4 - 2, 3, 2);
-  chest('minehut', 54, FB / 4 - 2, [slot('pick', 1), slot('radio_coil', 1), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
-  worldInfo.radioParts.coil = { x: 54 * 4 + 4, y: FB - 4, site: 'minehut' };
-  floorNote('n4', 'minehut', 208, FB);
-  addSite('minehut', (h0 + h1) / 2, FB - 14, h1 - h0, 40);
+  for (let x = h0; x < h1; x += 12) bgBox(x, FB - 30, x + 4, FB, 7);                                 // support posts (decorative, behind the player)
+  addFixture('bed', 29, FB / 4 - 1, 4, 1);
+  chest('minehut', 35, FB / 4 - 2, [slot('pick', 1), slot('radio_coil', 1), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
+  addFixture('table', 40, FB / 4 - 2, 3, 2);
+  worldInfo.radioParts.coil = { x: 35 * 4 + 4, y: FB - 4, site: 'minehut' };
+  floorNote('n4', 'minehut', 128, FB);
+  floorNote('n6', 'minehut', 150, FB);
+  addSite('minehut', (h0 + h1) / 2, FB - 14, h1 - h0 + 20, 44);
   // --- bulkhead and sealed methane pocket in the west dead end ---
   const [p0, p1] = MI.pocket;
   box(p0, FB - HA, p1, FB, AIR);
@@ -371,12 +364,11 @@ function stampMine(T: Terrain) {
   box(MI.bulkhead, FB - HA, MI.bulkhead + 4, FB, M.PLANK);
   box(MI.bulkhead, FB - 20, MI.bulkhead + 4, FB - 18, M.METAL); box(MI.bulkhead, FB - 8, MI.bulkhead + 4, FB - 6, M.METAL);
   worldInfo.spots.methane = { x: Math.round((p0 + p1) / 2), y: FB - 10 };
-  floorNote('n5', 'mine', MI.bulkhead + 12, FB);
-  // --- adit notes ---
-  floorNote('n2', 'mine', 306, FA);
-  // --- the underground ice lake ---
+  floorNote('n5', 'mine', MI.bulkhead + 14, FB);
+  floorNote('n2', 'mine', 276, FA);
+  // --- the underground ice lake (sealed cavern, reached by digging down) ---
   stampIceLake(T);
-  addSite('mine', 215, 300, 280, 140);
+  addSite('mine', 190, 300, 300, 140);
 }
 
 function stampIceLake(T: Terrain) {
@@ -401,8 +393,6 @@ function stampIceLake(T: Terrain) {
     void floorY;
     bgBox(x, ceil, x + 4, iceY + 34, 3);
   }
-  // shore stairs down to the ice on the west side (rise 4 / run 5 matching the ramp)
-  for (let x = L.x0 + 26; x < L.x0 + 40; x++) { const f = Math.min(iceY, L.shore + 4 * Math.floor((x - (L.x0 + 26)) / 5)); for (let y = f; y < iceY + 4; y++) put(x, y, M.STONE); for (let y = f - HA; y < f; y++) put(x, y, AIR); }
   // frost lining and icicles under the cavern roof
   for (let x = L.x0 + 36; x < L.x1; x++) {
     let y = 330; while (y < iceY && mat[y * W + x] !== AIR) y++;               // first air row under the rock ceiling
@@ -412,14 +402,14 @@ function stampIceLake(T: Terrain) {
   // far (east) shore niche with a cache
   const sx = L.x1 - 14;
   box(sx - 2, L.shore - 12, sx + 12, L.shore, AIR);
-  chest('icelake', Math.floor(sx / 4), L.shore / 4 - 2, [slot('fat', 3), slot('matches', 4), slot('rope', 2), slot('note_n6', 1)], 2, 2, { look: 'old' });
+  chest('icelake', Math.floor(sx / 4), L.shore / 4 - 2, [slot('fat', 3), slot('matches', 4), slot('rope', 2)], 2, 2, { look: 'old' });
   worldInfo.spots.lakeThin = { x: 340, y: iceY };
   addSite('icelake', mid, 372, L.x1 - L.x0, 70);
 }
 
 function stampApron(T: Terrain) {
   // spoil heaps in front of the portal: coal and gravel, rails end at a tipple
-  const x0 = MI.portalX + 24, x1 = MI.portalX + 52;
+  const x0 = MI.portalX + 36, x1 = MI.portalX + 62;
   for (let x = x0; x < x1; x++) {
     const t = 1 - Math.abs((x - (x0 + x1) / 2) / ((x1 - x0) / 2)), hh = Math.round(14 * t * (0.7 + 0.5 * noise1(x * 0.2)));
     for (let k = 1; k <= hh; k++) { const y = FA - 1 - k; if (mat[y * W + x] === AIR) put(x, y, rand() < 0.6 ? M.COAL : M.GRAVEL); }
@@ -561,16 +551,16 @@ function stampBeach(T: Terrain) {
   }
   // whale skeleton: a bone arch you can walk under. The spine rises from the gravel into an arch, ribs hang from it (tips 22 cells above the
   // ground so the way stays open), the tail sinks into the gravel on the left, a low wedge-shaped skull and jaws lie to the right.
-  const cx = 930, gy = T.surf[cx];
+  const cx = 952, gy = T.surf[cx];
   const wb = (x: number, y: number, w: number, h: number) => box(x, y, x + w, y + h, M.WHALEBONE, 0, 0, false);
-  const spineH = (x: number) => { const t = (x - (cx - 60)) / 120; return t <= 0 || t >= 1 ? 0 : 5 + 40 * Math.pow(Math.sin(Math.PI * t), 0.75); };
+  const spineH = (x: number) => { const t = (x - (cx - 48)) / 96; return t <= 0 || t >= 1 ? 0 : 5 + 40 * Math.pow(Math.sin(Math.PI * t), 0.75); };
   const gAt = (x: number) => T.surf[Math.max(8, Math.min(W - 9, x))];
-  for (let x = cx - 96; x < cx + 66; x++) {
+  for (let x = cx - 72; x < cx + 50; x++) {
     const h = spineH(x), y = gAt(x) - Math.round(h) - 2;
     wb(x, y, 1, 4);
     if (((x - cx) % 6) === 0) wb(x - 2, y - 2, 5, 7);                        // vertebrae
   }
-  for (let k = -4; k <= 4; k++) {                                              // ribs hanging from the spine
+  for (let k = -3; k <= 3; k++) {                                              // ribs hanging from the spine
     const ax = cx + k * 12, sy0 = gAt(ax) - Math.round(spineH(ax)) - 2, tipY = gAt(ax) - 22, L = tipY - sy0;
     if (L < 8) continue;
     for (let rep = 0; rep < 2; rep++) {
@@ -582,17 +572,17 @@ function stampBeach(T: Terrain) {
     }
   }
   // low skull: a long wedge of bone (walkable), a lower jaw and a rostrum
-  const sx = cx + 66;
-  for (let u = 0; u < 78; u++) {
-    const x = sx + u, g = gAt(x), top = g - Math.round(4 + 12 * Math.sin(Math.PI * Math.min(1, u / 70)) ** 0.8);
+  const sx = cx + 50;
+  for (let u = 0; u < 62; u++) {
+    const x = sx + u, g = gAt(x), top = g - Math.round(4 + 12 * Math.sin(Math.PI * Math.min(1, u / 56)) ** 0.8);
     wb(x, top, 1, 3);
     if (u % 9 === 0) wb(x, top, 2, g - top);                                   // struts
   }
-  line(sx + 4, gAt(sx + 4) - 2, sx + 70, gAt(sx + 70) - 3, M.WHALEBONE, 3);   // lower jaw
+  line(sx + 4, gAt(sx + 4) - 2, sx + 58, gAt(sx + 58) - 3, M.WHALEBONE, 3);   // lower jaw
   box(sx + 14, gAt(sx + 14) - 14, sx + 20, gAt(sx + 14) - 8, AIR);            // eye socket
   worldInfo.spots.whale = { x: cx, y: gy - 30 };
   floorNote('n7', 'whale', cx + 6, T.surf[cx + 6] - 1);
-  addSite('whale', cx + 10, gy - 20, 190, 70);
+  addSite('whale', cx - 6, gy - 20, 150, 70);
   floorNote('n8', 'beach', 952, T.surf[952]);
   // tide crack: a narrow gap through the grounded ice down to the seabed, with hairline crack lines
   const tx = 1090;
@@ -605,10 +595,10 @@ function stampBeach(T: Terrain) {
 // ---------------------------------------------------------------------------------------------------------------------
 // FAST ICE: pressure hummocks and stranded driftwood (seal holes are cut by worldgen)
 function stampFastIce(T: Terrain) {
+  // small ice rubble heaps (never taller than a step) scattered on the sheet; the real obstacles are the seal holes, the berg and the tide crack
   for (const hx of [1236, 1296, 1412]) {
-    const hgt = pileBlocks(hx - 16, hx + 16, 8, 24, M.ICE, 4, 9, 3, 4, { x0: hx - 6, x1: hx + 6, cap: 4 });
-    snowBank(hx + 16, hx + 40, hx + 22, 6, 200, 170);
-    worldInfo.iceField.ridges.push({ x: hx, w: 32, h: Math.max(...Array.from(hgt)) });
+    const hgt = pileBlocks(hx - 10, hx + 10, 5, 10, M.ICE, 3, 7, 2, 3);
+    worldInfo.iceField.ridges.push({ x: hx, w: 21, h: Math.max(...Array.from(hgt)) });
   }
   void T;
 }
@@ -700,7 +690,7 @@ function stampShip(T: Terrain) {
   for (let b = 0; b < 3; b++) { const u0 = -70 + b * 14; LB(u0, u0 + 12, 18, 20, M.PLANK); LB(u0, u0 + 2, 18, 28, M.PLANK); LB(u0 + 10, u0 + 12, 18, 28, M.PLANK); }
   LB(-44, -30, 14, 16, M.PLANK); LB(-44, -42, 14, 28, M.PLANK); LB(-32, -30, 14, 28, M.PLANK);
   // coal bunker in the stern hold: a heap behind a low bulkhead, crates in the bow hold
-  for (let u = -70; u < -26; u++) { const t = 1 - Math.abs((u + 48) / 24), hh = Math.round(14 * Math.max(0, t) * (0.8 + 0.4 * noise1(u * 0.3))); for (let k = 1; k <= hh; k++) if (mat[wy(u, 56 - k) * W + wx(u)] === AIR) L(u, 56 - k, M.COAL); }
+  for (let u = -70; u < -26; u++) { const t = 1 - Math.abs((u + 48) / 24), hh = Math.round(20 * Math.max(0, t) * (0.8 + 0.4 * noise1(u * 0.3))); for (let k = 1; k <= hh; k++) if (mat[wy(u, 56 - k) * W + wx(u)] === AIR) L(u, 56 - k, M.COAL); }
   LB(-27, -24, 40, 56, M.PLANK);
   for (let c = 0; c < 5; c++) { const u0 = 52 + (c % 3) * 9, lev = c < 3 ? 0 : 1; LB(u0, u0 + 8, 56 - 8 * (lev + 1), 56 - 8 * lev, M.PLANK); LB(u0 + 3, u0 + 5, 56 - 8 * (lev + 1), 56 - 8 * (lev + 1) + 2, M.METAL); }
   // canvas bales
