@@ -369,11 +369,12 @@ function toolSample(id: string, u: number, v: number, load: number): number {
       return 0;
     }
     case 'block': {
-      // snow block: lit top and near face, cooler far and lower faces, saw-cut lines on the near face
-      if (inR(1, 13, -5, 5)) {
-        const shade = u > 11.2 || v > 3.6;
-        if (!shade && u > 1.6 && u < 12.4 && (v + 5) % 3.4 < 0.45) return lc(TC.snowCut);
-        return lc(shade ? TC.snowSh : v < -3.6 || u < 2.6 ? TC.snowHi : TC.snow);
+      // snow block centred on the hand: lit top, cooler far and lower faces, saw-cut courses on the front, eased corners
+      if (inR(-6, 6, -5, 5) && !(Math.abs(u) > 5.2 && Math.abs(v) > 4.2)) {
+        if (v < -3.6) return lc(TC.snowHi);
+        if (u > 4.2 || v > 3.6) return lc(TC.snowSh);
+        if ((v + 5) % 3.2 < 0.9) return lc(TC.snowCut);
+        return lc(TC.snow);
       }
       return 0;
     }
@@ -421,6 +422,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const ph = pl.walkPhase * Math.PI * 2;
   const amt = Math.min(1, Math.abs(pl.vx) / 22);
   const working = pl.alive && pl.work > 0;
+  const holdBlock = pl.alive && !aim && !working && TOOLS[tool.cur].id === 'block';   // idle with a block: both hands on it
   if (pl.alive) deadAt = -1; else if (deadAt < 0) deadAt = t;
   const dT = pl.alive ? 0 : t - deadAt, kneel = Math.min(1, dT / 0.55), slump = Math.max(0, Math.min(1, (dT - 0.5) / 1.0));
   const q = Math.floor(t * 24), jr = (k: number) => hash1(q * 3.1 + k) - 0.5;
@@ -437,9 +439,16 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const swingB = pl.alive ? Math.sin(ph + Math.PI) * 0.6 * amt : 0.15;
   const armL = 9;
   {
-    const a = Math.PI / 2 + (pl.alive ? swingB * vf : 0.5 * vf * kneel + 0.6 * vf * slump);
+    let a = Math.PI / 2 + (pl.alive ? swingB * vf : 0.5 * vf * kneel + 0.6 * vf * slump);
     const sxp = -vf * 3 + (spLean ? vf * Math.round(spLean * 0.5) : 0);
-    const hx = sxp + Math.cos(a) * armL * 0.95, hy = shY + Math.sin(a) * armL * 0.95;
+    let reach = armL * 0.95;
+    if (holdBlock) {
+      // the far hand reaches under the block: its lower edge sits 6.5 cells below the near hand, across the forearm
+      const ba = vf > 0 ? 0.55 : Math.PI - 0.55, bx = Math.cos(ba), by = Math.sin(ba);
+      const tx = shX + bx * armL - by * vf * 6.5, ty = shY + by * armL + bx * vf * 6.5;
+      a = Math.atan2(ty - shY, tx - sxp); reach = armL * 1.12;
+    }
+    const hx = sxp + Math.cos(a) * reach, hy = shY + Math.sin(a) * reach;
     spLine(sxp, shY, hx, hy, 3, lc(PAL.parkaSh));
     spLine(hx, hy, hx + Math.cos(a) * 3, hy + Math.sin(a) * 3, 3, lc(PAL.mitt));
   }

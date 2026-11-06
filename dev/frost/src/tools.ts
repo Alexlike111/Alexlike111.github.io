@@ -19,7 +19,7 @@ export const TOOLS = [
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
 // msgSec: how long the next tool message stays on the hint card (seconds)
-export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
+export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, dugN: 0, dugD: 0, thrownN: 0, thrownD: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
 /** E / «Взять» feeds a campfire this close (cells, 2 m); the HUD fuel chip shows at the same distance */
 export const FEED_R = 40;
@@ -185,7 +185,7 @@ export function aimTarget(ax: number, ay: number, moveX = 0): DigTarget {
 }
 /** a finished dig: its snow cells leave the world into the spoil bag (thrown clear by tickSpoil), dust bursts, the stamina cost by hardness */
 function finishDig(tiles: DigTile[]) {
-  let n = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  let n = 0, dd = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const u of tiles) {
     const bx = u.tx * TILE, by = u.ty * TILE;
     x0 = Math.min(x0, bx); y0 = Math.min(y0, by); x1 = Math.max(x1, bx + TILE); y1 = Math.max(y1, by + TILE);
@@ -194,12 +194,12 @@ function finishDig(tiles: DigTile[]) {
       if (!inb(x, y)) continue;
       const i = idx(x, y);
       if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) continue;
-      bag.push(dens[i]); n++;
+      bag.push(dens[i]); n++; dd += dens[i];
       set(x, y, M.AIR);
     }
   }
   if (!n) return;
-  tool.digs++;
+  tool.digs++; tool.dugN += n; tool.dugD += dd;
   for (let k = 0, nb = 4 + Math.min(10, n >> 2); k < nb; k++) {
     const u = tiles[k % tiles.length];
     const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6, sp = 20 + Math.random() * 40;
@@ -388,13 +388,16 @@ function flushSpoil() {
   flushIn = 0.25;
   const ds = bag.splice(0, bag.length);
   const [sx, sy] = shoulder();
-  if (!skyOpen(Math.round(pl.x), Math.round(pl.y - pl.h * 0.5)) && tunnelSpoil(ds)) { tool.outs++; sfx?.throwSnow(); return; }
+  if (!skyOpen(Math.round(pl.x), Math.round(pl.y - pl.h * 0.5)) && tunnelSpoil(ds)) {
+    tool.outs++; tool.thrownN += ds.length; for (const d of ds) tool.thrownD += d; sfx?.throwSnow(); return;
+  }
   tool.ins++;
   const p = planSpoil(sx, sy);
   for (const d of ds) {
     const j = (Math.random() - 0.5) * 0.04;
     const vx = (p.ux + j) * p.sp * (0.9 + Math.random() * 0.2), vy = (p.uy + j) * p.sp * (0.9 + Math.random() * 0.2) - 25;
     if (spawn(PK.CLUMP, sx + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4, vx, vy, CLUMP_LIFE, 1, d, 0) < 0) bag.push(d); // particle pool full: kept for the next throw
+    else { tool.thrownN++; tool.thrownD += d; }
   }
   sfx?.throwSnow();
 }

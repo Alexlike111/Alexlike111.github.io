@@ -21,9 +21,8 @@ export interface Animal {
 export const K_HARE = 0, K_BIRD = 1;
 const ST_WANDER = 0, ST_FREEZE = 1, ST_FLEE = 2, ST_FLY = 3, ST_GOHIDE = 4, ST_HIDE = 5, ST_DEAD = 6;
 
-const CPM = 20;                        // cells per metre
 const POOL = 20;                       // hard cap on animals
-const HARE_MAX = 6, FLOCKS_MAX = 4;    // 6 hares + 4 flocks x 3 birds = 18 at most
+const FLOCKS_MAX = 4;                  // 4 flocks x 3 birds + 6 hares = 18 at most
 const SNARE_MAX = 12;
 const SNARE_R = 10;                    // 0.5 m: a path this close to a snare is a crossing
 const CATCH_P = 0.35;                  // per crossing, per game hour
@@ -409,6 +408,14 @@ export function placeSnare(x: number, _y?: number): number {
   return snares.length - 1;
 }
 
+/** Picks up snare i (armed or emptied; a caught one is collected with checkSnare first). Returns false if nothing was removed. */
+export function removeSnare(i: number): boolean {
+  const sn = snares[i];
+  if (!sn || sn.state !== 0) return false;
+  snares.splice(i, 1);
+  return true;
+}
+
 /** Index of the nearest snare within radius cells of (x, y), or -1. */
 export function checkSnareAt(x: number, y: number, radius: number): number {
   let best = -1, bd = radius * radius;
@@ -444,29 +451,29 @@ export function faunaNear(x: number, y: number, r: number): Animal[] {
 // Sprites are authored as texel grids (1 texel = 0.5 cell = 2.5 cm), outlined automatically, and cached as small canvases.
 // Legend: w white coat, s shade, k dark eye / ear tip / beak / tail, n nose, '.' empty.
 const HARE_ART = [
-  '..............kk.kk.',
-  '..............ww.ww.',
-  '..............ww.ww.',
-  '.............wwwwwww',
-  '.............wwwwkww',
-  '............wwwwwwwn',
-  '..........wwwwwwwww.',
-  '........wwwwwwwwwwww',
-  '...wwwwssssssssswwww',
+  '...............kk.kk',
+  '...............ww.ww',
+  '...............wwwww',
+  '........wwwww.wwwwww',
+  '..ww.wwwwwwwwwwwwwkw',
+  '.wwwwwwwwwwwwwwwwwwn',
+  '.wwwwwwwwwwwwwwwwww.',
   '..wwwwwwwwwwwwwwwww.',
-  '..ww.......ww.......',
-  '..ww.......ww.......',
+  '....wwwsssssssswww..',
+  '.....sssssssssss....',
+  '..wwwwww.....ww.....',
+  '..wwwwww.....ww.....',
 ];
 const BIRD_ART = [
-  '..........wwww',
-  '..........wkwk',
-  '...wwwwwwwwwww',
-  'kkwwsssswwwwww',
-  'kkwwssssswwwww',
-  '..wwssssssswww',
-  '...sssssssss..',
-  '....ww....ww..',
-  '....ww....ww..',
+  '...........ww.',
+  '......wwwwwwkw',
+  '...wwssssswwww',
+  '.kkwssssssswww',
+  '.kkwwssssswwww',
+  '.kkwwwwwwwwww.',
+  '.....wwwwww...',
+  '.....ww...ww..',
+  '.....ww...ww..',
 ];
 const PAL_DAY = { w: [244, 247, 250], s: [205, 216, 230], k: [30, 35, 44], n: [196, 138, 143], o: [58, 70, 90, 170] };
 const PAL_NIGHT = { w: [150, 162, 182], s: [108, 122, 146], k: [16, 20, 28], n: [120, 80, 86], o: [8, 12, 20, 230] };
@@ -515,8 +522,8 @@ function spriteFor(kind: number, night: boolean): HTMLCanvasElement | null {
 }
 
 /**
- * Draws animals and snares. Call inside drawOverlay with the world transform set (as for drawPlayer), after drawPlayer.
- * worldToScreen: renderer.worldToScreen (used only to cull what is off screen). scale: device pixels per cell (G.cam.zoom * dpr).
+ * Draws animals and snares. Call inside drawOverlay with the world transform set (as for drawPlayer), before drawPlayer so the hero stands in front.
+ * worldToScreen: renderer.worldToScreen (culling only). scale: device pixels per cell (G.cam.zoom * dpr).
  * night: 0 day .. 1 night (the dark palette is used above 0.5).
  */
 export function drawFauna(ctx: CanvasRenderingContext2D, worldToScreen: (x: number, y: number) => [number, number], scale: number, night: number) {

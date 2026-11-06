@@ -1,4 +1,5 @@
 // World grid: 5 cm cells, y grows downward.
+import { placeLocations } from './locations';
 export const CELL = 0.05; // m
 export const W = 2400;
 export const H = 608;
@@ -230,6 +231,7 @@ export function generate(s = 20261106) {
   // the 4th crate sits 50-80 cells west of the start, on the windward ramp (outside the lee drift): food + matches within reach of the first dig
   const cx = [680, 980, 1300, START_X - 66, 1900, 2120, 230, 1420]; // none under the lake (x 1480..1800)
   for (let k = 0; k < cx.length; k++) placeCrate(clearSpot(cx[k]), loots[k]);
+  placeLocations(s); // locations (station, lake, grotto, wreck, tower, warm spring): stamped after the terrain, snow and crates
   for (let i = 0; i < awake.length; i++) { awake[i] = 0; gpuDirty[i] = 1; }
 }
 

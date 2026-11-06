@@ -158,6 +158,8 @@ interface Gauge { root: HTMLElement; val: HTMLElement; num: HTMLElement }
 type Cached<T extends HTMLElement = HTMLElement> = T & { _t?: string };
 
 const TOOL_ICON: Record<string, string> = { shovel: 'shovel', saw: 'saw', axe: 'axe', beam: 'beam', block: 'block', fire: 'fire' };
+/** the icon a tool shows now: the beam in «дверь» mode shows a planked door */
+function toolIconName(id: string, beamMode = ''): string { return id === 'beam' && beamMode.startsWith('дверь') ? 'door' : (TOOL_ICON[id] ?? 'block'); }
 
 // built structure ids (tool.built) -> Russian names for the end card
 const BUILT_NAME: Record<string, string> = {
@@ -671,7 +673,7 @@ export class UI {
       const bar = this.toolBar(t.id, h);
       const live = t.id === 'fire' && h.fire ? `Костёр: ${fireText(h.fire)}` : this.liveSub(t.id, h);
       return {
-        id: String(i), label: t.name, icon: ico(TOOL_ICON[t.id] ?? 'block'),
+        id: String(i), label: t.name, icon: ico(toolIconName(t.id, h.beamMode)),
         badge: t.count === undefined ? undefined : String(t.count), sub: live || TOOL_SUB[t.id] || '',
         bar: bar > 0.02 ? bar : undefined,
         cls: [i === h.tool ? 'sel' : '', t.enabled ? '' : 'off', t.count === 0 ? 'empty' : '', t.id === 'fire' ? 'fire' : ''].filter(Boolean).join(' '),
@@ -823,6 +825,8 @@ export class UI {
       const g = this.tags[i]; if (!g) return;
       this.txt(g.name, t.name); this.txt(g.key, t.key);
       this.txt(g.count, t.count === undefined ? '' : String(t.count));
+      const ti = toolIconName(t.id, h.beamMode);
+      this.m('tagico' + i, ti, () => { const old = g.root.querySelector('.tag-ico'); if (old) old.outerHTML = ico(ti, 'tag-ico'); });
       this.m('tag' + i, (i === h.tool ? 1 : 0) + (t.enabled ? 2 : 0) + ((t.count ?? 1) === 0 ? 4 : 0), () => {
         g.root.classList.toggle('sel', i === h.tool);
         g.root.classList.toggle('off', !t.enabled);
@@ -842,7 +846,8 @@ export class UI {
     // ---- touch cluster: the tool button shows the current tool + count (the other buttons: paintTouch)
     const ct = h.tools[h.tool];
     if (ct) {
-      this.m('cbtool', ct.id, () => { this.cbToolIco.innerHTML = ico(TOOL_ICON[ct.id] ?? 'block'); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
+      const cti = toolIconName(ct.id, h.beamMode);
+      this.m('cbtool', ct.id + cti, () => { this.cbToolIco.innerHTML = ico(cti); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
       // badge: the count, or the live % while the saw cuts
       const live = ct.id === 'saw' && h.sawP > 0.005 ? `${Math.round(h.sawP * 100)}%` : '';
       const cnt = live || (ct.count === undefined ? '' : String(ct.count));

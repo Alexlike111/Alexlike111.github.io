@@ -547,9 +547,9 @@ body { position: fixed; inset: 0; width: 100%; }
   --P: clamp(48px, 13.6vh, 56px);     /* Положить */
   --S: clamp(44px, 11.6vh, 48px);     /* secondary buttons: never under 44 px */
   --X: clamp(38px, 10vh, 42px);       /* Рентген: small; its hit area is grown by ::before */
-  --r1: clamp(70px, 19vh, 80px);      /* inner ring radius */
-  --rx: clamp(140px, 23vw, 210px);    /* outer arc: horizontal radius */
-  --ry: clamp(100px, 28vh, 120px);    /* outer arc: vertical radius */
+  --r1: clamp(74px, 20vh, 84px);      /* inner ring radius */
+  --rx: clamp(140px, 22vw, 230px);    /* outer arc: horizontal radius */
+  --ry: clamp(100px, 34vh, 150px);    /* outer arc: vertical radius (the arc stays below the top-right HUD, ending at y 140) */
   position: absolute; right: calc(var(--pad-r) + var(--J) / 2); bottom: calc(var(--pad-b) + var(--J) / 2);
   width: 0; height: 0; pointer-events: none;
 }
@@ -568,10 +568,10 @@ body { position: fixed; inset: 0; width: 100%; }
 .cb-put { --d: var(--P); --x: calc(var(--r1) * -0.7071); --y: calc(var(--r1) * -0.7071); }
 .cb-take { --x: calc(var(--r1) * -1); }
 .cb-tool { --y: calc(var(--r1) * -1); }
-.cb-xray { --d: var(--X); --x: calc(var(--rx) * -0.9903); --y: calc(var(--ry) * -0.1392); }
-.cb-wait { --x: calc(var(--rx) * -0.848); --y: calc(var(--ry) * -0.5299); }
-.cb-rot { --x: calc(var(--rx) * -0.5592); --y: calc(var(--ry) * -0.829); }
-.cb-eat { --x: calc(var(--rx) * -0.2079); --y: calc(var(--ry) * -0.9781); }
+.cb-xray { --d: var(--X); --x: calc(var(--rx) * -1); --y: 0px; }
+.cb-wait { --x: calc(var(--rx) * -0.8988); --y: calc(var(--ry) * -0.4384); }
+.cb-rot { --x: calc(var(--rx) * -0.6428); --y: calc(var(--ry) * -0.766); }
+.cb-eat { --x: calc(var(--rx) * -0.309); --y: calc(var(--ry) * -0.9511); }
 .cbtn .ico { width: calc(var(--d) * 0.42); height: calc(var(--d) * 0.42); }
 .cb-jump .ico { width: calc(var(--d) * 0.46); height: calc(var(--d) * 0.46); stroke-width: 1.8; }
 .cb-ico { display: grid; place-items: center; }
