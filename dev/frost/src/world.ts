@@ -37,32 +37,51 @@ let beamSeq = 0;
 export function nextBeamId(): number { beamSeq = beamSeq >= 65535 ? 1 : beamSeq + 1; return beamSeq; }
 
 // chunk bookkeeping
-export const awake = new Uint8Array(CW * CHH);       // frames to stay awake
-export const gpuDirty = new Uint8Array(CW * CHH);    // needs texture upload
+export const awake = new Uint8Array(CW * CHH);       // quiet passes left before the chunk sleeps (0 = asleep, the automaton skips it)
+export const gpuDirty = new Uint8Array(CW * CHH);    // needs texture upload (set only where cells actually changed)
 export const solidVer = new Uint32Array(CW * CHH);   // bumps when rigid layout changes
+/** Hysteresis: a chunk whose last full pass changed nothing sleeps after this many more passes. */
+export const AWAKE_T = 12;
+/** A cell's next state depends only on cells this close (grains: 2 below, 1 aside; water runs 3 sideways). */
+export const WAKE_R = 3;
 
 export const idx = (x: number, y: number) => y * W + x;
 export const inb = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;
 
+/** External writers (player, tools, bodies): wake the 3x3 chunks around (x,y) and mark its chunk for upload. */
 export function wake(x: number, y: number) {
   const cx = (x / CH) | 0, cy = (y / CH) | 0;
   for (let j = cy - 1; j <= cy + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
     if (i < 0 || j < 0 || i >= CW || j >= CHH) continue;
-    const c = j * CW + i; awake[c] = 90;
+    const c = j * CW + i; if (awake[c] < AWAKE_T) awake[c] = AWAKE_T;
   }
   gpuDirty[cy * CW + cx] = 1;
 }
+/** A cell changed at (x,y): wake only the chunks holding a cell within WAKE_R of it (usually just its own). No GPU mark. */
+export function wakeNear(x: number, y: number) {
+  const x0 = Math.max(0, ((x - WAKE_R) / CH) | 0), x1 = Math.min(CW - 1, ((x + WAKE_R) / CH) | 0);
+  const y0 = Math.max(0, ((y - WAKE_R) / CH) | 0), y1 = Math.min(CHH - 1, ((y + WAKE_R) / CH) | 0);
+  for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) { const c = j * CW + i; if (awake[c] < AWAKE_T) awake[c] = AWAKE_T; }
+}
+/** A grain was added in place (snowfall): only its own chunk. If the grain then moves, the move wakes its neighbourhood. */
+export function wakeOwn(x: number, y: number) { const c = ((y / CH) | 0) * CW + ((x / CH) | 0); if (awake[c] < AWAKE_T) awake[c] = AWAKE_T; }
 export function touch(x: number, y: number) { gpuDirty[((y / CH) | 0) * CW + ((x / CH) | 0)] = 1; }
 export function solidChanged(x: number, y: number) { solidVer[((y / CH) | 0) * CW + ((x / CH) | 0)]++; }
 
-export function set(x: number, y: number, m: number, d = 0, b = 0, f = 0) {
+/** Raw cell write, no wake. Keeps tree/beam ids and rigid-layout versions right; marks the chunk for upload only if the cell changed. */
+export function putCell(x: number, y: number, m: number, d: number, b: number, f: number): boolean {
   const i = y * W + x;
   const wasRigid = rigidAt(i);
+  const changed = mat[i] !== m || dens[i] !== d || bond[i] !== b || flags[i] !== f;
   if (mat[i] !== m || !(f & F_TREE)) treeId[i] = 0; // a cell that changes material is no longer part of a standing tree
   mat[i] = m; dens[i] = d; bond[i] = b; flags[i] = f;
   beamId[i] = 0; // callers that place a beam stamp beamId after set()
   if (wasRigid !== rigidAt(i)) solidChanged(x, y);
-  wake(x, y);
+  if (changed) gpuDirty[((y / CH) | 0) * CW + ((x / CH) | 0)] = 1;
+  return changed;
+}
+export function set(x: number, y: number, m: number, d = 0, b = 0, f = 0) {
+  if (putCell(x, y, m, d, b, f)) wake(x, y);
 }
 export function clear(x: number, y: number) { set(x, y, M.AIR); }
 

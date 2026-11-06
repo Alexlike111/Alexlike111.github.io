@@ -1283,6 +1283,7 @@ export class Renderer {
     const covers = this.cellValid && this.cellOrgX <= vx0 && vx1 < this.cellOrgX + this.cellW && this.cellOrgY <= vy0 && vy1 < this.cellOrgY + this.cellH;
     this.cellAge++;
     const drawCell = !covers || variant !== this.cellVar || worldChanged || this.cellAge >= period;
+    /*DBG*/ { const w = (window as unknown as { __why?: Record<string, number> }); w.__why = w.__why || {}; const k = !covers ? 'cover' : variant !== this.cellVar ? 'variant' : worldChanged ? 'world' : this.cellAge >= period ? 'age' : 'skip'; w.__why[k] = (w.__why[k] || 0) + 1; }
     if (drawCell) {
       this.cellOrgX = this.orgX; this.cellOrgY = this.orgY; this.cellVar = variant; this.cellValid = true; this.cellAge = 0;
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);

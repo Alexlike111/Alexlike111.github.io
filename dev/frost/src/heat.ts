@@ -28,8 +28,11 @@ const FREEZE_RATE = 0.6;   // 1/s share of water cells in a heat cell that freez
 const FREEZE_T = -0.5, FREEZE_HEAT = 0.4; // freezing returns 40% of MELT_E (T goes up slightly)
 const WIND_DECAY = 0.94;   // shelter retained per heat cell travelled downwind of an obstacle
 const MARGIN = 8;          // heat cells simulated beyond G.win
+// The solver integrates at most every HEAT_DT real seconds, using the accumulated dt (heat is slow: time constants of seconds).
+// Explicit conduction stays stable for any sub-step <= 0.1 s (fastest cell rate ~1.5 1/s), so 20 Hz is well inside the limit.
+const HEAT_DT = 0.05;
 
-// ---------------- per-cell material tables ----------------
+// ---------------- per-material tables ----------------
 const SK = new Float32Array(1024), SC = new Float32Array(1024);
 for (let d = 0; d < 1024; d++) {
   const r = Math.max(0.03, d / 1000);
@@ -45,8 +48,11 @@ setM(M.WOOD, 0.12, 25); setM(M.CRATE, 0.12, 25); setM(M.PLANK, 0.12, 25); setM(M
 // blocking for wind / shelter / sky: solid enough to stop air
 const BLOCK = new Uint8Array(16);
 for (const m of [M.SNOW, M.ICE, M.DIRT, M.ROCK, M.WOOD, M.PLANK, M.DOOR, M.CRATE, M.BEDROCK]) BLOCK[m] = 1;
+const WATER_F = new Uint8Array(16), GND_F = new Uint8Array(16);   // water count / ground (dirt, rock, bedrock) count per cell
+WATER_F[M.WATER] = 1; GND_F[M.DIRT] = 1; GND_F[M.ROCK] = 1; GND_F[M.BEDROCK] = 1;
 
-// ---------------- per heat-cell composition cache ----------------
+// ---------------- per heat-cell state ----------------
+// composition (refreshed by compose, staggered over rows)
 const cap = new Float32Array(HW * HH).fill(1);     // mean heat capacity per cell
 const kk = new Float32Array(HW * HH).fill(0.35);   // mean conductivity
 const nSol = new Uint8Array(HW * HH);              // blocking cells of 16
@@ -55,20 +61,50 @@ const nWat = new Uint8Array(HW * HH);
 const nGnd = new Uint8Array(HW * HH);              // dirt/rock/bedrock
 const sDens = new Uint16Array(HW * HH);            // mean snow density
 const sky = new Uint8Array(HW * HH);               // 1 = no blocking heat cell above in the column
-const dT = new Float32Array(HW * HH);              // scratch accumulator
+// conduction coefficients derived from the composition (refreshed with it, so the solver does no divisions per step)
+const ic = new Float32Array(HW * HH).fill(1);      // 1 / cap
+const air = new Uint8Array(HW * HH);               // 1 = air-like cell (cap <= 2)
+const gR = new Float32Array(HW * HH);              // conductance of the pair (h, h+1)
+const gD = new Float32Array(HW * HH);              // conductance of the pair (h, h+HW)
+// per-cell relaxation rates (1/s) derived from wind / sky / composition in windPass
+const vR = new Float32Array(HW * HH);              // ventilation towards ambient
+const sR = new Float32Array(HW * HH);              // sky cooling of exposed snow towards ambient-2
+const gndR = new Float32Array(HW * HH);            // deep ground relaxing towards GROUND_T
+const tn = new Float32Array(HW * HH);              // conduction scratch (interior cells of one sub-step)
+const dirty = new Int32Array(HW * HH);             // heat cells whose conduction inputs changed (queue for applyDirty)
+let nDirty = 0;
 
 function compose(hx: number, hy: number) {
-  const h = hy * HW + hx, base = hy * HS * W + hx * HS;
+  const h = hy * HW + hx;
+  let i0 = hy * HS * W + hx * HS;
   let sk = 0, sc = 0, ns = 0, nsn = 0, nw = 0, ng = 0, sd = 0;
-  for (let j = 0; j < HS; j++) {
-    let i = base + j * W;
-    for (let k = 0; k < HS; k++, i++) {
+  for (let j = 0; j < HS; j++, i0 += W) {
+    for (let i = i0, e = i0 + HS; i < e; i++) {
       const m = mat[i];
-      if (m === M.SNOW) { const d = Math.min(1023, dens[i]); sk += SK[d]; sc += SC[d]; ns++; nsn++; sd += d; }
-      else { sk += MK[m]; sc += MC[m]; if (BLOCK[m]) ns++; if (m === M.WATER) nw++; else if (m === M.DIRT || m === M.ROCK || m === M.BEDROCK) ng++; }
+      if (m === M.SNOW) { const d = dens[i] > 1023 ? 1023 : dens[i]; sk += SK[d]; sc += SC[d]; ns++; nsn++; sd += d; }
+      else { sk += MK[m]; sc += MC[m]; ns += BLOCK[m]; nw += WATER_F[m]; ng += GND_F[m]; }
     }
   }
-  kk[h] = sk / 16; cap[h] = sc / 16; nSol[h] = ns; nSnow[h] = nsn; nWat[h] = nw; nGnd[h] = ng; sDens[h] = nsn ? (sd / nsn) | 0 : 0;
+  const nk = sk / 16, nc = sc / 16;
+  // conduction coefficients only follow a real change of the mean conductivity / capacity (queued for applyDirty)
+  if (nk !== kk[h] || nc !== cap[h]) { kk[h] = nk; cap[h] = nc; dirty[nDirty++] = h; }
+  nSol[h] = ns; nSnow[h] = nsn; nWat[h] = nw; nGnd[h] = ng; sDens[h] = nsn ? (sd / nsn) | 0 : 0;
+}
+
+/** conduction coefficients of one heat cell: its own 1/C, air flag, and the pairs it owns (right, down) and the pairs ending in it (left, up).
+ *  Pairs with a neighbour that is also queued are recomputed when that neighbour is processed, so the final state is consistent. */
+function coefCell(h: number) {
+  const c = cap[h]; ic[h] = 1 / c; air[h] = c <= 2 ? 1 : 0;
+  const hy = (h / HW) | 0, hx = h - hy * HW;
+  if (hx < HW - 1) { const ki = kk[h], kj = kk[h + 1]; gR[h] = (ki * kj * 2 / (ki + kj)) * ((air[h] & air[h + 1]) ? GK_AIR : GK_SOLID); }
+  if (hy < HH - 1) { const ki = kk[h], kj = kk[h + HW]; gD[h] = (ki * kj * 2 / (ki + kj)) * ((air[h] & air[h + HW]) ? GK_AIR : GK_SOLID); }
+  if (hx > 0) { const ki = kk[h - 1], kj = kk[h]; gR[h - 1] = (ki * kj * 2 / (ki + kj)) * ((air[h - 1] & air[h]) ? GK_AIR : GK_SOLID); }
+  if (hy > 0) { const ki = kk[h - HW], kj = kk[h]; gD[h - HW] = (ki * kj * 2 / (ki + kj)) * ((air[h - HW] & air[h]) ? GK_AIR : GK_SOLID); }
+}
+/** refresh the conduction coefficients of every queued cell, then empty the queue */
+function applyDirty() {
+  for (let q = 0; q < nDirty; q++) coefCell(dirty[q]);
+  nDirty = 0;
 }
 
 function profileT(hx: number, hy: number): number {
@@ -88,10 +124,13 @@ function scanSurf(x: number, hint: number, full = false) {
 }
 
 export function initHeat() {
+  nDirty = 0;
   for (let x = 0; x < W; x++) scanSurf(x, 0);
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) compose(hx, hy);
+  for (let h = 0; h < HW * HH; h++) dirty[h] = h;   // every cell: start from exact coefficients
+  nDirty = HW * HH; applyDirty();
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) T[hy * HW + hx] = profileT(hx, hy);
-  WND.fill(0); meltAcc.fill(0); prevValid = false;
+  WND.fill(0); vR.fill(0); sR.fill(0); gndR.fill(0); meltAcc.fill(0); prevValid = false;
 }
 
 // ---------------- window ----------------
@@ -140,9 +179,23 @@ function windPass() {
       if (hx === xb) break;
     }
   }
-  for (let hx = hx0; hx <= hx1; hx++) {       // sky exposure: nothing blocking above in this column
+  // sky exposure (nothing blocking above in this column) and the per-cell relaxation rates the conduction uses
+  for (let hx = hx0; hx <= hx1; hx++) {
     let open = 1;
-    for (let hy = hy0; hy <= hy1; hy++) { const h = hy * HW + hx; sky[h] = open; if (nSol[h] >= 8) open = 0; }
+    for (let hy = hy0; hy <= hy1; hy++) {
+      const h = hy * HW + hx, ns = nSol[h];
+      sky[h] = open;
+      if (ns <= 4) {                                                // (mostly) air cells: ventilation
+        const aw = Math.abs(WND[h]);
+        vR[h] = open ? VENT_SKY + VENT_WIND * aw : VENT_LEAK + VENT_WIND * ROOF_WIND * aw;
+        sR[h] = 0;
+      } else {
+        vR[h] = 0;
+        sR[h] = ns < 16 && nSnow[h] >= 4 && hy > hy0 && sky[h - HW] ? SKY_COOL : 0;   // sky radiative cooling of the exposed surface
+      }
+      gndR[h] = nGnd[h] >= 8 && hy * HS + 2 > groundY[Math.min(W - 1, hx * HS + 2)] + GROUND_DEEP ? GROUND_RATE : 0;
+      if (ns >= 8) open = 0;
+    }
   }
 }
 
@@ -191,20 +244,21 @@ export function stepHeat(dt: number) {
   const w = G.win;
   if (w.x1 <= w.x0 || w.y1 <= w.y0) return;
   dt = Math.min(dt, 0.25);
-  // fast frames (>= ~50 fps): integrate at ~30 Hz with the accumulated dt instead of every frame (heat is slow; same physics, half the CPU)
+  // fast frames: integrate every HEAT_DT with the accumulated dt instead of every frame (same physics, a fraction of the CPU)
   hAcc += dt;
-  if (hAcc < 0.025 && prevValid) return;
+  if (hAcc < HEAT_DT && prevValid) return;
   dt = Math.min(hAcc, 0.25); hAcc = 0;
   tick++; dtAvg += (dt - dtAvg) * 0.2;
   updateWindow();
   const amb = G.ambientT;
 
   let pt = pnow();
-  // staggered: surface scan (a quarter of the columns), composition + phase change (a quarter of the rows)
+  // staggered: surface scan (a quarter of the columns), composition (a quarter of the rows); changed cells update their conduction coefficients
   // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
   for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
-  for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) { compose(hx, hy); }
+  for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) compose(hx, hy);
+  applyDirty();
   pend('hCompose', pt); pt = pnow();
   if ((tick & 1) === 0) windPass();
   pend('hWind', pt); pt = pnow();
@@ -220,53 +274,44 @@ export function stepHeat(dt: number) {
     const fx = (f.x / HS) | 0, fy = ((f.y - 2) / HS) | 0;
     if (fx <= hx0 + 1 || fx >= hx1 - 1 || fy <= hy0 + 2 || fy >= hy1 - 1) continue;
     const q = f.power * SRC * dt;
-    const add = (x: number, y: number, wgt: number) => { const h = y * HW + x; T[h] += q * wgt / cap[h]; };
+    const add = (x: number, y: number, wgt: number) => { const h = y * HW + x; T[h] += q * wgt * ic[h]; };
     const fa = FIRE_AIR;
     add(fx, fy, 0.25 * fa); add(fx, fy - 1, 0.2 * fa); add(fx, fy - 2, 0.1 * fa); add(fx - 1, fy, 0.1 * fa); add(fx + 1, fy, 0.1 * fa);
     add(fx, fy + 1, 0.25 * FIRE_CONTACT);   // flame touching the ground/snow underneath (extra, non-conserved, so fires sink into powder)
   }
   {
     const p = G.player, px = (p.x / HS) | 0, py = ((p.y - p.h * 0.6) / HS) | 0;
-    if (px > hx0 && px < hx1 && py > hy0 && py < hy1) { const h = py * HW + px; T[h] += p.heat * SRC * dt / cap[h]; }
+    if (px > hx0 && px < hx1 && py > hy0 && py < hy1) { const h = py * HW + px; T[h] += p.heat * SRC * dt * ic[h]; }
   }
 
-  // conduction + buoyancy + ventilation, explicit with substeps (rate bound ~4/s)
+  // conduction + buoyancy + ventilation: explicit Jacobi sub-steps (fastest cell rate ~1.5 1/s, so sdt <= 0.1 s is stable)
   const n = Math.max(1, Math.min(4, Math.ceil(dt * 10)));
   const sdt = dt / n;
+  const bb = Math.min(0.3, BUOY * sdt);                     // buoyancy transfer cap per sub-step
   const x0 = hx0 + 1, x1 = hx1 - 1, y0 = hy0 + 1, y1 = hy1 - 1;
   for (let s = 0; s < n; s++) {
-    for (let hy = hy0; hy <= hy1; hy++) dT.fill(0, hy * HW + hx0, hy * HW + hx1 + 1);
     for (let hy = y0; hy <= y1; hy++) {
-      for (let hx = x0, h = hy * HW + x0; hx <= x1; hx++, h++) {
-        const ti = T[h], ci = cap[h], ki = kk[h];
-        const airI = ci <= 2;
-        // right
-        let h2 = h + 1, kj = kk[h2], g = (ki * kj * 2 / (ki + kj)) * (airI && cap[h2] <= 2 ? GK_AIR : GK_SOLID);
-        let f = g * (T[h2] - ti) * sdt; dT[h] += f / ci; dT[h2] -= f / cap[h2];
-        // down
-        h2 = h + HW; kj = kk[h2]; g = (ki * kj * 2 / (ki + kj)) * (airI && cap[h2] <= 2 ? GK_AIR : GK_SOLID);
-        f = g * (T[h2] - ti) * sdt; dT[h] += f / ci; dT[h2] -= f / cap[h2];
-        // buoyancy: warm air gives heat to the air cell above
-        if (airI) {
-          const hu = h - HW;
-          if (cap[hu] <= 2 && ti > T[hu]) { const b = Math.min(0.3, BUOY * sdt) * (ti - T[hu]); dT[h] -= b; dT[hu] += b; }
+      for (let h = hy * HW + x0, e = hy * HW + x1; h <= e; h++) {
+        const ti = T[h];
+        // conduction: sum over the four neighbours of g * (T_nb - T) / C (gather form of the pairwise flux)
+        const dc = gR[h] * (T[h + 1] - ti) + gR[h - 1] * (T[h - 1] - ti) + gD[h] * (T[h + HW] - ti) + gD[h - HW] * (T[h - HW] - ti);
+        let t = ti + dc * sdt * ic[h];
+        // buoyancy between air cells: warm air hands heat to the air cell above, receives from the one below
+        if (air[h]) {
+          const tu = T[h - HW], tb = T[h + HW];
+          if (air[h - HW] && ti > tu) t -= bb * (ti - tu);
+          if (air[h + HW] && tb > ti) t += bb * (tb - ti);
         }
+        // ventilation of (mostly) air cells, sky cooling of exposed snow
+        const v = vR[h];
+        if (v > 0) t += (amb - t) * Math.min(0.5, v * sdt);
+        else { const k = sR[h]; if (k > 0) t += (amb - 2 - t) * k * sdt; }
+        const gn = gndR[h];
+        if (gn > 0) t += (GROUND_T - t) * Math.min(0.5, gn * sdt);
+        tn[h] = t < -80 ? -80 : t > 400 ? 400 : t;
       }
     }
-    for (let hy = y0; hy <= y1; hy++) {
-      for (let hx = x0, h = hy * HW + x0; hx <= x1; hx++, h++) {
-        let t = T[h] + dT[h];
-        const ns = nSol[h];
-        if (ns <= 4) {                                                // ventilation of (mostly) air cells
-          const r = sky[h] ? VENT_SKY + VENT_WIND * Math.abs(WND[h]) : VENT_LEAK + VENT_WIND * ROOF_WIND * Math.abs(WND[h]);
-          t += (amb - t) * Math.min(0.5, r * sdt);
-        } else if (nSnow[h] >= 4 && sky[h - HW] && ns < 16) {         // sky radiative cooling of the exposed surface
-          t += (amb - 2 - t) * SKY_COOL * sdt;
-        }
-        if (nGnd[h] >= 8 && hy * HS + 2 > groundY[Math.min(W - 1, hx * HS + 2)] + GROUND_DEEP) t += (GROUND_T - t) * Math.min(0.5, GROUND_RATE * sdt);
-        T[h] = t < -80 ? -80 : t > 400 ? 400 : t;
-      }
-    }
+    for (let hy = y0; hy <= y1; hy++) for (let h = hy * HW + x0, e = hy * HW + x1; h <= e; h++) T[h] = tn[h];
   }
   pend('hCond', pt);
   // boundary: open air at the window edge and the top rows is ambient

@@ -2,7 +2,7 @@
 // sintering, wind transport (saltation), snowfall deposition, particles.
 import {
   W, H, CH, CW, CHH, M, F_DIST, F_WET, F_DRIFT, BOND_SOLID, mat, dens, bond, flags, body, stamp, awake, idx, inb,
-  wake, touch, set, rigidAt, solidChanged, freshDens, CELL,
+  wakeNear, wakeOwn, touch, putCell, rigidAt, solidChanged, freshDens, CELL, AWAKE_T,
 } from './world';
 import { G } from './state';
 import { P, PK, spawn, kill } from './particles';
@@ -14,6 +14,25 @@ const pending = new Float32Array(W); // fresh snow (cells) waiting to be deposit
 const acc = new Float32Array(W);     // fractional deposit accumulator per column (inside window)
 const PENDING_MAX = 60;
 const clampX = (x: number) => (x < 1 ? 1 : x > W - 2 ? W - 2 : x);
+const POLE_OFFS = [1, -1, 2, -2, 3, -3, 4, -4];
+
+// ---------- zones ----------
+// Near zone = the view plus 1/8 of its size on each side (1.25x the view). G.win (2x the view) is the far zone:
+// it still gets the automaton and the slow pass, just less often, so far snow stays consistent with the near snow.
+const NEAR_K = 0.625;     // near half-size as a share of the G.win half-size (G.win = view +- view)
+const FAR_CA_EVERY = 8;   // far chunks run the automaton every 8th frame (power of two)
+const SLOW_NEAR = 10;     // near columns are visited by the slow pass every 10th frame ...
+const SLOW_FAR = 16;      // ... far columns every 16th; each visit covers the frames since the last one (time-scaled)
+let nX0 = 0, nX1 = -1, nY0 = 0, nY1 = -1;
+let slowNear = 0, slowFar = 0;
+/** Near-zone rectangle in cells, from the camera centre and G.win's (unclamped) half-size. Allocation-free. */
+function updateNear() {
+  const w = G.win, c = G.cam;
+  const vx = Math.max(c.x - w.x0, w.x1 - c.x), vy = Math.max(c.y - w.y0, w.y1 - c.y);
+  nX0 = Math.max(w.x0, Math.floor(c.x - vx * NEAR_K)); nX1 = Math.min(w.x1, Math.ceil(c.x + vx * NEAR_K));
+  nY0 = Math.max(w.y0, Math.floor(c.y - vy * NEAR_K)); nY1 = Math.min(w.y1, Math.ceil(c.y + vy * NEAR_K));
+}
+
 /** Return a mass-carrying particle's mass to the books (never destroy it). */
 function refund(i: number) {
   const k = P.kind[i];
@@ -38,7 +57,8 @@ function depositNear(x: number, y: number, d: number, fl: number, b: number): bo
       const yy = y - up; if (yy < 1) break;
       const i = idx(xx, yy);
       if (mat[i] === M.AIR && !body[i] && !onPole(xx, yy)) {
-        set(xx, yy, M.SNOW, d, mat[i + W] !== M.AIR ? b : 0, fl);
+        putCell(xx, yy, M.SNOW, d, mat[i + W] !== M.AIR ? b : 0, fl);
+        wakeOwn(xx, yy);
         if (surf[xx] > yy) surf[xx] = yy;
         return true;
       }
@@ -55,28 +75,38 @@ function canEnter(i: number, m: number) {
   if (m !== M.WATER && t === M.WATER) return true; // heavier grains sink through water
   return false;
 }
+/** A move: swap the two cells, then mark both for upload and wake the chunks near each (a move can unblock its neighbours). */
 function swap(a: number, b: number) {
   const m = mat[a], d = dens[a], bo = bond[a], f = flags[a];
   mat[a] = mat[b]; dens[a] = dens[b]; bond[a] = bond[b]; flags[a] = flags[b];
   mat[b] = m; dens[b] = d; bond[b] = bo; flags[b] = f;
   stamp[a] = stamp[b] = frameStamp;
+  moveMark(a); moveMark(b);
 }
-function wakeI(i: number) { const x = i % W, y = (i / W) | 0; wake(x, y); }
+function moveMark(i: number) { const x = i % W, y = (i / W) | 0; touch(x, y); wakeNear(x, y); }
 
-/** Fast pass: granular snow, ash and water motion in awake chunks within the window. */
+/** Set by a grain or ash that was due to slide or creep but whose random roll said wait: its chunk must stay awake. */
+let cand = false;
+
+/** Fast pass: granular snow, ash and water motion. Near chunks every frame, far chunks every FAR_CA_EVERY frames.
+ *  A chunk sleeps once a full pass changes nothing (no move, no pending slide) for AWAKE_T passes in a row. */
 function stepCA() {
   frameStamp = (frameStamp + 1) & 255 || 1;
   const { x0, y0, x1, y1 } = G.win;
   const cx0 = Math.max(0, (x0 / CH) | 0), cx1 = Math.min(CW - 1, (x1 / CH) | 0);
   const cy0 = Math.max(0, (y0 / CH) | 0), cy1 = Math.min(CHH - 1, (y1 / CH) | 0);
+  const nc0 = (nX0 / CH) | 0, nc1 = (nX1 / CH) | 0, nr0 = (nY0 / CH) | 0, nr1 = (nY1 / CH) | 0;
   const dirFlip = (G.frame & 1) === 0;
   for (let cy = cy1; cy >= cy0; cy--) {
+    const nearRow = cy >= nr0 && cy <= nr1;
     for (let k = 0; k <= cx1 - cx0; k++) {
       const cx = dirFlip ? cx0 + k : cx1 - k;
       const c = cy * CW + cx;
       if (awake[c] === 0) continue;
-      awake[c]--;
+      const near = nearRow && cx >= nc0 && cx <= nc1;
+      if (!near && ((G.frame + c) & (FAR_CA_EVERY - 1)) !== 0) continue;
       let moved = false;
+      cand = false;
       const yy0 = cy * CH, yy1 = Math.min(H - 2, yy0 + CH - 1);
       const xx0 = cx * CH, xx1 = Math.min(W - 2, xx0 + CH - 1);
       for (let y = yy1; y >= yy0; y--) {
@@ -94,11 +124,24 @@ function stepCA() {
           else if (m === M.WATER) { if (moveWater(i, x, y)) moved = true; }
         }
       }
-      if (moved) { awake[c] = Math.max(awake[c], 20); gpuMark(cx, cy); }
+      if (moved || cand) awake[c] = AWAKE_T; else awake[c]--;
     }
   }
 }
-function gpuMark(cx: number, cy: number) { touch(cx * CH, cy * CH); }
+
+/** Slide to a free diagonal below (either side)? Geometry only, no random roll. */
+function slideOpen(i: number, below: number, m: number): boolean {
+  return (canEnter(i + 1, m) && canEnter(below + 1, m)) || (canEnter(i - 1, m) && canEnter(below - 1, m));
+}
+/** Lateral creep of one grain into the air beside it, with a free cell beyond. Geometry only. */
+function creepStep(i: number, x: number, dx: number, m: number): boolean {
+  const xx = x + 2 * dx;
+  if (xx < 1 || xx >= W - 1) return false;
+  return canEnter(i + dx, m) && !canEnter(i + dx + W, m) && canEnter(i + 2 * dx + W, m);
+}
+function creepOpen(i: number, x: number, m: number): boolean {
+  return creepStep(i, x, 1, m) || creepStep(i, x, -1, m);
+}
 
 function moveGrain(i: number, x: number, y: number, m: number): boolean {
   const below = i + W;
@@ -106,11 +149,11 @@ function moveGrain(i: number, x: number, y: number, m: number): boolean {
   if (canEnter(below, m)) {
     let j = below;
     if (y + 2 < H && canEnter(j + W, m)) j += W;
-    swap(i, j); wakeI(j); wakeI(i); return true;
+    swap(i, j); return true;
   }
   if (mat[below] === M.POLE && m === M.SNOW) { // a grain perched on a marker pole top slides off (no standable snow pillar)
     const d0 = Math.random() < 0.5 ? -1 : 1;
-    for (let s = 0; s < 2; s++) { const dx = s === 0 ? d0 : -d0; if (canEnter(i + dx, m)) { swap(i, i + dx); wakeI(i + dx); return true; } }
+    for (let s = 0; s < 2; s++) { const dx = s === 0 ? d0 : -d0; if (canEnter(i + dx, m)) { swap(i, i + dx); return true; } }
   }
   // cohesion: dry cold fresh snow slides freely (angle of repose ~38°), bonded/wet snow holds steeper
   const b = bond[i];
@@ -119,21 +162,25 @@ function moveGrain(i: number, x: number, y: number, m: number): boolean {
   if (wet) p *= 0.25;
   if (m === M.ASH) p = 0.9;
   if (p <= 0.02) return false;
-  if (Math.random() > p) return false;
+  const creep = p > 0.85;
+  if (Math.random() > p) { // rolled to hold this frame: still unstable if it could slide or creep
+    if (slideOpen(i, below, m) || (creep && creepOpen(i, x, m))) cand = true;
+    return false;
+  }
   const d = Math.random() < 0.5 ? -1 : 1;
   for (let s = 0; s < 2; s++) {
     const dx = s === 0 ? d : -d;
     const side = i + dx, diag = below + dx;
-    if (canEnter(side, m) && canEnter(diag, m)) { swap(i, diag); wakeI(diag); wakeI(i); return true; }
+    if (canEnter(side, m) && canEnter(diag, m)) { swap(i, diag); return true; }
   }
   // lateral creep only for very loose snow -> repose slightly below 45°
-  if (p > 0.85 && Math.random() < 0.18) {
-    for (let s = 0; s < 2; s++) {
-      const dx = s === 0 ? d : -d;
-      const side = i + dx;
-      if (x + 2 * dx < 1 || x + 2 * dx >= W - 1) continue;
-      if (canEnter(side, m) && canEnter(side + W, m) === false && canEnter(i + 2 * dx + W, m)) { swap(i, side); wakeI(side); return true; }
-    }
+  if (creep) {
+    if (Math.random() < 0.18) {
+      for (let s = 0; s < 2; s++) {
+        const dx = s === 0 ? d : -d;
+        if (creepStep(i, x, dx, m)) { swap(i, i + dx); return true; }
+      }
+    } else if (creepOpen(i, x, m)) cand = true;
   }
   return false;
 }
@@ -141,19 +188,20 @@ function moveGrain(i: number, x: number, y: number, m: number): boolean {
 function moveWater(i: number, x: number, y: number): boolean {
   const below = i + W;
   const bm = mat[below];
-  if (bm === M.AIR && !body[below]) { swap(i, below); wakeI(below); wakeI(i); return true; }
+  if (bm === M.AIR && !body[below]) { swap(i, below); return true; }
   // soak into loose snow -> slush
   if (bm === M.SNOW && bond[below] < 200 && dens[below] < 520) {
     const add = Math.min(dens[i], 917 - dens[below]);
     if (add <= 0) return false;
     dens[below] += add; flags[below] |= F_WET; bond[below] = Math.min(255, bond[below] + 30);
     if (add >= dens[i]) { mat[i] = M.AIR; dens[i] = 0; flags[i] = 0; } else dens[i] -= add;
-    wakeI(i); touch(i % W, (i / W) | 0); return true;
+    wakeNear(x, y); touch(x, y); touch(x, y + 1);
+    return true;
   }
   const d = Math.random() < 0.5 ? -1 : 1;
   for (let s = 0; s < 2; s++) {
     const dx = s === 0 ? d : -d;
-    if (mat[below + dx] === M.AIR && mat[i + dx] === M.AIR && !body[below + dx]) { swap(i, below + dx); wakeI(below + dx); return true; }
+    if (mat[below + dx] === M.AIR && mat[i + dx] === M.AIR && !body[below + dx]) { swap(i, below + dx); return true; }
   }
   for (let s = 0; s < 2; s++) {
     const dx = s === 0 ? d : -d;
@@ -161,78 +209,87 @@ function moveWater(i: number, x: number, y: number): boolean {
       const j = i + dx * r;
       if (x + dx * r < 1 || x + dx * r >= W - 1) break;
       if (mat[j] !== M.AIR || body[j]) break;
-      if (r === 3 || mat[j + W] === M.AIR) { swap(i, j); wakeI(j); return true; }
+      if (r === 3 || mat[j + W] === M.AIR) { swap(i, j); return true; }
     }
   }
   return false;
 }
 
-// ---------- slow pass: compaction + sintering over the window, staggered ----------
+// ---------- slow pass: compaction + sintering, staggered ----------
 const COMPACT_K = 0.3; // 1/h per unit of density deficit at visc=1
-let slowRow = 0;
-const SLOW_SLICES = 10; // each cell visited every 10 frames
-function stepSlow(dtReal: number) {
-  const { x0, y0, x1, y1 } = G.win;
-  const dtGameH = (dtReal * SLOW_SLICES * 60 * G.timeScale) / 3600; // game hours since this cell was visited
-  slowRow = (slowRow + 1) % SLOW_SLICES;
-  const xa = Math.max(1, x0), xb = Math.min(W - 2, x1);
-  const ya = Math.max(1, y0), yb = Math.min(H - 2, y1);
-  for (let x = xa + slowRow; x <= xb; x += SLOW_SLICES) {
-    // scan column from top: running overburden load (kg/m²)
-    let load = 0, found = 0; // found: rows of tamped foundation left under a placed beam/crate/post (those cells do not flow away)
-    for (let y = ya; y <= yb; y++) {
-      const i = y * W + x;
-      const m = mat[i];
-      if (m === M.AIR || m === M.NEEDLE) { load = 0; found = 0; continue; }
-      if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; found = (m === M.PLANK || m === M.DOOR || m === M.CRATE || m === M.POLE) && !body[i] ? 7 : 0; continue; }
-      const d = dens[i];
-      load += d * CELL;
-      const T = tempAt(x, y);
-      const Tc = Math.min(0, T);
-      // --- sintering: Arrhenius-like, fastest near 0..-5 °C, slow when very cold ---
-      if (bond[i] < 255) {
-        const arr = Math.exp(0.085 * (Tc + 5)); // -5 → 1, -30 → 0.12
-        let rate = 70 * arr * (0.4 + d / 350); // bond units per game hour
-        if (flags[i] & F_DIST) rate *= 2.6;   // mixing different-temperature grains sinters fast (quinzhee)
-        if (flags[i] & F_DRIFT) rate *= 1.6;
-        if (flags[i] & F_WET && T < 0) rate *= 4;
-        // only sinter when resting on something (no free-falling grains)
-        const bm = mat[i + W];
-        if (bm !== M.AIR) {
-          const nb = Math.min(255, bond[i] + rate * dtGameH + Math.random());
-          const was = bond[i] >= BOND_SOLID;
-          bond[i] = nb | 0;
-          if (!was && bond[i] >= BOND_SOLID) { wake(x, y); }
-        }
+
+/** One column of the slow pass over rows ya..yb, `dtGameH` game hours since its last visit. */
+function slowColumn(x: number, ya: number, yb: number, dtGameH: number) {
+  // scan column from top: running overburden load (kg/m²)
+  let load = 0, found = 0; // found: rows of tamped foundation left under a placed beam/crate/post (those cells do not flow away)
+  for (let y = ya; y <= yb; y++) {
+    const i = y * W + x;
+    const m = mat[i];
+    if (m === M.AIR || m === M.NEEDLE) { load = 0; found = 0; continue; }
+    if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; found = (m === M.PLANK || m === M.DOOR || m === M.CRATE || m === M.POLE) && !body[i] ? 7 : 0; continue; }
+    const d = dens[i];
+    load += d * CELL;
+    const T = tempAt(x, y);
+    const Tc = Math.min(0, T);
+    // --- sintering: Arrhenius-like, fastest near 0..-5 °C, slow when very cold ---
+    if (bond[i] < 255) {
+      const arr = Math.exp(0.085 * (Tc + 5)); // -5 → 1, -30 → 0.12
+      let rate = 70 * arr * (0.4 + d / 350); // bond units per game hour
+      if (flags[i] & F_DIST) rate *= 2.6;   // mixing different-temperature grains sinters fast (quinzhee)
+      if (flags[i] & F_DRIFT) rate *= 1.6;
+      if (flags[i] & F_WET && T < 0) rate *= 4;
+      // only sinter when resting on something (no free-falling grains)
+      const bm = mat[i + W];
+      if (bm !== M.AIR) {
+        const nb = Math.min(255, bond[i] + rate * dtGameH + Math.random());
+        const was = bond[i] >= BOND_SOLID;
+        bond[i] = nb | 0;
+        // crossing into rigid changes only this cell's own motion (neighbours see mat, not bond): own chunk, no neighbour wake
+        if (!was && bond[i] >= BOND_SOLID) { wakeOwn(x, y); touch(x, y); }
       }
-      // --- compaction: transfer mass from this cell into the one below if below is under-dense ---
-      const j = i + W;
-      if (found > 0) found--;
-      else if (mat[j] === M.SNOW && !body[j] && !((flags[i] & F_DIST) && bond[i] >= 150)) { // placed / well-sintered blocks keep their mass (no settling out of the apex course)
-        const target = Math.min(560, 140 + 135 * Math.log10(1 + load / 4)); // kg/m³ for given overburden
-        const dj = dens[j];
-        if (dj < target) {
-          const visc = Math.exp(0.07 * (Tc + 5)) * (1 + (flags[j] & F_WET ? 3 : 0));
-          const diff = target - dj;
-          // stochastic rounding: exact integer mass moved, no truncation loss, works for tiny rates
-          let n = Math.floor(Math.min(d, diff, diff * COMPACT_K * visc * dtGameH) + Math.random());
-          n = Math.min(n, d, 917 - dj);
-          if (n > 0) {
-            dens[j] = dj + n;
-            let left = d - n;
-            if (left < 22) { // top cell has collapsed: move ALL remaining mass down (cap 917)
-              const m2 = Math.min(left, 917 - dens[j]);
-              dens[j] += m2; left -= m2;
-            }
-            if (left <= 0) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; wake(x, y); }
-            else dens[i] = left;
-            touch(x, y);
-          }
-        }
-      }
-      if ((flags[i] & F_DIST) && bond[i] > 200) flags[i] &= ~F_DIST;
     }
+    // --- compaction: transfer mass from this cell into the one below if below is under-dense ---
+    const j = i + W;
+    if (found > 0) found--;
+    else if (mat[j] === M.SNOW && !body[j] && !((flags[i] & F_DIST) && bond[i] >= 150)) { // placed / well-sintered blocks keep their mass (no settling out of the apex course)
+      const target = Math.min(560, 140 + 135 * Math.log10(1 + load / 4)); // kg/m³ for given overburden
+      const dj = dens[j];
+      if (dj < target) {
+        const visc = Math.exp(0.07 * (Tc + 5)) * (1 + (flags[j] & F_WET ? 3 : 0));
+        const diff = target - dj;
+        // stochastic rounding: exact integer mass moved, no truncation loss, works for tiny rates
+        let n = Math.floor(Math.min(d, diff, diff * COMPACT_K * visc * dtGameH) + Math.random());
+        n = Math.min(n, d, 917 - dj);
+        if (n > 0) {
+          dens[j] = dj + n;
+          let left = d - n;
+          if (left < 22) { // top cell has collapsed: move ALL remaining mass down (cap 917)
+            const m2 = Math.min(left, 917 - dens[j]);
+            dens[j] += m2; left -= m2;
+          }
+          if (left <= 0) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; wakeNear(x, y); }
+          else dens[i] = left;
+          touch(x, y);
+        }
+      }
+    }
+    if ((flags[i] & F_DIST) && bond[i] > 200) flags[i] &= ~F_DIST;
   }
+}
+
+/** Near columns every SLOW_NEAR frames over the near rows; far columns (rest of G.win) every SLOW_FAR frames.
+ *  Each column's dt is its own visit interval, so settling runs at real-time speed in both zones. */
+function stepSlow(dtReal: number) {
+  const dtN = (dtReal * SLOW_NEAR * 60 * G.timeScale) / 3600; // game hours since a near column was visited
+  const dtF = (dtReal * SLOW_FAR * 60 * G.timeScale) / 3600;  // ... since a far column was visited
+  slowNear = (slowNear + 1) % SLOW_NEAR;
+  slowFar = (slowFar + 1) % SLOW_FAR;
+  const { x0, x1 } = G.win;
+  const xa = Math.max(1, x0), xb = Math.min(W - 2, x1);
+  const ya = Math.max(1, nY0), yb = Math.min(H - 2, nY1);
+  const na = Math.max(xa, nX0), nb = Math.min(xb, nX1);
+  for (let x = xa + slowFar; x <= xb; x += SLOW_FAR) if (x < na || x > nb) slowColumn(x, ya, yb, dtF);
+  for (let x = na + slowNear; x <= nb; x += SLOW_NEAR) slowColumn(x, ya, yb, dtN);
 }
 
 // ---------- snowfall & wind ----------
@@ -284,7 +341,8 @@ function stepWeather(dt: number) {
     if (Math.random() > (u - thr) * 0.25 * dt * 10) continue;
     const d = dens[i];
     if (spawn(PK.DRIFT, x, y - 1, Math.sign(G.wind) * u * 20 * 0.5, -(10 + Math.random() * 30), 6, 1, d, 0) < 0) continue;
-    set(x, y, M.AIR);
+    putCell(x, y, M.AIR, 0, 0, 0);
+    wakeNear(x, y);
   }
 }
 
@@ -299,20 +357,22 @@ export function depositAt(x: number, d: number, fl: number, yHint = -1, b = 0): 
   i = idx(x, y);
   if (mat[i] !== M.AIR || body[i]) return false;
   if (mat[i + W] === M.POLE) { // never stack snow on a marker pole top: put it on the ground beside the pole instead
-    for (const off of [1, -1, 2, -2, 3, -3, 4, -4]) {
-      const xx = x + off; if (xx < 1 || xx >= W - 1) continue;
+    for (let o = 0; o < POLE_OFFS.length; o++) {
+      const xx = x + POLE_OFFS[o]; if (xx < 1 || xx >= W - 1) continue;
       let yy = Math.min(H - 3, y + 1);
       if (mat[idx(xx, yy)] !== M.AIR) { while (yy > 1 && mat[idx(xx, yy)] !== M.AIR) yy--; }
       else { while (yy < H - 2 && mat[idx(xx, yy + 1)] === M.AIR) yy++; }
       const j = idx(xx, yy);
       if (mat[j] !== M.AIR || body[j] || mat[j + W] === M.POLE) continue;
-      set(xx, yy, M.SNOW, d, b, fl);
+      putCell(xx, yy, M.SNOW, d, b, fl);
+      wakeOwn(xx, yy);
       if (surf[xx] > yy) surf[xx] = yy;
       return true;
     }
     return false;
   }
-  set(x, y, M.SNOW, d, b, fl | F_DIST * 0);
+  putCell(x, y, M.SNOW, d, b, fl);
+  wakeOwn(x, y);
   if (surf[x] > y) surf[x] = y;
   return true;
 }
@@ -330,7 +390,7 @@ function landGrain(i: number, k: number, c: number, px0: number, py0: number) {
     flags[c] |= fl;
     if (mat[c + W] !== M.AIR) bond[c] = Math.max(bond[c], 60);
     const cx = c % W, cy = (c / W) | 0;
-    wake(cx, cy);
+    touch(cx, cy); wakeOwn(cx, cy); // density only rises here: neighbours can only lose moves, so the own chunk is enough
     if (was !== rigidAt(c)) solidChanged(cx, cy);
     if (d <= 0) return;
   }
@@ -428,6 +488,7 @@ export function stepParticles(dt: number) {
 /** dt: physics step (clamped by the caller); dtReal: wall-clock share of this step, used for weather and sintering/compaction so game time does not crawl on slow devices. */
 export function stepSim(dt: number, dtReal: number = dt) {
   let t = pnow();
+  updateNear();
   stepWeather(dtReal); pend('weather', t); t = pnow();
   stepCA(); pend('ca', t); t = pnow();
   stepSlow(dtReal); pend('slow', t); t = pnow();
