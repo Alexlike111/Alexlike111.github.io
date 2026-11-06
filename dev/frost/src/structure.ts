@@ -317,3 +317,15 @@ export function supportMargin(cells: { x: number; y: number; m: number; d: numbe
   }
   return margin < 0 ? 0 : margin;
 }
+
+/** Diagnostics (no side effects on the world): world indices of structural cells that would fail in the rect. */
+export function analyzeRect(x0: number, y0: number, x1: number, y1: number): number[] | null {
+  if (!loadRect(x0, y0, x1, y1)) return null;
+  prep(); solve();
+  const out: number[] = [];
+  for (let y = 1; y <= rh; y++) for (let x = 1; x <= rw; x++) {
+    const l = y * pw + x;
+    if (cls[l] === 1 && dist[l] === INF) out.push(wIdx(l));
+  }
+  return out;
+}
