@@ -37,7 +37,8 @@ src/engine/
   light.ts       computeLight(view) per frame for visible tiles (+margin): sky light (from G.daylight, aurora, moon) propagated down open
                  columns and spread sideways, point lights G.lights, glowing materials; lightR/G/B Float32Array(view tiles); lightAt(x,y):[r,g,b]
   render.ts      initRender(canvas); resize(); render(dt); screenToWorld(sx,sy):[x,y]; worldToScreen(x,y):[sx,sy];
-                 addLayer(z, fn(ctx:CanvasRenderingContext2D, v:View)) — game draws sprites/overlays in CELL coordinates on the low-res canvas
+                 addLayer(z, fn: DrawFn) — modules draw in CELL coordinates on the low-res canvas (View/DrawFn + z rules in game/state.ts)
+                 bodies.ts exports drawBodies(ctx,v) (z −20); particles.ts exports drawParticles(ctx,v,emissive) (z −10 / z 10); main registers them
   sprites.ts     pixel-art sprites as string grids + palettes; drawSprite(ctx,key,x,y,{frame,flip,tint,alpha,rot}); icon(key):HTMLCanvasElement (UI icons)
   camera.ts      updateCamera(dt, tx, ty, snap?) (smooth follow, look-ahead, clamp, shake decay)
   input.ts       input: InputState (below); initInput(canvas); endFrame(); touch UI (ui/touch.ts) writes into the same state
@@ -186,3 +187,7 @@ Dark navy panels (#0b1220 / #121c2b, 1 px #24364c borders, 6 px radius), ice blu
 - `npm run check` must pass for your files before you finish (ignore errors only in files owned by agents running in parallel with you, and say so).
 - Prefer data over branches, typed arrays in hot loops, no per-frame allocations in hot paths.
 - Report back: files written, public API deviations from this spec, known gaps, test results.
+
+## 10. Localisation & difficulty (added)
+- **i18n** (`src/content/i18n.ts`, CONTRACT): all player-facing text goes through `strings(ns, {key: 'Русский текст'})` declared in the module that uses it (RU is the source), `fmt()` for placeholders, `tr('mat.KEY'|'item.id', fallback)` / helpers for data names. 10 languages: ru, en, zh, hi, es, ar (RTL), fr, bn, pt, id; default = browser language, switch in Settings and on the title screen. Translations are JSON packs in `src/content/lang/<code>.json` produced later by translator agents from `dumpSource()`. Fonts: Pixelify Sans/Jura cover Latin + Cyrillic; other scripts fall back to system fonts (font stacks must include system-ui). UI must tolerate 40 % longer strings (no fixed-width text boxes that clip) and RTL for Arabic (dir=rtl on panels, HUD mirrored is NOT required).
+- **Difficulty** (G.diff, DIFFS in state.ts): chosen on New Game — Мягкая / Обычная / Суровая — plus a **Хардкор** toggle (one life: death ends the run with a stats screen; otherwise respawn at bed with a backpack). Systems multiply rates: cold (body heat loss), hunger, wolves (pack size/aggression/damage), loot (cache amounts). Normal = the tuning targets in §6.

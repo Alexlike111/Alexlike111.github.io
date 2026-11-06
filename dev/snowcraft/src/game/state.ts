@@ -62,6 +62,22 @@ export const G = {
   xray: 0,                          // debug overlay: 0 off, 1 temperature, 2 support, 3 light
   nextId: 1,
   seed: 1,
+  // difficulty preset chosen at New Game (owner: menus/main). Systems multiply their rates by these.
+  diff: { level: 1 as 0 | 1 | 2, cold: 1, hunger: 1, wolves: 1, loot: 1, hardcore: false },
 };
+/** Difficulty presets: 0 мягкая, 1 обычная, 2 суровая. */
+export const DIFFS = [
+  { cold: 0.55, hunger: 0.7, wolves: 0.6, loot: 1.3 },
+  { cold: 1, hunger: 1, wolves: 1, loot: 1 },
+  { cold: 1.6, hunger: 1.3, wolves: 1.6, loot: 0.75 },
+];
 export const newId = () => G.nextId++;
 export function toast(text: string, kind: Toast['kind'] = 'info') { G.toasts.push({ text, t: 3.5, kind }); }
+
+/** Render view passed to draw layers. The low-res world canvas pixel (0,0) is world cell (x0,y0); 1 canvas px = 1 cell.
+ *  Draw world things at (x - v.x0, y - v.y0). Layers (render.addLayer):
+ *   z < 0        world space BEFORE lighting — gets lit by the light map (sprites, clusters, trees, fixtures, drops)
+ *   0 ≤ z < 100  AFTER lighting with 'lighter' compositing — emissive (flames, sparks, glows)
+ *   z ≥ 100      on top, normal blending, unlit (target frame, ghost, labels, weather fog, vignettes) */
+export interface View { x0: number; y0: number; w: number; h: number; scale: number; t: number }
+export type DrawFn = (ctx: CanvasRenderingContext2D, v: View) => void;
