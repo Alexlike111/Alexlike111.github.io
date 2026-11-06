@@ -28,6 +28,7 @@ const WET_K = 1.0;        // soaked clothes add WET_K x wetness to the loss fact
 const HUNGER_LOSS = 0.05; // extra loss as the food gauge runs out (ramps in below 30 %, +5 % when empty)
 const FOOD_K = 0.21;      // gauge scale (see stepBody)
 let hungerLvl = 2;
+let thirstWarned = false;  // the «жажда» hint is said once per rise past 60 %
 
 function solid(x: number, y: number) {
   if (!inb(x, y)) return true;
@@ -438,6 +439,8 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   if (hl < hungerLvl) { hungerLvl = hl; tool.msg = (hl === 0 ? 'Голод почти убил тебя' : 'Голод: осталось 20% сытости') + (inv.food + inv.crackers > 0 ? '. Q: съесть' : '. Еды нет — ищи ящики под оранжевыми вешками'); }
   else if (hl > hungerLvl && pl.food > 0.3) hungerLvl = hl;
   pl.thirst = Math.min(1, pl.thirst + dtG / THIRST_FULL_S);
+  if (pl.thirst > 0.6 && !thirstWarned) { thirstWarned = true; tool.msg = 'Жажда: выпей чаю или воды (Q). Без питья силы уходят'; }
+  else if (pl.thirst < 0.3) thirstWarned = false;
   // snow on clothes melts when warm → wetness; dries near fire
   // by a fire in freezing air the melt is slow and most of it steams off in the heat (only a third soaks in); drying below always beats it, so standing at a fire never leaves you colder
   const nearFire = rad > 60 && pl.airT <= -1;
@@ -452,5 +455,6 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
 export function die(cause: string) { if (!pl.alive) return; pl.alive = false; pl.cause = cause; }
 
 export function resetPlayer(x: number, y: number) {
-  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH, thirst: 0, sledDrag: 1 }); G.player.h = PH; stuckT = 0; pushT = 0; trunkSince = -1; hungerLvl = 2;
+  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH, thirst: 0, sledDrag: 1 });
+  thirstWarned = false; G.player.h = PH; stuckT = 0; pushT = 0; trunkSince = -1; hungerLvl = 2;
 }

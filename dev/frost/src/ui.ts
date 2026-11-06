@@ -102,10 +102,10 @@ const ICONS: Record<string, string> = {
 const CHIP_WORDS: Record<string, [string, string, string]> = {
   logs: ['бревно', 'бревна', 'брёвен'], matches: ['спичка', 'спички', 'спичек'], blocks: ['блок', 'блока', 'блоков'],
   branches: ['хворост', 'хвороста', 'хвороста'], thermos: ['термос', 'термоса', 'термосов'],
-  // phase 2 items: nouns that do not change with the count are written the same in all three forms
-  stones: ['камень', 'камня', 'камней'], meat: ['мясо', 'мяса', 'мяса'], cooked: ['жаренное', 'жаренных', 'жаренных'],
-  ice: ['лёд', 'льда', 'льда'], water: ['вода', 'воды', 'воды'], tea: ['чай', 'чая', 'чая'], cord: ['верёвка', 'верёвки', 'верёвок'],
-  pelt: ['шкурка', 'шкурки', 'шкурок'], resin: ['смола', 'смолы', 'смолы'], needles: ['хвоя', 'хвои', 'хвои'],
+  // phase 2 items: the caption agrees with the count (1 кусок, 2 куска, 5 кусков); the full name is the chip's tooltip
+  stones: ['камень', 'камня', 'камней'], meat: ['кусок', 'куска', 'кусков'], cooked: ['жареный кусок', 'жареных куска', 'жареных кусков'],
+  ice: ['кусок', 'куска', 'кусков'], water: ['вода', 'воды', 'воды'], tea: ['порция', 'порции', 'порций'], cord: ['верёвка', 'верёвки', 'верёвок'],
+  pelt: ['шкурка', 'шкурки', 'шкурок'], resin: ['ком', 'кома', 'комов'], needles: ['пучок', 'пучка', 'пучков'],
   planks: ['доска', 'доски', 'досок'], torches: ['факел', 'факела', 'факелов'], traps: ['силок', 'силка', 'силков'],
   torchFuel: ['горит', 'горит', 'горит'],
 };
@@ -454,7 +454,7 @@ export class UI {
       ['food', 'food', 'еда', 'pri'], ['blocks', 'block', 'блоки', 'sec grp'], ['thermos', 'thermos', 'термос', 'sec'],
       ['snowshoes', 'snowshoes', 'снегоступы', 'badge'],
       // phase 2: non-zero only (setChip hides the rest). Counted items first, then gear badges.
-      ['stones', 'stones', 'камни', 'sec'], ['meat', 'meat', 'мясо', 'sec'], ['cooked', 'cooked', 'жаренное', 'pri'], ['ice', 'ice', 'лёд', 'sec'],
+      ['stones', 'stones', 'камни', 'sec'], ['meat', 'meat', 'сырое мясо', 'sec'], ['cooked', 'cooked', 'жареное мясо', 'pri'], ['ice', 'ice', 'лёд', 'sec'],
       ['water', 'water', 'вода', 'sec'], ['tea', 'tea', 'чай', 'pri'], ['cord', 'cord', 'верёвка', 'sec'], ['pelt', 'pelt', 'шкурка', 'sec'],
       ['resin', 'resin', 'смола', 'sec'], ['needles', 'needles', 'хвоя', 'sec'], ['planks', 'planks', 'доски', 'sec'],
       ['torches', 'torch', 'факелы', 'sec'], ['traps', 'trap', 'силки', 'sec'], ['torchFuel', 'torch', 'горит', 'pri'],
@@ -737,6 +737,7 @@ export class UI {
 
   /** Live caption for a tool ('' = none): shovel dig %, cut progress, beam shape, campfire fuel. Shared by the belt tags and the wheel. */
   private liveSub(id: string, h: HudData): string {
+    if (h.tools.some((t) => t.id === id && !t.enabled)) return 'нет';   // not owned yet: found in a crate or crafted
     if (id === 'shovel') return h.digP > 0.01 ? `копает ${Math.round(h.digP * 100)}%` : '';
     if (id === 'saw') return this.sawLive(h) ? `Пилю… ${Math.round(h.sawP * 100)}%` : '';
     if (id === 'beam') return h.beamMode;

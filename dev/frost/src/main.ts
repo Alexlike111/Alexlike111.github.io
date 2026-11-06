@@ -1547,7 +1547,7 @@ boot();
   aimDig: (x: number, y: number, mv = 0) => { const t = aimTarget(x, y, mv); return { tx: t.tx, ty: t.ty, ok: t.ok, far: t.far, reason: t.reason, snapped: t.snapped, n: t.tiles.length, time: +t.time.toFixed(3), key: t.key }; },
   digState: () => ({ key: DIG.key, p: DIG.p }),
   /** phase 2 items: crafting, the kettle, gear state, animals and snares */
-  items: { craftAt, benchAt, pot, gear, snares, animals, pl },
+  items: { craftAt, benchAt, pot, gear, snares, animals, pl, crates },
   crates: () => crates.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h, opened: c.opened, loot: c.loot.slice() })),
   // events, lore, discovery and the radio (tests)
   event: (name: string) => forceEvent(name, evCtx),
