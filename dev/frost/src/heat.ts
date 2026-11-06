@@ -242,6 +242,9 @@ function phase(hx: number, hy: number, dtRow: number) {
 const nb = (x: number, y: number) => (inb(x, y) ? mat[y * W + x] : M.ROCK);
 const exposed = (x: number, y: number) => { let m = nb(x, y - 1); if (m === M.AIR || m === M.WATER) return true; m = nb(x + 1, y); if (m === M.AIR || m === M.WATER) return true; m = nb(x - 1, y); if (m === M.AIR || m === M.WATER) return true; m = nb(x, y + 1); return m === M.AIR || m === M.WATER; };
 
+/** heat `q * wgt` (units of heat per cell capacity) into heat cell (x, y) */
+function addHeat(x: number, y: number, q: number, wgt: number) { const h = y * HW + x; T[h] += q * wgt * ic[h]; }
+
 // ---------------- main step ----------------
 export function stepHeat(dt: number) {
   const w = G.win;
@@ -256,7 +259,7 @@ export function stepHeat(dt: number) {
   const amb = G.ambientT;
 
   let pt = pnow();
-  // staggered: surface scan (a quarter of the columns), composition (a quarter of the rows); changed cells update their conduction coefficients
+  // staggered: surface scan (a quarter of the columns), composition (an eighth of the rows; changed cells update their conduction coefficients)
   // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
   for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
@@ -277,10 +280,9 @@ export function stepHeat(dt: number) {
     const fx = (f.x / HS) | 0, fy = ((f.y - 2) / HS) | 0;
     if (fx <= hx0 + 1 || fx >= hx1 - 1 || fy <= hy0 + 2 || fy >= hy1 - 1) continue;
     const q = f.power * SRC * dt;
-    const add = (x: number, y: number, wgt: number) => { const h = y * HW + x; T[h] += q * wgt * ic[h]; };
     const fa = FIRE_AIR;
-    add(fx, fy, 0.25 * fa); add(fx, fy - 1, 0.2 * fa); add(fx, fy - 2, 0.1 * fa); add(fx - 1, fy, 0.1 * fa); add(fx + 1, fy, 0.1 * fa);
-    add(fx, fy + 1, 0.25 * FIRE_CONTACT);   // flame touching the ground/snow underneath (extra, non-conserved, so fires sink into powder)
+    addHeat(fx, fy, q, 0.25 * fa); addHeat(fx, fy - 1, q, 0.2 * fa); addHeat(fx, fy - 2, q, 0.1 * fa); addHeat(fx - 1, fy, q, 0.1 * fa); addHeat(fx + 1, fy, q, 0.1 * fa);
+    addHeat(fx, fy + 1, q, 0.25 * FIRE_CONTACT);   // flame touching the ground/snow underneath (extra, non-conserved, so fires sink into powder)
   }
   {
     const p = G.player, px = (p.x / HS) | 0, py = ((p.y - p.h * 0.6) / HS) | 0;

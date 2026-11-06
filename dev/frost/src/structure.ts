@@ -97,6 +97,7 @@ interface Job {
   seeding: boolean; d: number; targets: number; // solve: anchor seeding, bucket cursor, sync early exit (settled targets left)
   cs: number; cy: number; cx: number; nfail: number; // commit: stage, row-major scan cursor, failing cell count
   gn: number; gk: number; gi: number; gcon: boolean; // group: size, flood cursor, decide / piece cursor, touches an anchor
+  gstale: number;                              // snow cells of the group that changed since the snapshot (the rect is solved again)
   bx0: number; by0: number; bx1: number; by1: number; // local bbox of the group / rigid piece
   changed: boolean; mx0: number; my0: number; mx1: number; my1: number; // world bbox of the changes made by this job
 }
@@ -104,14 +105,14 @@ interface Job {
 function makeJob(): Job {
   return {
     c: makeCtx(), st: ST_IDLE, ps: 0, pu: 0, pb: false, seeding: true, d: 0, targets: 0,
-    cs: CS_MARK, cy: 1, cx: 1, nfail: 0, gn: 0, gk: 0, gi: 0, gcon: false,
+    cs: CS_MARK, cy: 1, cx: 1, nfail: 0, gn: 0, gk: 0, gi: 0, gcon: false, gstale: 0,
     bx0: 0, by0: 0, bx1: 0, by1: 0, changed: false, mx0: 0, my0: 0, mx1: 0, my1: 0,
   };
 }
 function resetJob(j: Job) {
   j.ps = 0; j.pb = false; j.seeding = true; j.d = 0; j.targets = 0;
   j.cs = CS_MARK; j.cy = 1; j.cx = 1; j.nfail = 0;
-  j.gn = 0; j.gk = 0; j.gi = 0; j.gcon = false; j.changed = false;
+  j.gn = 0; j.gk = 0; j.gi = 0; j.gcon = false; j.gstale = 0; j.changed = false;
 }
 
 const JOB = makeJob();             // the time-sliced solve (stepStructure)
@@ -142,14 +143,24 @@ function loadRect(c: Ctx, x0: number, y0: number, x1: number, y1: number): boole
   off[0] = -pw - 1; off[1] = -pw; off[2] = -pw + 1; off[3] = -1; off[4] = 1; off[5] = pw - 1; off[6] = pw; off[7] = pw + 1;
   const n = pw * c.ph;
   c.lm.fill(0, 0, n); c.lb.fill(0, 0, n); c.ld.fill(0, 0, n); c.lf.fill(0, 0, n); c.lfr.fill(0, 0, n);
-  const lm = c.lm, lb = c.lb, ld = c.ld, lf = c.lf, lfr = c.lfr;
-  const anyFresh = fresh.size > 0;
-  for (let y = 0; y < rh; y++) {
-    let wi = (y0 + y) * W + x0, l = (y + 1) * pw + 1;
-    for (let x = 0; x < rw; x++, wi++, l++) {
-      if (body[wi] !== 0) continue; // rigid bodies are not part of the static structure
-      lm[l] = mat[wi]; lb[l] = bond[wi]; ld[l] = dens[wi]; lf[l] = flags[wi];
-      if (anyFresh && (mat[wi] === M.PLANK || mat[wi] === M.DOOR) && fresh.has(beamId[wi])) lfr[l] = 1;
+  const { lm, lb, ld, lf, lfr } = c;
+  if (fresh.size > 0) { // beams in their grace period are marked cell by cell
+    for (let y = 0; y < rh; y++) {
+      let wi = (y0 + y) * W + x0, l = (y + 1) * pw + 1;
+      for (let x = 0; x < rw; x++, wi++, l++) {
+        if (body[wi] !== 0) continue; // rigid bodies are not part of the static structure
+        lm[l] = mat[wi]; lb[l] = bond[wi]; ld[l] = dens[wi]; lf[l] = flags[wi];
+        if ((mat[wi] === M.PLANK || mat[wi] === M.DOOR) && fresh.has(beamId[wi])) lfr[l] = 1;
+      }
+    }
+  } else { // row blocks copied natively, then bodies blanked
+    for (let y = 0; y < rh; y++) {
+      const wi = (y0 + y) * W + x0, l = (y + 1) * pw + 1;
+      lm.set(mat.subarray(wi, wi + rw), l); lb.set(bond.subarray(wi, wi + rw), l);
+      ld.set(dens.subarray(wi, wi + rw), l); lf.set(flags.subarray(wi, wi + rw), l);
+      for (let x = 0; x < rw; x++) {
+        if (body[wi + x] !== 0) { lm[l + x] = 0; lb[l + x] = 0; ld[l + x] = 0; lf[l + x] = 0; }
+      }
     }
   }
   return true;
@@ -435,20 +446,22 @@ function commitStep(j: Job): boolean {
         continue;
       }
       case CS_DECIDE: {
-        if (!membersMatch(c, grp, j.gn)) { // changed since the snapshot: leave it to a fresh solve
-          requeueLocal(j, j.bx0, j.by0, j.bx1, j.by1);
-          for (let k = 0; k < j.gn; k++) vis[grp[k]] = 0;
-          j.cs = CS_SCAN;
-          continue;
-        }
         const n = j.gn;
-        if (!j.gcon && n >= MIN_ISLAND && n <= MAX_ISLAND && spawnBody(j, grp, n)) {
-          frameBodies++;
-          for (let k = 0; k < n; k++) vis[grp[k]] = 3;
-          j.cs = CS_SCAN;
-          continue;
+        if (!j.gcon && n >= MIN_ISLAND && n <= MAX_ISLAND) { // an island body: all of it or nothing
+          if (!membersMatch(c, grp, n)) { // changed since the snapshot: leave it to a fresh solve
+            requeueLocal(j, j.bx0, j.by0, j.bx1, j.by1);
+            for (let k = 0; k < n; k++) vis[grp[k]] = 0;
+            j.cs = CS_SCAN;
+            continue;
+          }
+          if (spawnBody(j, grp, n)) {
+            frameBodies++;
+            for (let k = 0; k < n; k++) vis[grp[k]] = 3;
+            j.cs = CS_SCAN;
+            continue;
+          }
         }
-        j.cs = CS_SNOW; j.gi = 0;
+        j.cs = CS_SNOW; j.gi = 0; j.gstale = 0;
         continue;
       }
       case CS_SNOW: { // attached failure: snow loses cohesion
@@ -459,7 +472,7 @@ function commitStep(j: Job): boolean {
             if (eff(wi) === M.SNOW) {
               set(wi % W, (wi / W) | 0, M.SNOW, Math.min(dens[wi], 400), 0, flags[wi] | F_DIST);
               frameCollapsed++; noteChange(j, l);
-            }
+            } else j.gstale++;
           }
           if ((j.gi & 63) === 0 && over()) return false;
         }
@@ -472,6 +485,7 @@ function commitStep(j: Job): boolean {
           if (vis[l0] === 2 && lm[l0] !== M.SNOW) rigidPiece(j, l0);
           if ((j.gi & 63) === 0 && over()) return false;
         }
+        if (j.gstale > 0) requeueLocal(j, j.bx0, j.by0, j.bx1, j.by1); // some snow had changed: solve the area again
         j.cs = CS_SCAN;
         continue;
       }
