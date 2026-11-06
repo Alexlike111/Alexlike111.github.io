@@ -21,6 +21,8 @@ import { baseTrackId, trackById } from './track/tracks';
 import type { CarInput, CarState, SaveData, SimEvent, TrackDef, UpgradeBranch } from './types';
 import { HudExtras } from './ui/hud';
 import { LeaderboardPanel } from './ui/leaderboard';
+import { ARENA, ARENA_TRACK, ArenaMatch, attachArena, stepArena } from './sim/arena';
+import { ArenaUi } from './ui/arena';
 import { UI, type UiHandlers } from './ui/ui';
 import { driverName, goalText, type PodiumData } from './ui/career';
 import { MissionTracker, applyRace, dailyOf, dayNumber, missionsForDay } from './meta/daily';
@@ -42,6 +44,9 @@ declare global {
       readonly hud: HudExtras;
       readonly timeScale: number;
       startRace(trackId: string): void;
+      /** Demolition Arena round (src/sim/arena.ts) */
+      startArena(): void;
+      readonly arena: ArenaMatch | null;
       setTimeScale(n: number): void;
       forceFinish(): void;
       pause(): void;
@@ -75,6 +80,9 @@ export class Game {
   private finishTimer = 0;
   private results: Parameters<UI['showResults']>[0] | null = null;
   private resultsReward = 0;
+  /** Demolition Arena round in progress (null = race mode) */
+  private arena: ArenaMatch | null = null;
+  private readonly arenaUi = new ArenaUi();
 
   private platformPaused = false;
   private platformAudio = true;
@@ -230,10 +238,11 @@ export class Game {
   private handlers(): UiHandlers {
     return {
       start: (id) => this.startRace(id),
+      arena: () => this.startArena(),
       pause: () => this.pauseRace(),
       resume: () => this.resumeRace(),
       quit: () => void this.leaveRace(() => this.toMenu(this.careerCtx ? 'career' : 'menu')),
-      restart: () => void this.leaveRace(() => this.restartRace()),
+      restart: () => void this.leaveRace(() => (this.arena ? this.startArena() : this.restartRace())),
       repair: () => this.repairNow(true),
       recenter: () => this.input.recenter(),
       repairHold: (on) => this.repairHold(on),
@@ -272,6 +281,7 @@ export class Game {
   }
 
   private toMenu(target: 'menu' | 'career' | 'podium' = 'menu'): void {
+    this.endArenaMode();
     this.userPaused = false;
     this.finish = null;
     this.results = null;
@@ -296,6 +306,7 @@ export class Game {
 
   startRace(trackId: string, career?: { cup: Cup; idx: number }): void {
     if (this.state === 'ad' || this.continuing) return;
+    this.endArenaMode();
     const def = trackById(trackId);
     if (!def || (!career && !this.save.unlockedTracks.includes(baseTrackId(def.id)))) return;   // a reverse layout opens with its forward track
     // first race on a touch device: a one-time, skippable controls picker (Buttons highlighted)
@@ -391,6 +402,85 @@ export class Game {
     if (act === 'restart') { this.ui.showCup(this.save, cup.id); return; }
     const idx = this.save.career.run?.results.length ?? 0;
     this.startRace(cup.races[idx].track, { cup, idx });
+
+  // ------------------------------------------------------------------ Demolition Arena
+
+  /** Start a Demolition Arena round: the ring arena, hunt AI, score instead of laps (race mode untouched). */
+  startArena(): void {
+    if (this.state === 'ad' || this.continuing) return;
+    if (this.input.touchActive && !this.save.settings.controlsPicked && !this.pickerOpen) {
+      this.pickerOpen = true;
+      this.ui.setSettings(this.save.settings);
+      this.ui.showControlsPicker(() => { this.pickerOpen = false; this.startArena(); });
+      return;
+    }
+    this.endArenaMode();
+    const seed = (Math.floor(Math.random() * 0x7fffffff) ^ (Date.now() & CONFIG.game.seedMask)) >>> 0;
+    const player = makePlayerSetup(this.save, 'Player');
+    const cars = [player, ...makeOpponents(1, player.stats, seed, this.save.carColor, rivalChoiceOf(this.save)).slice(0, ARENA.rivals)];
+    const old = this.sim;
+    this.sim = null;
+    old?.dispose();
+    const sim = new Sim({ track: ARENA_TRACK, cars, seed, laps: ARENA_TRACK.laps });
+    const match = new ArenaMatch();
+    attachArena(sim, match);
+    this.sim = sim;
+    this.arena = match;
+    this.finish = null;
+    this.results = null;
+    this.userPaused = false;
+    this.wasGo = false;
+    this.applyCamera();
+    this.renderer.loadRace(sim);
+    this.state = 'racing';
+    this.applyControls();
+    this.input.setEnabled(true);
+    this.ui.setSettings(this.save.settings);
+    this.ui.setTouchMode(this.input.touchActive);
+    this.ui.showHud(this.save.money);
+    this.ui.resetRaceFeedback();
+    document.body.classList.add('arena-mode');
+    this.arenaUi.showHud();
+    this.repairIntent = 'none'; this.repairProgress = 0; this.repairsUsed = 0; this.lastRepairAt = -999;
+    this.tutorialOn = false;
+    this.stuck.reset(); this.dmgShown.clear(); this.dmgGap = 0;
+    this.syncPause();
+  }
+
+  private updateArena(sim: Sim, dt: number): void {
+    const m = this.arena;
+    if (!m || this.state !== 'racing') return;
+    const wasDead = m.dead.size;
+    stepArena(sim, m, dt);
+    if (m.dead.size > wasDead) { this.ui.toast(t('arena.wreck')); this.audio.ui('buy'); }
+    this.arenaUi.update(m, sim.cars.filter((c) => !m.dead.has(c.id)).length, dt);
+    if (m.ended) this.endArenaRound(m);
+  }
+
+  private endArenaRound(m: ArenaMatch): void {
+    const coins = m.coins();
+    let best = 0;
+    try { best = Number(localStorage.getItem('smash-arena-best')) || 0; } catch { /* storage blocked */ }
+    if (m.score > best) { best = m.score; try { localStorage.setItem('smash-arena-best', String(best)); } catch { /* ignore */ } }
+    this.save = { ...this.save, money: this.save.money + coins };
+    void writeSave(this.save);
+    this.state = 'results';
+    this.input.setEnabled(false);
+    this.ui.setMoney(this.save.money);
+    this.audio.ui('buy');
+    this.arenaUi.showResults(
+      { reason: m.ended ?? 'time', score: m.score, coins, wrecks: m.wrecks, damage: m.damageDealt, props: m.props, best },
+      () => { if (this.state === 'results') this.startArena(); },
+      () => { if (this.state === 'results') this.toMenu(); },
+    );
+    this.syncPause();
+  }
+
+  private endArenaMode(): void {
+    if (!this.arena) return;
+    this.arena = null;
+    this.arenaUi.hideAll();
+    document.body.classList.remove('arena-mode');
   }
 
   private pauseRace(): void {
@@ -783,6 +873,7 @@ export class Game {
         this.handleEvents(events, sim);
         this.hitStop.onEvents(events, sim.cars[0].id);
         this.missions.tick(dt * this.timeScale, sim.cars[0], events);
+        if (this.arena) this.updateArena(sim, dt * this.timeScale);
         this.watchStuck(sim, dt);
         this.watchDamage(sim, dt);
         if (this.state === 'racing') this.updateRepair(dt, sim);
@@ -898,6 +989,8 @@ export class Game {
       setSettings: (s) => { g.setSettings(s); g.ui.setSettings(g.save.settings); },
       get timeScale() { return g.timeScale; },
       startRace: (id) => g.startRace(id),
+      startArena: () => g.startArena(),
+      get arena() { return g.arena; },
       setTimeScale: (n) => { g.timeScale = Math.max(0.05, Math.min(CONFIG.game.maxTimeScale, n)); },
       forceFinish: () => {
         const sim = g.sim;

@@ -18,6 +18,8 @@ import { clearPreview, dailyAct, missionsButtonHtml, paintShopHtml, type DailyCt
 
 export interface UiHandlers {
   start(trackId: string): void;
+  /** Main menu: start a Demolition Arena round. */
+  arena?(): void;
   pause(): void;
   resume(): void;
   quit(): void;
@@ -650,6 +652,7 @@ export class UI {
     if (dailyAct(act, el, this.dailyCtx())) return;
     switch (act) {
       case 'play': this.sfx('click'); if (save) this.showTrackSelect(save); break;
+      case 'arena': this.sfx('click'); this.h.arena?.(); break;
       case 'garage': this.sfx('click'); if (save) this.showGarage(save); break;
       case 'settings': this.sfx('click'); if (save) this.showSettings(save); break;
       case 'back':
@@ -900,6 +903,7 @@ export class UI {
         </div>
         <div class="menu-buttons">
           <button class="btn big orange career-btn" data-act="career">${icon('trophy')}<span class="cb-t"><b>${esc(t('menu.career'))}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span></button>
+          <button class="btn red" data-act="arena">${icon('crash')}<span>${esc(t('arena.title'))}</span></button>
           <div class="pair">
             <button class="btn green" data-act="play">${icon('play')}<span>${esc(t('menu.quick'))}</span></button>
             <button class="btn blue" data-act="garage">${icon('wrench')}<span>${esc(t('menu.garage'))}</span></button>
