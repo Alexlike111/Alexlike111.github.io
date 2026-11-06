@@ -2,7 +2,7 @@
 // sintering, wind transport (saltation), snowfall deposition, particles.
 import {
   W, H, CH, CW, CHH, M, F_DIST, F_WET, F_DRIFT, BOND_SOLID, mat, dens, bond, flags, body, stamp, awake, idx, inb,
-  wakeNear, wakeOwn, touch, putCell, rigidAt, solidChanged, freshDens, CELL, AWAKE_T,
+  wakeArea, wakeOwn, wakeLanding, touch, putCell, rigidAt, solidChanged, freshDens, CELL, AWAKE_T,
 } from './world';
 import { G } from './state';
 import { P, PK, spawn, kill } from './particles';
@@ -58,7 +58,7 @@ function depositNear(x: number, y: number, d: number, fl: number, b: number): bo
       const i = idx(xx, yy);
       if (mat[i] === M.AIR && !body[i] && !onPole(xx, yy)) {
         putCell(xx, yy, M.SNOW, d, mat[i + W] !== M.AIR ? b : 0, fl);
-        wakeOwn(xx, yy);
+        wakeLanding(xx, yy);
         if (surf[xx] > yy) surf[xx] = yy;
         return true;
       }
@@ -83,7 +83,7 @@ function swap(a: number, b: number) {
   stamp[a] = stamp[b] = frameStamp;
   moveMark(a); moveMark(b);
 }
-function moveMark(i: number) { const x = i % W, y = (i / W) | 0; touch(x, y); wakeNear(x, y); }
+function moveMark(i: number) { const x = i % W, y = (i / W) | 0; touch(x, y); wakeArea(x, y); }
 
 /** Set by a grain or ash that was due to slide or creep but whose random roll said wait: its chunk must stay awake. */
 let cand = false;
@@ -195,7 +195,7 @@ function moveWater(i: number, x: number, y: number): boolean {
     if (add <= 0) return false;
     dens[below] += add; flags[below] |= F_WET; bond[below] = Math.min(255, bond[below] + 30);
     if (add >= dens[i]) { mat[i] = M.AIR; dens[i] = 0; flags[i] = 0; } else dens[i] -= add;
-    wakeNear(x, y); touch(x, y); touch(x, y + 1);
+    wakeArea(x, y); touch(x, y); touch(x, y + 1);
     return true;
   }
   const d = Math.random() < 0.5 ? -1 : 1;
@@ -217,6 +217,12 @@ function moveWater(i: number, x: number, y: number): boolean {
 
 // ---------- slow pass: compaction + sintering, staggered ----------
 const COMPACT_K = 0.3; // 1/h per unit of density deficit at visc=1
+// Temperature factors of sintering (arr) and viscosity (visc), tabulated at 1/64 °C: exp() per snow cell was the slow pass's main cost.
+// Rounding to the nearest 1/64 °C moves a rate by < 0.1 %, below anything visible.
+const LUT_N = 60 * 64 + 1;
+const ARR_LUT = new Float64Array(LUT_N), VISC_LUT = new Float64Array(LUT_N);
+for (let k = 0; k < LUT_N; k++) { ARR_LUT[k] = Math.exp(0.085 * (5 - k / 64)); VISC_LUT[k] = Math.exp(0.07 * (5 - k / 64)); }
+const lutIdx = (Tc: number) => { const k = Math.round(-Tc * 64); return k < 0 ? 0 : k >= LUT_N ? LUT_N - 1 : k; };
 
 /** One column of the slow pass over rows ya..yb, `dtGameH` game hours since its last visit. */
 function slowColumn(x: number, ya: number, yb: number, dtGameH: number) {
@@ -232,8 +238,9 @@ function slowColumn(x: number, ya: number, yb: number, dtGameH: number) {
     const T = tempAt(x, y);
     const Tc = Math.min(0, T);
     // --- sintering: Arrhenius-like, fastest near 0..-5 °C, slow when very cold ---
+    const lk = lutIdx(Tc);
     if (bond[i] < 255) {
-      const arr = Math.exp(0.085 * (Tc + 5)); // -5 → 1, -30 → 0.12
+      const arr = ARR_LUT[lk]; // -5 → 1, -30 → 0.12
       let rate = 70 * arr * (0.4 + d / 350); // bond units per game hour
       if (flags[i] & F_DIST) rate *= 2.6;   // mixing different-temperature grains sinters fast (quinzhee)
       if (flags[i] & F_DRIFT) rate *= 1.6;
@@ -255,7 +262,7 @@ function slowColumn(x: number, ya: number, yb: number, dtGameH: number) {
       const target = Math.min(560, 140 + 135 * Math.log10(1 + load / 4)); // kg/m³ for given overburden
       const dj = dens[j];
       if (dj < target) {
-        const visc = Math.exp(0.07 * (Tc + 5)) * (1 + (flags[j] & F_WET ? 3 : 0));
+        const visc = VISC_LUT[lk] * (1 + (flags[j] & F_WET ? 3 : 0));
         const diff = target - dj;
         // stochastic rounding: exact integer mass moved, no truncation loss, works for tiny rates
         let n = Math.floor(Math.min(d, diff, diff * COMPACT_K * visc * dtGameH) + Math.random());
@@ -267,7 +274,7 @@ function slowColumn(x: number, ya: number, yb: number, dtGameH: number) {
             const m2 = Math.min(left, 917 - dens[j]);
             dens[j] += m2; left -= m2;
           }
-          if (left <= 0) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; wakeNear(x, y); }
+          if (left <= 0) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; wakeArea(x, y); }
           else dens[i] = left;
           touch(x, y);
         }
@@ -342,7 +349,7 @@ function stepWeather(dt: number) {
     const d = dens[i];
     if (spawn(PK.DRIFT, x, y - 1, Math.sign(G.wind) * u * 20 * 0.5, -(10 + Math.random() * 30), 6, 1, d, 0) < 0) continue;
     putCell(x, y, M.AIR, 0, 0, 0);
-    wakeNear(x, y);
+    wakeArea(x, y);
   }
 }
 
@@ -365,14 +372,14 @@ export function depositAt(x: number, d: number, fl: number, yHint = -1, b = 0): 
       const j = idx(xx, yy);
       if (mat[j] !== M.AIR || body[j] || mat[j + W] === M.POLE) continue;
       putCell(xx, yy, M.SNOW, d, b, fl);
-      wakeOwn(xx, yy);
+      wakeLanding(xx, yy);
       if (surf[xx] > yy) surf[xx] = yy;
       return true;
     }
     return false;
   }
   putCell(x, y, M.SNOW, d, b, fl);
-  wakeOwn(x, y);
+  wakeLanding(x, y);
   if (surf[x] > y) surf[x] = y;
   return true;
 }

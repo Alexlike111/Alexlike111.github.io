@@ -42,8 +42,6 @@ export const gpuDirty = new Uint8Array(CW * CHH);    // needs texture upload (se
 export const solidVer = new Uint32Array(CW * CHH);   // bumps when rigid layout changes
 /** Hysteresis: a chunk whose last full pass changed nothing sleeps after this many more passes. */
 export const AWAKE_T = 12;
-/** A cell's next state depends only on cells this close (grains: 2 below, 1 aside; water runs 3 sideways). */
-export const WAKE_R = 3;
 
 export const idx = (x: number, y: number) => y * W + x;
 export const inb = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;
@@ -57,14 +55,20 @@ export function wake(x: number, y: number) {
   }
   gpuDirty[cy * CW + cx] = 1;
 }
-/** A cell changed at (x,y): wake only the chunks holding a cell within WAKE_R of it (usually just its own). No GPU mark. */
-export function wakeNear(x: number, y: number) {
-  const x0 = Math.max(0, ((x - WAKE_R) / CH) | 0), x1 = Math.min(CW - 1, ((x + WAKE_R) / CH) | 0);
-  const y0 = Math.max(0, ((y - WAKE_R) / CH) | 0), y1 = Math.min(CHH - 1, ((y + WAKE_R) / CH) | 0);
-  for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) { const c = j * CW + i; if (awake[c] < AWAKE_T) awake[c] = AWAKE_T; }
+/** A cell moved, was removed or soaked (it can now let its neighbours move): the 3x3 chunks around it wake, the same reach as wake(). No GPU mark. */
+export function wakeArea(x: number, y: number) {
+  const cx = (x / CH) | 0, cy = (y / CH) | 0;
+  for (let j = Math.max(0, cy - 1); j <= Math.min(CHH - 1, cy + 1); j++) for (let i = Math.max(0, cx - 1); i <= Math.min(CW - 1, cx + 1); i++) {
+    const c = j * CW + i; if (awake[c] < AWAKE_T) awake[c] = AWAKE_T;
+  }
 }
-/** A grain was added in place (snowfall): only its own chunk. If the grain then moves, the move wakes its neighbourhood. */
+/** A grain was added in place (snowfall deposit, drift landing): only its own chunk. A grain that then moves wakes its area. */
 export function wakeOwn(x: number, y: number) { const c = ((y / CH) | 0) * CW + ((x / CH) | 0); if (awake[c] < AWAKE_T) awake[c] = AWAKE_T; }
+/** Snowfall landing at (x,y): its own chunk only, except next to a chunk border, where a new grain can also enable a diagonal creep of the cell beside it (wake the 3x3). */
+export function wakeLanding(x: number, y: number) {
+  const lx = x & (CH - 1), ly = y & (CH - 1);
+  if (lx === 0 || ly === 0 || lx === CH - 1 || ly === CH - 1) wakeArea(x, y); else wakeOwn(x, y);
+}
 export function touch(x: number, y: number) { gpuDirty[((y / CH) | 0) * CW + ((x / CH) | 0)] = 1; }
 export function solidChanged(x: number, y: number) { solidVer[((y / CH) | 0) * CW + ((x / CH) | 0)]++; }
 

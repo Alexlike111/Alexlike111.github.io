@@ -5,11 +5,13 @@
 // Beam action: a cell's lateral cost shrinks with the depth (run) of its own material and the load penalty is
 // divided by that depth; compression arch: thin snow/ice shells whose top surface curves down on both sides
 // (concave-down, radius < ~2.4 m) carry thrust laterally at ARCH_F of the flat-beam cost.
-// Frame budget: a dirty rect is solved as a resumable job (stepStructure). Its snapshot is taken in one go
-// (loadRect); the prep passes, the Dijkstra and the failure commit then run for at most SLICE_MS per frame
-// and resume at their cursor (row / column / bucket / group). A failing group is committed only if its cells
-// still match the snapshot; otherwise its rect goes back on the queue. supportMargin and analyzeRect use their
-// own scratch context and always run to completion, so they never disturb a job in flight.
+// Frame budget: a dirty rect is solved as a resumable job (stepStructure). Its snapshot is copied in one go
+// (loadRect, a few hundred microseconds per 100 x 100 cells); the prep passes, the Dijkstra and the failure
+// commit then run for about SLICE_MS per frame and resume at their cursor (row / column / bucket / group).
+// Only the snapshot copy and the creation of a rigid body (makeBody) are atomic. An island body is spawned only if all its cells
+// still match the snapshot; a snow cell that changed meanwhile is left alone, and the rect is solved again.
+// supportMargin and analyzeRect use their own scratch context and always run to completion, so they never
+// disturb a job in flight.
 import {
   W, H, M, F_DIST, F_TREE, BOND_SOLID, mat, dens, bond, flags, body, beamId, set, wake,
 } from './world';
@@ -515,7 +517,7 @@ function startJob(x0: number, y0: number, x1: number, y1: number): boolean {
 // ---------------- queue ----------------
 const pend: number[] = []; // flat x0,y0,x1,y1 (already expanded + clamped)
 let qT = 0, sT = 0, clock = 0;
-let batch = 0;                                      // rects of the current queue batch still to start
+let batch = 0;                                      // rects of the current queue tick still to start
 const fresh = new Map<number, number>();            // beamId -> clock at which its grace ends
 const freshRects: number[] = [];                    // flat t,x0,y0,x1,y1 (re-check when the grace ends)
 
