@@ -37,6 +37,9 @@ export class Input {
   onModeChange: ((mobile: boolean) => void) | null = null;
   /** hold Q (PC) opens the radial tool wheel: 'open' after a short hold, 'close' on release (pick), 'cancel' on blur. A quick tap of Q still eats. */
   onWheelKey: ((phase: 'open' | 'close' | 'cancel') => void) | null = null;
+  /** PC: Ctrl toggles the smart cursor (the shovel target snaps to snow in reach); called with the new state */
+  smartCursor = false;
+  onSmart: ((on: boolean) => void) | null = null;
   /** a radial wheel is open: the world ignores pointer / wheel input */
   blocked = false;
   /** performance.now() of the last touch down / move / up on the world; the UI fades the reticle 1.5 s after it */
@@ -196,6 +199,7 @@ export class Input {
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat) { this.smartCursor = !this.smartCursor; this.onSmart?.(this.smartCursor); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const c = e.code;
     const overlay = document.documentElement.dataset.overlay === '1';

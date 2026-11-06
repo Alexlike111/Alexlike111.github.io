@@ -503,4 +503,6 @@ export function stepSim(dt: number, dtReal: number = dt) {
   stepParticles(dt); pend('particles', t);
 }
 
+/** fresh snow not yet deposited, summed over the columns (cells): the mass audit counts it */
+export function pendingTotal(): number { let t = 0; for (let x = 0; x < W; x++) t += pending[x]; return t; }
 export { rigidAt, isAirLike };

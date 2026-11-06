@@ -148,7 +148,6 @@ function addFire(x: number, k: Kit) {
   G.fires.push({ x, y, fuel: 400, power: 0, lit: true, id: 100 + G.fires.length });
   void k;
 }
-function loadShovel() { tool.load = 46; tool.loadDens = 240; }
 
 const SCENARIOS: Scn[] = [
   // ---------------- overlays
@@ -185,12 +184,12 @@ const SCENARIOS: Scn[] = [
       k.data.x = x; k.stand(x - 14); k.data.x0 = pl.x; k.useTool('shovel');
     },
     tick: (k) => { const b = k.bi; b.primary = true; b.moveX = 0.6; k.aim(pl.x + 16, pl.y - 10); } },
-  { id: 'throw', outcome: (k) => `бросков ${Number(k.data.n ?? 0)}`, name: 'Бросок снега лопатой', group: 'Снег', note: 'полная лопата каждые 0,4 с: 46 комков в полёте, посадка и осаждение',
+  { id: 'throw', outcome: (k) => `плиток ${tool.digs}, бросков ${tool.ins + tool.outs}`, name: 'Плитки лопатой: выемка и бросок снега', group: 'Снег', note: 'копает 5×5 плиток у ног по обе стороны каждые 0,4 с: снег из каждой плитки уходит за спину (планировщик отвала), без накопления в лопате',
     setup: (k) => { k.clock(12 * 60); k.stand(START_X); k.useTool('shovel'); },
     tick: (k, t) => {
-      const n = Math.floor(t / 0.4); if (k.data.n === n) return; k.data.n = n;
-      loadShovel(); const s = n % 2 ? 1 : -1;
-      k.aim(pl.x + s * (26 + (n % 4) * 7), pl.y - 26); k.bi.secondaryPressed = true;
+      const n = Math.floor(t / 0.4); if (k.data.n !== n) { k.data.n = n; k.data.s = n % 2 ? 1 : -1; }
+      const s = Number(k.data.s ?? 1), ph = t % 0.4;
+      k.aim(pl.x + s * (7 + (n % 3) * 5), pl.y + 2); k.bi.primary = ph < 0.3;   // a dig on the ground beside the feet, then a pause
     } },
   { id: 'collapse', outcome: (k) => `тел ${allBodies().size}`, name: 'Обрушение сугроба и лавина', group: 'Снег', note: 'подкоп большого сугроба: солвер статики, плиты-тела, осыпь клеточного автомата',
     setup: (k) => { k.clock(12 * 60); const c = driftCrest(); k.data.c = c; k.stand(c - 62); },

@@ -2,12 +2,12 @@ import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crate
 import { G, FORCE } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt, surf } from './heat';
-import { stepSim } from './sim';
+import { stepSim, pendingTotal } from './sim';
 import { initBodies, stepBodies, allBodies, initPhysics, spawnStressTest } from './phys';
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud, beamModesLine } from './tools';
+import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, aimTarget, DIG, TILE, setSmart, spoilInFlight, type DigTarget, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud, beamModesLine } from './tools';
 import { plural } from './ru';
 import { Renderer } from './render';
 import { Input } from './input';
@@ -20,6 +20,8 @@ const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
 const ctx = fx.getContext('2d')!;
 const input = new Input(glCanvas);
+// Ctrl (PC): the smart cursor on / off; a short tool message says which (touch is always smart)
+input.onSmart = (on) => { setSmart(on); tool.msg = on ? 'Умный курсор включён: цель липнет к снегу в пределах 2 м' : 'Умный курсор выключен'; tool.msgSec = 3; };
 const ui = new UI(document.getElementById('ui')!, input);
 const sound = new Sound();
 bindSound(sound);
@@ -97,7 +99,7 @@ function updateCamera(dt: number, snap = false) {
 
 // ---------------- game lifecycle ----------------
 let shake = 0, stats = { built: [] as string[] };
-let hintT = 0, hintText: string | null = null, tutorial = 0;
+let hintT = 0, hintText: string | null = null, tutorial = 0, tut1At = -1; // tut1At: when step 1 («Снег с лопаты сам летит…») began
 let tipCrawlUntil = -1, tipCrawlDone = false, tipDoorUntil = -1, tipDoorDone = false;
 function newGame(seed = 20261106 + Math.floor(Math.random() * 1000)) {
   generate(seed);
@@ -106,7 +108,7 @@ function newGame(seed = 20261106 + Math.floor(Math.random() * 1000)) {
   const sx = START_X; const sy = surfaceAt(sx);
   resetPlayer(sx, sy - 1);
   renderer.invalidate();
-  P.n = 0; ended = false; paused = false; tutorial = 0; tipCrawlUntil = tipDoorUntil = -1; tipCrawlDone = tipDoorDone = false;
+  P.n = 0; ended = false; paused = false; tutorial = 0; tut1At = -1; tipCrawlUntil = tipDoorUntil = -1; tipCrawlDone = tipDoorDone = false;
   tipSeen.clear(); tipShow = null; pitSince = -1; enclNext = 0; enclNow = { st: 'none', ang: null }; pocketNow = new Set();
   updateCamera(0, true);
   // pre-warm weather / heat
@@ -212,7 +214,7 @@ function shelterTip(): string | null {
 let hintSig = '', hintLast = '', hintLastT = -99;
 /** tool messages: live <= 2.5 s; any successful action (snow dug / thrown, inventory or build change, tool switch) wipes a stale message at once; the same refusal is not repeated for 4 s while a button is held */
 function hint(): string | null {
-  const sig = `${tool.cur}|${Math.round(tool.load)}|${inv.logs}|${inv.branches}|${inv.matches}|${inv.food}|${inv.crackers}|${inv.blocks.length}|${tool.built.size}`;
+  const sig = `${tool.cur}|${tool.digs}|${inv.logs}|${inv.branches}|${inv.matches}|${inv.food}|${inv.crackers}|${inv.blocks.length}|${tool.built.size}`;
   if (sig !== hintSig) { if (hintSig) { hintT = 0; hintText = null; } hintSig = sig; }
   if (tool.msg) {
     const m = tool.msg, sec = tool.msgSec; tool.msg = ''; tool.msgSec = 2.5;
@@ -227,7 +229,7 @@ function hint(): string | null {
   const shelter = shelterTip();
   if (shelter) return shelter;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
-  if (tutorial === 1) return mob ? '«Положить»: бросить снег из лопаты туда, куда целишься' : 'ПКМ: бросить снег из лопаты туда, куда целишься';
+  if (tutorial === 1) return mob ? 'Снег с лопаты сам летит за спину. «Положить» — утрамбовать' : 'Снег с лопаты сам летит за спину. ПКМ — утрамбовать';
   if (tutorial === 2) return mob ? 'Найди ящик под оранжевой вешкой, подкопай и жми «Взять»' : 'Найди ящик под оранжевой вешкой, подкопай к нему и жми E';
   if (tutorial === 3) return 'Укрытие: землянка (копай в сугроб), иглу (пила по насту, ПКМ), дом (топор по ели, 4)';
   if (tutorial === 4) return mob ? 'Разведи костёр в укрытии (кнопка 6) и жди ночь («Ждать»)' : 'Разведи костёр в укрытии (6) и жди ночь (T)';
@@ -470,7 +472,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     spLine(sx, sy, sx + dx * 4, sy + dy * 4, 3, lc(PAL.parkaHi, 0.96));
     // tool (inverse-sampled so rotated shapes stay pixel-solid)
     const sc = 1.3, flipY = dx < 0 ? -1 : 1, R = 40;
-    const load = id === 'shovel' ? Math.min(1, tool.load / 46) : 0;
+    const load = 0; // the blade carries no snow: each dug tile is thrown clear at once
     for (let py = -R; py <= R; py++) for (let px = -R; px <= R; px++) {
       const rx = px + 0.5, ry = py + 0.5;
       const u = (rx * dx + ry * dy) / sc, v = (-rx * dy + ry * dx) / sc * flipY;
@@ -745,21 +747,15 @@ function ovSaw(ax: number, ay: number, px: number) {
   }
 }
 
-// shovel throw (RMB): where the load lands, chosen the way throwLoad() chooses (touch, aim near the body or into firm snow = auto spoil by planSpoil)
-const TH = { mode: -1, k0: 0, k1: 0, k2: 0, k3: 0, k4: 0, ok: false, lx: 0, ly: 0, n: 0, arc: new Float32Array(2 * 130) };
-function ovThrow(aim: [number, number], px: number) {
-  const ax = aim[0], ay = aim[1], [sx, sy] = shoulder();
-  const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1;
-  const auto = G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai));
-  // the manual landing depends on the aim cell; the auto spoil ignores the aim, so it is re-planned only when the hero moves or about once a second (planSpoil: 1-6 ms)
-  const mode = auto ? 1 : 0;
-  const k0 = auto ? pl.x | 0 : Math.round(ax), k1 = auto ? pl.y | 0 : Math.round(ay);
-  const k2 = auto ? tool.digDir : sx | 0, k3 = auto ? pl.face : sy | 0, k4 = auto ? (G.frame / 60) | 0 : 0;
-  if (TH.mode !== mode || TH.k0 !== k0 || TH.k1 !== k1 || TH.k2 !== k2 || TH.k3 !== k3 || TH.k4 !== k4) {
-    TH.mode = mode; TH.k0 = k0; TH.k1 = k1; TH.k2 = k2; TH.k3 = k3; TH.k4 = k4;
-    let vx: number, vy: number;
-    if (auto) { const p = planSpoil(sx, sy); vx = p.ux * p.sp; vy = p.uy * p.sp - 25; }
-    else { const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy)), sp = 95 + Math.min(60, L * 1.2); vx = dx / L * sp; vy = dy / L * sp - 25; }
+// shovel: where the dug snow lands (auto: planSpoil, the plan tickSpoil throws with). Re-planned only when the hero moves or about once a second.
+const TH = { k0: NaN, k1: NaN, k2: NaN, k3: NaN, k4: NaN, ok: false, lx: 0, ly: 0, arc: new Float32Array(2 * 130), n: 0 };
+function ovThrow(px: number) {
+  const [sx, sy] = shoulder();
+  const k0 = pl.x | 0, k1 = pl.y | 0, k2 = tool.digDir, k3 = pl.face, k4 = (G.frame / 60) | 0;
+  if (TH.k0 !== k0 || TH.k1 !== k1 || TH.k2 !== k2 || TH.k3 !== k3 || TH.k4 !== k4) {
+    TH.k0 = k0; TH.k1 = k1; TH.k2 = k2; TH.k3 = k3; TH.k4 = k4;
+    const p = planSpoil(sx, sy);
+    const vx = p.ux * p.sp, vy = p.uy * p.sp - 25;
     const [lx, ly] = simulateClump(sx, sy, vx, vy);
     TH.ok = ly < 1e4; TH.lx = lx; TH.ly = ly;
     // flight path: gravity and 1/30 s steps as in stepParticles, up to the landing
@@ -773,14 +769,46 @@ function ovThrow(aim: [number, number], px: number) {
     TH.n = n;
   }
   if (!TH.ok) return;
-  const col = TH.mode ? '255,190,110' : '190,228,255';
   ctx.beginPath(); ctx.moveTo(TH.arc[0], TH.arc[1]);
   for (let k = 1; k < TH.n; k++) ctx.lineTo(TH.arc[2 * k], TH.arc[2 * k + 1]);
   ctx.setLineDash([]); ctx.lineWidth = px * 2.2; ctx.strokeStyle = 'rgba(8,14,26,0.2)'; ctx.stroke();
-  ctx.setLineDash([2.6 * px, 2.2 * px]); ctx.lineWidth = px; ctx.strokeStyle = `rgba(${col},0.9)`; ctx.stroke(); ctx.setLineDash([]);
+  ctx.setLineDash([2.6 * px, 2.2 * px]); ctx.lineWidth = px; ctx.strokeStyle = 'rgba(190,228,255,0.9)'; ctx.stroke(); ctx.setLineDash([]);
   ctx.lineWidth = px * 2; ctx.strokeStyle = OV_DARK; ctx.beginPath(); ctx.arc(TH.lx, TH.ly, 3.2 * px, 0, OV_TAU); ctx.stroke();
-  ctx.lineWidth = px; ctx.strokeStyle = `rgba(${col},0.95)`; ctx.beginPath(); ctx.arc(TH.lx, TH.ly, 2.8 * px, 0, OV_TAU); ctx.stroke();
-  if (TH.mode) ovText('авто', TH.lx, TH.ly + 6 * px, OV_TXT, px, 'center', 'top');
+  ctx.lineWidth = px; ctx.strokeStyle = 'rgba(190,228,255,0.95)'; ctx.beginPath(); ctx.arc(TH.lx, TH.ly, 2.8 * px, 0, OV_TAU); ctx.stroke();
+  ovText('авто', TH.lx, TH.ly + 6 * px, OV_TXT, px, 'center', 'top');
+}
+/** crack lines on one tile: stage 0 none, 1 two, 2 four, 3 seven. Deterministic per tile, so the cracks grow in the same places. */
+function ovCracks(tx: number, ty: number, stage: number, px: number) {
+  const n = [0, 2, 4, 7][stage];
+  if (!n) return;
+  let r = ((tx * 73856093) ^ (ty * 19349663)) >>> 0 || 1;
+  const rnd = () => { r = (Math.imul(r, 1664525) + 1013904223) >>> 0; return r / 4294967296; };
+  ctx.setLineDash([]); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.lineWidth = px * 1.5; ctx.strokeStyle = 'rgba(10,18,30,0.9)';
+  ctx.beginPath();
+  for (let k = 0; k < n; k++) {
+    let x = tx * TILE + rnd() * TILE, y = ty * TILE + rnd() * TILE;
+    ctx.moveTo(x, y);
+    for (let j = 0, seg = 2 + Math.floor(rnd() * 2); j < seg; j++) { x += (rnd() - 0.5) * 3.4; y += (rnd() - 0.5) * 3.4; ctx.lineTo(x, y); }
+  }
+  ctx.stroke();
+}
+/** Shovel target: the tile under the cursor is outlined - white = can dig, red = beyond the 2 m reach, grey = why not (a short label).
+ *  While it is dug: crack stages (3) on its tiles, following the progress. */
+function ovDig(t: DigTarget, px: number) {
+  const bx = t.tx * TILE, by = t.ty * TILE;
+  const col = t.ok ? 'rgba(240,248,255,0.95)' : t.far ? 'rgba(255,120,100,0.95)' : 'rgba(176,190,204,0.9)';
+  ctx.setLineDash([]);
+  ctx.fillStyle = t.ok ? 'rgba(240,248,255,0.1)' : t.far ? 'rgba(255,92,60,0.12)' : 'rgba(150,164,178,0.08)';
+  ctx.fillRect(bx, by, TILE, TILE);
+  if (t.ok) for (const u of t.tiles) if (u.tx !== t.tx || u.ty !== t.ty) { ctx.lineWidth = px * 1.2; ctx.strokeStyle = 'rgba(240,248,255,0.6)'; ctx.strokeRect(u.tx * TILE, u.ty * TILE, TILE, TILE); }
+  ctx.lineWidth = px * 3; ctx.strokeStyle = OV_DARK; ctx.strokeRect(bx, by, TILE, TILE);
+  ctx.lineWidth = px * 1.6; ctx.strokeStyle = col; ctx.strokeRect(bx, by, TILE, TILE);
+  if (DIG.key && DIG.key === t.key && DIG.p > 0) {
+    const stage = DIG.p < 0.25 ? 0 : DIG.p < 0.5 ? 1 : DIG.p < 0.75 ? 2 : 3;
+    for (const u of DIG.tiles) ovCracks(u.tx, u.ty, stage, px);
+  }
+  if (!t.ok) ovLabel([{ s: t.reason, col: t.far ? OV_BAD : OV_TXT }], { x0: bx, y0: by, x1: bx + TILE, y1: by + TILE }, px, ['above', 'below', 'right', 'left']);
 }
 
 // axe over a standing trunk: dashed arrow from its base in the direction it falls (chop() drops it away from the hero), as long as the tree is tall
@@ -812,7 +840,7 @@ function ovFall(ax: number, ay: number, px: number) {
   ovText('падает', tx, by - 4 * px, OV_TXT, px);
 }
 
-function drawOverlay(aim: [number, number] | null) {
+function drawOverlay(aim: [number, number] | null, moveX = 0) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, fx.width, fx.height);
   ovPlaced.length = 0;   // labels are placed afresh each frame
@@ -842,15 +870,18 @@ function drawOverlay(aim: [number, number] | null) {
     if (!near) ovReach(aim, px);
     if (id === 'block' || id === 'beam') ovGhost(id === 'beam', ax, ay, px);
     else if (id === 'saw') ovSaw(ax, ay, px);
-    else {
-      const bite = id === 'shovel' ? shovelBite(ax, ay) : { rx: 2.5, ry: 2.5 };
+    else if (id === 'shovel') {
+      const t = aimTarget(aim[0], aim[1], moveX);   // the tile a dig takes now (the same target usePrimary digs)
+      ovDig(t, px);
+      if (t.ok) ovThrow(px);
+    } else {
+      const bite = { rx: 2.5, ry: 2.5 };
       ctx.setLineDash([]);
       ctx.lineWidth = px * 3; ctx.strokeStyle = near ? OV_DARK : 'rgba(8,14,26,0.45)';
       ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, OV_TAU); ctx.stroke();
       ctx.lineWidth = px * 1.5; ctx.strokeStyle = near ? 'rgba(240,248,255,0.95)' : 'rgba(235,244,255,0.5)';
       ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, OV_TAU); ctx.stroke();
-      if (id === 'shovel' && tool.load > 0) ovThrow(aim, px);
-      else if (id === 'axe') ovFall(ax, ay, px);
+      if (id === 'axe') ovFall(ax, ay, px);
     }
   }
   // crate pole flags flutter (cheap)
@@ -1049,9 +1080,10 @@ function frameBody(now: number) {
   let working = false;
   pt = pnow();
   if (pl.alive) {
-    if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], realDt); working = true; if (tutorial === 0 && tool.load > 0) tutorial = 1; }
+    if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], realDt, s.moveX); working = true; if (tutorial === 0 && tool.digs > 0) { tutorial = 1; tut1At = G.realTime; } }
     else if (!s.primary) idleTool(realDt); // button still held but aim lost for a frame: keep the one-per-press latches
     if (s.secondaryPressed && aimWorld) { useSecondary(aimWorld[0], aimWorld[1]); if (tutorial === 1) tutorial = 2; }
+    if (tutorial === 1 && tut1At >= 0 && G.realTime - tut1At > 8) tutorial = 2;   // the one-time tip shows ~8 s; the tamp (RMB) also moves on
     if (s.interactPressed) { if (!interact()) sound.uiDeny(); }
     if (s.eatPressed) eat();
     if (s.firePressed && aimWorld) placeFire(aimWorld[0], aimWorld[1]);
@@ -1106,7 +1138,7 @@ function frameBody(now: number) {
     tools: TOOLS.map((t) => ({ id: t.id, name: t.name, key: t.key, enabled: t.id === 'saw' ? inv.saw : true,
       count: t.id === 'beam' ? inv.logs : t.id === 'block' ? inv.blocks.length : t.id === 'fire' ? Math.min(inv.matches, inv.logs, Math.floor(inv.branches / 2)) : undefined })),
     inv: { logs: inv.logs, branches: inv.branches, matches: inv.matches, food: inv.food + inv.crackers, blocks: inv.blocks.length, snowshoes: inv.snowshoes, thermos: inv.thermos },
-    hint: hint(), shovelLoad: Math.min(1, tool.load / 46), waiting: G.timeScale > 2,
+    hint: hint(), waiting: G.timeScale > 2,
     ...toolHud(),
     encl: enclNow,
   };
@@ -1116,7 +1148,7 @@ function frameBody(now: number) {
   pend('hud', pt); pt = pnow();
   renderer.render(dt);
   pend('render', pt); pt = pnow();
-  drawOverlay(aimWorld);
+  drawOverlay(aimWorld, s.moveX);
   pend('overlay', pt);
   if (prof.on) pend('frameJS', t0);
   adaptWork(performance.now() - tw);
@@ -1191,5 +1223,6 @@ boot();
   benchResult: () => bench.last(),
   benchReport: () => { const r = bench.last(); return r ? makeReport(r) : ''; },
   sawCheck, tutorial: () => tutorial,
+  spoil: () => spoilInFlight(), pendingSnow: () => pendingTotal(),
 };
 void PW; void dens; void bond;

@@ -18,14 +18,13 @@ export const TOOLS = [
 ] as const;
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
-// msgSec: how long the next tool message stays on the hint card (seconds); autoTipped: the one-time auto-throw explanation was shown this game
-export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, autoTipped: false, built: new Set<string>() };
+// msgSec: how long the next tool message stays on the hint card (seconds)
+export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
 /** E / «Взять» feeds a campfire this close (cells, 2 m); the HUD fuel chip shows at the same distance */
 export const FEED_R = 40;
 /** a campfire this close (4 m) gets «Подойди ближе к костру» instead of the generic E hint */
 const FIRE_NEAR_R = 80;
-export const SHOVEL_MAX = 46; // cells the shovel holds before it throws
 export const BLOCK_CAP = 8;
 const PW_HALF = 5; // half body width (cells)
 let sfx: Sound | null = null;
@@ -34,9 +33,9 @@ let fireId = 1;
 
 export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
-  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5, autoTipped: false });
+  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, digs: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5 });
   tool.built.clear();
-  G.fires.length = 0; laid.length = 0; loadWarned = false; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
+  G.fires.length = 0; laid.length = 0; bag.length = 0; flushIn = 0; DIG.key = ''; DIG.p = 0; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
 }
 
 export const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
@@ -51,90 +50,214 @@ export function reachPoint(ax: number, ay: number): [number, number] {
 
 function say(m: string) { tool.msg = m; }
 
-// ---------------- shovel ----------------
-let lastNothingT = -99, loadWarned = false;
-/** Shovel bite at the aim: a round scoop (r 4.5), or - aiming near-horizontally at body height, i.e. into a wall / tunnel face - a tall ellipse 5 wide x 10 high
- *  (still <= 46 cells), so a crawl tunnel (20 cells high) takes two stacked scoops per 5 cells of length (~8-10 scoops per metre). */
-export function shovelBite(ax: number, ay: number): { rx: number; ry: number; tunnel: boolean; shaft?: boolean } {
-  const dx = ax - pl.x, dy = ay - (pl.y - pl.h * 0.5); // slope measured from the middle of the body (crawling or standing)
-  const tun = Math.abs(dx) >= 6 && (pl.h < 34 || Math.abs(dy) <= Math.abs(dx) * 0.6) && ay >= pl.y - pl.h - 2 && ay <= pl.y + 1; // crawling: any aim at body height ahead is a tunnel bite
-  if (tun) return { rx: 2.5, ry: 5, tunnel: true };
-  // starting a shaft (aim below the feet, close by): a wide flat scoop, so the shaft top is ~11+ cells wide and the hero can drop in
-  if (ay > pl.y && Math.abs(ax - pl.x) <= 14) return { rx: 6, ry: 3.5, tunnel: false, shaft: true };
-  return { rx: 4.5, ry: 4.5, tunnel: false };
+// ---------------- shovel: digs 5 x 5 cell tiles ----------------
+/** A tile is 5 x 5 cells (25 cm), grid-aligned: tile (tx, ty) covers cells x 5tx..5tx+4, y 5ty..5ty+4. */
+export const TILE = 5;
+/** seconds to dig one tile, by the hardness class of its snow: 0 powder, 1 settled, 2 firm / sintered, 3 very hard */
+const DIG_S = [0.07, 0.15, 0.3, 0.5];
+/** smart cursor (Ctrl toggle on PC; always on for touch): a dig target that is not snow snaps to the nearest diggable tile in reach */
+let smartOn = false;
+export function setSmart(on: boolean) { smartOn = on; }
+/** one tile: what is in it. hard = ice, frozen ground, rock, timber, water or a crate (not shovelled); body = a fallen log */
+export interface DigTile { tx: number; ty: number; snow: number; hard: number; body: number; hardMat: number; time: number; }
+export interface DigTarget {
+  tx: number; ty: number;   // the tile the target lands on
+  target: DigTile;          // its contents
+  ok: boolean;              // can dig now: snow, nothing hard, within reach
+  far: boolean;             // beyond the 2 m reach (red outline)
+  reason: string;           // short why it is not ok ('' when ok)
+  tiles: DigTile[];         // one dig takes these (the target; under the hero also the neighbours of a shaft start)
+  time: number;             // seconds for all of them
+  key: string;              // identity of the dig: a moved target starts it over
+  snapped: boolean;         // the smart cursor or the touch stick moved the target off the aim
 }
-let stallT = 0, stallMsgT = -99, lastDigN = -1;
-/** shovel held but going nowhere: the aim is beyond the 2 m reach, or the bites find nothing to take, for ~1 s */
-function shovelStall(dt: number, beyond: boolean) {
-  stallT = beyond || lastDigN === 0 ? stallT + dt : 0;
-  if (stallT > 1 && G.realTime - stallMsgT > 4) { stallMsgT = G.realTime; say('Дальше не достать — спрыгни в яму и копай изнутри'); }
+/** the dig in progress: its key, progress 0..1 and tiles (the overlay draws the cracks from these). Released or moved: starts over. */
+export const DIG = { key: '', p: 0, tiles: [] as DigTile[] };
+let lastNothingT = -99;
+const HARD_WHY: Record<number, string> = {
+  [M.ICE]: 'лёд: лопата не берёт', [M.DIRT]: 'мёрзлая земля: не берётся', [M.ROCK]: 'камень: не берётся', [M.BEDROCK]: 'скала: не берётся',
+  [M.WATER]: 'вода: копать нечем', [M.WOOD]: 'дерево: рубить топором', [M.PLANK]: 'брус: не копается', [M.DOOR]: 'дверь: не копается', [M.CRATE]: 'ящик: не копается', [M.POLE]: 'вешка: не копается',
+};
+/** hardness class of one snow cell from its density and bond (the top powder 75-95 / bond 0; the middle layer ~200 / 90-120; deeper 235-400) */
+function cellClass(i: number): number {
+  const d = dens[i], b = bond[i];
+  if (d >= 400 || b >= 220) return 3;
+  if (d >= 300 || b >= 150) return 2;
+  if (d >= 150 || b >= BOND_SOLID) return 1;
+  return 0;
 }
-/** Returns the cells taken (0 = nothing in reach), or -1 when the load was thrown instead. */
-function dig(ax: number, ay: number): number {
-  const { rx, ry, tunnel, shaft } = shovelBite(ax, ay);
-  tool.tun = tunnel; tool.digDir = ax >= pl.x ? 1 : -1;
-  let n = 0, sum = 0, hard = 0;
-  const cap = 46 - tool.load;
-  if (cap <= 2 || (tunnel && cap < 36 && tool.load > 0)) { throwLoad(ax, ay, true); return -1; } // tunnel: empty the blade before a full-size bite does not fit
-  // tunnel bite: a 5 x 10 slab (squared-off ellipse, offsets -2..2 x -5..4) that hugs the face - slid from the body outwards along the aim line to the first spot where it is nearly full of snow
-  const offs: number[] = [];
-  if (tunnel) {
-    for (let dy = -5; dy <= 4; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.pow(Math.abs(dx) / 2.3, 4) + Math.pow(Math.abs(dy + 0.5) / 4.8, 4) <= 1) offs.push(dx, dy);
-    const dir = ax >= pl.x ? 1 : -1, full = offs.length / 2;
-    let bestX = Math.round(ax), bestN = -1;
-    for (let cx = Math.round(pl.x + dir * (PW_HALF + 3)); dir > 0 ? cx <= Math.round(ax) : cx >= Math.round(ax); cx += dir) {
-      let c = 0;
-      for (let k = 0; k < offs.length; k += 2) {
-        const x = cx + offs[k], y = Math.round(ay) + offs[k + 1];
-        if (!inb(x, y)) continue; const i = idx(x, y);
-        if ((mat[i] === M.SNOW || mat[i] === M.ASH) && !body[i]) c++;
-      }
-      if (c > bestN) { bestN = c; bestX = cx; }
-      if (c >= full * 0.85) { bestX = cx; break; }
-    }
-    ax = bestX;
-  }
-  const take = (x: number, y: number) => {
-    if (n >= cap || !inb(x, y)) return;
+function scanTile(tx: number, ty: number): DigTile {
+  const t: DigTile = { tx, ty, snow: 0, hard: 0, body: 0, hardMat: -1, time: 0 };
+  let sec = 0;
+  for (let y = ty * TILE; y < ty * TILE + TILE; y++) for (let x = tx * TILE; x < tx * TILE + TILE; x++) {
+    if (!inb(x, y)) continue;
     const i = idx(x, y);
-    if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) return;
-    n++; sum += dens[i]; hard += bond[i] / 255 * Math.min(1, dens[i] / 400);
-    set(x, y, M.AIR);
-  };
-  if (tunnel) { for (let k = 0; k < offs.length; k += 2) take(ax + offs[k], Math.round(ay) + offs[k + 1]); }
-  else {
-    // shaft scoop: whole rows, the rows nearest the aim line first, so a capped bite keeps its widest (surface) rows
-    const dys: number[] = [];
-    if (shaft) { dys.push(0); for (let k = 1; k <= 4; k++) dys.push(-k, k); }
-    else for (let dy = -ry; dy <= ry; dy++) dys.push(dy);
-    for (const dy of dys) for (let dx = -rx; dx <= rx; dx++) {
-      if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1) continue;
-      take(Math.round(ax + dx), Math.round(ay + dy));
+    if (body[i]) { t.body++; continue; }
+    const m = mat[i];
+    if (m === M.SNOW || m === M.ASH) { t.snow++; sec += DIG_S[cellClass(i)]; }
+    else if (m !== M.AIR && m !== M.NEEDLE) { t.hard++; if (t.hardMat < 0) t.hardMat = m; }
+  }
+  t.time = t.snow ? sec / t.snow : 0;
+  return t;
+}
+const diggable = (t: DigTile) => t.snow > 0 && t.hard === 0 && t.body === 0;
+/** why a tile is grey (not dug): the material in it, or that there is no snow */
+function whyNot(t: DigTile): string {
+  if (t.body) return 'упавшее бревно: топором';
+  if (t.hard) return HARD_WHY[t.hardMat] ?? 'твёрдое: не копается';
+  return t.snow ? '' : 'здесь нет снега: целься в снег';
+}
+/** Terraria rule: the straight line from the shoulder to the aim meets the first non-air cell; that cell is the target (no digging through walls). -1: the line is clear. */
+function firstSolid(ax: number, ay: number): number {
+  const [sx, sy] = shoulder();
+  const dx = ax - sx, dy = ay - sy;
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
+  let last = -1;
+  for (let k = 0; k <= n; k++) {
+    const x = Math.round(sx + (dx * k) / n), y = Math.round(sy + (dy * k) / n);
+    if (!inb(x, y)) return -1;
+    const i = idx(x, y);
+    if (i === last) continue;
+    last = i;
+    if (body[i] || (mat[i] !== M.AIR && mat[i] !== M.NEEDLE)) return i;
+  }
+  return -1;
+}
+/** the nearest point of the tile is within the 2 m reach of the shoulder */
+function inReachTile(tx: number, ty: number): boolean {
+  const [sx, sy] = shoulder();
+  const nx = Math.min(Math.max(sx, tx * TILE), tx * TILE + TILE), ny = Math.min(Math.max(sy, ty * TILE), ty * TILE + TILE);
+  return Math.hypot(nx - sx, ny - sy) <= REACH;
+}
+/** smart cursor: the nearest diggable tile within 3 tiles of the aim, reached by the line from the shoulder first (never snapped through a wall) */
+function snapTile(tx: number, ty: number, ax: number, ay: number): DigTile | null {
+  let best: DigTile | null = null, bd = 1e9;
+  for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+    const u = scanTile(tx + dx, ty + dy);
+    if (!diggable(u) || !inReachTile(u.tx, u.ty)) continue;
+    const cx = u.tx * TILE + TILE / 2, cy = u.ty * TILE + TILE / 2;
+    const d = Math.hypot(cx - ax, cy - ay);
+    if (d >= bd) continue;
+    const f = firstSolid(cx, cy);
+    if (f >= 0 && (Math.floor((f % W) / TILE) !== u.tx || Math.floor(((f / W) | 0) / TILE) !== u.ty)) continue; // a wall lies between
+    best = u; bd = d;
+  }
+  return best;
+}
+/** under the hero, at or below the knees: a shaft starts here and is dug as wide as the body, so the hero can drop in */
+function underHero(t: DigTile): boolean {
+  return Math.abs(t.tx * TILE + TILE / 2 - pl.x) <= PW_HALF + TILE / 2 && (t.ty + 1) * TILE > pl.y - 6;
+}
+/** The tile a dig at the aim takes now. The line from the shoulder decides first (you dig the wall you meet, not what is behind it).
+ *  Smart cursor (or touch): a target that is not snow snaps to the nearest snow in reach. Touch with the stick moving: when still not snow,
+ *  the wall in front (chest, head, then feet height) is taken. */
+export function aimTarget(ax: number, ay: number, moveX = 0): DigTarget {
+  const i = firstSolid(ax, ay);
+  const tx0 = i >= 0 ? Math.floor((i % W) / TILE) : Math.floor(ax / TILE);
+  const ty0 = i >= 0 ? Math.floor(((i / W) | 0) / TILE) : Math.floor(ay / TILE);
+  let t = scanTile(tx0, ty0), snapped = false;
+  if (!(diggable(t) && inReachTile(t.tx, t.ty)) && (smartOn || G.mobile)) {
+    const s = snapTile(tx0, ty0, ax, ay);
+    if (s) { t = s; snapped = true; }
+  }
+  if (!diggable(t) && G.mobile && moveX !== 0) {
+    const fx = pl.x + (moveX > 0 ? 1 : -1) * (PW_HALF + 3);
+    for (const fy of [pl.y - pl.h * 0.5, pl.y - pl.h + 5, pl.y - 4]) {
+      const f = scanTile(Math.floor(fx / TILE), Math.floor(fy / TILE));
+      if (diggable(f) && inReachTile(f.tx, f.ty)) { t = f; snapped = true; break; }
     }
   }
-  if (n === 0) {
-    const i = inb(ax | 0, ay | 0) ? idx(ax | 0, ay | 0) : 0;
-    if (mat[i] === M.ICE || mat[i] === M.DIRT || mat[i] === M.ROCK) { say('Лопата не берёт мёрзлую землю и лёд'); sfx?.uiDeny(); }
-    else if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say('Тут нечего копать — целься в снег в пределах 2 м'); }
-    return 0;
+  const far = !inReachTile(t.tx, t.ty);
+  const ok = !far && diggable(t);
+  const tiles: DigTile[] = [t];
+  if (ok && underHero(t)) {
+    const c0 = Math.floor((pl.x - PW_HALF) / TILE), c1 = Math.floor((pl.x + PW_HALF - 0.001) / TILE);
+    for (let cx = c0; cx <= c1; cx++) {
+      if (cx === t.tx) continue;
+      const u = scanTile(cx, t.ty);
+      if (diggable(u) && inReachTile(cx, t.ty)) tiles.push(u);
+    }
   }
-  tool.bite = n;
-  const h = hard / n;
-  tool.loadDens = (tool.loadDens * tool.load + sum) / (tool.load + n);
-  tool.load += n;
-  if (!loadWarned && tool.load >= 46 * 0.8) { loadWarned = true; say(G.mobile ? 'Лопата полна — копай дальше: снег сам полетит за спину' : 'Лопата полна — копай дальше (снег полетит за спину) или ПКМ — бросить, куда целишься'); }
-  pl.stamina -= 0.012 + h * 0.02;
-  pl.snowOn = Math.min(1, pl.snowOn + 0.01);
-  tool.cool = 0.22 + h * 0.45;
-  sfx?.dig(h);
-  // spray: a few fine dust bits plus 2-3 cell clumps (m >= 1.7 draws as a solid clump), lofted in an arc and drifted by the wind
-  for (let k = 0, nb = 4 + Math.min(5, n >> 2); k < nb; k++) {
-    const clump = k % 3 === 0, a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6 + pl.face * 0.35, sp = clump ? 30 + Math.random() * 34 : 16 + Math.random() * 44;
-    spawn(PK.DUST, ax + (Math.random() - 0.5) * 4, ay + (Math.random() - 0.5) * 3, Math.cos(a) * sp, Math.sin(a) * sp, clump ? 0.6 + Math.random() * 0.5 : 0.45 + Math.random() * 0.6, clump ? 1.8 + Math.random() * 0.8 : 0.9 + Math.random() * 0.6, 0, 0);
-  }
-  markStruct(ax - 8, ay - 8, ax + 8, ay + 8);
-  return n;
+  return {
+    tx: t.tx, ty: t.ty, target: t, ok, far, reason: ok ? '' : far ? 'дальше 2 м' : whyNot(t), tiles,
+    time: tiles.reduce((s, u) => s + u.time, 0), key: tiles.map((u) => u.tx + ',' + u.ty).join(';'), snapped,
+  };
 }
+/** a finished dig: its snow cells leave the world into the spoil bag (thrown clear by tickSpoil), dust bursts, the stamina cost by hardness */
+function finishDig(tiles: DigTile[]) {
+  let n = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const u of tiles) {
+    const bx = u.tx * TILE, by = u.ty * TILE;
+    x0 = Math.min(x0, bx); y0 = Math.min(y0, by); x1 = Math.max(x1, bx + TILE); y1 = Math.max(y1, by + TILE);
+    pl.stamina -= 0.006 + 0.02 * u.time;
+    for (let y = by; y < by + TILE; y++) for (let x = bx; x < bx + TILE; x++) {
+      if (!inb(x, y)) continue;
+      const i = idx(x, y);
+      if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) continue;
+      bag.push(dens[i]); n++;
+      set(x, y, M.AIR);
+    }
+  }
+  if (!n) return;
+  tool.digs++;
+  for (let k = 0, nb = 4 + Math.min(10, n >> 2); k < nb; k++) {
+    const u = tiles[k % tiles.length];
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6, sp = 20 + Math.random() * 40;
+    spawn(PK.DUST, u.tx * TILE + Math.random() * TILE, u.ty * TILE + Math.random() * TILE, Math.cos(a) * sp, Math.sin(a) * sp, 0.5 + Math.random() * 0.5, 1.2 + Math.random() * 0.6, 0, 0);
+  }
+  sfx?.dig(Math.min(1, tiles[0].time / DIG_S[3]));
+  markStruct(x0 - 6, y0 - 6, x1 + 6, y1 + 6);
+}
+/** shovel held: progress on the target's tile(s) by their hardness; a finished tile is cleared at once, the progress of a moved target starts over */
+function shovelDig(ax: number, ay: number, dt: number, moveX: number) {
+  const t = aimTarget(ax, ay, moveX);
+  if (!t.ok) {
+    DIG.key = ''; DIG.p = 0;
+    if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say(t.far ? 'Дальше 2 м не достать — подойди или спрыгни в яму' : t.reason); if (!t.far) sfx?.uiDeny(); }
+    return;
+  }
+  tool.digDir = ax >= pl.x ? 1 : -1;
+  if (pl.stamina < 0.03) { say('Нет сил. Передохни'); DIG.key = ''; DIG.p = 0; return; }
+  if (t.key !== DIG.key) { DIG.key = t.key; DIG.p = 0; }
+  DIG.tiles = t.tiles;
+  DIG.p += dt / Math.max(0.02, t.time);
+  if (Math.random() < dt * 14) { // dust off the blade while it bites (no mass)
+    spawn(PK.DUST, t.target.tx * TILE + Math.random() * TILE, t.target.ty * TILE + Math.random() * TILE, (Math.random() - 0.5) * 30, -(10 + Math.random() * 30), 0.45 + Math.random() * 0.4, 1 + Math.random() * 0.6, 0, 0);
+  }
+  if (DIG.p >= 1) { finishDig(t.tiles); DIG.key = ''; DIG.p = 0; }
+}
+/** RMB with the shovel: tamp the target tile (its snow pressed firm, mass kept) */
+function shovelTamp(ax: number, ay: number) {
+  const t = aimTarget(ax, ay, 0);
+  if (t.far) { say('Дальше 2 м не достать'); return; }
+  const u = t.target;
+  if (u.snow === 0 || u.hard || u.body) { say(u.snow === 0 ? 'Тут нечего утрамбовать — целься в снег' : t.reason); sfx?.uiDeny(); return; }
+  if (pl.stamina < 0.03) { say('Нет сил. Передохни'); return; }
+  tampTile(u);
+  pl.stamina -= 0.02; tool.cool = 0.3;
+  say('Утрамбовал');
+  sfx?.dig(0.6);
+  markStruct(u.tx * TILE - 6, u.ty * TILE - 6, u.tx * TILE + TILE + 6, u.ty * TILE + TILE + 6);
+}
+/** Tamp: every column of the tile is pressed into its lowest snow cells, density >= 350 and bond >= 140 where the mass allows.
+ *  The column's density sum is kept exactly (loose cells above are pulled into the firm ones; no mass is made). */
+function tampTile(u: DigTile) {
+  for (let x = u.tx * TILE; x < u.tx * TILE + TILE; x++) compactColumn(x, u.ty * TILE, u.ty * TILE + TILE - 1);
+}
+function compactColumn(x: number, y0: number, y1: number) {
+  let n = 0, S = 0, yb = -1;
+  for (let y = y0; y <= y1; y++) {
+    if (!inb(x, y)) return;
+    const i = idx(x, y);
+    if ((mat[i] === M.SNOW || mat[i] === M.ASH) && !body[i]) { n++; S += dens[i]; yb = y; }
+  }
+  if (!n) return;
+  const k = Math.max(1, Math.min(n, Math.floor(S / 350)));   // firm cells the column's mass makes; never more cells than it had
+  const base = Math.floor(S / k), rem = S - base * k;
+  for (let y = y0; y <= y1; y++) { const i = idx(x, y); if ((mat[i] === M.SNOW || mat[i] === M.ASH) && !body[i]) set(x, y, M.AIR); }
+  for (let j = 0; j < k; j++) set(x, yb - j, M.SNOW, base + (j < rem ? 1 : 0), 150, 0);
+}
+
 // ---- spoil throw: ballistic planner ----
 export const CLUMP_G = 196, CLUMP_LIFE = 4;
 /** Where a clump thrown from (sx,sy) with velocity (vx,vy) comes to rest: mirrors stepParticles (1 cell steps, first non-air cell stops it). */
@@ -216,9 +339,9 @@ export function planSpoil(sx: number, sy: number): ThrowPlan {
   return { ux: Math.cos(a) * side, uy: -Math.sin(a), sp: 330, where: 'blind', dist: 0 };
 }
 /** Tunnel spoil: from inside a roofed gallery the snow is shovelled out along the air path to the nearest open-sky cell (the entrance / shaft) and lands on the
- *  surface 12-30 cells beside it, on the side away from the dig, so the tunnel never refills itself. Returns false when there is no air route out. */
+ *  surface 12-30 cells beside it, on the side away from the dig, so the tunnel never refills itself. ds: density of each cell. Returns false when there is no air route out. */
 const bfsSeen = new Uint16Array(W * H); let bfsStamp = 0;
-function tunnelSpoil(n: number): boolean {
+function tunnelSpoil(ds: number[]): boolean {
   if (++bfsStamp > 65000) { bfsSeen.fill(0); bfsStamp = 1; }
   const sx0 = Math.round(pl.x), sy0 = Math.round(pl.y) - 4;
   const q = new Int32Array(9000); let qh = 0, qt = 0;
@@ -239,51 +362,41 @@ function tunnelSpoil(n: number): boolean {
   tool.bfs = qt;
   if (ex < 0) return false;
   const side = -tool.digDir;
-  const dn = Math.max(120, Math.min(400, Math.round(tool.loadDens * 0.8)));
   let xr = ex, xl = ex; // the air span at the exit row (the shaft / entrance): the heap goes beside it, never into it
   while (xr - ex < 80 && inb(xr + 1, ey) && (openAir(idx(xr + 1, ey)) || isGranular(idx(xr + 1, ey)))) xr++;
   while (ex - xl < 80 && inb(xl - 1, ey) && (openAir(idx(xl - 1, ey)) || isGranular(idx(xl - 1, ey)))) xl--;
   const base = side > 0 ? xr : xl;
-  for (let k = 0; k < n; k++) {
+  for (let k = 0; k < ds.length; k++) {
     const x = Math.max(2, Math.min(W - 3, base + side * (6 + Math.floor(Math.random() * 80)))); // spread over ~4 m so the heap stays low and does not slide back into the entrance
     let y = Math.max(1, ey - 130); while (y < H - 3 && mat[idx(x, y)] === M.AIR) y++;
-    spawn(PK.CLUMP, x, y - 5 - Math.random() * 3, side * (4 + Math.random() * 8), -6, CLUMP_LIFE, 1, dn, 0);
+    spawn(PK.CLUMP, x, y - 5 - Math.random() * 3, side * (4 + Math.random() * 8), -6, CLUMP_LIFE, 1, ds[k], 0);
   }
   return true;
 }
-export function throwLoad(ax: number, ay: number, auto: boolean) {
-  if (tool.load < 1) return;
-  if (auto && tool.tun && tunnelSpoil(Math.round(tool.load))) {
-    tool.outs++;
-    tool.load = 0; tool.loadDens = 0; loadWarned = false; sfx?.throwSnow(); pl.stamina -= 0.01; return;
-  }
-  if (auto) tool.ins++;
+/** Snow dug out and not thrown yet: the density of each cell. It is mass in flight (the mass audit counts it). */
+const bag: number[] = [];
+let flushIn = 0;
+/** sum of the densities of the snow dug out and waiting to be thrown */
+export function spoilInFlight(): number { let s = 0; for (const d of bag) s += d; return s; }
+/** per frame: the bag is thrown every 0.25 s, or at once when it holds 60 cells */
+export function tickSpoil(dt: number) {
+  flushIn -= dt;
+  if (bag.length && (flushIn <= 0 || bag.length >= 60)) flushSpoil();
+}
+/** Throw the bag clear: under a roof the tunnelSpoil route; in the open planSpoil's landing, outside the hole. One clump per cell, with that cell's own density (mass-exact). */
+function flushSpoil() {
+  flushIn = 0.25;
+  const ds = bag.splice(0, bag.length);
   const [sx, sy] = shoulder();
-  let ux: number, uy: number, sp: number;
-  // a throw aimed back into the snow being dug (or right at his feet / on a touch screen, where the aim is the dig spot) is tossed clear automatically
-  if (!auto) {
-    const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1;
-    if (G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai))) {
-      auto = true;
-      // explained once per game, and only where the key is the right-click the text names (touch throws have no such key)
-      if (!G.mobile && !tool.autoTipped) { tool.autoTipped = true; say('Снег из ямы летит сам за спину; ПКМ дальше 1 м — бросок туда, куда целишься'); tool.msgSec = 4.5; }
-    }
+  if (!skyOpen(Math.round(pl.x), Math.round(pl.y - pl.h * 0.5)) && tunnelSpoil(ds)) { tool.outs++; sfx?.throwSnow(); return; }
+  tool.ins++;
+  const p = planSpoil(sx, sy);
+  for (const d of ds) {
+    const j = (Math.random() - 0.5) * 0.04;
+    const vx = (p.ux + j) * p.sp * (0.9 + Math.random() * 0.2), vy = (p.uy + j) * p.sp * (0.9 + Math.random() * 0.2) - 25;
+    if (spawn(PK.CLUMP, sx + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4, vx, vy, CLUMP_LIFE, 1, d, 0) < 0) bag.push(d); // particle pool full: kept for the next throw
   }
-  if (auto) { const p = planSpoil(sx, sy); ux = p.ux; uy = p.uy; sp = p.sp; }
-  else {
-    const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy));
-    ux = dx / L; uy = dy / L; sp = 95 + Math.min(60, L * 1.2);
-  }
-  const n = Math.round(tool.load);
-  for (let k = 0; k < n; k++) {
-    const j = auto ? (Math.random() - 0.5) * 0.04 : (Math.random() - 0.5) * 0.25;
-    const vx = (ux + j) * sp * (auto ? 0.9 + Math.random() * 0.2 : 0.85 + Math.random() * 0.3);
-    const vy = (uy + j) * sp * (auto ? 0.9 + Math.random() * 0.2 : 0.85 + Math.random() * 0.3) - 25;
-    spawn(PK.CLUMP, sx + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4, vx, vy, CLUMP_LIFE, 1, Math.max(120, Math.min(400, Math.round(tool.loadDens * 0.8))), 0);
-  }
-  tool.load = 0; tool.loadDens = 0; loadWarned = false;
   sfx?.throwSnow();
-  pl.stamina -= 0.01;
 }
 
 // ---------------- saw ----------------
@@ -740,12 +853,12 @@ export function toolHud() {
     fire: nf ? { fuel: nf.f.fuel, lit: nf.f.lit, d: nf.d, near: nf.d <= FEED_R } : null,
     sawP: sawProgress(),
     beamMode: BEAM_MODE_NAMES[beamModeIndex()].replace(' (проходимая)', ''),
-    shovelN: Math.round(tool.load),
-    shovelMax: SHOVEL_MAX,
+    digP: DIG.key ? DIG.p : 0,   // shovel: progress of the tile being dug, 0..1
   };
 }
 export function stepFires(dt: number) {
   watchLaid(dt); // per-frame tool watch: blocks that crumble just after being laid
+  tickSpoil(dt); // dug snow is thrown clear (the spoil bag)
   const gm = dt * G.timeScale; // game minutes
   for (let k = G.fires.length - 1; k >= 0; k--) {
     const f = G.fires[k];
@@ -883,19 +996,12 @@ export function eat(): boolean {
 // ---------------- dispatch ----------------
 let fireLatch = false;   // set by a fire click, released by idleTool (button up)
 let placeLatch = false;  // same for beam / block: one placement per press, however long LMB is held
-export function usePrimary(ax: number, ay: number, dt: number) {
+export function usePrimary(ax: number, ay: number, dt: number, moveX = 0) {
   tool.cool -= dt;
   const [x, y] = reachPoint(ax, ay);
   const id = TOOLS[tool.cur].id;
   if (id === 'saw') { if (tool.cool <= 0) saw(x, y, dt); return; }
-  if (id === 'shovel') {
-    if (tool.cool <= 0) {
-      if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; }
-      else lastDigN = dig(x, y);
-    }
-    shovelStall(dt, !inReach(ax, ay)); // after the bite, so the reach hint is the message shown
-    return;
-  }
+  if (id === 'shovel') { shovelDig(ax, ay, dt, moveX); return; }
   if (tool.cool > 0) return;
   if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; return; }
   if (id === 'axe') chop(x, y);
@@ -906,10 +1012,10 @@ export function usePrimary(ax: number, ay: number, dt: number) {
 export function useSecondary(ax: number, ay: number) {
   const [x, y] = reachPoint(ax, ay);
   const id = TOOLS[tool.cur].id;
-  if (id === 'shovel') { if (tool.load > 0) throwLoad(ax, ay, false); else say('Лопата пустая. Сначала набери снег'); }
+  if (id === 'shovel') { shovelTamp(ax, ay); }
   else if (id === 'saw' || id === 'block') place('block', x, y);
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);
 }
-export function idleTool(dt: number) { fireLatch = false; placeLatch = false; stallT = 0; lastDigN = -1; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 0.25); }
+export function idleTool(dt: number) { fireLatch = false; placeLatch = false; DIG.key = ''; DIG.p = 0; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 0.25); }
 export { CELL };

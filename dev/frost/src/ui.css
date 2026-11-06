@@ -537,31 +537,58 @@ body { position: fixed; inset: 0; width: 100%; }
   border: 1.5px solid var(--frost-2); box-shadow: 0 0 0 1.5px rgba(3, 6, 11, 0.55), 0 0.4em 1em var(--shade);
 }
 
-/* compact touch cluster (bottom right): tool wheel, actions wheel, put / throw, jump (holdable) */
+/* compact touch cluster (bottom right): every action is its own button around a big JUMP (holdable).
+   The anchor is the JUMP centre (a 0x0 box, so the cluster keeps its place inside the safe-area insets).
+   A button sits at --x / --y from the anchor (px, negative = left / up) with diameter --d.
+   Inner ring (--r1): Взять left, Инструмент up, Положить on the diagonal (the big one, next to JUMP).
+   Outer arc (--rx / --ry, flattened so it stays clear of the right-hand HUD): Рентген, Ждать, Поворот, Съесть. */
 .tcluster {
-  --J: clamp(54px, 14.5vh, 66px); --P: clamp(50px, 13vh, 60px); --K: clamp(46px, 11.6vh, 54px);
-  position: absolute; right: var(--pad-r); bottom: var(--pad-b); display: grid; grid-template-columns: var(--P) var(--J); grid-template-rows: var(--K) var(--J);
-  gap: 9px 10px; justify-items: center; align-items: center; pointer-events: none;
+  --J: clamp(52px, 14.5vh, 60px);     /* jump */
+  --P: clamp(48px, 13.6vh, 56px);     /* Положить */
+  --S: clamp(44px, 11.6vh, 48px);     /* secondary buttons: never under 44 px */
+  --X: clamp(38px, 10vh, 42px);       /* Рентген: small; its hit area is grown by ::before */
+  --r1: clamp(70px, 19vh, 80px);      /* inner ring radius */
+  --rx: clamp(150px, 26vw, 230px);    /* outer arc: horizontal radius */
+  --ry: clamp(100px, 30vh, 130px);    /* outer arc: vertical radius */
+  position: absolute; right: calc(var(--pad-r) + var(--J) / 2); bottom: calc(var(--pad-b) + var(--J) / 2);
+  width: 0; height: 0; pointer-events: none;
 }
 .cbtn {
-  position: relative; pointer-events: auto; touch-action: none; cursor: pointer; padding: 0; display: grid; place-items: center; border-radius: 50%;
+  --d: var(--S); --x: 0px; --y: 0px;
+  position: absolute; left: calc(var(--x) - var(--d) / 2); top: calc(var(--y) - var(--d) / 2); width: var(--d); height: var(--d);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; margin: 0; border-radius: 50%;
+  pointer-events: auto; touch-action: none; cursor: pointer;
   color: var(--frost-2); border: 1.5px solid var(--plate-line-hi);
   background: radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.14), transparent 55%), linear-gradient(165deg, rgba(34, 54, 80, 0.74), rgba(7, 13, 23, 0.8));
   box-shadow: inset 0 1px 0 var(--plate-inset), inset 0 0 0 3px rgba(3, 6, 11, 0.35), 0 0.3em 0.9em var(--shade);
-  transition: transform 0.12s var(--ease), border-color 0.2s, box-shadow 0.2s, color 0.2s;
+  transition: transform 0.12s var(--ease), border-color 0.2s, box-shadow 0.2s, color 0.2s, opacity 0.25s, filter 0.25s;
 }
-.cb-tool, .cb-acts { width: var(--K); height: var(--K); }
-.cb-put { width: var(--P); height: var(--P); }
-.cb-jump { width: var(--J); height: var(--J); border-color: rgba(143, 211, 255, 0.7); color: var(--frost); }
-.cbtn .ico { width: 1.95em; height: 1.95em; }
-.cb-jump .ico { width: 2.3em; height: 2.3em; stroke-width: 1.8; }
+/* placement: diameter and centre offset from the anchor */
+.cb-jump { --d: var(--J); border-color: rgba(143, 211, 255, 0.7); color: var(--frost); }
+.cb-put { --d: var(--P); --x: calc(var(--r1) * -0.7071); --y: calc(var(--r1) * -0.7071); }
+.cb-take { --x: calc(var(--r1) * -1); }
+.cb-tool { --y: calc(var(--r1) * -1); }
+.cb-xray { --d: var(--X); --x: calc(var(--rx) * -0.9903); --y: calc(var(--ry) * -0.1392); }
+.cb-wait { --x: calc(var(--rx) * -0.848); --y: calc(var(--ry) * -0.5299); }
+.cb-rot { --x: calc(var(--rx) * -0.5592); --y: calc(var(--ry) * -0.829); }
+.cb-eat { --x: calc(var(--rx) * -0.2079); --y: calc(var(--ry) * -0.9781); }
+.cbtn .ico { width: calc(var(--d) * 0.42); height: calc(var(--d) * 0.42); }
+.cb-jump .ico { width: calc(var(--d) * 0.46); height: calc(var(--d) * 0.46); stroke-width: 1.8; }
 .cb-ico { display: grid; place-items: center; }
+/* tiny caption under the icon; hidden on the short phones, where the buttons are icon-only */
+.cb-lab { font: 700 10.5px / 1 var(--font-ui); letter-spacing: 0.03em; white-space: nowrap; color: inherit; pointer-events: none; }
+.cb-xray::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
 .cbtn.down { transform: scale(0.92); background: radial-gradient(circle at 50% 50%, rgba(143, 211, 255, 0.4), rgba(20, 40, 64, 0.9)); border-color: var(--frost); }
 .cbtn.open { border-color: var(--frost); color: var(--frost); box-shadow: inset 0 1px 0 var(--plate-inset), 0 0 1.1em rgba(143, 211, 255, 0.35); }
 .cbtn.on { border-color: var(--ice); color: var(--ice); box-shadow: inset 0 1px 0 var(--plate-inset), 0 0 1em rgba(143, 211, 255, 0.3); }
+.cbtn.ready { border-color: rgba(143, 211, 255, 0.7); color: var(--ice); }
+.cbtn.glow { border-color: var(--ice); color: var(--ice); animation: ice-breathe 1.6s ease-in-out infinite; }
 .cbtn.urgent { border-color: var(--ember); color: var(--ember); background: radial-gradient(circle at 30% 22%, rgba(255, 171, 69, 0.3), transparent 60%), linear-gradient(165deg, rgba(74, 46, 20, 0.8), rgba(14, 12, 12, 0.85)); animation: ember-pulse 1.3s ease-in-out infinite; }
+/* not useful right now: dimmed in place, so the layout never reflows */
+.cbtn.dim { opacity: 0.38; filter: saturate(0.3); }
 .cb-tool.fire .ico, .cb-put.fire .ico { color: var(--ember); }
 .cb-tool.empty .cb-ico { opacity: 0.45; }
+@media (max-height: 380px) { .cb-lab { display: none; } }
 /* dashed outer ring = "opens a wheel" */
 .wheel-opener::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1.5px dashed rgba(143, 211, 255, 0.4); pointer-events: none; }
 .cb-badge { position: absolute; right: -4px; top: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: var(--night-1); border: 1px solid var(--plate-line-hi); font: 600 10.5px / 1 var(--font-mono); color: var(--frost); pointer-events: none; }
@@ -575,7 +602,7 @@ body { position: fixed; inset: 0; width: 100%; }
 .cb-tool.full .cb-load i { background: var(--frost); }
 
 /* ------------------------------------------------------------------
-   Radial wheel (tools / actions): a glass dial with six enamel caps
+   Radial wheel (the six tools): a glass dial with six enamel caps
    ------------------------------------------------------------------ */
 .wheel {
   position: fixed; inset: 0; z-index: 15; visibility: hidden; pointer-events: none; touch-action: none; cursor: default;
@@ -629,11 +656,7 @@ body { position: fixed; inset: 0; width: 100%; }
 .wheel-item.hot { transform: translate(calc(var(--ux) * var(--R)), calc(var(--uy) * var(--R))) scale(1.12); border-color: var(--frost); color: var(--frost); box-shadow: inset 0 1px 0 var(--plate-inset), 0 0 1.4em rgba(143, 211, 255, 0.5), 0 0.4em 1em rgba(0, 0, 0, 0.5); }
 .wheel-item.hot .wi-label { color: var(--frost); }
 .wheel-item.sel { border-color: var(--frost); box-shadow: inset 0 1px 0 var(--plate-inset), 0 0 0 1px rgba(234, 243, 251, 0.35), 0 0 1.2em rgba(143, 211, 255, 0.3), 0 0.3em 0.9em rgba(0, 0, 0, 0.5); }
-.wheel-item.on, .wheel-item.ready { border-color: var(--ice); color: var(--ice); }
-.wheel-item.on .wi-label { color: var(--ice); }
 .wheel-item.fire .ico { color: var(--ember); }
-.wheel-item.urgent { border-color: var(--ember); color: var(--ember); background: radial-gradient(circle at 30% 22%, rgba(255, 171, 69, 0.3), transparent 60%), linear-gradient(165deg, rgba(74, 46, 20, 0.95), rgba(14, 12, 12, 0.97)); }
-.wheel-item.urgent .wi-label { color: var(--ember); }
 .wheel-item.off, .wheel-item.empty { opacity: 0.5; filter: saturate(0.55); }
 .wheel-item.off.hot, .wheel-item.empty.hot { opacity: 0.8; }
 .wheel:not(.open) .wheel-item.off, .wheel:not(.open) .wheel-item.empty { opacity: 0; }

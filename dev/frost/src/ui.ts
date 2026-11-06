@@ -10,14 +10,12 @@ export interface HudData {
   tool: number; tools: { id: string; name: string; key: string; count?: number; enabled: boolean }[]; // ids: shovel, saw, axe, beam, block, fire
   inv: { logs: number; branches: number; matches: number; food: number; blocks: number; snowshoes: boolean; thermos: number };
   hint: string | null;
-  shovelLoad: number; // 0..1
   waiting: boolean;
   // live readouts (tools.ts toolHud)
   fire: { fuel: number; lit: boolean; d: number; near: boolean } | null; // nearest campfire; fuel in game minutes; near = within the 2 m feed radius
   sawP: number;       // share of the current cut done, 0..1
   beamMode: string;   // beam shape name, e.g. «брус 1 м»
-  shovelN: number;    // cells in the shovel
-  shovelMax: number;
+  digP: number;       // shovel: progress of the tile being dug, 0..1 (0 = not digging)
   encl: Enclosure;    // the air pocket the hero stands in (main.ts enclosureAt, 4 Hz)
 }
 /** closed: the air pocket reaches no open sky; open: it does (ang = degrees, screen axes, toward the nearest opening, null when standing in it);
@@ -37,12 +35,13 @@ function fireText(f: NonNullable<HudData['fire']>): string {
 // ---------------------------------------------------------------- icons
 // Hand-drawn 24×24 line icons (stroke = currentColor). Deliberately a little uneven.
 const ICONS: Record<string, string> = {
-  shovel: '<path d="M17.8 3.2l3 3.1M15.3 5.6l3.4 3.4M16.9 4.6L11.2 10.3"/><path d="M11.2 10.3l2.9 2.9-4.3 5.9c-1.1 1.3-3 1.3-4.1.2l-.7-.7c-1.1-1.1-1-3 .3-4.1z"/>',
-  saw: '<path d="M2.8 11.6L16.6 8.1l.7 3-1.9.5-1 1.9-2-.7-1.5 2.2-1.9-1-1.8 2.2-1.6-1.2-2.8 1.7z"/><path d="M16.6 8.1l4.3-1.1.8 3.6-4.4 1"/>',
-  axe: '<path d="M4.6 20.3L15.7 6.6"/><path d="M13.6 5.4c2.4-2 5.6-1.8 7.2.5l-2 4.1c-1.6-.4-3.3-1.3-5.2-2.4z"/>',
-  beam: '<path d="M2.8 8.2h14.4v7.6H2.8z"/><path d="M17.2 8.2c2.2 0 3.9 1.7 3.9 3.8s-1.7 3.8-3.9 3.8"/><path d="M17.2 10.3c1 0 1.8.8 1.8 1.7s-.8 1.7-1.8 1.7"/><path d="M5 11h7.5M5 13.2h5.2"/>',
-  block: '<path d="M12 2.8l8 4.5v9.4l-8 4.5-8-4.5V7.3z"/><path d="M4 7.3l8 4.6 8-4.6M12 11.9v9.3"/><path d="M6.4 14.2l1.2.7M16.5 5.9l1 .6" opacity=".6"/>',
-  fire: '<path d="M12.2 2.4c.9 3.4 5 5.4 5 9.6a5.1 5.1 0 0 1-10.2.2c0-2 .9-3.4 2-4.5.3 1.5.9 2.2 1.7 2.5-.6-2.4-.2-5.2 1.5-7.8z"/><path d="M12.1 15.5c-1 .8-1.4 1.5-1.4 2.3a1.4 1.4 0 0 0 2.8 0c0-.8-.5-1.5-1.4-2.3z"/><path d="M5.4 21l13.2-2.4M5.6 18.4l12.9 2.7" opacity=".8"/>',
+  shovel: '<g stroke-width="1.75"><g transform="translate(18.4 5.2) rotate(135)"><path d="M0 -2.6C-4.4 -2.6 -4.4 2.6 0 2.6Z" fill="currentColor" fill-opacity=".14"/><path d="M0 0H9.6" stroke-width="2"/><path d="M9.4 -3.2L13.4 -4.9Q18.2 -5.3 18.2 0Q18.2 5.3 13.4 4.9L9.4 3.2Z" fill="currentColor" fill-opacity=".22"/><path d="M11.6 0H16.4" stroke-width="1.1" opacity=".65"/></g></g>',
+  saw: '<g stroke-width="1.75"><g transform="translate(2 18.7) rotate(-35)"><rect x="1.6" y="-3.6" width="5" height="5.6" rx="1.8" fill="currentColor" fill-opacity=".14"/><path d="M6.6 -2.4H20.4L22.6 0.2L21.4 2.2H6.6Z" fill="currentColor" fill-opacity=".2"/><path d="M7.2 2.2L8.8 4.1L10.4 2.2L12 4.1L13.6 2.2L15.2 4.1L16.8 2.2L18.4 4.1L20 2.2"/></g></g>',
+  axe: '<g stroke-width="1.75"><g transform="translate(-1.5 0.5) rotate(38 12 12)"><path d="M11.7 22.4C10.8 17 11.5 12.4 11.8 7"/><path d="M7.6 4.6Q7.6 3.1 9.2 3.1L18.6 2.6Q21.6 4.2 21.4 6.6Q21.2 9.6 16.2 11.2L12.8 10.2L9.2 10.4Q7.6 10.4 7.6 8.8Z" fill="currentColor" fill-opacity=".22"/><path d="M10.2 5.2H12.6V8.6H10.2Z" stroke-width="1.1" opacity=".75"/><path d="M18.8 5C20.3 5.8 20.6 8 19.6 9.4" stroke-width="1.1" opacity=".6"/></g></g>',
+  beam: '<g stroke-width="1.75"><path d="M17.5 6.2H4.6Q2.8 12 4.6 17.8H17.5Z" fill="currentColor" fill-opacity=".18"/><path d="M6.4 9.6H10.2M9.6 14.6H13.4" stroke-width="1.2" opacity=".6"/><ellipse cx="17.5" cy="12" rx="2.9" ry="5.8" fill="currentColor" fill-opacity=".3"/><ellipse cx="17.5" cy="12" rx="1.6" ry="3.2" stroke-width="1.1" opacity=".7"/><ellipse cx="17.5" cy="12" rx=".6" ry="1" fill="currentColor" stroke-width="1"/></g>',
+  door: '<g stroke-width="1.75"><rect x="5.5" y="3" width="13" height="18" rx="1.2" fill="currentColor" fill-opacity=".18"/><path d="M9.8 3V21M14.2 3V21" stroke-width="1.2" opacity=".7"/><path d="M5.5 8.2H18.5M5.5 15.8H18.5" stroke-width="1.2" opacity=".7"/><circle cx="15.8" cy="12" r=".9" fill="currentColor" stroke-width="1"/></g>',
+  block: '<g stroke-width="1.75"><path d="M12 2.8L21.2 7.6L12 12.4L2.8 7.6Z" fill="currentColor" fill-opacity=".3"/><path d="M2.8 7.6L12 12.4V21.4L2.8 16.6Z" fill="currentColor" fill-opacity=".14"/><path d="M12 12.4L21.2 7.6V16.6L12 21.4Z" fill="currentColor" fill-opacity=".05"/><path d="M4.2 12.8L10.6 16.2M14 15.9L19.6 12.95" stroke-width="1.2" opacity=".65"/></g>',
+  fire: '<g stroke-width="1.75"><path d="M5.2 21L10.8 5.6M18.8 21L13.2 5.6"/><path d="M3.8 21.2H20.2"/><path d="M12 9.4C13.6 11.6 15.6 13.2 15.4 15.6C15.2 17.4 13.8 18.2 12 18.2C10.2 18.2 8.8 17.4 8.6 15.6C8.5 13.9 9.6 12.8 10.2 11.4C10.8 12.3 11.2 12.7 11.7 12.9C11.4 11.5 11.2 10.5 12 9.4Z" fill="currentColor" fill-opacity=".25"/><path d="M12 14.6C12.8 15.6 13.4 16.2 13.1 17C12.9 17.5 11.1 17.5 10.9 17C10.6 16.2 11.2 15.6 12 14.6Z" fill="currentColor" fill-opacity=".7" stroke-width="1"/></g>',
   branches: '<path d="M3.5 20.3L20 5"/><path d="M9.6 14.6l-.8-4.9M13.8 10.8l5.3.8M7 17l-3.3-.7M16 8l.4-3.4"/>',
   matches: '<path d="M5 20L16.3 5.6M10 20l9.5-12"/><circle cx="17.2" cy="4.6" r="1.9"/><circle cx="20.5" cy="6.6" r="1.7"/>',
   food: '<path d="M5 8.2c0-1.2 3.1-2.2 7-2.2s7 1 7 2.2v8.4c0 1.2-3.1 2.2-7 2.2s-7-1-7-2.2z"/><path d="M5 8.2c0 1.2 3.1 2.2 7 2.2s7-1 7-2.2"/><path d="M5.2 13.2c1.7 1 4 1.4 6.8 1.4s5.100-.4 6.800-1.400" opacity=".6"/>',
@@ -207,7 +206,7 @@ const xrGradient = (d: XrayDef) => 'linear-gradient(90deg,' + Array.from({ lengt
 const XR_TOAST = ['Рентген выкл.', 'Рентген 1/3 · плотность', 'Рентген 2/3 · спекание снега', 'Рентген 3/3 · температура'];
 
 const TOOL_SUB: Record<string, string> = {
-  shovel: 'копать, бросать снег', saw: 'пилить снежные блоки', axe: 'рубить деревья', beam: 'строить из брёвен', block: 'ставить блоки', fire: 'разжечь костёр',
+  shovel: 'копать плитки, ПКМ — утрамбовать', saw: 'пилить снежные блоки', axe: 'рубить деревья', beam: 'строить из брёвен', block: 'ставить блоки', fire: 'разжечь костёр',
 };
 
 export class UI {
@@ -246,7 +245,6 @@ export class UI {
   private chipsTid = 0;
   private hintTid = 0;
   private compactMQ: MediaQueryList | null = null;
-  private btnEat!: HTMLElement;
   private warnLine!: Cached;
   private warnText!: Cached;
   private reticleEl: HTMLElement;
@@ -275,16 +273,21 @@ export class UI {
   private fireChip!: HTMLElement;
   private fireChipN!: Cached;
   private beltSig = '';
-  private btnWait!: HTMLElement;
-  // radial wheels (touch layout buttons / Q on PC)
+  // the radial wheel of the six tools (touch: the tool button; PC: hold Q)
   private toolWheel!: Wheel;
-  private actWheel!: Wheel;
   private lastH: HudData | null = null;
+  // touch cluster: one button per action
   private cbTool!: HTMLElement;
   private cbToolIco!: HTMLElement;
   private cbToolBadge!: HTMLElement;
   private cbToolLoad!: HTMLElement;
-  private cbActs!: HTMLElement;
+  private cbTake!: HTMLElement;
+  private cbEat!: HTMLElement;
+  private cbEatN!: HTMLElement;
+  private cbWait!: HTMLElement;
+  private cbRot!: HTMLElement;
+  private cbXray!: HTMLElement;
+  private cbXrayN!: HTMLElement;
   private cbPut!: HTMLElement;
   private cbJump!: HTMLElement;
 
@@ -676,9 +679,9 @@ export class UI {
     });
   }
 
-  /** Live caption for a tool ('' = none): shovel load, cut progress, beam shape, campfire fuel. Shared by the belt tags and the wheel. */
+  /** Live caption for a tool ('' = none): shovel dig %, cut progress, beam shape, campfire fuel. Shared by the belt tags and the wheel. */
   private liveSub(id: string, h: HudData): string {
-    if (id === 'shovel') return h.shovelN >= 40 ? 'за спину' : h.shovelN > 0 ? `${h.shovelN}/${h.shovelMax}` : '';   // near the auto-dump (44) the label says where the snow goes
+    if (id === 'shovel') return h.digP > 0.01 ? `копает ${Math.round(h.digP * 100)}%` : '';
     if (id === 'saw') return this.sawLive(h) ? `Пилю… ${Math.round(h.sawP * 100)}%` : '';
     if (id === 'beam') return h.beamMode;
     if (id === 'fire') return h.fire ? fireText(h.fire) : '';
@@ -689,7 +692,7 @@ export class UI {
   /** Meter 0..1 for a tool, quantised to 1/40 so the bar is not redrawn for tiny changes (0 = hidden). */
   private toolBar(id: string, h: HudData): number {
     const q = (v: number) => Math.round(clamp(v, 0, 1) * 40) / 40;
-    if (id === 'shovel') return q(h.shovelLoad);
+    if (id === 'shovel') return q(h.digP);
     if (id === 'saw') return this.sawLive(h) ? q(h.sawP) : 0;
     if (id === 'fire') return h.fire ? q(h.fire.fuel / FIRE_FULL_MIN) : 0;
     return 0;
@@ -853,7 +856,7 @@ export class UI {
         g.root.classList.toggle('empty', t.count === 0);
         g.root.setAttribute('aria-pressed', String(i === h.tool));
       });
-      // live line under the name (shovel load, cut %, beam shape, fire fuel) and the 4 px meter under it
+      // live line under the name (shovel dig %, cut %, beam shape, fire fuel) and the 4 px meter under it
       this.txt(g.sub, this.liveSub(t.id, h));
       const bar = this.toolBar(t.id, h);
       this.m('tb' + i, bar, () => {
@@ -867,8 +870,8 @@ export class UI {
     const ct = h.tools[h.tool];
     if (ct) {
       this.m('cbtool', ct.id, () => { this.cbToolIco.innerHTML = ico(TOOL_ICON[ct.id] ?? 'block'); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
-      // badge: the count, or the live number while the shovel carries snow / the saw cuts
-      const live = ct.id === 'shovel' && h.shovelN > 0 ? String(h.shovelN) : ct.id === 'saw' && h.sawP > 0.005 ? `${Math.round(h.sawP * 100)}%` : '';
+      // badge: the count, or the live % while the saw cuts
+      const live = ct.id === 'saw' && h.sawP > 0.005 ? `${Math.round(h.sawP * 100)}%` : '';
       const cnt = live || (ct.count === undefined ? '' : String(ct.count));
       this.m('cbcnt', cnt, () => { this.cbToolBadge.textContent = cnt; this.cbToolBadge.style.display = cnt ? '' : 'none'; this.cbToolBadge.classList.toggle('live', !!live); this.cbTool.classList.toggle('empty', ct.count === 0); });
       const bar = this.toolBar(ct.id, h);

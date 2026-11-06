@@ -1,4 +1,4 @@
-// Radial selection wheel (tools / actions). Pure DOM; styled in ui.css (.wheel*). Opens around a point (clamped to the screen),
+// Radial selection wheel (the six tools). Pure DOM; styled in ui.css (.wheel*). Opens around a point (clamped to the screen),
 // closes on tap outside / centre / pick. Three ways to pick:
 //   tap      – open (tap on the opener), then tap an item
 //   drag     – press the opener, drag onto an item, release (flick)
@@ -10,7 +10,7 @@ export interface WheelItem {
   badge?: string;          // small count pill
   bar?: number;            // 0..1 live meter along the item's foot (shovel load, cut progress, fire fuel); absent = none
   sub?: string;            // hub caption while the item is highlighted (or selected, when nothing is)
-  cls?: string;            // sel | on | off | empty | urgent
+  cls?: string;            // sel | off | empty | fire
 }
 
 export type WheelMode = 'tap' | 'drag' | 'hold';
