@@ -1198,7 +1198,7 @@ export class Renderer {
 
   render(_dt: number) {
     if (this.lost) return;
-    const gl = this.gl, c = G.cam, pr = prof.on;
+    const gl = this.gl, c = G.cam, pr = prof.on && !prof.nosync;
     let t = pnow();
     this.frame++;
     c.vw = this.cssW / c.zoom; c.vh = this.cssH / c.zoom;
@@ -1229,7 +1229,7 @@ export class Renderer {
     gl.uniform3f(uc.uAmb, this.amb[0], this.amb[1], this.amb[2]); gl.uniform3f(uc.uDirCol, this.dir[0], this.dir[1], this.dir[2]);
     if (nl > 0) { gl.uniform4fv(uc['uLP[0]'], this.lp); gl.uniform3fv(uc['uLC[0]'], this.lc); }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (pr) { pend('cellSubmit', t); this.sync(true); pend('gpuCell', t); t = pnow(); }
+    if (prof.on) { pend('cellSubmit', t); if (pr) { this.sync(true); pend('gpuCell', t); } t = pnow(); }
 
     // ---- background columns ----
     if (this.progCol) {
@@ -1263,7 +1263,7 @@ export class Renderer {
     gl.uniform3f(u.uSkyTop, this.top[0], this.top[1], this.top[2]); gl.uniform3f(u.uSkyHor, this.hor[0], this.hor[1], this.hor[2]);
     gl.uniform4f(u.uBody, L.sbx, L.sby, L.mbx, L.mby);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (pr) { pend('scrSubmit', t); this.sync(false); pend('gpuScr', t); t = pnow(); }
+    if (prof.on) { pend('scrSubmit', t); if (pr) { this.sync(false); pend('gpuScr', t); } t = pnow(); }
 
     // ---- particles ----
     this.fillParticles();
@@ -1284,6 +1284,6 @@ export class Renderer {
       gl.disable(gl.BLEND);
     }
     gl.bindVertexArray(null);
-    if (pr) { pend('particleDraw', t); this.sync(false); pend('gpuPart', t); }
+    if (prof.on) { pend('particleDraw', t); if (pr) { this.sync(false); pend('gpuPart', t); } }
   }
 }

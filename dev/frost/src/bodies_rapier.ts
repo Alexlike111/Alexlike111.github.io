@@ -10,6 +10,7 @@ import {
   mat, dens, bond, flags, body as bodyGrid, awake, gpuDirty, solidVer,
 } from './world';
 import { spawn, PK } from './particles';
+import { pnow, pend as pprof } from './prof';
 
 export type BodyKind = 'tree' | 'slab' | 'beam' | 'debris';
 /** Thin planck-like wrapper around a Rapier rigid body. Pose is cached after every physics step. */
@@ -510,7 +511,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   if (!pw) initBodies();
   clock += dt;
   if (bodies.size === 0) { updateColliders(); return retObj; }
-  updateColliders();
+  { const t1 = pnow(); updateColliders(); pprof('bColl', t1); }
 
   acc = Math.min(acc + dt, FIXED * 4);
   while (acc >= FIXED) {
@@ -523,9 +524,9 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
       r.b.setLinearVelocity({ x: v.x * (1 - k), y: v.y * (1 - k * 0.7) });
       r.b.setAngularVelocity(r.b.getAngularVelocity() * (1 - k * 0.5));
     }
-    pw!.step(eq!);
-    drainImpacts();
-    for (const r of bodies.values()) r.b.sync();
+    { const t1 = pnow(); pw!.step(eq!); pprof('bStep', t1); }
+    { const t1 = pnow(); drainImpacts();
+    for (const r of bodies.values()) r.b.sync(); pprof('bSync', t1); }
     for (const [id, h] of hitMax) {
       const r = bodies.get(id); if (!r) continue;
       if (h.dv > 0.6) {
@@ -545,6 +546,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   shatterQ.clear();
 
   const outOfWorld = outOfWorldBuf, settled = settledBuf; outOfWorld.length = 0; settled.length = 0;
+  const tStamp = pnow();
   for (const r of bodies.values()) {
     const p = r.b.getPosition();
     if (p.y > H * CELL + 10 || p.x < -10 || p.x > W * CELL + 10) { outOfWorld.push(r); continue; }
@@ -555,6 +557,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
     }
     stampBody(r);
   }
+  pprof('bStamp', tStamp);
   for (const r of outOfWorld) removeBody(r, false);
   for (const r of settled) removeBody(r, true);
   return retObj;

@@ -7,6 +7,7 @@ import {
   mat, dens, bond, flags, body as bodyGrid, awake, gpuDirty, solidVer,
 } from './world';
 import { spawn, PK } from './particles';
+import { pnow, pend as pprof } from './prof';
 
 export type BodyKind = 'tree' | 'slab' | 'beam' | 'debris';
 export interface BodyRec {
@@ -404,7 +405,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   if (!pw) initBodies();
   clock += dt;
   if (bodies.size === 0) { updateColliders(); return { impacts }; }
-  updateColliders();
+  { const t1 = pnow(); updateColliders(); pprof('bColl', t1); }
 
   acc = Math.min(acc + dt, FIXED * 4);
   while (acc >= FIXED) {
@@ -417,7 +418,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
       r.b.setLinearVelocity(planck.Vec2(v.x * (1 - k), v.y * (1 - k * 0.7)));
       r.b.setAngularVelocity(r.b.getAngularVelocity() * (1 - k * 0.5));
     }
-    pw!.step(FIXED, 8, 3);
+    { const t1 = pnow(); pw!.step(FIXED, 8, 3); pprof('bStep', t1); }
     for (const [id, h] of hitMax) {
       const r = bodies.get(id); if (!r) continue;
       if (h.dv > 0.6) {
@@ -437,6 +438,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   shatterQ.clear();
 
   const outOfWorld: BodyRec[] = [], settled: BodyRec[] = [];
+  const tStamp = pnow();
   for (const r of bodies.values()) {
     const p = r.b.getPosition();
     if (p.y > H * CELL + 10 || p.x < -10 || p.x > W * CELL + 10) { outOfWorld.push(r); continue; }
@@ -447,6 +449,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
     }
     stampBody(r);
   }
+  pprof('bStamp', tStamp);
   for (const r of outOfWorld) removeBody(r, false);
   for (const r of settled) removeBody(r, true);
   return { impacts };
