@@ -70,6 +70,11 @@ export class Sound {
       if (!AC) return;
       const c = new AC();
       this.ctx = c;
+      document.addEventListener('visibilitychange', () => {
+        const x = this.ctx; if (!x || x.state === 'closed') return;
+        if (document.visibilityState === 'hidden') void x.suspend().catch(() => {});
+        else void x.resume().catch(() => {});
+      });
       this.master = c.createGain();
       this.ears = c.createBiquadFilter();
       this.ears.type = 'lowpass';

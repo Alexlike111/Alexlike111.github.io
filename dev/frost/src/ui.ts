@@ -145,6 +145,10 @@ const XRAY: Record<number, XrayDef> = {
 
 export class UI {
   onSound: (on: boolean) => void = () => {};
+  onVolume: (v: number) => void = () => {};
+  /** persisted master volume 0..1 (localStorage, try/catch) */
+  volume = ((): number => { try { const v = parseFloat(localStorage.getItem('frost.vol') ?? ''); return isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.8; } catch { return 0.8; } })();
+  private hungerToast = false;
   /** pause-screen physics comparison: switch engine / drop 40 test bodies */
   onEngine: () => void = () => {};
   onStress: () => void = () => {};
@@ -616,6 +620,11 @@ export class UI {
     this.setChip('snowshoes', inv.snowshoes ? 1 : 0, '', inv.snowshoes);
     this.setChip('thermos', inv.thermos, undefined, inv.thermos > 0);
     this.m('lowmatch', inv.matches, () => this.chips.matches.root.classList.toggle('warn', inv.matches <= 1));
+    this.m('starving', h.food < 0.2, () => {
+      this.gauges.food.root.classList.toggle('starving', h.food < 0.2);
+      if (h.food < 0.2 && !this.hungerToast) { this.hungerToast = true; this.toast('Голод: съешь что-нибудь (Q)', 'warn'); }
+      else if (h.food >= 0.2) this.hungerToast = h.food < 0.35 && this.hungerToast;
+    });
     const hungry = h.food < 0.3 && inv.food > 0;
     this.m('hungry', hungry, () => this.chips.food.root.classList.toggle('warn', hungry));
 
@@ -850,10 +859,25 @@ export class UI {
     });
     acts.append(resume, restart);
 
+    // master volume: an instrument slider (range input styled as a fader), persisted
+    const vol = el('div', 'vol');
+    const pct0 = Math.round(this.volume * 100);
+    vol.innerHTML = `<label class="vol-lab cap" for="vol-r">Громкость</label><input id="vol-r" class="vol-r" type="range" min="0" max="100" step="1" value="${pct0}" aria-label="Громкость"><output class="vol-val mono">${pct0}%</output>`;
+    const vr = vol.querySelector('.vol-r') as HTMLInputElement, vo = vol.querySelector('.vol-val') as HTMLElement;
+    const paintVol = () => { vr.style.setProperty('--p', vr.value + '%'); vo.textContent = vr.value + '%'; };
+    paintVol();
+    vr.addEventListener('input', () => {
+      this.volume = Number(vr.value) / 100; paintVol();
+      try { localStorage.setItem('frost.vol', String(this.volume)); } catch { /* storage unavailable */ }
+      this.onVolume(this.volume);
+    });
+    vr.addEventListener('change', () => vr.blur());
+    card.insertBefore(vol, acts.nextSibling);
+
     // physics comparison: kept on purpose, presented as a deliberate "laboratory" drawer (closed by default)
     const lab = el('section', 'lab');
-    lab.setAttribute('aria-label', 'Лаборатория: физика');
-    const toggle = el('button', 'lab-toggle', `<i class="lab-line"></i>${ico('flask', 'lab-ico')}<span>Лаборатория: физика</span>${ico('chev', 'lab-chev')}<i class="lab-line"></i>`);
+    lab.setAttribute('aria-label', 'Лаборатория (сравнение физики)');
+    const toggle = el('button', 'lab-toggle', `<i class="lab-line"></i>${ico('flask', 'lab-ico')}<span>Лаборатория (сравнение физики)</span>${ico('chev', 'lab-chev')}<i class="lab-line"></i>`);
     toggle.type = 'button';
     toggle.setAttribute('aria-expanded', 'false');
     const phys = el('div', 'plate phys');

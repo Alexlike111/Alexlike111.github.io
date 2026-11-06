@@ -186,6 +186,18 @@ export function generate(s = 20261106) {
       placed.push(bx);
     }
   }
+  // start-area dressing: a few young spruces and half-buried rocks on both sides of the start (the dugout drift DRIFT_X-110..+110 and the spawn stay clear).
+  // Deterministic positions, no world rnd() use: the rest of the generation is unchanged. Young = ~4-5 m (the snow here is ~2.3 m deep).
+  for (const [dx, h] of [[-215, 96], [-90, 84], [58, 80], [320, 100], [480, 86]] as const) {
+    const tx = START_X + dx;
+    if (Math.abs(tx - DRIFT_X) < 118 || tx < 60 || (tx > lakeA - 20 && tx < lakeB + 20)) continue;
+    plantTree(tx, h, false);
+  }
+  for (const [dx, hb, sd] of [[-265, 9, 7.7], [-165, 11, 3.1], [380, 10, 31.4]] as const) {
+    const bx = START_X + dx;
+    if (Math.abs(bx - DRIFT_X) < 125 || bx < 100 || trees.some(t => Math.abs(t.x - bx) < 42)) continue;
+    placeBoulder(bx, hb, sd);
+  }
   // supply crates with orange poles
   const loots: string[][] = [
     ['saw', 'food', 'matches'], ['food', 'food'], ['snowshoes', 'food'], ['matches', 'thermos'],
@@ -282,7 +294,7 @@ function placeBoulder(bx: number, h: number, sd: number) {
 
 /** Spruce: tapering trunk + tiered drooping boughs (solid core, ragged tips), snow caps on the upper surfaces.
  *  NEEDLE cells carry their tone in `bond` (0 = light tip / top edge .. 255 = dark core / underside); trunk cells hidden by a bough carry bond 255. */
-export function plantTree(x: number, h: number) {
+export function plantTree(x: number, h: number, well = true) {
   const base = groundY[x];
   const trunkW = Math.max(3, Math.round(h / 40));
   const top = base - h;
@@ -329,8 +341,8 @@ export function plantTree(x: number, h: number) {
     }
     yA += S; ti++;
   }
-  // remove snow inside the crown (tree well)
-  for (let y = top; y < base; y++) for (let dx = -30; dx <= 30; dx++) {
+  // remove snow inside the crown (tree well); young trees (well = false) stand in the snow instead
+  if (well) for (let y = top; y < base; y++) for (let dx = -30; dx <= 30; dx++) {
     const xx = x + dx; if (!inb(xx, y)) continue; const i = idx(xx, y);
     if (mat[i] === M.SNOW && y < base - 6 && Math.abs(dx) < h * 0.2) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; }
   }

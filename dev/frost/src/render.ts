@@ -531,7 +531,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
       c += vec3(.1,.11,.12)*lit*(1.-smoothstep(0.,1.6,dz));                    // rim light along the sunny crest
       c *= bgL;
       c += vec3(.05,.08,.15)*nt*(1.-uStorm)*exp(-dz/7.)*(.5+.5*uVis.y);        // moonlit snowcaps
-      c = mix(c, uSkyHor, clamp(.50-.2*nt+.35*fg + .3*smoothstep(50.,130.,dz),0.,1.));   // far layer: strongest atmospheric haze, thick mist in the valley
+      c = mix(c, uSkyHor, clamp(.40-.2*nt+.35*fg + .3*smoothstep(50.,130.,dz),0.,1.));   // far layer: strongest atmospheric haze, thick mist in the valley
       col = mix(col, c, a);
     }
   }
@@ -1074,6 +1074,9 @@ export class Renderer {
     const nm = 0.7 + 0.55 * moon, nightAmb = set3(this.sB, 0.15 * nm, 0.205 * nm, 0.345 * nm);
     mix3(amb, nightAmb, dayAmb, day);
     amb[0] += 0.10 * dusk; amb[1] += 0.03 * dusk; amb[2] = Math.max(0, amb[2] - 0.03 * dusk);
+    // storm: a cold blue lift of the ambient light (scattered in the snow haze) so slopes, trees and the player never sink into black; strongest at night
+    const lift = storm * (1 - 0.55 * day);
+    amb[0] += 0.13 * lift; amb[1] += 0.19 * lift; amb[2] += 0.30 * lift;
     // directional light (sun / moon)
     const sunI = clamp((day - 0.1) / 0.5) * (1 - 0.85 * storm) * 0.6;
     const sunCol = mix3(this.sC, set3(this.sD, 1, 0.97, 0.9), set3(this.sE, 1, 0.68, 0.42), clamp(dusk * 1.4));
@@ -1092,7 +1095,7 @@ export class Renderer {
     mix3(hor, set3(this.sA, 0.035 * hm, 0.07 * hm, 0.17 * hm), set3(this.sB, 0.66, 0.77, 0.88), day);   // day haze ~ #9fb4c8-ish, never pink
     hor[0] += 0.62 * dusk * 0.7; hor[1] += 0.28 * dusk * 0.7; hor[2] += 0.1 * dusk * 0.7;
     top[0] += 0.16 * dusk * 0.3; top[1] += 0.07 * dusk * 0.3; top[2] += 0.18 * dusk * 0.3;
-    const gk = 0.2 + 0.8 * day, grey = set3(this.sC, 0.60 * gk, 0.65 * gk, 0.74 * gk);
+    const gk = 0.5 + 0.5 * day, grey = set3(this.sC, 0.58 * gk, 0.66 * gk, 0.80 * gk);   // whiteout haze: bright grey-blue, only dimmed (not blackened) at night
     mix3(top, top, set3(this.sD, grey[0] * 0.85, grey[1] * 0.85, grey[2] * 0.85), storm * 0.85);
     mix3(hor, hor, grey, storm * 0.85);
     L.fog = 0.15 + 0.6 * storm + Math.min(0.15, G.snowfall * 2);

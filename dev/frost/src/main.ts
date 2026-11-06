@@ -531,23 +531,35 @@ function drawOverlay(aim: [number, number] | null) {
 // ---------------- adaptive quality ----------------
 // Frame-time EMA drives (1) dynamic resolution of the screen pass (nearest upscale, UI stays crisp), (2) auto drop to quality 0.
 // The GPU headroom is invisible while vsync-locked, so resolution is raised again by probing: try a step up after a hold-off, undo and back off if it hurts.
-const AD = { avg: 16.7, n: 0, t: 0, hold: 0, probing: false, backoff: 4, lastDown: -99 };
+const AD = { avg: 16.7, work: 6, n: 0, t: 0, good: 0, probing: false, probeT: 0, backoff: 3, cool: 0, deep: 0, promoted: false, noPromote: false };
+const AD_BUDGET = 16.7;
+function adaptWork(ms: number) { AD.work += (Math.min(ms, 100) - AD.work) * 0.1; }   // CPU+submit time of a frame: the only headroom visible under vsync
 function adaptQuality(ms: number) {
   if ((window as unknown as { __noAdapt?: boolean }).__noAdapt) return;
   if (ms > 1000 || !running || paused) { AD.n = 0; return; }            // tab switch / title screen / pause: not representative
   AD.avg += (ms - AD.avg) * 0.1; AD.t += ms / 1000; AD.n++;
   if (AD.n < 20 || AD.t < 0.6) return;
-  AD.t = 0;
+  const step = AD.t; AD.t = 0;
   const dyn = renderer.getDyn(), lo = renderer.dynMin();
-  if (AD.avg > 22) {                                                      // under ~45 fps
-    AD.hold = 0;
-    if (AD.probing) { AD.probing = false; AD.backoff = Math.min(40, AD.backoff * 2); }
-    if (dyn > lo + 0.01) { renderer.setDyn(Math.max(lo, dyn * 0.85)); AD.lastDown = G.realTime; AD.n = 0; }
-    else if (G.quality === 1) { G.quality = 0; renderer.setDyn(1); resize(); AD.lastDown = G.realTime; AD.n = 0; }
-  } else if (dyn < 0.999) {
-    AD.hold += 0.6;
-    if (AD.probing && AD.hold > 1.8) { AD.probing = false; AD.backoff = Math.max(4, AD.backoff * 0.7); }
-    else if (!AD.probing && AD.hold > AD.backoff) { AD.probing = true; AD.hold = 0; renderer.setDyn(Math.min(1, dyn / 0.85)); AD.n = 0; }
+  AD.cool = Math.max(0, AD.cool - step);
+  if (AD.avg > 22) {                                                      // under ~45 fps: step down
+    AD.good = 0;
+    if (AD.probing) { AD.probing = false; AD.backoff = Math.min(40, AD.backoff * 2); AD.cool = AD.backoff; }  // failed probe: back off exponentially
+    if (dyn > lo + 0.01) { renderer.setDyn(Math.max(lo, dyn * 0.85)); AD.n = 0; AD.cool = Math.max(AD.cool, AD.backoff); }
+    else if (G.quality === 1) { G.quality = 0; renderer.setDyn(1); resize(); AD.n = 0; if (AD.promoted) AD.noPromote = true; AD.promoted = false; AD.cool = 20; }
+    return;
+  }
+  const headroom = AD.work < AD_BUDGET * 0.7 && AD.avg < 19;              // EMA of frame work under 70% of budget and holding ~60 fps
+  AD.good = headroom ? AD.good + step : 0;
+  if (AD.probing) {                                                       // probe survives 2.4 s without falling: keep it, relax back-off
+    AD.probeT += step;
+    if (AD.probeT > 2.4) { AD.probing = false; AD.backoff = Math.max(3, AD.backoff * 0.7); AD.good = 0; }
+    return;
+  }
+  if (dyn < 0.999) {
+    if (AD.good >= 3 && AD.cool <= 0) { AD.probing = true; AD.probeT = 0; AD.good = 0; renderer.setDyn(Math.min(1, dyn / 0.85)); AD.n = 0; }
+  } else if (G.quality === 0 && !AD.noPromote && AD.work < AD_BUDGET * 0.5 && AD.good >= 15 && AD.cool <= 0) {
+    G.quality = 1; AD.promoted = true; AD.probing = true; AD.probeT = 0; AD.good = 0; resize(); AD.n = 0;   // sustained headroom at full resolution
   }
 }
 
@@ -558,7 +570,7 @@ let waitToggle = false;
 function frame(now: number) {
   requestAnimationFrame(frame);
   if ((window as unknown as { __freeze?: boolean }).__freeze) { renderer.render(0); return; }   // dev/test: hold the world still, keep rendering
-  const t0 = pnow();
+  const t0 = pnow(), tw = performance.now();
   const rawMs = now - last;
   const realDt = Math.max(0, Math.min(0.25, rawMs / 1000)); last = now; // wall clock: game time, survival, fires, weather
   const dt = Math.min(0.05, realDt);                                          // physics / CA / bodies step (2 substeps when the frame is slow)
@@ -658,9 +670,12 @@ function frame(now: number) {
   drawOverlay(aimWorld);
   pend('overlay', pt);
   if (prof.on) pend('frameJS', t0);
+  adaptWork(performance.now() - tw);
 }
 
 ui.onSound = (on) => { sound.init(); sound.setMuted(!on); };
+sound.setVolume(ui.volume);
+ui.onVolume = (v) => { sound.setVolume(v); };
 
 // ---------------- physics engine switch (compare planck vs Rapier) ----------------
 async function toggleEngine() { await setEngine(engine === 'rapier' ? 'planck' : 'rapier'); ui.toast('Движок физики: ' + (engine === 'rapier' ? 'Rapier 2D (wasm)' : 'planck.js'), 'info'); }
