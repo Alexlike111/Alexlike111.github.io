@@ -259,10 +259,11 @@ function stampStation(r: () => number): void {
   for (let y = S + 6; y < F; y += 7) for (let x = PIT0 + 4; x <= PIT1 - 4; x++) put(x, y, M.POLE, 0, 0, 0);
   // Stevenson screen: louvred PLANK box on a post, 1.5 m above the snow
   const SBX = HX + HW + 2, SBW = 14, BT = S - 44, BB = S - 31;
+  // frame: solid top, bottom and side posts; louvres are short slats from each post (gaps between them), so every piece is held
   for (let y = BT; y <= BB; y++) for (let x = SBX; x < SBX + SBW; x++) {
-    const edge = x === SBX || x === SBX + SBW - 1;
-    if (y === BT || y === BB) put(x, y, M.PLANK, 0, 0, 0);
-    else if (edge && (y - BT) % 3 !== 2) put(x, y, M.PLANK, 0, 0, 0);
+    const post = x === SBX || x === SBX + SBW - 1;
+    const slat = (x < SBX + 4 || x >= SBX + SBW - 4) && (y - BT) % 3 !== 2;
+    if (y === BT || y === BB || post || slat) put(x, y, M.PLANK, 0, 0, 0);
   }
   for (let y = BB; y < F; y++) for (const x of [SBX + 6, SBX + 7]) put(x, y, M.POLE, 0, 0, F_VERT);
   // wind vane: a tall post, an orange arm with a white fin
