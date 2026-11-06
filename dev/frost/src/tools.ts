@@ -1,5 +1,5 @@
 // Tools: shovel, snow saw, axe, beams, snow blocks, campfire; crates, eating.
-import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
+import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
 import { G, Fire } from './state';
 import { pl, PH } from './player';
 import { spawn, PK } from './particles';
@@ -110,7 +110,7 @@ function saw(ax: number, ay: number, dt: number) {
   if (Math.random() < dt * 4) { sfx?.sawStroke(); spawn(PK.DUST, ax, ay, (Math.random() - 0.5) * 20, -10, 0.6, 1, 0, 0); }
   if (tool.sawT < 1.0 + avg / 500) return;
   tool.sawT = 0;
-  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { if (inb(x, y) && mat[idx(x, y)] === M.SNOW) set(x, y, M.AIR); }
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { if (inb(x, y) && mat[idx(x, y)] === M.SNOW && !body[idx(x, y)]) set(x, y, M.AIR); }
   inv.blocks.push(Math.round(avg));
   pl.stamina -= 0.05;
   tool.cool = 0.3;
@@ -129,7 +129,7 @@ export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     if (!inb(x, y)) { blocked = true; continue; }
     const i = idx(x, y);
-    if ((rigidAt(i) && !isGranular(i)) || body[i]) blocked = true;
+    if ((rigidAt(i) && !isGranular(i)) || body[i] || mat[i] === M.WATER) blocked = true; // water never turns into snow
     cells.push({ x, y, m: kind === 'block' ? M.SNOW : M.PLANK, d: kind === 'block' ? (inv.blocks[inv.blocks.length - 1] ?? 300) : 500, b: kind === 'block' ? 170 : 0 });
   }
   // the player's own body
@@ -152,14 +152,15 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
   if (g.blocked) { say('Мешает: тут твёрдое или стоишь ты сам'); sfx?.uiDeny(); return; }
   const vert = tool.rot % 2 === 1;
   const d = kind === 'block' ? inv.blocks.pop()! : 500;
+  const bid = kind === 'beam' ? nextBeamId() : 0;
   for (const c of g.cells) {
     const i = idx(c.x, c.y);
-    if (mat[i] !== M.AIR) { // displace loose snow upward
+    if (mat[i] === M.SNOW || mat[i] === M.ASH) { // displace loose snow upward
       let y = c.y - 1; while (y > 0 && mat[idx(c.x, y)] !== M.AIR) y--;
-      if (y > g.y0 - 12 && y > 0) set(c.x, y, M.SNOW, dens[i], 0, F_DIST);
+      if (y > g.y0 - 12 && y > 0) set(c.x, y, mat[i], dens[i], 0, F_DIST);
     }
     if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST);
-    else set(c.x, c.y, M.PLANK, 500, 0, vert ? F_VERT : 0);
+    else { set(c.x, c.y, M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
   if (kind === 'beam') inv.logs--;
   sfx?.place(kind === 'beam');

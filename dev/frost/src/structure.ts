@@ -14,6 +14,14 @@ const PAD = 64;            // rect expansion around marked edits
 const MAXD = 512;          // max rect side
 const LREF_SNOW = 60, LREF_OTHER = 250;
 const GRAN_COST = 3;
+const THICK_R = 10;         // run length at which the load penalty is halved
+const WOOD_H = 18;         // lateral cost of timber
+const SNOW_H = 44;         // lateral cost of snow (before thickness/load scaling)
+const RUNCAP = 40;         // vertical run length cap (2 m)
+const ARCH_D = 12;         // sample distance (cells) for the shell curvature test
+const ARCH_KMIN = 3;       // min (dl + dr) ~ D^2 / R : curved tighter than R ~ 48 cells (2.4 m)
+const ARCH_RUN = 24;       // arch action only for thin shells (vertical run <= this)
+const ARCH_F = 0.1;        // lateral cost factor inside a compression arch
 const MIN_ISLAND = 12, MAX_ISLAND = 5000;
 const QUEUE_PERIOD = 0.12, SWEEP_PERIOD = 2.5;
 const SWEEP_W = 360, SWEEP_H = 220;
@@ -28,7 +36,9 @@ const lb = new Uint8Array(MAXN);    // bond
 const ld = new Uint16Array(MAXN);   // dens
 const lf = new Uint8Array(MAXN);    // flags
 const cls = new Uint8Array(MAXN);   // 0 none, 1 structural, 2 granular carrier, 3 anchor
-const run = new Uint8Array(MAXN);   // contiguous structural run length in column (capped 12)
+const run = new Uint8Array(MAXN);   // contiguous structural run length in column (capped RUNCAP)
+const rtop = new Uint16Array(MAXN); // local row of the top of the cell's vertical structural (class 1) run
+const arch = new Uint8Array(MAXN);  // 1 = the shell around this cell is curved concave-down (compression arch)
 const load = new Uint16Array(MAXN); // kg/m2 resting on top
 const cu = new Uint16Array(MAXN);   // cost to be supported from below
 const cdg = new Uint16Array(MAXN);  // from diagonal-below
@@ -84,11 +94,12 @@ function prep() {
       cls[l] = c;
     }
   }
-  // column passes: run length (capped 12) and load above
+  // column passes: run length (capped), top of the structural run, and load above
   for (let y = 1; y <= rh; y++) for (let x = 1; x <= rw; x++) {
     const l = y * pw + x, a = l - pw;
-    const st = cls[l] === 1 || cls[l] === 3;
-    run[l] = st ? Math.min(12, (cls[a] === 1 || cls[a] === 3 ? run[a] : 0) + 1) : 0;
+    // run = depth of the cell's own material (snow on a beam is load, not depth)
+    run[l] = cls[l] === 1 ? Math.min(RUNCAP, (cls[a] === 1 && grp8(lm[a]) === grp8(lm[l]) ? run[a] : 0) + 1) : 0;
+    rtop[l] = cls[l] === 1 ? (cls[a] === 1 ? rtop[a] : y) : 0;
     if (lm[a] !== 0) {
       const ma = lm[a];
       const mass = (ma === M.SNOW || ma === M.ASH) ? ld[a] * CELLM : 0;
@@ -97,7 +108,18 @@ function prep() {
   }
   for (let y = rh - 1; y >= 1; y--) for (let x = 1; x <= rw; x++) {
     const l = y * pw + x, b = l + pw;
-    if (run[l] !== 0 && run[b] !== 0 && (cls[b] === 1 || cls[b] === 3)) run[l] = run[b];
+    if (run[l] !== 0 && run[b] !== 0 && cls[b] === 1 && grp8(lm[b]) === grp8(lm[l])) run[l] = run[b];
+  }
+  // compression arch: thin snow/ice shells whose top surface curves down on both sides
+  for (let y = 1; y <= rh; y++) for (let x = 1; x <= rw; x++) {
+    const l = y * pw + x;
+    arch[l] = 0;
+    if (cls[l] !== 1 || run[l] > ARCH_RUN || (lm[l] !== M.SNOW && lm[l] !== M.ICE)) continue;
+    if (x - ARCH_D < 1 || x + ARCH_D > rw) continue;
+    const tl = topNear(x - ARCH_D, y), tr = topNear(x + ARCH_D, y);
+    if (tl < 0 || tr < 0) continue;
+    const t = rtop[l];
+    if ((tl - t) + (tr - t) >= ARCH_KMIN) arch[l] = 1;
   }
   // cost tables for structural cells
   for (let y = 1; y <= rh; y++) for (let x = 1; x <= rw; x++) {
@@ -107,17 +129,29 @@ function prep() {
     switch (lm[l]) {
       case M.SNOW: {
         let s = (lb[l] / 255) * (ld[l] / 350); s = s < 0.15 ? 0.15 : s > 1.3 ? 1.3 : s;
-        u = 4 / s; dg = 10 / s; h = 30 / s; g = 150 / s; lref = LREF_SNOW; break;
+        u = 4 / s; dg = 10 / s; h = SNOW_H / s; g = 150 / s; lref = LREF_SNOW; break;
       }
       case M.ICE: u = 2; dg = 5; h = 12; g = 40; break;
       case M.CRATE: u = 3; dg = 6; h = 10; g = 30; break;
-      default: u = 2; dg = 4; h = 6; g = 20; break; // wood / plank / pole
+      default: u = 2; dg = 4; h = WOOD_H; g = WOOD_H * 2.2; break; // wood / plank / pole
     }
-    const k = (3 / (1 + run[l] / 3)) * (1 + load[l] / lref);
+    // thick runs carry load by beam action: the load penalty shrinks with thickness
+    const k = (3 / (1 + run[l] / 3)) * (1 + load[l] / (lref * (1 + run[l] / THICK_R)));
     h *= k; g *= k;
+    if (arch[l]) h *= ARCH_F;
     cu[l] = u < 1 ? 1 : Math.ceil(u); cdg[l] = dg < 1 ? 1 : Math.ceil(dg);
     chz[l] = h > 65535 ? 65535 : Math.max(1, Math.ceil(h)); chg[l] = g > 65535 ? 65535 : Math.max(1, Math.ceil(g));
   }
+}
+/** material group for run (depth) accounting */
+function grp8(m: number): number { return m === M.SNOW ? 1 : m === M.ICE ? 2 : m === M.CRATE ? 4 : 3; }
+/** run-top row of the structural cell nearest (in y) to row `y` in column `x`, or -1 */
+function topNear(x: number, y: number): number {
+  for (let k = 0; k <= 8; k++) {
+    if (y - k >= 1) { const a = (y - k) * pw + x; if (cls[a] === 1) return rtop[a]; }
+    if (k > 0 && y + k <= rh) { const b = (y + k) * pw + x; if (cls[b] === 1) return rtop[b]; }
+  }
+  return -1;
 }
 const CELLM = 0.05;
 

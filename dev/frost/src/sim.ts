@@ -158,7 +158,7 @@ function moveWater(i: number, x: number, y: number): boolean {
 }
 
 // ---------- slow pass: compaction + sintering over the window, staggered ----------
-const COMPACT_K = 0.05; // 1/h per unit of density deficit at visc=1
+const COMPACT_K = 0.3; // 1/h per unit of density deficit at visc=1
 let slowRow = 0;
 const SLOW_SLICES = 10; // each cell visited every 10 frames
 function stepSlow(dtReal: number) {

@@ -98,25 +98,30 @@ vec3 pointLights(vec2 wp, ivec2 c, vec2 n, float hasN, float jr){
       if(mm!=0){ A += ABS_L[mm]*sl; if(A.g>4.5) break; }
     }
     float facing = hasN>.5 ? .7+.3*clamp(dot(n, d/max(dist,.001))*1.5,-1.,1.) : 1.;
-    acc += uLC[i]*pw*exp(-A)*facing;
+    vec3 warm = mix(vec3(1.), vec3(1.,.74,.5), clamp(q*.5,0.,1.));
+    acc += uLC[i]*warm*pw*exp(-A)*facing;
   }
   return acc;
 }
 
-vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, bool top){
+vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, bool top, vec2 nn, float hasN){
   float g = hh-.5;
+  float upN = hasN>.5 ? clamp(-nn.y,0.,1.) : (top?1.:0.);
   bool vert = (fl & 8) != 0;
   if(m==1){
     float t = clamp((dn-60.)/400.,0.,1.);
-    vec3 b = mix(vec3(.95,.97,1.), vec3(.79,.86,.95), t);
-    b = mix(b, b*vec3(.94,.96,1.), smoothstep(30.,255.,bn)*.6);
-    float amp = .06;
-    if((fl&16)!=0){ b = mix(b, vec3(.92,.95,.99), .5); amp = .025; }
-    if((fl&2)!=0) b = mix(b, vec3(.53,.58,.66), .7);
+    vec3 b = mix(vec3(.915,.955,.99), vec3(.80,.85,.90), t);           // fresh -> compacted (slightly greyer)
+    b = mix(b, b*vec3(.95,.97,1.), smoothstep(30.,255.,bn)*.5);
+    float amp = .05;
+    if((fl&16)!=0){ b = mix(b, vec3(.93,.96,.995), .5); amp = .02; }
+    if((fl&2)!=0) b = mix(b, vec3(.58,.63,.70), .6);
     b += g*amp;
-    b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.05*t;
-    b = mix(b, DEEP, 1.-exp(-depth/10.));
-    return b * mix(1., .6, 1.-exp(-depth/16.));
+    b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.04*t;
+    // subsurface blue grows with distance from the nearest air (cuts, caves), not with the global height
+    float d1 = 1.-exp(-depth/10.), d2 = 1.-exp(-depth/38.);
+    b = mix(b, vec3(.36,.56,.79), d1*.72);
+    b = mix(b, vec3(.17,.31,.53), d2*.65);
+    return b;
   }
   if(m==2){
     float s = vn(vec2(cf.x*.12, cf.y*.7));
@@ -130,12 +135,30 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     return b;
   }
   if(m==4){
-    vec3 b = vec3(.32,.23,.17)*(1.+g*.4);
+    float blot = vn(cf*.2), fine = vn(cf*.85);
+    vec3 b = mix(vec3(.25,.175,.125), vec3(.39,.29,.21), blot*.65+fine*.35);
+    b *= (.93+.14*vn(vec2(cf.x*.02, cf.y*.55)))*(1.+g*.32);
+    if(fract(hh*91.3)>.93) b *= .68;                                   // dark pebbles
+    if(fract(hh*37.7)>.968) b = mix(b, vec3(.72,.8,.88), .5);          // frost crystals
     if(depth<3.5 && fract(hh*37.3)>.88) b = mix(b, vec3(.75,.82,.9), .6);
     return b;
   }
-  if(m==5) return vec3(.42,.44,.47)*(.85+.3*vn(cf*.25))*(1.+g*.15);
-  if(m==12) return vec3(.17,.18,.21)*(1.+g*.2);
+  if(m==5){
+    float band = .5+.5*sin(cf.y*.3 + vn(cf*.05)*5. + cf.x*.01);
+    float sn = vn(cf*vec2(.06,.5));
+    vec3 b = mix(vec3(.30,.32,.37), vec3(.52,.54,.58), band*.55+sn*.45);
+    b *= (.82+.32*vn(cf*.35))*(1.+g*.2);
+    if(fract(hh*53.1)>.965) b *= 1.3;                                  // mineral speckle
+    if(fract(hh*17.9)>.985) b *= .6;
+    float rim = (1.-smoothstep(0.,2.6,depth))*(1.-upN);
+    b *= 1.-rim*.42;                                                   // darker rim / sides
+    float topH = upN*(1.-smoothstep(1.2,3.5,depth));
+    b = mix(b, vec3(.82,.88,.95), topH*.42)*(1.+topH*.12);             // frosted top highlight
+    return b;
+  }
+  if(m==12){
+    return vec3(.15,.16,.20)*(.8+.4*vn(cf*.3))*(1.+g*.2);
+  }
   if(m==6){
     float s = vert ? vn(vec2(cf.x*.9, cf.y*.05)) : vn(vec2(cf.x*.05, cf.y*.9));
     vec3 b = vec3(.31,.21,.12)*(.7+.6*s)*(1.+g*.15);
@@ -196,7 +219,8 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   sky += vec3(.4,.5,.8)*exp(-dm*9.)*.25*uVis.y;
   sky = mix(sky, vec3(.9,.93,1.)*(.8+.2*vn(mv*90.)), (1.-smoothstep(.022,.025,dm))*uVis.y);
 
-  float fg = uFog;
+  float fg = uFog + uStorm*.35;
+  float nt = (1.-uDay);
   vec3 col = sky;
   // far mountains
   {
@@ -204,8 +228,9 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     float rr = 1.-abs(2.*fbm1(Lx*.012+3.)-1.);
     float e = 20. - 100.*pow(rr,1.5);
     float a = smoothstep(-.7,.7,ly-e);
-    vec3 c = mix(vec3(.66,.76,.90), vec3(.46,.58,.78), clamp((ly-e)/60.,0.,1.))*bgL;
-    c = mix(c, uSkyHor, clamp(.55+.35*fg,0.,1.));
+    vec3 c = mix(vec3(.70,.79,.92), vec3(.46,.58,.78), clamp((ly-e)/60.,0.,1.))*bgL;
+    c += vec3(.05,.08,.15)*nt*(1.-uStorm)*exp(-max(ly-e,0.)/7.)*(.5+.5*uVis.y);   // moonlit snowcaps
+    c = mix(c, uSkyHor, clamp((.55-.2*nt)+.35*fg,0.,1.));
     col = mix(col, c, a);
   }
   // mid hills
@@ -213,7 +238,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     float Lx = uCam.x*.15 + sOff.x, ly = sOff.y + (uCam.y-380.)*.17;
     float e = 48. - 50.*fbm1(Lx*.02+41.);
     float a = smoothstep(-.7,.7,ly-e);
-    vec3 c = mix(vec3(.55,.66,.82), vec3(.38,.50,.70), clamp((ly-e)/50.,0.,1.))*bgL;
+    vec3 c = mix(vec3(.52,.63,.80), vec3(.34,.46,.68), clamp((ly-e)/50.,0.,1.))*bgL*(1.-.28*nt);
     c = mix(c, uSkyHor, clamp(.42+.4*fg,0.,1.));
     col = mix(col, c, a);
   }
@@ -222,7 +247,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     float Lx = uCam.x*.30 + sOff.x, ly = sOff.y + (uCam.y-380.)*.27;
     float hy = 74. - 16.*fbm1(Lx*.03+90.);
     float a = smoothstep(-.7,.7,ly-hy);
-    vec3 c = vec3(.82,.88,.96)*bgL;
+    vec3 c = vec3(.86,.91,.97)*bgL*(1.+.25*nt);
     c = mix(c, uSkyHor, clamp(.22+.4*fg,0.,1.));
     col = mix(col, c, a);
     if(ly>-8.){
@@ -238,7 +263,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
           if(abs(Lx-tx)<hw) aT = 1.;
         }
       }
-      vec3 tc = mix(vec3(.10,.18,.24)*bgL, uSkyHor, clamp(.18+.4*fg,0.,1.));
+      vec3 tc = mix(vec3(.10,.18,.24)*bgL*(1.-.35*nt), uSkyHor, clamp(.18+.4*fg,0.,1.));
       col = mix(col, tc, aT);
     }
   }
@@ -256,7 +281,7 @@ void main(){
   float dn = tx.g*4., bn = tx.b; int fl = int(tx.a);
   float hh = hash2(c);
   vec2 cf = vec2(c);
-  vec3 bgL = uAmb*.85+.02;
+  vec3 bgL = uAmb*.85+.02 + vec3(.03,.05,.09)*(1.-uDay)*(1.-uStorm);
   float asp = uRes.x/uRes.y;
   float dd = length((sUV-.5)*vec2(asp,1.));
   vec3 col;
@@ -288,30 +313,64 @@ void main(){
     vec3 n3 = normalize(vec3(n*1.2,.6));
     vec3 L3 = normalize(vec3(uSkyDir,.55));
     float diff = hasN>.5 ? max(dot(n3,L3),0.) : .55;
-    vec3 alb = albedo(m, dn, bn, fl, cf, hh, depth, mUp==0);
+    vec3 alb = albedo(m, dn, bn, fl, cf, hh, depth, mUp==0, n, hasN);
     vec3 pl = uNL>0 ? pointLights(wp, c, n, hasN, hh) : vec3(0.);
-    vec3 scat = m==1 ? vec3(.14,.24,.34)*exp(-depth/30.) : vec3(0.);
-    vec3 lit = uAmb*((m==1?.16:.45)+.84*sv3+scat) + uDirCol*diff*dirT + pl;
+    vec3 scat = m==1 ? vec3(.12,.2,.3)*exp(-depth/30.) : vec3(0.);
+    vec3 svS = m==1 ? mix(pow(sv3, vec3(.5)), vec3(1.), .12) : sv3;   // thick snow still scatters plenty of light
+    vec3 lit = uAmb*((m==1?.3:.45)+(m==1?.7:.84)*svS+scat) + uDirCol*diff*dirT + pl;
     col = alb*lit;
-    if(m==1 && depth<1.5){
-      float gl = hash3(c, int(floor(uTime*3.)));
-      if(gl>.996){
+    if(m==1){
+      // never darker than moon-lit snow where it can see the sky
+      col = max(col, vec3(.078,.137,.227)*smoothstep(.12,.45,sv3.b)*(1.-.5*smoothstep(8.,30.,depth)));
+      if(depth<1.5){
+        float gl = hash3(c, int(floor(uTime*3.)));
         float lum = dot(uDirCol,vec3(.33))*dirT.g + dot(pl,vec3(.33));
-        col += vec3(1.,.98,.92)*lum*1.5;
+        if(gl>.994) col += vec3(1.,.98,.92)*lum*1.6;
+        else if(hh>.93 && gl>.8) col += vec3(.9,.96,1.)*dot(uDirCol,vec3(.33))*dirT.g*.5;   // crisp daytime sparkle
       }
     }
   }
 
-  // blowing snow near ground level
-  float ws = smoothstep(4.,16.,abs(uWind));
-  if(isAir && ws>.01){
-    float hgt = uFeet - wp.y;
-    float prof = exp(-max(hgt,0.)/22.)*step(-8.,hgt);
-    if(prof>.01){
-      float sx = wp.x - uTime*uWind*1.6;
-      float s = smoothstep(.45,.9, vn(vec2(sx*.08, wp.y*.55))*vn(vec2(sx*.03+9., wp.y*.2+3.))*1.6);
-      col = mix(col, min(bgL*1.05+.05, vec3(1.)), s*prof*ws*(.35+.65*uStorm)*.7*max(openA,.3));
+  // low drifting snow hugging the local ground when it blows (> ~6 m/s)
+  float ws = smoothstep(5.,11.,abs(uWind));
+  if(isAir && ws>.01 && openA>.05){
+    float gh = 26.;
+    for(int k=1;k<=8;k++){ if(mAt(c+ivec2(0,k*3))!=0){ gh = float(k*3)-1.5; break; } }
+    float prof = exp(-gh/9.);
+    if(prof>.02){
+      float sx = wp.x - uTime*uWind*2.2;
+      float s1 = vn(vec2(sx*.035, wp.y*.85))*vn(vec2(sx*.011+9., wp.y*.3+3.));
+      float s = smoothstep(.2,.5,s1*1.7) + .5*smoothstep(.82,.95,vn(vec2(sx*.2, wp.y*1.7)));
+      col = mix(col, min(bgL*1.1+.06, vec3(1.)), clamp(s,0.,1.)*prof*ws*(.4+.6*uStorm)*.75*openA);
     }
+  }
+  // storm: wind-driven snow streaks + whiteout
+  if(uStorm>.02){
+    float spd = min(abs(uWind),30.), wdir = uWind>=0.?1.:-1.;
+    vec2 vel = vec2(wdir*(14.+spd*2.4), 24.+12.*uStorm);
+    vec2 vdir = normalize(vel), pdir = vec2(-vdir.y, vdir.x);
+    float acc = 0.;
+    int NL = uSteps>12 ? 3 : 2;
+    for(int L=0;L<3;L++){
+      if(L>=NL) break;
+      float fl = float(L);
+      float cs = 15.-3.5*fl, par = 1.3-.28*fl;
+      vec2 p = (sOff + uCam*par - vel*uTime*(1.15-.2*fl)*(.9+.2*fl))/cs;
+      vec2 ci = floor(p);
+      float r0 = hf(ci+fl*13.7);
+      if(r0>.5+.12*uStorm) continue;
+      vec2 off = (vec2(hf(ci+3.1+fl), hf(ci+8.3+fl))-.5)*.34;
+      vec2 d = (fract(p)-.5-off)*cs;
+      float len = (3.6+spd*.22)*(1.-.3*fl);
+      float along = abs(dot(d,vdir)), perp = abs(dot(d,pdir));
+      float w = .5+.28*(2.-fl)*.5;
+      acc += (1.-smoothstep(.15,w,perp))*(1.-smoothstep(len*.25,len,along))*(.75-.12*fl);
+    }
+    vec3 sc = min(uAmb*1.08+.05, vec3(1.));
+    col = mix(col, sc, clamp(acc,0.,.8)*uStorm*.75);
+    vec3 wo = min(uSkyHor*1.1+.03, vec3(1.));
+    float wf = uStorm*(.2+.62*smoothstep(.1,.85,dd)) + uStorm*.12*vn(vec2(wp.x*.01-uTime*uWind*.05, wp.y*.02));
+    col = mix(col, wo, clamp(wf,0.,.92));
   }
   // weather veil
   col = mix(col, uSkyHor, uFog*(.12+.88*smoothstep(.05,1.1,dd))*.8);
@@ -321,21 +380,23 @@ void main(){
   col = mix(col, hi, step(.7,col));
 
   if(uXray>0){
-    vec3 xc = vec3(0.); bool use = false; float k = .78;
+    vec3 xc = vec3(0.); bool use = false; float k = .8;
     if(uXray==1 && m==1){
       float t = clamp((dn-50.)/450.,0.,1.);
-      xc = t<.5 ? mix(vec3(.1,.3,.95), vec3(.95), t*2.) : mix(vec3(.95), vec3(1.,.5,.1), (t-.5)*2.);
+      xc = t<.5 ? mix(vec3(.345,.682,.941), vec3(.875,.914,.949), t*2.) : mix(vec3(.875,.914,.949), vec3(.788,.471,.227), (t-.5)*2.);
       use = true;
     } else if(uXray==2 && m==1){
-      xc = mix(vec3(.95,.15,.1), vec3(.15,.9,.3), bn/255.);
-      if(abs(bn-48.)<2.5) xc = vec3(1.,.95,.2);
+      float t = bn/255.;
+      xc = t<.5 ? mix(vec3(.71,.322,.231), vec3(.851,.761,.478), t*2.) : mix(vec3(.851,.761,.478), vec3(.435,.761,.545), (t-.5)*2.);
+      if(abs(bn-48.)<1.5) xc = vec3(1.);                                // BOND_SOLID threshold
       use = true;
     } else if(uXray==3){
       float tc = texture(uHeat, wp/vec2(float(WI),float(HI))).r*127.5-60.;
-      xc = tc<0. ? mix(vec3(.1,.25,1.), vec3(.95), clamp((tc+40.)/40.,0.,1.)) : mix(vec3(.95), vec3(1.,.15,.1), clamp(tc/10.,0.,1.));
-      use = true; k = .62;
+      float t = clamp((tc+40.)/50.,0.,1.);
+      xc = t<.5 ? mix(vec3(.239,.435,.847), vec3(.933,.953,.973), t*2.) : mix(vec3(.933,.953,.973), vec3(.847,.341,.184), (t-.5)*2.);
+      use = true; k = .72;
     }
-    col = use ? mix(col*(uXray==3?.55:.45), xc, k) : col*.45;
+    col = use ? mix(col*(uXray==3?.5:.4), xc, k) : col*.4;
   }
   col *= 1.-.3*smoothstep(.35,.75,length(sUV-.5));
   col += (float(ihash(uvec2(gl_FragCoord.xy)))*(1./4294967296.)-.5)/255.;
@@ -509,18 +570,18 @@ export class Renderer {
   private setUniforms() {
     const gl = this.gl, u = this.u, c = G.cam;
     const day = clamp(G.daylight), sa = G.sunAngle, storm = clamp(G.storm), moon = clamp(G.moon);
-    const dusk = Math.exp(-((sa / 0.12) ** 2)) * (1 - 0.7 * storm);
+    const dusk = Math.exp(-((sa / 0.1) ** 2)) * (1 - 0.8 * storm);
     const tod = ((G.time / 60) % 24 + 24) % 24;
     // ambient
     const dayAmb: V3 = [0.88 * (1 - 0.3 * storm), 0.93 * (1 - 0.3 * storm), 1.0 * (1 - 0.25 * storm)];
-    const nm = 0.35 + 0.85 * moon, nightAmb: V3 = [0.10 * nm, 0.15 * nm, 0.30 * nm];
+    const nm = 0.7 + 0.55 * moon, nightAmb: V3 = [0.125 * nm, 0.185 * nm, 0.36 * nm];
     const amb = mix3(nightAmb, dayAmb, day);
-    amb[0] += 0.15 * dusk; amb[1] += 0.05 * dusk; amb[2] = Math.max(0, amb[2] - 0.04 * dusk);
+    amb[0] += 0.10 * dusk; amb[1] += 0.03 * dusk; amb[2] = Math.max(0, amb[2] - 0.03 * dusk);
     // directional light (sun / moon)
     const sunI = clamp((day - 0.1) / 0.5) * (1 - 0.85 * storm) * 0.6;
-    const sunCol = mix3([1, 0.96, 0.88], [1, 0.62, 0.35], clamp(dusk * 1.5));
-    const moonI = moon * 0.2 * (1 - day) * (1 - 0.7 * storm);
-    const dir: V3 = [sunCol[0] * sunI + 0.55 * moonI, sunCol[1] * sunI + 0.7 * moonI, sunCol[2] * sunI + moonI];
+    const sunCol = mix3([1, 0.97, 0.9], [1, 0.68, 0.42], clamp(dusk * 1.4));
+    const moonI = moon * 0.3 * (1 - day) * (1 - 0.6 * storm);
+    const dir: V3 = [sunCol[0] * sunI + 0.5 * moonI, sunCol[1] * sunI + 0.68 * moonI, sunCol[2] * sunI + 1.05 * moonI];
     // celestial positions in sky uv (y from top)
     const sbx = 0.5 + clamp((12.5 - tod) / 4.2, -1, 1) * 0.44, sby = 0.62 - clamp(sa, -0.1, 0.5) / 0.5 * 0.45;
     const mt = clamp(((tod - 17 + 24) % 24) / 14), mbx = 0.5 + (0.5 - mt) * 0.9, mby = 0.62 - 0.45 * Math.sin(mt * Math.PI);
@@ -531,9 +592,9 @@ export class Renderer {
     // sky colours
     let top: V3 = mix3([0.010, 0.022, 0.07], [0.30, 0.52, 0.90], day);
     const hm = 0.55 + 0.9 * moon;
-    let hor: V3 = mix3([0.03 * hm, 0.06 * hm, 0.15 * hm], [0.74, 0.86, 0.97], day);
-    hor = [hor[0] + 0.95 * dusk * 0.7, hor[1] + 0.45 * dusk * 0.7, hor[2] + 0.22 * dusk * 0.7];
-    top = [top[0] + 0.25 * dusk * 0.3, top[1] + 0.1 * dusk * 0.3, top[2] + 0.25 * dusk * 0.3];
+    let hor: V3 = mix3([0.035 * hm, 0.07 * hm, 0.17 * hm], [0.66, 0.77, 0.88], day);   // day haze ~ #9fb4c8-ish, never pink
+    hor = [hor[0] + 0.62 * dusk * 0.7, hor[1] + 0.28 * dusk * 0.7, hor[2] + 0.1 * dusk * 0.7];
+    top = [top[0] + 0.16 * dusk * 0.3, top[1] + 0.07 * dusk * 0.3, top[2] + 0.18 * dusk * 0.3];
     const gk = 0.12 + 0.88 * day, grey: V3 = [0.60 * gk, 0.64 * gk, 0.69 * gk];
     top = mix3(top, [grey[0] * 0.85, grey[1] * 0.85, grey[2] * 0.85], storm * 0.85);
     hor = mix3(hor, grey, storm * 0.85);

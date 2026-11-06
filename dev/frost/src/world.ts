@@ -30,6 +30,11 @@ export const bond = new Uint8Array(W * H);
 export const flags = new Uint8Array(W * H);
 export const body = new Uint16Array(W * H);   // rigid body id stamped here (0 = none)
 export const stamp = new Uint8Array(W * H);   // frame stamp to avoid double moves
+export const treeId = new Uint16Array(W * H); // unique id (1..) of the standing tree a trunk/needle cell belongs to; 0 = none
+export const beamId = new Uint16Array(W * H); // unique id (1..) of the placed beam (PLANK) a cell belongs to; 0 = none
+let beamSeq = 0;
+/** next beam id (1..65535, wraps, never 0) */
+export function nextBeamId(): number { beamSeq = beamSeq >= 65535 ? 1 : beamSeq + 1; return beamSeq; }
 
 // chunk bookkeeping
 export const awake = new Uint8Array(CW * CHH);       // frames to stay awake
@@ -53,7 +58,9 @@ export function solidChanged(x: number, y: number) { solidVer[((y / CH) | 0) * C
 export function set(x: number, y: number, m: number, d = 0, b = 0, f = 0) {
   const i = y * W + x;
   const wasRigid = rigidAt(i);
+  if (mat[i] !== m || !(f & F_TREE)) treeId[i] = 0; // a cell that changes material is no longer part of a standing tree
   mat[i] = m; dens[i] = d; bond[i] = b; flags[i] = f;
+  beamId[i] = 0; // callers that place a beam stamp beamId after set()
   if (wasRigid !== rigidAt(i)) solidChanged(x, y);
   wake(x, y);
 }
@@ -95,7 +102,7 @@ export { freshDens };
 
 export function generate(s = 20261106) {
   setSeed(s);
-  mat.fill(0); dens.fill(0); bond.fill(0); flags.fill(0); body.fill(0);
+  mat.fill(0); dens.fill(0); bond.fill(0); flags.fill(0); body.fill(0); treeId.fill(0); beamId.fill(0);
   crates.length = 0; trees.length = 0;
   START_X = 560;
   // ground profile: rolling hills, a ridge, a frozen lake hollow
@@ -164,7 +171,7 @@ export function generate(s = 20261106) {
     for (let dy = -r; dy <= r; dy++) for (let dx = -r * 1.3; dx <= r * 1.3; dx++) {
       if ((dx / 1.3) ** 2 + dy * dy > r * r) continue;
       const xx = Math.round(bx + dx), yy = Math.round(gy + dy - r * 0.4);
-      if (inb(xx, yy)) { const i = idx(xx, yy); mat[i] = M.ROCK; dens[i] = 0; bond[i] = 0; flags[i] = 0; }
+      if (inb(xx, yy)) { const i = idx(xx, yy); mat[i] = M.ROCK; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
     }
   }
   // supply crates with orange poles
@@ -188,22 +195,23 @@ function placeCrate(x: number, loot: string[]) {
   for (let yy = g - 1; yy > 0; yy--) if (mat[idx(x, yy)] !== M.SNOW) { break; } else base = yy;
   const y0 = Math.max(base, g - 30) ; // crate sits on ground but may poke if snow is thin
   const top = g - h;
-  for (let yy = top; yy < g; yy++) for (let xx = x; xx < x + w; xx++) { const i = idx(xx, yy); mat[i] = M.CRATE; dens[i] = 0; bond[i] = 0; flags[i] = 0; }
+  for (let yy = top; yy < g; yy++) for (let xx = x; xx < x + w; xx++) { const i = idx(xx, yy); mat[i] = M.CRATE; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
   void y0;
   crates.push({ x, y: top, w, h, loot: loot.slice(), opened: false });
   // pole sticks out of the snow ~1 m above surface
   const s = surfaceAt(x + 2);
-  for (let yy = s - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; }
+  for (let yy = s - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; treeId[i] = 0; }
 }
 
 export function plantTree(x: number, h: number) {
   let base = groundY[x];
   const trunkW = Math.max(3, Math.round(h / 40));
   const top = base - h;
+  const tid = (trees.length % 65535) + 1; // unique per tree (wraps only past 65535 trees)
   for (let y = top; y < base; y++) {
     const t = (base - y) / h;
     const tw = Math.max(1, Math.round(trunkW * (1 - t * 0.7)));
-    for (let dx = 0; dx < tw; dx++) { const xx = x - (tw >> 1) + dx; const i = idx(xx, y); mat[i] = M.WOOD; dens[i] = 500; flags[i] = F_TREE | F_VERT; bond[i] = 0; }
+    for (let dx = 0; dx < tw; dx++) { const xx = x - (tw >> 1) + dx; const i = idx(xx, y); mat[i] = M.WOOD; dens[i] = 500; flags[i] = F_TREE | F_VERT; bond[i] = 0; treeId[i] = tid; }
   }
   // tiers of branches (spruce): wider at bottom, start ~1/5 up
   const crownStart = base - Math.round(h * 0.18);
@@ -217,7 +225,7 @@ export function plantTree(x: number, h: number) {
       if (mat[i] !== M.AIR && mat[i] !== M.SNOW) continue;
       const droop = Math.abs(dx) / (half + 1);
       if (rnd() < 0.18 + droop * 0.35) continue;
-      mat[i] = M.NEEDLE; dens[i] = 0; bond[i] = 0; flags[i] = F_TREE;
+      mat[i] = M.NEEDLE; dens[i] = 0; bond[i] = 0; flags[i] = F_TREE; treeId[i] = tid;
     }
   }
   // remove snow inside the crown (tree well) and load snow on boughs

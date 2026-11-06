@@ -42,6 +42,7 @@ const ICONS: Record<string, string> = {
   moon: '<path d="M19.500 14.800A8 8 0 0 1 9.200 4.500a8 8 0 1 0 10.300 10.300z"/>',
   baro: '<path d="M4 17a8 8 0 0 1 16 0"/><path d="M12 17l-3.500-5.200"/><path d="M6 13.500l1 .6M18 13.500l-1 .6M12 8.500v1.100"/><path d="M5 20.500h14"/>',
   phone: '<rect x="6" y="2.500" width="12" height="19" rx="2.200"/><path d="M10.500 18.500h3"/>',
+  swap: '<path d="M4 8.500h14.500M15 4.800l3.700 3.700-3.700 3.700"/><path d="M20 15.500H5.500M9 11.800l-3.700 3.700L9 19.200"/>',
 };
 
 function ico(name: string, cls = ''): string {
@@ -74,7 +75,7 @@ function thermoSVG(): string {
   }
   const y35 = tY(35).toFixed(1), y366 = tY(36.6).toFixed(1);
   return `
-  <svg class="thermo-svg" viewBox="-12 0 96 252" aria-hidden="true" focusable="false">
+  <svg class="thermo-svg" viewBox="-28 0 112 252" aria-hidden="true" focusable="false">
     <defs>
       <linearGradient id="gl-glass" x1="0" x2="1"><stop offset="0" stop-color="var(--glass-lo)"/><stop offset=".45" stop-color="var(--glass-hi)"/><stop offset="1" stop-color="var(--glass-lo)"/></linearGradient>
     </defs>
@@ -108,7 +109,7 @@ function dialSVG(): string {
     <circle cx="60" cy="60" r="52" class="dial-face"/>
     <path d="${arc(ang(18), ang(30), 50)}" class="dial-zone"/>
     ${ticks}
-    <text x="60" y="42" class="dial-cap" text-anchor="middle">ВЕТЕР</text>
+    <text x="60" y="33" class="dial-cap" text-anchor="middle">ВЕТЕР</text>
     <g id="dial-dir" class="dial-dir"><path d="M49 52.500h22M65.500 48.500l5.500 4-5.500 4"/></g>
     <g id="dial-needle" class="dial-needle"><path d="M-9 0H41" class="nd-line"/><path d="M41 0l-8-2.600v5.200z" class="nd-tip"/><circle r="4.600" class="nd-hub"/><circle r="1.600" class="nd-pin"/></g>
     <text id="dial-val" x="60" y="94" class="dial-val" text-anchor="middle">0</text>
@@ -117,13 +118,32 @@ function dialSVG(): string {
 }
 
 // ---------------------------------------------------------------- UI
-interface Gauge { root: HTMLElement; fill: HTMLElement; val: HTMLElement }
+interface Gauge { root: HTMLElement; val: HTMLElement; num: HTMLElement }
 type Cached<T extends HTMLElement = HTMLElement> = T & { _t?: string };
 
 const TOOL_ICON: Record<string, string> = { shovel: 'shovel', saw: 'saw', axe: 'axe', beam: 'beam', block: 'block', fire: 'fire' };
 
+// built structure ids (tool.built) -> Russian names for the end card
+const BUILT_NAME: Record<string, string> = {
+  fire: 'Костёр', snow: 'Снежные блоки', wood: 'Брёвна и брус', dugout: 'Землянка', igloo: 'Иглу', cabin: 'Дом',
+};
+
+// x-ray legend plates: [title, gradient stops, scale labels]. Colours match the renderer.
+interface XrayDef { title: string; a: string; b: string; c: string; ticks: { at: number; text: string; edge?: 'l' | 'r' }[] }
+const XRAY: Record<number, XrayDef> = {
+  1: { title: 'Плотность, кг/м³', a: '#58aef0', b: '#dfe9f2', c: '#c9783a',
+    ticks: [{ at: 0, text: '50', edge: 'l' }, { at: 1 / 3, text: '200' }, { at: 2 / 3, text: '350' }, { at: 1, text: '500', edge: 'r' }] },
+  2: { title: 'Спекание', a: '#b5523b', b: '#d9c27a', c: '#6fc28b',
+    ticks: [{ at: 0, text: 'рыхлый', edge: 'l' }, { at: 1, text: 'спёкся', edge: 'r' }] },
+  3: { title: 'Температура, °C', a: '#3d6fd8', b: '#eef3f8', c: '#d8572f',
+    ticks: [{ at: 0, text: '−40', edge: 'l' }, { at: 0.4, text: '−20' }, { at: 0.8, text: '0' }, { at: 1, text: '+10', edge: 'r' }] },
+};
+
 export class UI {
   onSound: (on: boolean) => void = () => {};
+  /** pause-screen physics comparison: switch engine / drop 40 test bodies */
+  onEngine: () => void = () => {};
+  onStress: () => void = () => {};
 
   private root: HTMLElement;
   private input: Input;
@@ -132,7 +152,14 @@ export class UI {
   private last = 0;
   private soundOn = true;
   private overlay: HTMLElement | null = null;
-  private overlayTimer = 0;
+  private physInfo = '';
+  private physEls: { info: HTMLElement; engine: HTMLElement } | null = null;
+  private xrayEl!: HTMLElement;
+  private xrayMode = 0;
+  private beatEl: HTMLElement | null = null;
+  private gaugeQ = { food: 1, stamina: 1, wet: 0, shelter: 0 };
+  private retUntil = 0;
+  private warnTime!: Cached;
   private toasts!: HTMLElement;
   private hintCard: HTMLElement;
   private hintText: HTMLElement;
@@ -176,6 +203,9 @@ export class UI {
     this.input = input;
     root.classList.add('ui-root');
     this.readColours();
+    // focus rings only for keyboard users (script-focused buttons must not show a ring on a mouse/touch session)
+    document.addEventListener('keydown', (e) => { if (/^(Tab|Enter| |Arrow.*)$/.test(e.key)) root.classList.add('kbd'); }, true);
+    document.addEventListener('pointerdown', () => root.classList.remove('kbd'), true);
 
     this.hud = el('div', 'hud');
     root.appendChild(this.hud);
@@ -187,6 +217,8 @@ export class UI {
     this.buildTouch();
 
     this.toasts.setAttribute('aria-live', 'polite');
+
+    this.buildXray();
 
     this.hintCard = el('div', 'hint');
     this.hintText = el('span', 'hint-text');
@@ -213,10 +245,18 @@ export class UI {
     } catch { /* keep defaults */ }
   }
 
+  /** A gauge glass: graduated tube, liquid column, scale ticks (danger zone tinted). */
   private gauge(key: 'food' | 'stamina' | 'wet' | 'shelter', label: string, icon: string): HTMLElement {
     const root = el('div', `plate gauge g-${key}`);
-    root.innerHTML = `<span class="g-ico">${ico(icon)}</span><span class="g-lab">${label}</span><span class="g-val"></span><span class="g-track"><i class="g-fill"></i></span>`;
-    this.gauges[key] = { root, fill: root.querySelector('.g-fill') as HTMLElement, val: root.querySelector('.g-val') as HTMLElement };
+    const zone = (i: number) => (key === 'wet' ? i >= 6 : key === 'shelter' ? false : i <= 2) ? ' class="z"' : '';
+    const ticks = Array.from({ length: 11 }, (_, i) => `<i${zone(i)}></i>`).join('');
+    root.innerHTML = `<span class="g-ico">${ico(icon)}</span><span class="g-lab">${label}</span><span class="g-val mono"><b>0</b><i>%</i></span><span class="g-glass"><i class="g-liq"></i></span><span class="g-scale">${ticks}</span>`;
+    root.setAttribute('role', 'meter');
+    root.setAttribute('aria-label', label.charAt(0) + label.slice(1).toLowerCase());
+    root.setAttribute('aria-valuemin', '0'); root.setAttribute('aria-valuemax', '100'); root.setAttribute('aria-valuenow', '0');
+    root.title = label.charAt(0) + label.slice(1).toLowerCase();
+    root.dataset.q = '0';
+    this.gauges[key] = { root, val: root.querySelector('.g-val') as HTMLElement, num: root.querySelector('.g-val b') as HTMLElement };
     return root;
   }
 
@@ -260,8 +300,9 @@ export class UI {
     box.appendChild(chips);
 
     this.warnLine = el('div', 'warn-line') as Cached;
-    this.warnLine.innerHTML = `${ico('baro')}<span class="warn-text"></span>`;
+    this.warnLine.innerHTML = `<span class="wl-time"></span><span class="warn-text"></span><i class="wl-ul"></i>`;
     this.warnText = this.warnLine.querySelector('.warn-text') as Cached;
+    this.warnTime = this.warnLine.querySelector('.wl-time') as Cached;
     this.warnLine.setAttribute('role', 'status');
     box.appendChild(this.warnLine);
     this.toasts = el('div', 'toasts');
@@ -297,12 +338,48 @@ export class UI {
     box.appendChild(dial);
 
     const temps = el('div', 'plate temps');
-    temps.innerHTML = `<div class="t-row t-air"><span>воздух</span><b class="mono"></b></div><div class="t-row t-feel"><span>ощущается</span><b class="mono"></b></div>`;
+    temps.innerHTML = `<div class="t-row t-air"><span><i class="l-full">воздух</i><i class="l-short">возд.</i></span><b class="mono"></b></div><div class="t-row t-feel"><span><i class="l-full">ощущается</i><i class="l-short">ощущ.</i></span><b class="mono"></b></div>`;
     this.air = temps.querySelector('.t-air b') as Cached;
     this.feel = temps.querySelector('.t-feel b') as Cached;
     this.feelRow = temps.querySelector('.t-feel') as HTMLElement;
     box.appendChild(temps);
     this.hud.appendChild(box);
+  }
+
+  private buildXray(): void {
+    this.xrayEl = el('div', 'plate xray');
+    this.xrayEl.setAttribute('aria-hidden', 'true');
+    this.hud.appendChild(this.xrayEl);
+  }
+
+  /** X-ray legend: mode 0 hides it, 1 density, 2 sintering, 3 temperature. */
+  setXray(mode: number): void {
+    const m = XRAY[mode] ? mode : 0;
+    if (m === this.xrayMode) return;
+    this.xrayMode = m;
+    const d = XRAY[m];
+    if (d) {
+      this.xrayEl.style.setProperty('--xa', d.a); this.xrayEl.style.setProperty('--xb', d.b); this.xrayEl.style.setProperty('--xc', d.c);
+      const ticks = d.ticks.map((t) => `<i style="left:${(t.at * 100).toFixed(1)}%"></i><span class="${t.edge ?? ''}" style="left:${(t.at * 100).toFixed(1)}%">${t.text}</span>`).join('');
+      this.xrayEl.innerHTML = `<div class="xr-head"><span class="cap">${ico('xray')}Рентген</span><span class="xr-mode mono">${m}/3</span></div><div class="xr-title"></div><div class="xr-bar"></div><div class="xr-scale">${ticks}</div>`;
+      (this.xrayEl.querySelector('.xr-title') as HTMLElement).textContent = d.title;
+    }
+    this.xrayEl.classList.toggle('on', m > 0);
+    this.root.classList.toggle('has-xray', m > 0);
+  }
+
+  /** Pause-screen physics line, e.g. "Rapier 2D · 58 к/с · тел 12". Call as often as you like. */
+  setPhysInfo(text: string): void {
+    if (text === this.physInfo) return;
+    this.physInfo = text;
+    this.paintPhys();
+  }
+
+  private paintPhys(): void {
+    const p = this.physEls; if (!p) return;
+    p.info.textContent = this.physInfo || '—';
+    const eng = this.physInfo.split(' · ')[0].trim();
+    p.engine.textContent = eng || 'Движок';
   }
 
   private buildBottom(): void {
@@ -480,12 +557,15 @@ export class UI {
       this.btnWait?.setAttribute('aria-pressed', String(waiting));
     });
 
-    // ---- warning (barometer)
+    // ---- weather log: entries are stamped with the time they were first noted
     const warn = h.warning ?? '';
     this.m('warn', warn, () => {
-      if (warn) this.warnText.textContent = warn;
+      if (warn) { this.warnText.textContent = warn; this.warnTime.textContent = h.clock; }
       this.warnLine.classList.toggle('on', !!warn);
     });
+
+    // ---- one shared heartbeat, only on the single most critical item
+    this.updateBeat(h, core, !!warn);
 
     // ---- inventory
     const inv = h.inv;
@@ -526,14 +606,35 @@ export class UI {
 
   private setGauge(k: 'food' | 'stamina' | 'wet' | 'shelter', v: number, invert: boolean, calm = false): void {
     const g = this.gauges[k];
-    const q = Math.round(clamp(v, 0, 1) * 48) / 48;
+    const q = Math.round(clamp(v, 0, 1) * 100) / 100;
+    this.gaugeQ[k] = q;
     this.m('g' + k, q, () => {
-      g.fill.style.transform = `scaleX(${q})`;
-      const pct = Math.round(q * 100) + '%';
-      g.val.textContent = pct;
+      g.root.style.setProperty('--q', String(q));
+      const pct = Math.round(q * 100);
+      g.num.textContent = String(pct);
+      g.root.dataset.q = pct === 0 ? '0' : '1';
+      g.root.setAttribute('aria-valuenow', String(pct));
       const lvl = calm ? 'calm' : (invert ? (q > 0.6 ? 'bad' : q > 0.35 ? 'mid' : 'ok') : (q < 0.2 ? 'bad' : q < 0.4 ? 'mid' : 'ok'));
       g.root.dataset.level = lvl;
     });
+  }
+
+  /** Pick the one item that deserves the heartbeat (severity >= 30); everything else stays still. */
+  private updateBeat(h: HudData, core: number, warn: boolean): void {
+    let best: HTMLElement | null = null, bs = 29;
+    const cand = (e: HTMLElement, s: number) => { if (s > bs) { bs = s; best = e; } };
+    cand(this.thermo, core < 32 ? 100 : core < 35 ? 70 : 0);
+    const gq = this.gaugeQ;
+    cand(this.gauges.food.root, gq.food < 0.2 ? 50 + (0.2 - gq.food) * 100 : 0);
+    cand(this.gauges.stamina.root, gq.stamina < 0.2 ? 48 + (0.2 - gq.stamina) * 100 : 0);
+    cand(this.gauges.wet.root, gq.wet > 0.6 ? 40 + (gq.wet - 0.6) * 60 : 0);
+    cand(this.warnLine, warn ? 35 : 0);
+    cand(this.chips.matches.root, h.inv.matches <= 0 ? 30 : 0);
+    if (best !== this.beatEl) {
+      this.beatEl?.classList.remove('beat');
+      this.beatEl = best;
+      (best as HTMLElement | null)?.classList.add('beat');
+    }
   }
 
   private setChip(k: string, n: number, label?: string, visible = true): void {
@@ -547,7 +648,10 @@ export class UI {
 
   private updateReticle(): void {
     const s = this.input.state;
-    const show = this.input.mobile && s.hasAim;
+    // the aim stays in Input for the secondary/fire buttons; the mark itself fades 1.5 s after the finger lifts
+    const now = performance.now();
+    if (s.primary) this.retUntil = now + 1500;
+    const show = this.input.mobile && s.hasAim && now < this.retUntil;
     this.m('ret-show', show, () => this.reticleEl.classList.toggle('on', show));
     if (!show) return;
     this.m('ret-down', s.primary, () => this.reticleEl.classList.toggle('down', s.primary));
@@ -576,8 +680,10 @@ export class UI {
 
   // ------------------------------------------------------------ overlays
   private setOverlay(node: HTMLElement, mode: 'title' | 'pause' | 'end'): void {
-    window.clearTimeout(this.overlayTimer);
+    // anything still fading out must go now, otherwise stacked leaving overlays leak
+    this.root.querySelectorAll('.overlay.leaving').forEach((n) => n.remove());
     this.overlay?.remove();
+    this.physEls = null;
     this.overlay = node;
     this.root.appendChild(node);
     this.root.classList.remove('ov-title', 'ov-pause', 'ov-end');
@@ -595,7 +701,8 @@ export class UI {
     if (!ov) return;
     ov.classList.remove('in');
     ov.classList.add('leaving');
-    this.overlayTimer = window.setTimeout(() => ov.remove(), 450);
+    this.physEls = null;
+    window.setTimeout(() => ov.remove(), 450);
   }
 
   private btn(label: string, cls: string, fn: () => void): HTMLButtonElement {
@@ -643,12 +750,15 @@ export class UI {
       <div class="ground" aria-hidden="true"></div>`;
     const actions = ov.querySelector('.title-actions') as HTMLElement;
     const start = this.btn('В путь', 'btn-primary btn-start', () => { onStart(); });
-    const snd = el('button', 'btn btn-ghost btn-sound', `${ico('sound')}<span>Звук: вкл</span>`);
+    const snd = el('button', 'btn btn-ghost btn-sound', ico(this.soundOn ? 'sound' : 'mute'));
     snd.type = 'button';
-    snd.setAttribute('aria-pressed', 'true');
+    snd.setAttribute('aria-pressed', String(this.soundOn));
+    const sndLabel = () => { const t = 'Звук: ' + (this.soundOn ? 'вкл' : 'выкл'); snd.title = t; snd.setAttribute('aria-label', t); };
+    sndLabel();
     snd.addEventListener('click', () => {
       this.soundOn = !this.soundOn;
-      snd.innerHTML = `${ico(this.soundOn ? 'sound' : 'mute')}<span>Звук: ${this.soundOn ? 'вкл' : 'выкл'}</span>`;
+      snd.innerHTML = ico(this.soundOn ? 'sound' : 'mute');
+      sndLabel();
       snd.setAttribute('aria-pressed', String(this.soundOn));
       this.onSound(this.soundOn);
       snd.blur();
@@ -677,16 +787,36 @@ export class UI {
       onRestart();
     });
     acts.append(resume, restart);
+
+    const phys = el('section', 'plate phys');
+    phys.setAttribute('aria-label', 'Сравнение физики');
+    phys.innerHTML = `
+      <div class="phys-head"><span class="cap">Сравнение физики</span><i class="phys-led"></i></div>
+      <div class="phys-row">
+        <button type="button" class="pbtn pb-engine"><span class="pb-lab">Движок</span><span class="pb-val"></span>${ico('swap')}<kbd>P</kbd></button>
+        <button type="button" class="pbtn pb-stress"><span class="pb-lab">Нагрузка</span><span class="pb-val">Сбросить 40 тел</span>${ico('put')}<kbd>K</kbd></button>
+      </div>
+      <p class="phys-info mono" aria-live="off"></p>
+      <i class="rivet r1"></i><i class="rivet r2"></i><i class="rivet r3"></i><i class="rivet r4"></i>`;
+    const eb = phys.querySelector('.pb-engine') as HTMLButtonElement;
+    const engLabel = eb.querySelector('.pb-val') as HTMLElement;
+    eb.addEventListener('click', () => { eb.classList.add('busy'); window.setTimeout(() => eb.classList.remove('busy'), 800); this.onEngine(); eb.blur(); });
+    (phys.querySelector('.pb-stress') as HTMLButtonElement).addEventListener('click', (e) => { this.onStress(); (e.currentTarget as HTMLElement).blur(); });
+    card.appendChild(phys);
+
     ov.appendChild(card);
     this.setOverlay(ov, 'pause');
+    this.physEls = { info: phys.querySelector('.phys-info') as HTMLElement, engine: engLabel };
+    this.paintPhys();
     window.setTimeout(() => resume.focus({ preventScroll: true }), 60);
   }
 
   showEnd(win: boolean, cause: string, stats: { days: number; hours: number; built: string[] }, onRestart: () => void): void {
     const ov = el('div', `overlay end ${win ? 'win' : 'lose'}`);
     const card = el('div', 'card');
-    const built = stats.built.length
-      ? `<ul class="built">${stats.built.map((b) => `<li></li>`).join('')}</ul>`
+    const names = [...new Set(stats.built.map((b) => BUILT_NAME[b] ?? b))];
+    const built = names.length
+      ? `<ul class="built">${names.map(() => `<li></li>`).join('')}</ul>`
       : '<p class="built-none">Ничего не построено</p>';
     card.innerHTML = `
       <div class="kicker"><i></i><span>${win ? 'Рассвет' : 'Конец записей'}</span><i></i></div>
@@ -695,12 +825,12 @@ export class UI {
       <div class="stats">
         <div><b class="mono">${stats.days}</b><span>${plural(stats.days, 'день', 'дня', 'дней')}</span></div>
         <div><b class="mono">${stats.hours}</b><span>${plural(stats.hours, 'час', 'часа', 'часов')} в пути</span></div>
-        <div><b class="mono">${stats.built.length}</b><span>${plural(stats.built.length, 'постройка', 'постройки', 'построек')}</span></div>
+        <div><b class="mono">${names.length}</b><span>${plural(names.length, 'постройка', 'постройки', 'построек')}</span></div>
       </div>
       <div class="built-wrap"><span class="cap">Построено</span>${built}</div>
       <div class="card-actions"></div>`;
     (card.querySelector('.cause') as HTMLElement).textContent = cause;
-    card.querySelectorAll('.built li').forEach((li, i) => { li.textContent = stats.built[i]; });
+    card.querySelectorAll('.built li').forEach((li, i) => { li.textContent = names[i]; });
     const again = this.btn(win ? 'Ещё раз' : 'Попробовать снова', 'btn-primary', () => { onRestart(); });
     (card.querySelector('.card-actions') as HTMLElement).appendChild(again);
     ov.appendChild(card);
