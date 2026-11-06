@@ -19,7 +19,7 @@ export const TOOLS = [
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
 // msgSec: how long the next tool message stays on the hint card (seconds)
-export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, dugN: 0, dugD: 0, thrownN: 0, thrownD: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
+export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, dugN: 0, dugD: 0, thrownN: 0, thrownD: 0, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
 /** E / «Взять» feeds a campfire this close (cells, 2 m); the HUD fuel chip shows at the same distance */
 export const FEED_R = 40;
@@ -33,7 +33,7 @@ let fireId = 1;
 
 export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
-  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, digs: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5 });
+  Object.assign(tool, { digDir: 1, cur: 0, cool: 0, rot: 0, digs: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5 });
   tool.built.clear();
   G.fires.length = 0; laid.length = 0; bag.length = 0; flushIn = 0; DIG.key = ''; DIG.p = 0; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
 }

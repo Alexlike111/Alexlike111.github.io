@@ -4,7 +4,7 @@
 // The lake reuses the ice-filled hollow that generate() carves (LAKE_A..LAKE_B): its lower part becomes WATER under a 20-40 cm ice lid.
 // Sites are placed on the ground generate() made: each stamp levels its own pad (fill or carve up to one floor row) and updates
 // groundY there, so heat / events keep reading the right ground line. The start area (START_X +- 150) is never touched.
-import { W, H, M, mat, flags, treeId, beamId, groundY, crates, putCell, nextBeamId, F_VERT, F_BOULDER, idx } from './world';
+import { W, H, M, mat, flags, treeId, beamId, groundY, crates, trees, putCell, nextBeamId, F_VERT, F_TREE, F_BOULDER, idx } from './world';
 
 export type LocationKind = 'station' | 'lake' | 'grotto' | 'wreck' | 'tower' | 'spring';
 export interface Pt { x: number; y: number }
@@ -25,6 +25,10 @@ const LAKE_A = 1500, LAKE_B = 1780;      // the frozen lake = the hollow generat
 const GROTTO_X = 1930;                   // west face of the cliff; the cave opens here
 const STATION_X = 2166;                  // hut left wall; a pit in front of the door
 const WRECK_X = 2290;                    // fuselage nose
+/** Column spans the sites build on (ground, snow, trees and supply crates there are cleared first). */
+const PADS = { spring: [144, 212], tower: [1076, 1108], grotto: [1916, 2000], station: [2148, 2268], wreck: [2280, 2358] } as const;
+/** Supply crates pushed into a pad by generate()'s clearSpot: their loot is moved into the station's parts crate. */
+let displaced: string[] = [];
 
 /** Deterministic small random stream of its own (the world's rnd() sequence is not touched). */
 function rng(seed: number): () => number {
@@ -66,13 +70,43 @@ function levelGround(x0: number, x1: number, F: number): void {
     groundY[x] = F;
   }
 }
-/** Remove the loose stuff above row yEnd in columns x0..x1: snow and the boulders generate() dropped there (the pad is rebuilt from here). */
+/** Remove the loose stuff above row yEnd in columns x0..x1: snow, the boulders generate() dropped there and the marker poles of displaced crates. */
 function clearLoose(x0: number, x1: number, yEnd: number): void {
   for (let x = x0; x <= x1; x++) for (let y = 0; y < yEnd; y++) {
     const i = idx(x, y);
-    if (mat[i] === M.SNOW || (mat[i] === M.ROCK && (flags[i] & F_BOULDER) !== 0)) putCell(x, y, M.AIR, 0, 0, 0);
+    if (mat[i] === M.SNOW || mat[i] === M.POLE || (mat[i] === M.ROCK && (flags[i] & F_BOULDER) !== 0)) putCell(x, y, M.AIR, 0, 0, 0);
   }
 }
+/** Fell the standing trees that have a cell in columns x0..x1 (crown included): a whole tree goes, so no stump or bough is left in a pad.
+ *  Trees are seeded, so a pad can meet one on some boots; the default world has none in these pads. */
+function fellTrees(x0: number, x1: number): void {
+  const ids = new Set<number>();
+  for (let x = x0; x <= x1; x++) for (let y = 0; y < H; y++) { const t = treeId[idx(x, y)]; if (t !== 0) ids.add(t); }
+  if (ids.size === 0) return;
+  const low = new Map<number, { x: number; y: number }>();          // lowest trunk cell of each tree
+  for (let i = 0; i < W * H; i++) {
+    const t = treeId[i];
+    if (t === 0 || !ids.has(t) || mat[i] !== M.WOOD || (flags[i] & F_TREE) === 0) continue;
+    const y = (i / W) | 0, b = low.get(t);
+    if (!b || y > b.y) low.set(t, { x: i - y * W, y });
+  }
+  for (let i = 0; i < W * H; i++) if (treeId[i] !== 0 && ids.has(treeId[i])) putCell(i % W, (i / W) | 0, M.AIR, 0, 0, 0);
+  for (const b of low.values()) {
+    const t = trees.find((tr) => tr.alive && Math.abs(tr.x - b.x) <= 2 && tr.base === b.y + 1);
+    if (t) t.alive = false;
+  }
+}
+/** Supply crates that lie in columns x0..x1 are emptied so the pad can be built; their loot goes to `displaced`. The list keeps its order (craft.ts keys extras by index). */
+function emptyCrates(x0: number, x1: number): void {
+  for (const c of crates) {
+    if (c.x + c.w - 1 < x0 || c.x > x1) continue;
+    for (let y = c.y; y < c.y + c.h; y++) for (let x = c.x; x < c.x + c.w; x++) if (mat[idx(x, y)] === M.CRATE) putCell(x, y, M.AIR, 0, 0, 0);
+    displaced.push(...c.loot);
+    c.opened = true;
+    c.loot = [];
+  }
+}
+
 /** A buried supply-style crate (16 x 11 cells, top-left at x, y). Returns the centre of its lid. */
 function crate(x: number, y: number, loot: string[]): Pt {
   for (let yy = y; yy < y + 11; yy++) for (let xx = x; xx < x + 16; xx++) put(xx, yy, M.CRATE, 0, 0, 0);
@@ -148,7 +182,7 @@ function stampTower(): void {
 function stampGrotto(r: () => number): void {
   const GX = GROTTO_X, GX1 = GX + 64, CX1 = GX + 44;
   const F = median(GX - 2, GX + 48);
-  levelGround(GX - 18, GX1 + 6, F);
+  levelGround(GX - 14, GX1 + 6, F);
   // rock mass: top 4 m above the floor, a little wavy; the east end sinks into the snow
   for (let x = GX; x <= GX1; x++) {
     let top = F - 80 + Math.round(3 * Math.sin(x * 0.21) + 2 * Math.sin(x * 0.53 + 1));
@@ -159,8 +193,8 @@ function stampGrotto(r: () => number): void {
   for (let x = GX; x < CX1; x++) for (let y = F - 45; y < F; y++) putCell(x, y, M.AIR, 0, 0, 0);
   // overhang lip sticking out 10 cells over the mouth, and the drift in front scooped out (a wind-cleared apron)
   for (let x = GX - 10; x < GX; x++) for (let y = F - 54; y < F - 45; y++) put(x, y, M.ROCK, 0, 0, 0);
-  for (let x = GX - 17; x < GX; x++) for (let y = F - 45; y < F; y++) putCell(x, y, M.AIR, 0, 0, 0);
-  for (let x = GX - 17; x < GX - 10; x++) for (let y = F - 60; y < F - 45; y++) putCell(x, y, M.AIR, 0, 0, 0);
+  for (let x = GX - 14; x < GX; x++) for (let y = F - 45; y < F; y++) putCell(x, y, M.AIR, 0, 0, 0);
+  for (let x = GX - 14; x < GX - 10; x++) for (let y = F - 60; y < F - 45; y++) putCell(x, y, M.AIR, 0, 0, 0);
   // icicles hanging from the roof: ICE, 6-11 cells long, tapering
   const ceil = F - 46;
   for (const off of [6, 14, 22, 30, 38]) {
@@ -177,7 +211,7 @@ function stampGrotto(r: () => number): void {
   for (let x = FX + 3; x <= FX + 9; x++) put(x, F - 2, M.ASH, 0, 0, 0);
   // hidden cache: a crate buried 15 cm under the cave floor (frozen ground, needs a pick)
   const cache = crate(GX + 30, F + 3, ['matches', 'food', 'saw']);
-  locations.push({ id: 'grotto', name: 'Скальный грот', x0: GX - 17, x1: GX1, y: F - 45, kind: 'grotto', poi: { cache } });
+  locations.push({ id: 'grotto', name: 'Скальный грот', x0: GX - 14, x1: GX1, y: F - 45, kind: 'grotto', poi: { cache } });
 }
 
 /** Abandoned weather station: a PLANK hut with its roof 30 cm under the snow, a door reached by a dug shaft with a ladder,
@@ -207,7 +241,7 @@ function stampStation(r: () => number): void {
   for (const x0 of [HX + 10, HX + 27]) for (let x = x0; x < x0 + 2; x++) for (let y = F - 14; y < F; y++) beamPut(x, y, M.PLANK, id);
   for (let x = HX + 15; x <= HX + 20; x++) for (let y = F - 21; y < F - 16; y++) put(x, y, M.WOOD, 0, 0, 0);
   // parts crate on the floor (the radio spares; loot ids are wired later)
-  const parts = crate(HX + 30, F - 11, ['matches', 'thermos']);
+  const parts = crate(HX + 30, F - 11, ['matches', 'thermos', ...displaced]);
   // snow over the roof and the sides (the pit and the posts are cut out afterwards)
   for (let x = PAD0; x <= PAD1; x++) {
     if (x >= PIT0 && x <= PIT1) continue;
@@ -281,7 +315,12 @@ export function findLocation(x: number): Location | null {
 export function placeLocations(seed: number): Location[] {
   locations.length = 0;
   warmSprings.length = 0;
+  displaced = [];
   const r = rng(seed);
+  // trees and supply crates standing in a pad go first (seeded forest and clearSpot shifts differ per boot); a grotto's cave keeps the big spruce east of the cliff
+  fellTrees(PADS.spring[0], PADS.spring[1]); fellTrees(PADS.tower[0], PADS.tower[1]); fellTrees(PADS.grotto[0], GROTTO_X + 43);
+  fellTrees(PADS.station[0], PADS.station[1]); fellTrees(PADS.wreck[0], PADS.wreck[1]);
+  for (const p of Object.values(PADS)) emptyCrates(p[0], p[1]);
   stampSpring(r);
   stampLake();
   stampTower();

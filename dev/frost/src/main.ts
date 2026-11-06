@@ -511,8 +511,8 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     const sx = shX + (spLean ? vf * Math.round(spLean * 0.6) : 0), sy = shY;
     const worldSx = x + sx + spJx, worldSy = y + sy;
     const id = TOOLS[tool.cur].id;
-    // a log carried on the shoulder: the hand is held level in front and the log runs back over the shoulder
-    const carry = id === 'beam' && !aim && !working;
+    // a log carried on the shoulder, a block held level in front of the chest: the hand is held level and the load runs back / lies in front
+    const carry = (id === 'beam' || id === 'block') && !aim && !working;
     let ang = vf > 0 ? (carry ? 0.2 : 0.55) : Math.PI - (carry ? 0.2 : 0.55);
     if (aim) ang = Math.atan2(aim[1] - worldSy, aim[0] - worldSx);
     let tr = 0, raise = 0;
