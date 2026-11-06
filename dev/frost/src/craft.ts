@@ -468,8 +468,8 @@ export function eatMeat(pack: Pack, cooked: boolean): MealResult {
 
 // ---------------- torch (факел) ----------------
 
-/** Game minutes one torch burns (spec: 40). */
-export const TORCH_MIN = 40;
+/** Game minutes one torch burns: 3 h (1 game minute = 1 real second at normal speed, so ~3 real minutes in hand). */
+export const TORCH_MIN = 180;
 
 /** Lights a spare torch: it takes one from torches and burns TORCH_MIN minutes (torchFuel). Refused while one is already lit. */
 export function lightTorch(pack: Pack): CraftResult {

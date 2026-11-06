@@ -44,9 +44,6 @@ const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_
 // warm spring (locations.ts isWarm): the pool is a heat source, so its water never freezes and the air just above warms
 const WARM_WATER_T = 4, WARM_AIR_T = 1;      // degC the pool water and the air over it are held near
 const WARM_WATER_K = 0.5, WARM_AIR_K = 0.2;  // 1/s relaxation toward those (per real second)
-// lake under its ice lid: the lid thickens slowly, and water stays under it (LAKE_KEEP cells) so the lake never freezes solid
-const LAKE_GROW = 0.04;    // share of the candidate cells that may freeze per check
-const LAKE_KEEP = 8;       // cells of liquid that always stay below the lid
 
 // ---------------- per-material tables ----------------
 const SK = new Float32Array(1024), SC = new Float32Array(1024);
@@ -165,13 +162,7 @@ export function initHeat() {
   }
 }
 
-/** Lake water is frozen only as the top row under the lid, slowly, and only while LAKE_KEEP cells of water stay below it. */
-function lakeMayFreeze(x: number, y: number): boolean {
-  if (nb(x, y - 1) !== M.ICE) return false;
-  if (Math.random() >= LAKE_GROW) return false;
-  for (let k = 1; k <= LAKE_KEEP; k++) if (nb(x, y + k) !== M.WATER) return false;
-  return true;
-}
+
 
 // ---------------- window ----------------
 let hx0 = 0, hx1 = 0, hy0 = 0, hy1 = 0, prevValid = false, tick = 0, dtAvg = 1 / 60, hAcc = 0;
@@ -282,7 +273,7 @@ function phase(hx: number, hy: number, dtRow: number) {
     for (let q = 0; q < 16 && done < n; q++) {
       const i = base + (q >> 2) * W + (q & 3);
       if (mat[i] !== M.WATER) continue;
-      if (isLakeWater(hx * HS + (q & 3), hy * HS + (q >> 2)) && !lakeMayFreeze(hx * HS + (q & 3), hy * HS + (q >> 2))) continue;
+      if (isLakeWater(hx * HS + (q & 3), hy * HS + (q >> 2))) continue;   // the lake stays open under its lid (a thicker lid breaks as a structure); a hole the ice break cut stays open too
       // ice keeps the water's mass; where a fire has burned the meltwater freezes into loose wet snow (slush the shovel digs)
       if (fireSeen[h]) set(hx * HS + (q & 3), hy * HS + (q >> 2), M.SNOW, dens[i], 0, F_WET);
       else set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, dens[i], 255, 0);
