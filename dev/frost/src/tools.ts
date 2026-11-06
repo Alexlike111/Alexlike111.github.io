@@ -1,6 +1,7 @@
 // Tools: shovel, snow saw, axe, beams, snow blocks, campfire; crates, eating.
 import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
 import { G, Fire } from './state';
+import { plural } from './ru';
 import { pl } from './player';
 import { spawn, PK } from './particles';
 import { markStruct, supportMargin, freshBeam } from './structure';
@@ -29,7 +30,7 @@ export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
   Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' });
   tool.built.clear();
-  G.fires.length = 0; loadWarned = false; fireLatch = false;
+  G.fires.length = 0; loadWarned = false; fireLatch = false; placeLatch = false;
 }
 
 const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
@@ -281,7 +282,7 @@ export function sawCheck(ax: number, ay: number): { ok: boolean; avg: number } {
 }
 function saw(ax: number, ay: number, dt: number) {
   if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
-  if (inv.blocks.length >= BLOCK_CAP) { say(`Больше ${BLOCK_CAP} блоков не унести. Сложи их`); return; }
+  if (inv.blocks.length >= BLOCK_CAP) { say(`Больше ${BLOCK_CAP} ${plural(BLOCK_CAP, 'блока', 'блоков', 'блоков')} не унести. Сложи их`); return; }
   const { x0, y0, w, h } = blockRect(ax, ay);
   const pr = sawProbe(ax, ay);
   if (!pr.solid) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
@@ -404,7 +405,7 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
   if (g.blocked) { say(`Мешает: ${g.reason}${kind === 'block' && !g.reason.startsWith('ты') ? '. Блок кладут на ровное место или на другой блок' : ''}`); sfx?.uiDeny(); return; }
   const bs = beamShape();
   const vert = bs.vert;
-  if (kind === 'beam' && inv.logs < bs.logs) { say(`Для бруса 2 м нужно ${bs.logs} бревна. R: сменить длину`); sfx?.uiDeny(); return; }
+  if (kind === 'beam' && inv.logs < bs.logs) { say(`Для бруса 2 м нужно ${bs.logs} ${plural(bs.logs, 'бревно', 'бревна', 'брёвен')}. R: сменить длину`); sfx?.uiDeny(); return; }
   const door = kind === 'beam' && bs.door;
   if (kind === 'beam') {
     const mg = supportMargin(g.cells);
@@ -469,7 +470,7 @@ function dismantleBeam(i0: number, cx: number, cy: number) {
   for (const i of cells) set(i % W, (i / W) | 0, M.AIR);
   const logs = Math.max(1, Math.round(cells.length / 80));
   inv.logs += logs; sfx?.chop(true); tool.cool = 0.4;
-  say(logs === 1 ? '+1 бревно' : `+${logs} брёвен`);
+  say(`+${logs} ${plural(logs, 'бревно', 'бревна', 'брёвен')}`);
   markStruct(cx - 30, cy - 30, cx + 30, cy + 30);
 }
 function chop(ax: number, ay: number) {
@@ -493,7 +494,7 @@ function chop(ax: number, ay: number) {
           const br = Math.round(ndl / 140) + (rec.kind === 'tree' ? 2 : 0);
           inv.logs += logs; inv.branches += br;
           removeBody(rec, false);
-          say(`+${logs} брёвен${br ? `, +${br} хвороста` : ''}`);
+          say(`+${logs} ${plural(logs, 'бревно', 'бревна', 'брёвен')}${br ? `, +${br} ${plural(br, 'хворост', 'хвороста', 'хвороста')}` : ''}`);
           sfx?.pickup();
         } else say(`Разделка: ${rec.hits}/${need}`);
         return;
@@ -583,6 +584,8 @@ export function placeFire(ax: number, ay: number) {
   if (shifted) for (let k = 0; k < 14 && y > 2 && mat[idx(x, y)] !== M.AIR && mat[idx(x, y)] !== M.NEEDLE; k++) y--; // the spot beside the body may be a step higher
   while (y < H - 2 && (mat[idx(x, y)] === M.AIR || mat[idx(x, y)] === M.NEEDLE)) y++;   // boughs are no ground
   if (Math.abs(y - ay) > 30 || !inReach(x, y)) { say('Слишком далеко'); return; }
+  // one fire per clearing: a new one next to a burning fire is refused, feed the old one instead (feedFire via interact: E / «Взять»)
+  if (G.fires.some((f) => Math.hypot(f.x - x, f.y - y) < 12)) { say('Рядом уже горит костёр — подбрось дров: E / «Взять»'); sfx?.uiDeny(); return; }
   inv.matches--; inv.logs--; inv.branches -= 2;
   G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++ });
   sfx?.ignite();
@@ -735,6 +738,7 @@ export function eat(): boolean {
 
 // ---------------- dispatch ----------------
 let fireLatch = false;   // set by a fire click, released by idleTool (button up)
+let placeLatch = false;  // same for beam / block: one placement per press, however long LMB is held
 export function usePrimary(ax: number, ay: number, dt: number) {
   tool.cool -= dt;
   const [x, y] = reachPoint(ax, ay);
@@ -744,8 +748,8 @@ export function usePrimary(ax: number, ay: number, dt: number) {
   if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; return; }
   if (id === 'shovel') dig(x, y);
   else if (id === 'axe') chop(x, y);
-  else if (id === 'beam') place('beam', x, y);
-  else if (id === 'block') place('block', x, y);
+  else if (id === 'beam') { if (placeLatch) return; placeLatch = true; place('beam', x, y); }
+  else if (id === 'block') { if (placeLatch) return; placeLatch = true; place('block', x, y); }
   else if (id === 'fire') { if (fireLatch) return; fireLatch = true; placeFire(x, y); tool.cool = 0.6; } // one fire per press
 }
 export function useSecondary(ax: number, ay: number) {
@@ -756,5 +760,5 @@ export function useSecondary(ax: number, ay: number) {
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);
 }
-export function idleTool(dt: number) { fireLatch = false; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
+export function idleTool(dt: number) { fireLatch = false; placeLatch = false; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
 export { CELL };

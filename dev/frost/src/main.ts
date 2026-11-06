@@ -35,7 +35,10 @@ let cssW = 0, cssH = 0, dpr = 1;
 /** bench.ts: render at a different viewport size (phone / desktop) without touching the window */
 let vpOverride: { w: number; h: number; dpr: number; mobile: boolean } | null = null;
 function resize() {
-  cssW = vpOverride ? vpOverride.w : window.innerWidth; cssH = vpOverride ? vpOverride.h : window.innerHeight; dpr = vpOverride ? vpOverride.dpr : Math.min(2, window.devicePixelRatio || 1);
+  cssW = vpOverride ? vpOverride.w : window.innerWidth; cssH = vpOverride ? vpOverride.h : window.innerHeight;
+  // touch devices: device pixel ratio capped at 1.5 (screen pass and overlay canvas scale with dpr^2)
+  const dprCap = (vpOverride ? vpOverride.mobile : G.mobile) ? 1.5 : 2;
+  dpr = Math.min(dprCap, vpOverride ? vpOverride.dpr : (window.devicePixelRatio || 1));
   renderer.resize(cssW, cssH, dpr);
   fx.width = Math.round(cssW * dpr); fx.height = Math.round(cssH * dpr);
   fx.style.width = cssW + 'px'; fx.style.height = cssH + 'px';
@@ -135,7 +138,7 @@ function hint(): string | null {
   if (tutorial === 1) return mob ? '«Положить»: бросить снег из лопаты туда, куда целишься' : 'ПКМ: бросить снег из лопаты туда, куда целишься';
   if (tutorial === 2) return mob ? 'Найди ящик под оранжевой вешкой, подкопай и жми «Взять»' : 'Найди ящик под оранжевой вешкой, подкопай к нему и жми E';
   if (tutorial === 3) return 'Укрытие: землянка (копай в сугроб), иглу (пила по насту, ПКМ), дом (топор по ели, 4)';
-  if (tutorial === 4) return mob ? 'Разведи костёр внутри (кнопка 6) и жди ночь («Ждать»)' : 'Разведи костёр внутри (6) и жди ночь (T)';
+  if (tutorial === 4) return mob ? 'Разведи костёр в укрытии (кнопка 6) и жди ночь («Ждать»)' : 'Разведи костёр в укрытии (6) и жди ночь (T)';
   if (pl.core < 35.5 && G.fires.length === 0) return 'Ты замерзаешь. Уйди от ветра в укрытие и разведи костёр (6)';
   if (pl.wet > 0.4) return 'Одежда мокрая и плохо греет. Посуши её у огня';
   if (tutorial === 5 && G.daylight > 0.2 && G.fires.length > 0) return mob ? 'Подкидывай брёвна в огонь («Взять»), жди ночь («Ждать»)' : 'Подкидывай брёвна в огонь (E), жди ночь (T)';
@@ -549,7 +552,7 @@ const AD_BUDGET = 16.7;
 function adaptWork(ms: number) { AD.work += (Math.min(ms, 100) - AD.work) * 0.1; }   // CPU+submit time of a frame: the only headroom visible under vsync
 function adaptQuality(ms: number) {
   if ((window as unknown as { __noAdapt?: boolean }).__noAdapt) return;
-  if (ms > 1000 || !running || paused) { AD.n = 0; return; }            // tab switch / title screen / pause: not representative
+  if (ms > 1000 || paused) { AD.n = 0; return; }                          // tab switch / pause: not representative (the title screen renders the world too, so it adapts)
   AD.avg += (ms - AD.avg) * 0.1; AD.t += ms / 1000; AD.n++;
   if (AD.n < 20 || AD.t < 0.6) return;
   const step = AD.t; AD.t = 0;
@@ -579,7 +582,7 @@ function adaptQuality(ms: number) {
 // ---------------- main loop ----------------
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60;
 let aimWorld: [number, number] | null = null;
-let waitToggle = false;
+let waitToggle = false, waitMsgT = -99;
 function frame(now: number) {
   requestAnimationFrame(frame);
   if (!bench.active) { frameBody(now); return; }
@@ -602,14 +605,17 @@ function frameBody(now: number) {
   const s = bench.active ? bench.input : input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
-  if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
+  if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); adaptWork(performance.now() - tw); return; }   // title / pause: still feeds the work estimate that adaptQuality uses
   if (ended) { // after win/death: world keeps living in the background but ignores game input
     G.realTime += realDt; G.frame++; updateCamera(realDt); stepHeat(realDt); stepSim(dt, realDt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
   }
   G.realTime += realDt; G.frame++;
-  // waiting (time compression) only when calm: not moving, sheltered or by a fire
+  // waiting (time compression) only when calm and in a place to wait: not moving / digging, sheltered (shelter >= 0.5) or within 40 cells of a burning fire
   if (s.waitHeld !== waitToggle) waitToggle = s.waitHeld;
-  const canWait = pl.alive && Math.abs(s.moveX) < 0.1 && !s.primary;
+  const calm = Math.abs(s.moveX) < 0.1 && !s.primary;
+  const waitSpot = pl.shelter >= 0.5 || G.fires.some((f) => f.lit && Math.hypot(f.x - pl.x, f.y - pl.y) < 40);
+  const canWait = pl.alive && calm && waitSpot;
+  if (waitToggle && pl.alive && calm && !waitSpot && G.realTime - waitMsgT > 3) { waitMsgT = G.realTime; tool.msg = 'Ждать можно только в укрытии или у костра'; }
   G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, realDt * 3);
   G.time += realDt * G.timeScale;
   let pt = pnow();

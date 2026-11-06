@@ -35,7 +35,17 @@ const CELL_BODY = `
 uniform highp usampler2D uTop;
 uniform ivec2 uOrg;
 uniform float uTime, uDay, uStorm, uWind, uCamX;
-uniform int uNL, uSteps, uSkyN, uSkyS;
+// loop budgets are compile-time per quality (HIQ variant) instead of uniforms: the loops unroll to their real length
+#ifdef HIQ
+#define PL_STEPS 24      // point-light beam samples per light and cell
+#define SKY_N 16         // sky transmittance samples upward
+#define SKY_S 0          // extra cell stride per sky sample
+#else
+#define PL_STEPS 8       // quality 0: 8 beam samples (was 12): coarser beam, same cut-off
+#define SKY_N 10
+#define SKY_S 1
+#endif
+uniform int uNL;
 uniform vec2 uSkyDir;
 uniform vec3 uAmb, uDirCol;
 uniform vec2 uVis;
@@ -59,8 +69,8 @@ vec3 skyMarch(ivec2 c, int stp, int jit, int mUp, out float depth){
   if(A.g>4.5) return exp(-A);
   int top = (c.x<0||c.x>=WI) ? 0 : int(texelFetch(uTop, ivec2(c.x,0), 0).r);
   if(mUp==0 && c.y<top) return vec3(1.);
-  stp += uSkyS;
-  int nmax = min(16, uSkyN);
+  stp += SKY_S;
+  int nmax = min(16, SKY_N);
   int lim = c.y - top - 2 - jit; lim = lim<0 ? 0 : min(nmax, lim/stp + 1);
   bool dead = false;
   for(int i=0;i<16;i++){
@@ -116,9 +126,9 @@ vec3 pointLights(vec2 wp, ivec2 c, vec2 n, float hasN, float jr){
     float q = dist/r*3.;
     float pw = uLP[i].w * (1./(1.+q*q) - .1)/.9;
     if(pw<=.003) continue;
-    int ns = min(uSteps, int(dist*.75)+2);
+    int ns = min(PL_STEPS, int(dist*.75)+2);
     vec3 A = vec3(0.); float sl = dist/float(ns);
-    for(int k=0;k<24;k++){
+    for(int k=0;k<PL_STEPS;k++){
       if(k>=ns) break;
       float t = (float(k)+.25+.5*jr)/float(ns);
       if(t>.94) break;
@@ -839,6 +849,10 @@ void main(){
 }`;
 
 const clamp = (v: number, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+/** cells rendered beyond the view on each side (quality 0 only): lets the cell target be reused while the camera drifts a few cells */
+const cellMargin = () => (G.quality === 0 ? 3 : 0);
+/** touch devices: quality 1 screen pass is capped at this many canvas px per css px (the screen pass scales with pixels, the cell pass does not) */
+const TOUCH_Q1_SCALE = 1.0;
 const mixn = (a: number, b: number, t: number) => a + (b - a) * t;
 const sstep = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 type V3 = [number, number, number];
@@ -855,6 +869,8 @@ export class Renderer {
   private pbuf!: WebGLBuffer; private worldTex!: WebGLTexture; private heatTex!: WebGLTexture;
   private cellTex: WebGLTexture | null = null; private auxTex: WebGLTexture | null = null; private cellFbo: WebGLFramebuffer | null = null;
   private cellW = 0; private cellH = 0; private orgX = 0; private orgY = 0;
+  // cell target reuse: origin / variant it was last rendered with, and frames since (see render, pass 1)
+  private cellOrgX = 0; private cellOrgY = 0; private cellValid = false; private cellVar = -1; private cellAge = 0;
   private half = false; private colOK = false;
   private progCol: WebGLProgram | null = null; private uk: Record<string, WebGLUniformLocation | null> = {};
   private colTex: WebGLTexture | null = null; private colFbo: WebGLFramebuffer | null = null; private colW = 0;
@@ -967,7 +983,7 @@ export class Renderer {
     let v = this.cellV.get(f);
     if (!v) {
       const p = this.compile(VS, fsCell(this.half, f), 'cell');
-      v = { p, u: this.locs(p, ['uWorld', 'uTop', 'uOrg', 'uTime', 'uDay', 'uStorm', 'uWind', 'uCamX', 'uNL', 'uSteps', 'uSkyN', 'uSkyS', 'uSkyDir', 'uAmb', 'uDirCol', 'uVis', 'uLP[0]', 'uLC[0]']) };
+      v = { p, u: this.locs(p, ['uWorld', 'uTop', 'uOrg', 'uTime', 'uDay', 'uStorm', 'uWind', 'uCamX', 'uNL', 'uSkyDir', 'uAmb', 'uDirCol', 'uVis', 'uLP[0]', 'uLC[0]']) };
       this.cellV.set(f, v);
     }
     return v;
@@ -990,10 +1006,10 @@ export class Renderer {
 
   /** (Re)allocate the cell target when the view size in cells changes. */
   private ensureCell() {
-    const gl = this.gl, c = G.cam, cw = Math.ceil(c.vw) + 3, ch = Math.ceil(c.vh) + 3;
+    const gl = this.gl, c = G.cam, mg = cellMargin(), cw = Math.ceil(c.vw) + 3 + 2 * mg, ch = Math.ceil(c.vh) + 3 + 2 * mg;
     if (this.cellTex && cw === this.cellW && ch === this.cellH) return;
     if (this.cellTex) { gl.deleteTexture(this.cellTex); gl.deleteTexture(this.auxTex); gl.deleteFramebuffer(this.cellFbo); }
-    this.cellW = cw; this.cellH = ch;
+    this.cellW = cw; this.cellH = ch; this.cellValid = false;
     this.cellTex = this.tex(cw, ch, gl.NEAREST, this.half ? gl.RGBA16F : gl.RGBA8);
     this.auxTex = this.tex(cw, ch, gl.NEAREST, gl.RGBA8);
     this.cellFbo = gl.createFramebuffer()!;
@@ -1017,7 +1033,10 @@ export class Renderer {
   }
 
   /** Canvas pixels per css pixel at full dynamic scale (low quality renders at 0.6x and lets the browser upscale). */
-  private baseScale() { return G.quality === 0 ? 0.6 : Math.min(this.dpr || 1, 2); }
+  private baseScale() {
+    if (G.quality === 0) return 0.6;
+    return Math.min(this.dpr || 1, G.mobile ? TOUCH_Q1_SCALE : 2);   // touch: quality 1 never at full device resolution
+  }
   /** Lowest dynamic multiplier we allow: keep >= ~1.1 canvas px per world cell so pixel art stays readable. */
   dynMin(): number { return clamp(1.1 / (G.cam.zoom * this.baseScale()), 0.45, 1); }
   getDyn() { return this.dyn; }
@@ -1064,15 +1083,17 @@ export class Renderer {
       }
     }
   }
-  private uploadWorld() {
+  /** Uploads the dirty world chunks; returns true when any cell changed (the cell target then has to be rendered again). */
+  private uploadWorld(): boolean {
     const gl = this.gl;
+    let changed = false;
     gl.bindTexture(gl.TEXTURE_2D, this.worldTex);
     gl.pixelStorei(gl.UNPACK_ROW_LENGTH, W);
     if (this.full) {
       this.pack(0, 0, W, H);
       gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, this.pix);
-      gpuDirty.fill(0); this.full = false; this.scanTop(0, W); this.topDirty = true;
+      gpuDirty.fill(0); this.full = false; this.scanTop(0, W); this.topDirty = true; changed = true;
     } else {
       for (let cy = 0; cy < CHH; cy++) {
         let cx = 0;
@@ -1083,7 +1104,7 @@ export class Renderer {
           this.pack(x0, y0, w, CH); if (prof.on) { prof.dirtyChunks = (prof.dirtyChunks || 0) * 0.98 + (e - cx) * 0.02; }
           gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, x0); gl.pixelStorei(gl.UNPACK_SKIP_ROWS, y0);
           gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, w, CH, gl.RGBA, gl.UNSIGNED_BYTE, this.pix);
-          this.scanTop(x0, x0 + w); this.topDirty = true;
+          this.scanTop(x0, x0 + w); this.topDirty = true; changed = true;
           cx = e;
         }
       }
@@ -1094,6 +1115,7 @@ export class Renderer {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, this.colTopY);
       this.topDirty = false;
     }
+    return changed;
   }
   /** First non-air row of every column in [x0,x1): the cell shader skips the sky march above it. Only dirty chunk columns are rescanned. */
   private scanTop(x0: number, x1: number) {
@@ -1238,10 +1260,11 @@ export class Renderer {
     let t = pnow();
     this.frame++;
     c.vw = this.cssW / c.zoom; c.vh = this.cssH / c.zoom;
-    this.uploadWorld();
+    const worldChanged = this.uploadWorld();
     if (G.xray === 3 && (this.frame & 3) === 1) this.uploadHeat();
     this.ensureCell();
-    this.orgX = Math.floor(c.x - c.vw * 0.5) - 1; this.orgY = Math.floor(c.y - c.vh * 0.5) - 1;
+    const mg = cellMargin();
+    this.orgX = Math.floor(c.x - c.vw * 0.5) - 1 - mg; this.orgY = Math.floor(c.y - c.vh * 0.5) - 1 - mg;   // origin this frame would render with
     this.computeLight();
     pend('upload', t); t = pnow();
     const lowQ = G.quality === 0, L = this.lt;
@@ -1249,23 +1272,34 @@ export class Renderer {
     gl.bindVertexArray(this.vao);
 
     // ---- pass 1: cells ----
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);
-    gl.viewport(0, 0, this.cellW, this.cellH);
+    // The cell target is world-space, so it is reused as long as it still covers the view. It is rendered again at once when the world
+    // changed (chunk uploads), the variant changed (lights / drift), its size changed or the view left it; otherwise every `period` frames
+    // (time of day, glints, light flicker). The period grows as dyn drops, so under load the cell pass costs less.
     const nl = this.packLights();
     const windy = Math.abs(G.wind) > 5.3;
-    const cv = this.cellProg((lowQ ? 0 : CF.HIQ) | (nl > 0 ? CF.LIGHTS : 0) | (windy ? CF.WIND : 0)), uc = cv.u;
-    gl.useProgram(cv.p);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.worldTex);
-    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.topTex);
-    gl.uniform1i(uc.uWorld, 0); gl.uniform1i(uc.uTop, 4); gl.uniform2i(uc.uOrg, this.orgX, this.orgY);
-    gl.uniform1f(uc.uTime, G.realTime); gl.uniform1f(uc.uDay, L.day); gl.uniform1f(uc.uStorm, L.storm); gl.uniform1f(uc.uWind, G.wind); gl.uniform1f(uc.uCamX, c.x);
-    gl.uniform1i(uc.uNL, nl); gl.uniform1i(uc.uSteps, lowQ ? 12 : 24);
-    gl.uniform1i(uc.uSkyN, lowQ ? 10 : 16); gl.uniform1i(uc.uSkyS, lowQ ? 1 : 0);
-    gl.uniform2f(uc.uSkyDir, L.dx, L.dy); gl.uniform2f(uc.uVis, L.vis0, L.vis1);
-    gl.uniform3f(uc.uAmb, this.amb[0], this.amb[1], this.amb[2]); gl.uniform3f(uc.uDirCol, this.dir[0], this.dir[1], this.dir[2]);
-    if (nl > 0) { gl.uniform4fv(uc['uLP[0]'], this.lp); gl.uniform3fv(uc['uLC[0]'], this.lc); }
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (prof.on) { pend('cellSubmit', t); if (pr) { this.sync(true); pend('gpuCell', t); } t = pnow(); }
+    const variant = (lowQ ? 0 : CF.HIQ) | (nl > 0 ? CF.LIGHTS : 0) | (windy ? CF.WIND : 0);
+    const period = lowQ ? (this.dyn >= 0.75 ? 2 : 3) : (this.dyn >= 0.6 ? 1 : 2);
+    const vx0 = Math.floor(c.x - c.vw * 0.5), vx1 = Math.floor(c.x + c.vw * 0.5), vy0 = Math.floor(c.y - c.vh * 0.5), vy1 = Math.floor(c.y + c.vh * 0.5);
+    const covers = this.cellValid && this.cellOrgX <= vx0 && vx1 < this.cellOrgX + this.cellW && this.cellOrgY <= vy0 && vy1 < this.cellOrgY + this.cellH;
+    this.cellAge++;
+    const drawCell = !covers || variant !== this.cellVar || worldChanged || this.cellAge >= period;
+    if (drawCell) {
+      this.cellOrgX = this.orgX; this.cellOrgY = this.orgY; this.cellVar = variant; this.cellValid = true; this.cellAge = 0;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.cellFbo);
+      gl.viewport(0, 0, this.cellW, this.cellH);
+      const cv = this.cellProg(variant), uc = cv.u;
+      gl.useProgram(cv.p);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.worldTex);
+      gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.topTex);
+      gl.uniform1i(uc.uWorld, 0); gl.uniform1i(uc.uTop, 4); gl.uniform2i(uc.uOrg, this.orgX, this.orgY);
+      gl.uniform1f(uc.uTime, G.realTime); gl.uniform1f(uc.uDay, L.day); gl.uniform1f(uc.uStorm, L.storm); gl.uniform1f(uc.uWind, G.wind); gl.uniform1f(uc.uCamX, c.x);
+      gl.uniform1i(uc.uNL, nl);
+      gl.uniform2f(uc.uSkyDir, L.dx, L.dy); gl.uniform2f(uc.uVis, L.vis0, L.vis1);
+      gl.uniform3f(uc.uAmb, this.amb[0], this.amb[1], this.amb[2]); gl.uniform3f(uc.uDirCol, this.dir[0], this.dir[1], this.dir[2]);
+      if (nl > 0) { gl.uniform4fv(uc['uLP[0]'], this.lp); gl.uniform3fv(uc['uLC[0]'], this.lc); }
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (prof.on) { pend('cellSubmit', t); if (pr) { this.sync(true); pend('gpuCell', t); } t = pnow(); }
+    }
 
     // ---- background columns ----
     if (this.progCol) {
@@ -1290,7 +1324,7 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.cellTex);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.auxTex);
     gl.uniform1i(u.uWorld, 0); gl.uniform1i(u.uHeat, 1); gl.uniform1i(u.uCell, 2); gl.uniform1i(u.uAux, 3); gl.uniform1i(u.uCol, 4);
-    gl.uniform2i(u.uOrg, this.orgX, this.orgY); gl.uniform2i(u.uCellSz, this.cellW, this.cellH);
+    gl.uniform2i(u.uOrg, this.cellOrgX, this.cellOrgY); gl.uniform2i(u.uCellSz, this.cellW, this.cellH);   // the origin the cell target was rendered with
     gl.uniform2f(u.uRes, this.canvas.width, this.canvas.height);
     gl.uniform2f(u.uCam, c.x, c.y); gl.uniform2f(u.uView, c.vw, c.vh); gl.uniform2f(u.uVis, L.vis0, L.vis1);
     gl.uniform1f(u.uTime, G.realTime); gl.uniform1f(u.uDay, L.day); gl.uniform1f(u.uStorm, L.storm); gl.uniform1f(u.uWind, G.wind); gl.uniform1f(u.uFog, L.fog);

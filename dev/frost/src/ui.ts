@@ -1,6 +1,7 @@
 import './ui.css';
 import type { Input, InputButton } from './input';
 import { Wheel, type WheelItem } from './wheel';
+import { plural } from './ru';
 
 export interface HudData {
   core: number; food: number; stamina: number; wet: number;   // core °C; others 0..1
@@ -54,6 +55,11 @@ const ICONS: Record<string, string> = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.800"/>',
 };
 
+/** caption forms for counted HUD chips: [one, few, many] */
+const CHIP_WORDS: Record<string, [string, string, string]> = {
+  logs: ['бревно', 'бревна', 'брёвен'], matches: ['спичка', 'спички', 'спичек'], blocks: ['блок', 'блока', 'блоков'],
+  branches: ['хворост', 'хвороста', 'хвороста'], thermos: ['термос', 'термоса', 'термосов'],
+};
 export function ico(name: string, cls = ''): string {
   return `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ''}</svg>`;
 }
@@ -239,7 +245,7 @@ export class UI {
   private clockTime!: Cached;
   private clockIcon!: HTMLElement;
   private clockWait!: HTMLElement;
-  private chips: Record<string, { root: HTMLElement; n: Cached }> = {};
+  private chips: Record<string, { root: HTMLElement; n: Cached; l: Cached }> = {};
   private belt!: HTMLElement;
   private tags: { root: HTMLElement; name: Cached; key: Cached; count: Cached; load: HTMLElement }[] = [];
   private beltSig = '';
@@ -378,7 +384,7 @@ export class UI {
       root.title = lab;
       root.innerHTML = `${ico(icon)}<span class="chip-n mono"></span><span class="chip-l">${lab}</span>`;
       chips.appendChild(root);
-      this.chips[k] = { root, n: root.querySelector('.chip-n') as Cached };
+      this.chips[k] = { root, n: root.querySelector('.chip-n') as Cached, l: root.querySelector('.chip-l') as Cached };
     }
     // phone: only non-zero items are listed; this chip opens the full row for a few seconds
     const more = el('button', 'chip more', '<span>…</span>');
@@ -763,7 +769,7 @@ export class UI {
       this.btnEat?.classList.toggle('none', eatNone);
       this.btnEat?.setAttribute('aria-disabled', String(eatNone));
     });
-    const sheltered = h.shelter >= 0.6;
+    const sheltered = h.shelter >= 0.5;   // same bar as the wait rule in main.ts
     this.m('waitready', sheltered, () => this.btnWait?.classList.toggle('ready', sheltered));
 
     // ---- tool tags
@@ -851,6 +857,8 @@ export class UI {
   private setChip(k: string, n: number, label?: string, visible = true): void {
     const c = this.chips[k]; if (!c) return;
     this.txt(c.n, label ?? String(n));
+    const w = CHIP_WORDS[k];   // the caption agrees with the count: 1 бревно, 2 бревна, 5 брёвен
+    if (w) { const word = plural(n, w[0], w[1], w[2]); this.txt(c.l, word); this.m('chipw' + k, word, () => { c.root.title = word; }); }
     this.m('chip' + k, (n > 0 ? 1 : 0) + (visible ? 2 : 0), () => {
       c.root.classList.toggle('zero', n <= 0);
       c.root.classList.toggle('hidden', !visible);
@@ -1114,12 +1122,4 @@ export class UI {
     this.setOverlay(ov, 'end');
     window.setTimeout(() => again.focus({ preventScroll: true }), 400);
   }
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const a = Math.abs(n) % 100, b = a % 10;
-  if (a > 10 && a < 20) return many;
-  if (b > 1 && b < 5) return few;
-  if (b === 1) return one;
-  return many;
 }
