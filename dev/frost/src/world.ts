@@ -188,7 +188,7 @@ export function generate(s = 20261106) {
   }
   // start-area dressing: a few young spruces and half-buried rocks on both sides of the start (the dugout drift DRIFT_X-110..+110 and the spawn stay clear).
   // Deterministic positions, no world rnd() use: the rest of the generation is unchanged. Young = ~4-5 m (the snow here is ~2.3 m deep).
-  for (const [dx, h] of [[-215, 96], [-116, 84], [58, 80], [320, 100], [480, 86]] as const) {
+  for (const [dx, h] of [[-215, 96], [-134, 84], [58, 80], [320, 100], [480, 86]] as const) {
     const tx = START_X + dx;
     if (Math.abs(tx - DRIFT_X) < 118 || tx < 60 || (tx > lakeA - 20 && tx < lakeB + 20)) continue;
     plantTree(tx, h, false);

@@ -173,8 +173,9 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     }
 #endif
     if(depth<2.6){                                                         // wind ripples / sastrugi along the surface: strong on wind slab, a whisper on plain slopes
-      float rp = sin(cf.x*.62 + vn(vec2(cf.x*.045, cf.y*.4))*5.5);
-      float rq = sin(cf.x*.23 - cf.y*.9 + vn(vec2(cf.x*.02, cf.y*.3))*7.);
+      float wv = vn(vec2(cf.x*.035, cf.y*.35));
+      float rp = sin(cf.x*.62 + wv*5.5);
+      float rq = sin(cf.x*.23 - cf.y*.9 + wv*7.);
       float ra = (fl&16)!=0 ? .035 : .013;
       b *= 1.+(ra*rp + .009*rq*(1.-slab))*(1.-trail);
       b += (vn(vec2(cf.x*.05, cf.y*1.3))-.5)*.022*(1.-trail);             // long, flat wind streaks
@@ -461,8 +462,9 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   float asp = uRes.x/uRes.y;
   float skyT = smoothstep(0.,.9,sUV.y);
   vec3 sky = mix(uSkyTop, uSkyHor, skyT);
-  sky += vec3(-.02,.0,.04)*sin(skyT*3.14159)*uDay*(1.-uStorm);              // a touch more saturated blue half-way down, so the gradient is not a straight lerp
-  sky += uSkyHor*exp(-pow((sUV.y-.8)/.24,2.))*(.08+.34*uStorm);              // horizon haze glow
+  sky += vec3(-.02,.0,.04)*(4.*skyT*(1.-skyT))*uDay*(1.-uStorm);            // a touch more saturated blue half-way down, so the gradient is not a straight lerp
+  float hzx = (sUV.y-.8)*4.2;
+  sky += uSkyHor*(1./(1.+hzx*hzx*hzx*hzx))*(.08+.34*uStorm);                 // horizon haze glow
   float nightClear = (1.-uDay)*(1.-smoothstep(.1,.35,uStorm));
 #ifdef NIGHT
   if(nightClear>.02){
@@ -504,30 +506,29 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   int gx = int(gl_FragCoord.x), gw = textureSize(uCol,0).x;
 #endif
   float cpx = uView.x/uRes.x;                                                 // cells per canvas pixel
+#ifdef COLTEX
+  vec4 sl = texelFetch(uCol, ivec2(gx, 7), 0);                                // (ridge slope, hill slope, facet noise, streak noise)
+#else
+  vec4 sl = slopeRow(uCam.x*.06 + sOff.x, uCam.x*.15 + sOff.x, cpx);
+#endif
   // far mountains: snow ridges shaded by the light direction, rock streaks, mist at the foot
   {
     float ly = sOff.y + (uCam.y-380.)*.10;
 #ifdef COLTEX
     float e = cm.x;
 #else
-    float Lx = uCam.x*.06 + sOff.x;
-    float e = eMtn(Lx);
+    float e = eMtn(uCam.x*.06 + sOff.x);
 #endif
     float a = smoothstep(-.7,.7,ly-e);
     if(a>0.){
       float dz = max(ly-e,0.);
-#ifdef COLTEX
-      float dedx = (texelFetch(uCol, ivec2(min(gx+4,gw-1),0),0).x - texelFetch(uCol, ivec2(max(gx-4,0),0),0).x)/(8.*cpx);
-      float Lx = uCam.x*.06 + sOff.x;
-#else
-      float dedx = (eMtn(Lx+4.*cpx)-eMtn(Lx-4.*cpx))/(8.*cpx);
-#endif
+      float dedx = sl.x;
       vec2 nrm = normalize(vec2(clamp(dedx,-2.5,2.5)*1.1, -1.));
       float lit = smoothstep(-.3,.85,dot(nrm,Ld));
-      float fx = vn(vec2(Lx*.07 + dz*.012*sign(dedx+.001), dz*.011));       // facets / gullies running down the flank
-      lit = clamp(lit + (fx-.5)*1.1*smoothstep(2.,22.,dz), 0., 1.);
-      float rk = vn(vec2(Lx*.5 + dz*.05*sign(dedx+.001), dz*.07));
-      float streak = smoothstep(.64,.8,rk)*smoothstep(9.,26.,dz)*(1.-smoothstep(60.,105.,dz))*(.35+.65*smoothstep(.1,.8,abs(dedx)));
+      float fx = sl.z + .7*(fract(dz*.021 + sl.z*4.)-.5);                      // facets / gullies running down the flank
+      lit = clamp(lit + (fx-.5)*1.5*smoothstep(2.,20.,dz), 0., 1.);
+      float rk = fract(sl.w*11. + dz*.04*sign(dedx+.001));
+      float streak = smoothstep(.7,.9,rk)*smoothstep(8.,22.,dz)*(1.-smoothstep(60.,105.,dz))*(.4+.6*smoothstep(.1,.8,abs(dedx)));
       vec3 c = mix(vec3(.50,.60,.79), vec3(.95,.975,1.), lit);
       c = mix(c, vec3(.30,.35,.48)*(.65+.55*lit), streak*.62);
       c = mix(c, vec3(.46,.58,.78), clamp(dz/120.,0.,1.)*.4);
@@ -544,20 +545,13 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
 #ifdef COLTEX
     float e = cm.y;
 #else
-    float Lx = uCam.x*.15 + sOff.x;
-    float e = eHill(Lx);
+    float e = eHill(uCam.x*.15 + sOff.x);
 #endif
     float a = smoothstep(-.7,.7,ly-e);
     if(a>0.){
       float dz = max(ly-e,0.);
-#ifdef COLTEX
-      float dedx = (texelFetch(uCol, ivec2(min(gx+5,gw-1),0),0).y - texelFetch(uCol, ivec2(max(gx-5,0),0),0).y)/(10.*cpx);
-      float Lx = uCam.x*.15 + sOff.x;
-#else
-      float dedx = (eHill(Lx+5.*cpx)-eHill(Lx-5.*cpx))/(10.*cpx);
-#endif
-      float lit = smoothstep(-.3,.85,dot(normalize(vec2(clamp(dedx,-2.,2.)*1.4,-1.)),Ld));
-      lit = clamp(lit + (vn(vec2(Lx*.05, dz*.03))-.5)*.5*smoothstep(1.,14.,dz), 0., 1.);
+      float lit = smoothstep(-.3,.85,dot(normalize(vec2(clamp(sl.y,-2.,2.)*1.4,-1.)),Ld));
+      lit = clamp(lit + (fract(dz*.037 + sl.z*5.)-.5)*.4*smoothstep(1.,14.,dz), 0., 1.);
       vec3 c = mix(vec3(.52,.63,.80), vec3(.34,.46,.68), clamp(dz/50.,0.,1.));
       c *= .84 + .3*lit;
       c += vec3(.07,.08,.09)*lit*(1.-smoothstep(0.,1.4,dz));
@@ -579,7 +573,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     vec3 c = vec3(.86,.91,.97)*bgL*(1.+.25*nt);
     c = mix(c, uSkyHor, clamp(.22+.4*fg,0.,1.));
     col = mix(col, c, a);
-    if(ly>-8.){
+    if(hy-ly>-6. && hy-ly<68.){
       float aT = 0.;
 #ifdef COLTEX
       for(int j=0;j<3;j++){
@@ -607,7 +601,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     vec3 c = mix(vec3(.80,.87,.95), vec3(.66,.76,.90), clamp((ly-hy)/40.,0.,1.))*bgL*(1.+.2*nt);
     c = mix(c, uSkyHor, clamp(.12+.38*fg,0.,1.));
     col = mix(col, c, a);
-    if(ly>-20.){
+    if(hy-ly>-6. && hy-ly<92.){
       float aT = 0., tnA = 0., sdA = 0.;
 #ifdef COLTEX
       for(int j=0;j<3;j++){
@@ -730,7 +724,8 @@ void main(){
   }
 #endif
   col *= 1.-.3*smoothstep(.35,.75,length(sUV-.5));
-  col += (float(ihash(uvec2(gl_FragCoord.xy)))*(1./4294967296.) + float(ihash(uvec2(gl_FragCoord.xy)+uvec2(17u,91u)))*(1./4294967296.) - 1.)/255.;   // triangular dither (+-1 LSB): no banding in the sky gradient
+  uint dh = ihash(uvec2(gl_FragCoord.xy));
+  col += (float(dh&65535u) + float(dh>>16u) - 65535.)*(1./65536./255.);   // triangular dither (+-1 LSB): no banding in the sky gradient
   fragColor = vec4(col,1.);
 }`;
 const SF = { STORM: 1, DRIFT: 2, NIGHT: 4, XRAY: 8 };
@@ -747,6 +742,10 @@ float eMtn(float Lx){ float rr = 1.-abs(2.*fbm1(Lx*.012+3.)-1.); float r2 = 1.-a
 float eHill(float Lx){ return 48. - 50.*fbm1(Lx*.02+41.); }
 float eNear(float Lx){ return 74. - 16.*fbm1(Lx*.03+90.); }
 float eNear2(float Lx){ return 70. - 11.*fbm1(Lx*.027+130.); }
+// per-column ridge / hill slopes (cells per cell) and two 1D noises that drive the facet / rock-streak shading of the far ridges
+vec4 slopeRow(float Lm, float Lh, float cpx){
+  return vec4((eMtn(Lm+4.*cpx)-eMtn(Lm-4.*cpx))/(8.*cpx), (eHill(Lh+5.*cpx)-eHill(Lh-5.*cpx))/(10.*cpx), vn1(Lm*.07), vn1(Lm*.45));
+}
 // spruce j (-1..1 around the pixel) of layer 0 (far, small) / 1 (near, big, in clumps): (x - tree x, height, ground y below it, present)
 vec4 treeRow(float Lx, int layer, int j){
   float sp = layer==0 ? 11. : 19.;
@@ -767,6 +766,8 @@ void main(){
     o = vec4(eMtn(uCam.x*.06 + sx), eHill(uCam.x*.15 + sx), eNear(uCam.x*.30 + sx), eNear2(uCam.x*.46 + sx));
   } else if(row<4){
     o = treeRow(uCam.x*.30 + sx, 0, row-2);
+  } else if(row==7){
+    o = slopeRow(uCam.x*.06 + sx, uCam.x*.15 + sx, uView.x/uRes.x);
   } else {
     o = treeRow(uCam.x*.46 + sx, 1, row-5);
   }
@@ -959,12 +960,12 @@ export class Renderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Background column target: 7 rows x canvas width, float32. */
+  /** Background column target: 8 rows x canvas width, float32. */
   private ensureCol() {
     const gl = this.gl, w = this.canvas.width;
     if (!this.progCol || (this.colTex && this.colW === w)) return;
     if (this.colTex) { gl.deleteTexture(this.colTex); gl.deleteFramebuffer(this.colFbo); }
-    this.colW = w; this.colTex = this.tex(w, 7, gl.NEAREST, gl.RGBA32F);
+    this.colW = w; this.colTex = this.tex(w, 8, gl.NEAREST, gl.RGBA32F);
     this.colFbo = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.colFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.colTex, 0);
@@ -1224,7 +1225,7 @@ export class Renderer {
     if (this.progCol) {
       this.ensureCol();
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.colFbo);
-      gl.viewport(0, 0, this.canvas.width, 7);
+      gl.viewport(0, 0, this.canvas.width, 8);
       gl.useProgram(this.progCol);
       const uk = this.uk;
       gl.uniform2f(uk.uCam, c.x, c.y); gl.uniform2f(uk.uView, c.vw, c.vh); gl.uniform2f(uk.uRes, this.canvas.width, this.canvas.height); gl.uniform1i(uk.uOct, lowQ ? 2 : 4);
