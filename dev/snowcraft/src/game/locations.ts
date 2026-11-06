@@ -22,7 +22,7 @@ export const LOC = {
     bulkhead: 96, pocket: [62, 96] as [number, number],  // sealed methane pocket (west of the bulkhead)
     lake: { x0: 268, x1: 376, ice: 372, shore: 364 },    // sealed cavern deeper down: reached by digging
   },
-  summit: { x: 150 },                                    // signal-fire hill on the cape
+  summit: { x: 474 },                                    // signal-fire hill: the crest east of the cairn (the cape hill itself is cut off by the quarry trench)
   cairn: { x: 445, y: 238 },
   station: { x0: 556, x1: 880, y: 272 },
   house: { L: 152, R: 170 },                             // tile columns of the main house walls
@@ -488,9 +488,10 @@ function stampMastAndShed(T: Terrain) {
   addFixture('mast', mx >> 2, F - 6, 2, 4, { data: { fallen: true } });
   worldInfo.spots.mast = { x: mx + 4, y: F * 4 - 10 };
   snowBank(mx + 8, mx + 52, mx + 28, 4, 190, 130);
-  const mastY = (x: number) => topSolid(x, 200) - 2;
-  for (let x = mx + 10; x < mx + 50; x++) { box(x, mastY(x) - 1, x + 1, mastY(x) + 2, M.METAL); }
-  for (let k = 0; k < 3; k++) { const x = mx + 16 + k * 10; box(x, mastY(x) - 4, x + 2, mastY(x) + 1, M.METAL); }
+  // the antenna mast lies on the snow bank: a straight pole with three cross arms (anemometer, vane, dipole)
+  const py = (x: number) => F * 4 - 4 - Math.round((x - (mx + 10)) * 0.1);
+  line(mx + 10, py(mx + 10), mx + 50, py(mx + 50), M.METAL, 3);
+  for (let k = 0; k < 3; k++) { const x = mx + 16 + k * 12; box(x, py(x) - 4, x + 2, py(x) + 1, M.METAL); }
   // generator shed with fuel drums and the battery under a drift (the east end is torn open: the drift came in)
   const { L, R } = LOC.shed;
   const { top } = cabin(L, R, F, 8, true);
@@ -579,7 +580,7 @@ function stampBeach(T: Terrain) {
   line(sx + 4, gAt(sx + 4) - 2, sx + 58, gAt(sx + 58) - 3, M.WHALEBONE, 3);   // lower jaw
   box(sx + 14, gAt(sx + 14) - 14, sx + 20, gAt(sx + 14) - 8, AIR);            // eye socket
   worldInfo.spots.whale = { x: cx, y: gy - 30 };
-  floorNote('n7', 'whale', cx + 6, T.surf[cx + 6] - 1);
+  floorNote('n7', 'whale', cx - 66, T.surf[cx - 66] - 1);       // by the tail of the skeleton, on open gravel (the arch interior is enclosed by the rising spine)
   addSite('whale', cx - 6, gy - 20, 150, 70);
   floorNote('n8', 'beach', 952, T.surf[952]);
   // tide crack: a narrow gap through the grounded ice down to the seabed, with hairline crack lines
@@ -605,19 +606,19 @@ function stampFastIce(T: Terrain) {
 // ICEBERG with an ice cave
 function stampIceberg(T: Terrain) {
   const cx = LOC.iceberg.x;
-  const peaks: [number, number][] = [[-47, 0], [-42, 10], [-33, 30], [-26, 46], [-18, 74], [-11, 60], [-3, 46], [4, 56], [12, 70], [16, 72], [20, 62], [24, 44], [28, 20], [31, 0]];
+  const peaks: [number, number][] = [[-47, 0], [-40, 10], [-30, 26], [-20, 38], [-12, 46], [-4, 44], [4, 50], [12, 48], [20, 40], [28, 28], [36, 14], [42, 4], [46, 0]];
   const hAt = (u: number) => {
     for (let i = 0; i < peaks.length - 1; i++) if (u >= peaks[i][0] && u <= peaks[i + 1][0]) { const t = (u - peaks[i][0]) / (peaks[i + 1][0] - peaks[i][0]); return peaks[i][1] + (peaks[i + 1][1] - peaks[i][1]) * t; }
     return 0;
   };
   const base = T.iceTop[cx];
   const iceH = new Int16Array(110);
-  for (let u = -47; u <= 31; u++) {
+  for (let u = -47; u <= 46; u++) {
     const x = cx + u, h = Math.round(hAt(u) + (fbm1(x / 5, 2) - 0.5) * 5);
     iceH[u + 50] = h;
     for (let y = base - h; y < base; y++) put(x, y, M.ICE, 0);
     // underwater part: tapers down
-    const dep = Math.round(58 * Math.pow(Math.max(0, 1 - ((u + 8) / 40) * ((u + 8) / 40)), 0.55));
+    const dep = Math.round(58 * Math.pow(Math.max(0, 1 - ((u + 1) / 47) * ((u + 1) / 47)), 0.55));
     for (let y = base; y < Math.min(T.seabed[x] - 1, base + dep + 14); y++) put(x, y, M.ICE, 0);
     // snow on the gentle slopes
     for (let y = base - h; y < base - h + 3; y++) {
@@ -625,23 +626,16 @@ function stampIceberg(T: Terrain) {
       if (sl < 1.6 && mat[(y + 0) * W + x] === M.ICE && mat[(y - 1) * W + x] === AIR) { put(x, y - 1, M.SNOW, 20 + ((rand() * 40) | 0)); if (sl < 0.8) put(x, y - 2, M.SNOW, 12); break; }
     }
   }
-  // the cave: a low entrance on the east (lee) foot, a domed chamber inside
-  const floorY = 288;                                   // tile aligned walking level inside (the sheet surface is ~290)
-  const entU = 31;
-  for (let u = 4; u <= entU + 2; u++) {                // tunnel
-    const x = cx + u, top = floorY - 24;
-    let sfc = 150; while (sfc < top && mat[sfc * W + x] === AIR) sfc++;
-    if (sfc > top - 7) for (let y = sfc; y < top; y++) { const i = y * W + x; if (mat[i] === M.ICE || isSoft(mat[i])) { mat[i] = AIR; aux[i] = 0; } }      // no thin roof slivers over the mouth
-    for (let y = top; y < floorY; y++) { put(x, y, AIR); markBg(x, y, 3); }
-    for (let y = floorY; y < floorY + 3; y++) put(x, y, M.ICE);
-  }
-  for (let u = -10; u <= 6; u++) {                     // chamber (dome)
-    const x = cx + u, t = (u + 2) / 9, top = Math.max(Math.round(floorY - 24 - 26 * Math.max(0, 1 - t * t)), base - iceH[u + 50] + 8);
+  // the ice cave: a domed chamber sealed inside the berg (a translucent ice wall 8 cells thick faces east: chisel your way in, it is a ready-made shelter).
+  // A through-tunnel is impossible here: a roof wider than ~40 cells cannot be carried, and the berg stands on the only route across the fast ice.
+  const floorY = 288, entU = 8;
+  for (let u = -12; u <= 6; u++) {                     // chamber (dome)
+    const x = cx + u, t = (u + 3) / 10, top = Math.max(Math.round(floorY - 24 - 26 * Math.max(0, 1 - t * t)), base - iceH[u + 50] + 8);
     for (let y = top; y < floorY; y++) { put(x, y, AIR); markBg(x, y, 3); }
     for (let y = floorY; y < floorY + 3; y++) put(x, y, M.ICE);
   }
   // icicles hang from the cave roof, a few ice columns stand on the floor of the chamber
-  for (let u = -10; u <= entU; u++) {
+  for (let u = -12; u <= entU; u++) {
     const x = cx + u; let y = floorY - 1; while (y > 200 && mat[y * W + x] === AIR) y--;       // first ice cell above the cave air = the roof
     if (y > floorY - 40 && y < floorY - 8 && rand() < 0.2) { const len = randInt(3, 10); for (let k = 1; k <= len && mat[(y + k) * W + x] === AIR; k++) put(x, y + k, M.ICE); }
     if (rand() < 0.05 && u < 4) { const hh = randInt(4, 10); for (let k = 1; k <= hh; k++) if (mat[(floorY - k) * W + x] === AIR) put(x, floorY - k, M.ICE); }
@@ -649,11 +643,11 @@ function stampIceberg(T: Terrain) {
   chest('icecave', Math.floor((cx - 8) / 4), floorY / 4 - 2, [slot('fat', 3), slot('sinew', 2), slot('tin', 2), slot('rope', 2), slot('matches', 3), slot('note_n9', 1)], 2, 2, { look: 'old' });
   floorNote('n10', 'icecave', cx - 2, floorY);
   worldInfo.spots.iceberg = { x: cx, y: base - 40 };
-  worldInfo.spots.icecave = { x: cx - 4, y: floorY - 8 };
-  addSite('iceberg', cx - 8, base - 30, 90, 120);
-  addSite('icecave', cx + 4, floorY - 14, 50, 44);
-  snowBank(cx + 34, cx + 76, cx + 42, 8, 200, 190);
-  worldInfo.iceField.ridges.push({ x: cx, w: 80, h: 74 });
+  worldInfo.spots.icecave = { x: cx - 3, y: floorY - 8 };
+  addSite('iceberg', cx - 1, base - 25, 94, 110);
+  addSite('icecave', cx - 3, floorY - 14, 30, 44);
+  snowBank(cx + 46, cx + 84, cx + 54, 7, 200, 190);
+  worldInfo.iceField.ridges.push({ x: cx, w: 94, h: 50 });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -670,54 +664,43 @@ function stampShip(T: Terrain) {
   for (let u = -82; u <= 88; u++) for (let d = -8; d <= 66; d++) {
     if (!inHull(u, d, 0)) continue;
     if (inHull(u, d, 4)) continue;
+    if (d < 0 && u > -76 && u < 82) continue;                          // above the deck only the ends have a rail (the sides are cut away)
     L(u, d, d > 14 && !inHull(u, d, 2) ? M.METAL : M.PLANK);
   }
   // hold interior: clear it first (cut out of the ice), then structure
   for (let u = -80; u <= 86; u++) for (let d = 0; d <= 66; d++) if (inHull(u, d, 4)) { L(u, d, AIR); markBg(wx(u), wy(u, d), 7); }
   // ballast
   for (let u = -80; u <= 86; u++) { const lim = Math.min(56, dBot(u) - 4); for (let d = Math.floor(lim); d <= dBot(u) - 4; d++) L(u, d, d > lim + 2 ? M.STONE : M.PLANK); }
-  // decks: planks with an iron beam row underneath (carries the span for the structure solver)
-  const deckHole = (u: number) => u >= -28 && u < 4;
+  // decks: planks with an iron beam row underneath (it carries the span for the structure solver).
+  // The stern deck is the way on board; a hatch right behind the stern rail takes a companionway down (steps descend east) into the captain's cabin
+  // below deck. A solid full-height bulkhead closes the cabin in the east and carries the deck above it. Everything east of it is sealed (dig in).
+  const FLOOR = 36;                                                      // crew-deck floor (row d of its top): 32 cells of headroom under the deck
+  const deckHole = (u: number) => u >= -72 && u < -36;
   for (let u = -78; u <= 82; u++) { if (deckHole(u)) continue; LB(u, u + 1, 0, 3, M.PLANK); L(u, 3, M.METAL); }
-  const crewHole = (u: number) => u >= 16 && u < 48;
-  for (let u = -78; u <= 80; u++) { if (crewHole(u)) continue; LB(u, u + 1, 28, 31, M.LOG); L(u, 31, M.METAL); }
-  // stairs: deck -> crew deck, crew deck -> hold (solid wedges, 4 up per 4 along)
-  for (let k = 0; k < 7; k++) LB(-28 + 4 * k, -24 + 4 * k, 4 * (k + 1), 32, M.PLANK);
-  for (let k = 0; k < 7; k++) LB(16 + 4 * k, 20 + 4 * k, 28 + 4 * (k + 1), 60, M.PLANK);
-  // bunks and shelves on the crew deck
-  for (let b = 0; b < 3; b++) { const u0 = -70 + b * 14; LB(u0, u0 + 12, 18, 20, M.PLANK); LB(u0, u0 + 2, 18, 28, M.PLANK); LB(u0 + 10, u0 + 12, 18, 28, M.PLANK); }
-  LB(-44, -30, 14, 16, M.PLANK); LB(-44, -42, 14, 28, M.PLANK); LB(-32, -30, 14, 28, M.PLANK);
-  // coal bunker in the stern hold: a heap behind a low bulkhead, crates in the bow hold
-  for (let u = -70; u < -26; u++) { const t = 1 - Math.abs((u + 48) / 24), hh = Math.round(20 * Math.max(0, t) * (0.8 + 0.4 * noise1(u * 0.3))); for (let k = 1; k <= hh; k++) if (mat[wy(u, 56 - k) * W + wx(u)] === AIR) L(u, 56 - k, M.COAL); }
-  LB(-27, -24, 40, 56, M.PLANK);
-  for (let c = 0; c < 5; c++) { const u0 = 52 + (c % 3) * 9, lev = c < 3 ? 0 : 1; LB(u0, u0 + 8, 56 - 8 * (lev + 1), 56 - 8 * lev, M.PLANK); LB(u0 + 3, u0 + 5, 56 - 8 * (lev + 1), 56 - 8 * (lev + 1) + 2, M.METAL); }
-  // canvas bales
-  LB(26, 34, 48, 56, M.CANVAS); LB(26, 34, 40, 48, M.CANVAS);
-  // captain's cabin on the stern deck
-  LB(-76, -72, -34, 0, M.LOG); LB(-38, -34, -34, -26, M.LOG); LB(-38, -34, -2, 0, M.LOG);
-  LB(-80, -30, -38, -34, M.PLANK); LB(-76, -34, -34, -32, M.PLANK);
-  LB(-76, -72, -20, -12, M.GLASS);
-  for (let u = -72; u < -34; u++) for (let d = -32; d < 0; d++) { if (u >= -38 && d < -26) continue; if (u >= -38 && d >= -2) continue; L(u, d, AIR); markBg(wx(u), wy(u, d), 7); }
-  for (let u = -80; u <= -30; u++) { const sy = -38 - 3 - Math.round(Math.abs(u + 55) * 0.06); for (let d = sy; d < -38; d++) L(u, d, M.SNOW, d === sy ? 14 : 50); }
-  // bow rail and stern bulwark
-  LB(80, 84, -8, 0, M.PLANK); LB(-80, -76, -10, 0, M.PLANK);
-  // masts, yards, torn sails, rigging
+  for (let u = -78; u <= 80; u++) { LB(u, u + 1, FLOOR, FLOOR + 3, M.LOG); L(u, FLOOR + 3, M.METAL); }
+  for (let k = 0; k < 9; k++) LB(-72 + 4 * k, -68 + 4 * k, 4 * (k + 1), FLOOR + 4, M.PLANK);          // steps: tread k tops out 4(k+1) below the deck
+  LB(14, 18, 3, 58, M.PLANK); LB(14, 18, 12, 14, M.METAL); LB(14, 18, 30, 32, M.METAL);                   // the bulkhead
+  // the hold below the cabin floor: a coal bunker (heap) and canvas bales, reachable only by digging
+  for (let u = -70; u < -20; u++) { const t = 1 - Math.abs((u + 45) / 25), hh = Math.round(15 * Math.max(0, t) * (0.8 + 0.4 * noise1(u * 0.3))); for (let k = 1; k <= hh; k++) if (mat[wy(u, 56 - k) * W + wx(u)] === AIR) L(u, 56 - k, M.COAL); }
+  LB(20, 28, 48, 56, M.CANVAS); LB(20, 28, 40, 48, M.CANVAS);
+  for (let c = 0; c < 4; c++) { const u0 = 44 + (c % 2) * 9, lev = c < 2 ? 0 : 1; LB(u0, u0 + 8, 56 - 8 * (lev + 1), 56 - 8 * lev, M.PLANK); }
+  // low bulwarks at both ends (a step, not a wall), a hatch coaming
+  LB(80, 84, -4, 0, M.PLANK); LB(-80, -76, -4, 0, M.PLANK);
+  // masts, yards, torn sails, rigging (the masts stand east of the hatch: the walkable deck ends at the mainmast)
   LB(12, 18, -96, 0, M.LOG); LB(58, 63, -74, 0, M.LOG);
   LB(-16, 46, -86, -82, M.LOG); LB(-10, 40, -62, -58, M.LOG); LB(42, 80, -72, -69, M.LOG);
   LB(-14, 44, -82, -77, M.CANVAS);                                      // furled upper sail
   for (let u = -8; u < 38; u++) { const hh = 14 + Math.round(12 * noise1(u * 0.35 + 3)); if (noise1(u * 0.9) > 0.78) continue; LB(u, u + 1, -58, -58 + hh, M.CANVAS); }   // torn mainsail
   LB(44, 78, -69, -64, M.CANVAS);
-  line(wx(15), wy(15, -95), wx(-76), wy(-76, -8), M.PLANK, 2);
-  line(wx(15), wy(15, -95), wx(83), wy(83, -8), M.PLANK, 2);
-  line(wx(60), wy(60, -73), wx(83), wy(83, -8), M.PLANK, 2);
-  line(wx(83), wy(83, -6), wx(104), wy(104, -22), M.LOG, 3);                // bowsprit
-  // upturned boat on deck
-  for (let u = 24; u < 54; u++) { const t = (u - 39) / 15, hh = Math.round(11 * Math.sqrt(Math.max(0, 1 - t * t))); for (let d = -hh; d < -hh + 3; d++) L(u, d, M.PLANK); }
-  // windlass at the bow
-  LB(70, 78, -8, 0, M.METAL);
-  // hatch coamings
-  LB(-30, -28, -4, 0, M.PLANK); LB(4, 6, -4, 0, M.PLANK);
-  // fixtures: stove + bunk + captain's chest in the cabin, chests below deck
+  line(wx(15), wy(15, -95), wx(-30), wy(-30, -34), M.PLANK, 2);                // a backstay that stays well above head height over the stern deck
+  LB(-32, -28, -34, -30, M.PLANK);
+  line(wx(15), wy(15, -95), wx(83), wy(83, -4), M.PLANK, 2);
+  line(wx(60), wy(60, -73), wx(83), wy(83, -4), M.PLANK, 2);
+  line(wx(83), wy(83, -4), wx(104), wy(104, -22), M.LOG, 3);                // bowsprit
+  // upturned boat on deck (low) and a windlass at the bow
+  for (let u = 22; u < 54; u++) { const t = (u - 38) / 16, hh = Math.round(6 * Math.sqrt(Math.max(0, 1 - t * t))); for (let d = -hh; d < -hh + 2; d++) L(u, d, M.PLANK); }
+  LB(70, 78, -4, 0, M.METAL);
+  // fixtures below deck: stove, bunk, the captain's chest and the cargo chest (all on the crew-deck floor)
   const fixOnFloor = (kind: FixtureKind, u: number, dFloor: number, tw: number, th: number, extra?: Partial<Fixture>) => {
     let minF = 1e9; for (let k = 0; k < tw * 4; k++) minF = Math.min(minF, wy(u + k, dFloor));
     const bottom = Math.floor(minF / 4) * 4, tx = Math.floor(wx(u) / 4), ty = bottom / 4 - th;
@@ -731,21 +714,19 @@ function stampShip(T: Terrain) {
     chest(site, tx, ty, items, 2, 2, data);
     return { x: tx * 4 + 4, y: bottom - 4 };
   };
-  const st = fixOnFloor('stove', -70, 0, 2, 2, { fuel: 0, lit: false });
-  st.f!.data = { smokeX: wx(-66), smokeY: wy(-66, -44) };
-  { const px = wx(-66); line(px, wy(-66, -34), px, wy(-66, -52), M.METAL, 2); }
-  fixOnFloor('bed', -60, 0, 4, 1);
-  const cabinChest = chestOn('ship', -45, 0, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
-  worldInfo.spots.shipCabin = { x: wx(-56), y: wy(-56, 0) };
-  const hold = chestOn('ship', 62, 56, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1)], { look: 'tool' });
+  const st = fixOnFloor('stove', -16, FLOOR, 2, 2, { fuel: 0, lit: false });
+  const chimU = -13;                                                      // chimney: a dark strip up to the deck, a short metal stub on the deck
+  for (let d = 4; d < FLOOR - 8; d += 4) markBg(wx(chimU), wy(chimU, d), 7);
+  LB(chimU, chimU + 2, -4, 4, M.METAL);
+  st.f!.data = { smokeX: wx(chimU), smokeY: wy(chimU, -8) };
+  fixOnFloor('bed', -34, FLOOR, 4, 1);
+  chestOn('ship', -6, FLOOR, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
+  worldInfo.spots.shipCabin = { x: wx(-26), y: wy(-26, FLOOR) - 4 };
+  const hold = chestOn('ship', 4, FLOOR, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1), slot('canvas', 3), slot('biscuit', 3), slot('fat', 2), slot('note_n11', 1)], { look: 'tool' });
   worldInfo.radioParts.triode = { x: hold.x, y: hold.y, site: 'ship' };
-  chestOn('ship', -36, 28, [slot('canvas', 3), slot('rope', 2), slot('biscuit', 3), slot('fat', 2), slot('note_n11', 1), slot('log', 2)], { look: 'crew' });
-  floorNote('n14', 'ship', wx(-18), wy(-18, 0));
-  void cabinChest;
-  // snow on the deck, drifts against the hull ends so the stern deck is reachable from the ice, icicles on the yards
-  for (let u = -76; u <= 82; u++) { if (deckHole(u)) continue; if (u > -72 && u < -34) continue; const hh = 2 + ((u * 7) & 1) + (noise1(u * 0.2) > 0.6 ? 2 : 0); for (let k = 1; k <= hh; k++) if (mat[wy(u, -k) * W + wx(u)] === AIR) L(u, -k, M.SNOW, k > hh - 1 ? 16 : 60); }
-  snowBank(cx - 128, cx - 78, cx - 84, 20, 284, 130);
-  snowBank(cx + 70, cx + 124, cx + 80, 24, 284, 130);
+  floorNote('n14', 'ship', wx(-76), wy(-76, 0) - 2);
+  // snow on the deck, icicles on the yards
+  for (let u = -76; u <= 82; u++) { if (deckHole(u)) continue; const hh = 1 + ((u * 7) & 1); for (let k = 1; k <= hh; k++) if (mat[wy(u, -k) * W + wx(u)] === AIR) L(u, -k, M.SNOW, k > hh - 1 ? 16 : 60); }
   for (let k = 0; k < 18; k++) { const u = randInt(-14, 44), d = randInt(-61, -57) + 14; if (mat[wy(u, d) * W + wx(u)] === AIR && mat[wy(u, d - 1) * W + wx(u)] !== AIR) { const len = randInt(3, 8); for (let j = 0; j < len && mat[wy(u, d + j) * W + wx(u)] === AIR; j++) L(u, d + j, M.ICE); } }
   worldInfo.spots.ship = { x: cx, y: yD - 8 };
   addSite('ship', cx + 4, yD - 30, 190, 150);
@@ -756,7 +737,7 @@ function stampShip(T: Terrain) {
 // signal fire pyre on the cape summit
 function stampSignalFire(T: Terrain) {
   const x = LOC.summit.x, gy = Math.floor(T.surf[x] / 4) * 4;
-  box(x - 14, gy, x + 14, gy + 4, M.STONE);
+  for (let xx = x - 14; xx < x + 14; xx++) box(xx, T.surf[xx], xx + 1, T.surf[xx] + 3, M.STONE);   // flush cap on the real surface (a raised pad would be a wall)
   addFixture('signal_fire', Math.floor((x - 8) / 4), gy / 4 - 4, 4, 4, { fuel: 0, lit: false });
   worldInfo.spots.signalFire = { x, y: gy };
 }

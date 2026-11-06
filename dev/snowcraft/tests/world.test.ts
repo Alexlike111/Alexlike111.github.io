@@ -216,11 +216,11 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
 // ---- iceberg & ship ----
 {
   const c = worldInfo.spots.icecave; let air = 0, ice = 0; for (let y = c.y - 20; y < c.y + 10; y++) for (let x = c.x - 12; x < c.x + 12; x++) { if (at(x, y) === MAT.AIR) air++; }
-  for (let y = 215; y < 300; y++) for (let x = LOC.iceberg.x - 50; x < LOC.iceberg.x + 35; x++) if (at(x, y) === MAT.ICE) ice++;
-  ok(air > 300 && ice > 2500, 'iceberg: tall ICE mass with an ice cave inside', `(cave air ${air}, ice ${ice})`);
+  for (let y = 240; y < 300; y++) for (let x = LOC.iceberg.x - 50; x < LOC.iceberg.x + 50; x++) if (at(x, y) === MAT.ICE) ice++;
+  ok(air > 250 && ice > 1800, 'iceberg: tall ICE mass with an ice cave inside', `(cave air ${air}, ice ${ice})`);
   let metal = 0, plankS = 0, canvas = 0, coal = 0; for (let y = 180; y < 350; y++) for (let x = LOC.ship.x - 100; x < LOC.ship.x + 120; x++) { const m = at(x, y); if (m === MAT.METAL) metal++; else if (m === MAT.PLANK) plankS++; else if (m === MAT.CANVAS) canvas++; else if (m === MAT.COAL) coal++; }
   ok(metal > 400 && plankS > 2500 && canvas > 300 && coal > 80, 'ghost ship: METAL + PLANK hull, canvas sails, coal bunker', `(metal ${metal}, plank ${plankS}, canvas ${canvas}, coal ${coal})`);
-  const cab = worldInfo.spots.shipCabin; ok(at(cab.x, cab.y - 8) === MAT.AIR && kinds('stove').some(f => Math.abs(f.tx * 4 - LOC.ship.x) < 100), 'the cabin is open air with a stove');
+  const cab = worldInfo.spots.shipCabin; ok(at(cab.x, cab.y - 8) === MAT.AIR && kinds('stove').some(f => Math.abs(f.tx * 4 - LOC.ship.x) < 100), 'the cabin below deck is open air with a stove');
 }
 
 // ---- backgrounds ----
@@ -285,15 +285,14 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   t = performance.now();
   const s2 = bfs();
   console.log(`       (walk BFS after digging ${(performance.now() - t).toFixed(0)} ms)`);
-  if ((globalThis as { process?: { env: Record<string, string> } }).process?.env.DEBUG_REACH) { let mnx = W, mxx = 0; for (let i = 0; i < s2.length; i++) if (s2[i]) { const x = i % W; if (x < mnx) mnx = x; if (x > mxx) mxx = x; } console.log('       reach x', mnx, '..', mxx); for (let y = 250; y < 340; y += 3) { let r = ""; for (let x = 90; x < 300; x++) r += s2[y * W + x] ? "#" : (at(x, y) === MAT.AIR ? "." : at(x, y) === MAT.PLANK ? "P" : at(x, y) === MAT.GRAVEL ? "g" : "x"); console.log("       M" + y, r); } }
-  if ((globalThis as { process?: { env: Record<string, string> } }).process?.env.DEBUG_STEP) { for (const [x, y] of [[178, 331], [177, 331], [176, 331], [175, 331], [174, 331], [173, 331], [172, 331]]) { const bl: string[] = []; for (let yy = y - 19; yy <= y; yy++) for (let xx = x - 4; xx < x + 4; xx++) if (solid[yy * W + xx]) bl.push(xx + ',' + yy + ':' + mat[yy * W + xx]); console.log('       STEP', x, y, 'seen', s2[y * W + x], 'free', free(x, y), 'sup', sup(x, y), bl.slice(0, 6).join(' ')); } }
   const hut = chestPos('minehut');
   ok(near(s2, hut.x, hut.y), 'after digging the collapse: miner hut chest (coil)');
   ok(near(s2, M_.pocket[1] + 6, M_.floorB - 4), 'after digging: the bulkhead of the methane pocket');
   ok(near(s2, worldInfo.radioParts.battery.x, worldInfo.radioParts.battery.y), 'after digging the drift: the battery chest');
-  ok(near(s2, 960, 270), 'on foot: the whale-skeleton beach');
+  ok(near(s2, worldInfo.spots.whale.x - 66, surfaceAt(worldInfo.spots.whale.x - 66) - 6), 'on foot: the whale skeleton tail (note n7)');
   ok(near(s2, 1200, 284), 'on foot: the fast ice (over the shore-ice pass and the tide crack)');
-  const berg = chestPos('icecave'); ok(near(s2, berg.x, berg.y), 'on foot: the iceberg ice cave chest');
+  const berg = chestPos('icecave'); ok(!near(s2, berg.x, berg.y, 4, 6), 'the iceberg ice cave is sealed behind an ice wall (chisel in)');
+  ok(near(s2, LOC.iceberg.x + 8, 250) || near(s2, LOC.iceberg.x - 8, 250), 'on foot: over the iceberg (walkable ice hill)');
   ok(near(s2, 1520, 284), 'on foot: the first floes of the pack ice');
   ok(near(s2, 1640, 284), 'on foot: across the thin-ice leads to the ship floe');
   const cab = chestPos('ship', 'barometer'); ok(near(s2, cab.x, cab.y), 'on foot: the captain cabin chest on the ship');
