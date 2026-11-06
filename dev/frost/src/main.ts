@@ -602,7 +602,7 @@ const snapRefresh = (p10: number): number => { let r = QL_REFRESH[0]; for (const
  * - the window after a promotion decides the probe: p90 frame over the limit undoes it;
  * - any 1 s stretch with p90 frame > 20 ms demotes at once (on the bottom step: a dynamic-resolution drop instead);
  * - a demoted step is not promoted into again for 30 s, so the ladder cannot chatter.
- * save() is called with each level that passes a window with no probe pending, i.e. the last stable one.
+ * save() is called with each level that passes a window (a probe that passed counts), i.e. the last stable one.
  */
 function createLadder(o: { start: number; apply: (level: number) => void; save: (level: number) => void; emergency: () => void }) {
   const N = QLADDER.length;
@@ -621,14 +621,12 @@ function createLadder(o: { start: number; apply: (level: number) => void; save: 
     refresh = snapRefresh(pctOf(win.map((s) => s.ms), 0.1));
     const ok = 1.05 * refresh;
     win = []; winStart = now;
-    if (probe) {
+    if (probe) {                                                            // the step taken last window: keep it or undo it
       probe = false;
-      if (p90 > ok) { blocked[level] = now + QL_BLOCK; set(level - 1); } else commit();
-      return;
-    }
-    if (p90 > ok) return;                                                   // 17.5-20 ms: hold where we are
+      if (p90 > ok) { blocked[level] = now + QL_BLOCK; set(level - 1); return; }
+    } else if (p90 > ok) return;                                            // 17.5-20 ms: hold where we are
     commit();
-    if (level < N - 1 && w90 <= 0.7 * refresh && now >= blocked[level + 1]) { set(level + 1); probe = true; }
+    if (level < N - 1 && w90 <= 0.7 * refresh && now >= blocked[level + 1]) { set(level + 1); probe = true; }   // one step per window
   };
   return {
     feed(now: number, ms: number, work: number) {
