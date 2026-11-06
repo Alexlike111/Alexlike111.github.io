@@ -13,7 +13,7 @@ export const surf = new Int16Array(W);         // y of the topmost non-AIR/non-N
 const GK_AIR = 1.0;        // scale of air<->air conduction (k_air_eff 0.35 * GK)
 const GK_SOLID = 0.15;     // scale of any conduction pair touching a solid (film resistance at walls)
 const SRC = 1 / 400;       // W -> heat units/s: a 4000 W fire = 10 u/s (Q/Ccell K/s into the cell it lands in)
-const FIRE_AIR = 4.5;        // multiplier on the share of fire power that warms the air around the flame (a campfire heats a closed shelter in ~1 min)
+const FIRE_AIR = 5.2;        // multiplier on the share of fire power that warms the air around the flame (a campfire heats a closed shelter in ~1 min)
 const FIRE_CONTACT = 8;    // multiplier on the share of fire power going into the cell right below the flame
 const BUOY = 0.9;          // 1/s: warm air hands heat to the air cell above
 const VENT_SKY = 0.05;     // 1/s ventilation of sky-open air cells towards ambient

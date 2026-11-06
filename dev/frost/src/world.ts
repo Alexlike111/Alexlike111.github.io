@@ -155,7 +155,7 @@ export function generate(s = 20261106) {
       const fromTop = cells - k; // cells below the surface
       mat[i] = M.SNOW;
       if (fromTop <= 4) { dens[i] = 75 + ((rnd() * 20) | 0); bond[i] = 0; }
-      else if (fromTop <= 24) { dens[i] = 190 + ((rnd() * 40) | 0); bond[i] = 60 + ((rnd() * 30) | 0); } // cuttable middle layer (saw works once the top ~20 cm of powder is dug off)
+      else if (fromTop <= 24) { dens[i] = 190 + ((rnd() * 40) | 0); bond[i] = 88 + ((rnd() * 30) | 0) + (driftK > 0.25 ? 10 : 0); } // cuttable middle layer; bond >= 88 below the top 20 cm so a roof cut into the drift does not sag (saw works once the top ~20 cm of powder is dug off)
       else {
         const t = Math.min(1, (fromTop - 24) / 30); dens[i] = 235 + Math.round(t * 115 + rnd() * 25); bond[i] = 115 + Math.round(t * 115);
         if (slope > 0.15 || depth > 2) flags[i] |= F_DRIFT, dens[i] = Math.min(400, dens[i] + 40);

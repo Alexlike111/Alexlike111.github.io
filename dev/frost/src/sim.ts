@@ -208,7 +208,7 @@ function stepSlow(dtReal: number) {
       // --- compaction: transfer mass from this cell into the one below if below is under-dense ---
       const j = i + W;
       if (found > 0) found--;
-      else if (mat[j] === M.SNOW && !body[j]) {
+      else if (mat[j] === M.SNOW && !body[j] && !((flags[i] & F_DIST) && bond[i] >= 150)) { // placed / well-sintered blocks keep their mass (no settling out of the apex course)
         const target = Math.min(560, 140 + 135 * Math.log10(1 + load / 4)); // kg/m³ for given overburden
         const dj = dens[j];
         if (dj < target) {

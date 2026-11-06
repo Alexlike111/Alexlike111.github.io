@@ -268,10 +268,10 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     return b;
   }
   if(m==13){                                                              // plank door: light vertical boards in a dark frame with rails
-    int dl = mAt(c+ivec2(-1,0))!=13 ? 0 : mAt(c+ivec2(-2,0))!=13 ? 1 : mAt(c+ivec2(-3,0))!=13 ? 2 : 3;
-    bool fr = dl==0 || mAt(c+ivec2(1,0))!=13 || mAt(c+ivec2(0,-1))!=13 || mAt(c+ivec2(0,1))!=13;
+    int dl = mAt(ivec2(cf)+ivec2(-1,0))!=13 ? 0 : mAt(ivec2(cf)+ivec2(-2,0))!=13 ? 1 : mAt(ivec2(cf)+ivec2(-3,0))!=13 ? 2 : 3;
+    bool fr = dl==0 || mAt(ivec2(cf)+ivec2(1,0))!=13 || mAt(ivec2(cf)+ivec2(0,-1))!=13 || mAt(ivec2(cf)+ivec2(0,1))!=13;
     vec3 b = vec3(.9,.72,.46)*(.9+.2*vn(vec2(cf.x*.6, cf.y*.05)));
-    if(dl==2 && mAt(c+ivec2(1,0))==13 && mAt(c+ivec2(2,0))!=13) b *= .72;   // groove between the two middle boards (4-wide door)
+    if(dl==2 && mAt(ivec2(cf)+ivec2(1,0))==13 && mAt(ivec2(cf)+ivec2(2,0))!=13) b *= .72;   // groove between the two middle boards (4-wide door)
     if(mod(cf.y,10.)<1. && !fr) b *= .8;                                      // faint plank joints
     if(fr) b = vec3(.30,.19,.10)*(.9+.2*hh);
     return b*(1.+g*.05);
@@ -399,7 +399,7 @@ void main(){
     vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
     if(m==6) lit = max(lit, uAmb*.82 + pl);                               // bark and boughs under the crown never go black
     else if(m==7) lit = max(lit, uAmb*.62 + pl);
-    else if(m==11 || m==13) lit = max(lit, uAmb*.9 + pl) + vec3(.05,.034,.02)*(1.-uDay);   // placed timber stays readable at night (a touch warmer / brighter)
+    else if(m==11 || m==13) lit = max(lit, uAmb*1.05 + pl) + vec3(.085,.058,.032)*(1.-uDay);   // placed timber stays readable at night (a touch warmer / brighter)
     else if(m==5 && (fl&64)!=0) lit = lit*1.2 + uAmb*.15;
     col = alb*lit;
     if(m==1 && hasN>.5 && depth<2.2){

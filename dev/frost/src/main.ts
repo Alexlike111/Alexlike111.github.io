@@ -7,7 +7,7 @@ import { initBodies, stepBodies, allBodies, setEngine, engine, spawnStressTest }
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck } from './tools';
+import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, shovelBite, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck } from './tools';
 import { Renderer } from './render';
 import { Input } from './input';
 import { UI, HudData } from './ui';
@@ -74,7 +74,7 @@ const clockStr = () => { const m = Math.floor(G.time % 1440); return String(Math
 
 // ---------------- camera & window ----------------
 function updateCamera(dt: number, snap = false) {
-  const tx = pl.x + pl.face * 30, ty = pl.y - PH * 0.6 - 20;
+  const tx = pl.x + pl.face * 30, ty = pl.y - pl.h * 0.6 - 20;
   const k = snap ? 1 : Math.min(1, dt * 4);
   G.cam.x += (tx - G.cam.x) * k; G.cam.y += (ty - G.cam.y) * k;
   const vw = cssW / G.cam.zoom, vh = cssH / G.cam.zoom;
@@ -88,6 +88,7 @@ function updateCamera(dt: number, snap = false) {
 // ---------------- game lifecycle ----------------
 let shake = 0, stats = { built: [] as string[] };
 let hintT = 0, hintText: string | null = null, tutorial = 0;
+let tipCrawlUntil = -1, tipCrawlDone = false, tipDoorUntil = -1, tipDoorDone = false;
 function newGame() {
   generate(20261106 + Math.floor(Math.random() * 1000));
   initHeat(); initBodies(); resetTools();
@@ -95,7 +96,7 @@ function newGame() {
   const sx = START_X; const sy = surfaceAt(sx);
   resetPlayer(sx, sy - 1);
   renderer.invalidate();
-  P.n = 0; ended = false; paused = false; tutorial = 0;
+  P.n = 0; ended = false; paused = false; tutorial = 0; tipCrawlUntil = tipDoorUntil = -1; tipCrawlDone = tipDoorDone = false;
   updateCamera(0, true);
   // pre-warm weather / heat
   for (let k = 0; k < 30; k++) { weather(0.1); stepHeat(0.1); }
@@ -119,6 +120,11 @@ function hint(): string | null {
   if (hintT > 0 && hintText) return hintText;
   advanceTutorial();
   const mob = G.mobile;
+  // one-shot tips: door mode after the first placed beam, crawling once the shelter stage is reached
+  if (!tipDoorDone && tool.built.has('wood')) { tipDoorDone = true; tipDoorUntil = G.realTime + 7; }
+  if (!tipCrawlDone && tutorial >= 4) { tipCrawlDone = true; tipCrawlUntil = G.realTime + 7; if (G.realTime < tipDoorUntil) tipCrawlUntil = tipDoorUntil + 7; }
+  if (G.realTime < tipDoorUntil) return mob ? 'Дверь: на кнопке поворота выбери режим «дверь» — проходима, но держит ветер и тепло' : 'Дверь: нажми R, пока не будет режим «дверь» — проходима, но держит ветер и тепло';
+  if (G.realTime < tipCrawlUntil) return 'В низком ходе герой ползёт сам (медленнее): снежная нора и иглу — это лаз, а не зал';
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
   if (tutorial === 1) return mob ? '«Положить»: бросить снег из лопаты туда, куда целишься' : 'ПКМ: бросить снег из лопаты туда, куда целишься';
   if (tutorial === 2) return mob ? 'Найди ящик под оранжевой вешкой, подкопай и жми «Взять»' : 'Найди ящик под оранжевой вешкой, подкопай к нему и жми E';
@@ -237,7 +243,7 @@ function toolSample(id: string, u: number, v: number, load: number): number {
   }
 }
 
-let deadAt = -1;
+let deadAt = -1, spCr = 0;
 function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number) {
   const x = pl.x, y = pl.y, t = G.realTime;
   // ---- lighting on the character ----
@@ -261,8 +267,9 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const q = Math.floor(t * 24), jr = (k: number) => hash1(q * 3.1 + k) - 0.5;
   spJx = pl.alive && pl.shiver > 0.05 ? Math.round(jr(1) * 2.2 * pl.shiver) : 0;
   spBob = moving && Math.abs(Math.sin(ph)) > 0.72 ? 1 : 0;
-  spLean = (moving && Math.abs(pl.vx) > 40 ? 2 : working ? 1 : 0) + Math.round(kneel * 2 + slump * 14);
-  spDrop = Math.round(kneel * 5 + slump * 6);
+  spLean = (moving && Math.abs(pl.vx) > 40 ? 2 : working ? 1 : 0) + Math.round(kneel * 2 + slump * 14 + spCr * 6);
+  spCr += ((pl.alive && pl.h < PH ? 1 : 0) - spCr) * 0.35;
+  spDrop = Math.round(kneel * 5 + slump * 6 + spCr * 13);
   if (pl.alive && !pl.onGround) spBob = pl.vy < 0 ? -1 : 0;
   spBuf.fill(0);
   const dim = (c: C3, k: number): C3 => [c[0] * k, c[1] * k, c[2] * k];
@@ -280,7 +287,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   // ---- backpack ----
   spR(-9, -29, 5, 12, lc(PAL.pack)); spR(-9, -29, 5, 2, lc(PAL.packHi)); spR(-8, -23, 3, 1, lc(PAL.strap)); spR(-10, -17, 6, 2, lc([108, 90, 62] as C3));
   // ---- legs & felt boots ----
-  const kneeling = kneel > 0.01;
+  const kneeling = kneel > 0.01 || spCr > 0.5;
   if (!kneeling) {
     for (let i = 0; i < 2; i++) {
       const front = i === 0;
@@ -509,11 +516,11 @@ function drawOverlay(aim: [number, number] | null) {
       ctx.lineWidth = px * 1.5; ctx.strokeStyle = 'rgba(214,234,255,0.95)'; ctx.setLineDash([1.4, 1]); ctx.strokeRect(rx, ry, w, h); ctx.setLineDash([]);
       if (tool.sawT > 0) { const f = Math.min(1, tool.sawT / 1.6); ctx.fillStyle = dark; ctx.fillRect(rx - px, ry - 2.6, w + px * 2, 1.4); ctx.fillStyle = 'rgba(255,200,120,0.95)'; ctx.fillRect(rx, ry - 2.3 + 0, w * f, 0.8); }
     } else {
-      const r = id === 'shovel' ? 4.5 : 2.5, near = inReach(aim[0], aim[1]);
+      const bite = id === 'shovel' ? shovelBite(ax, ay) : { rx: 2.5, ry: 2.5 }, near = inReach(aim[0], aim[1]);
       ctx.lineWidth = px * 3; ctx.strokeStyle = near ? dark : 'rgba(8,14,26,0.45)';
-      ctx.beginPath(); ctx.arc(ax, ay, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, Math.PI * 2); ctx.stroke();
       ctx.lineWidth = px * 1.5; ctx.strokeStyle = near ? 'rgba(240,248,255,0.95)' : 'rgba(235,244,255,0.5)';
-      ctx.beginPath(); ctx.arc(ax, ay, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(ax, ay, bite.rx, bite.ry, 0, 0, Math.PI * 2); ctx.stroke();
     }
   }
   // crate pole flags flutter (cheap)
@@ -598,7 +605,13 @@ function frame(now: number) {
   if (s.hasAim) aimWorld = renderer.screenToWorld(s.aimX, s.aimY);
   // tools
   if (s.toolSelect >= 0 && s.toolSelect < TOOLS.length) { tool.cur = s.toolSelect; sound.uiClick(); }
-  if (s.rotatePressed) { tool.rot++; sound.uiClick(); }
+  if (s.rotatePressed) {
+    const bm = TOOLS[tool.cur].id === 'beam';
+    tool.rot = bm ? (((tool.rot % BEAM_MODES) + 1) % BEAM_MODES) : (tool.rot + 1) % 2;
+    if (bm) tool.msg = 'Режим: ' + BEAM_MODE_NAMES[tool.rot] + (tool.rot === 4 ? ' — стоит в проёме, держит ветер и тепло' : '');
+    else if (TOOLS[tool.cur].id === 'block') tool.msg = 'Блок: ' + (tool.rot % 2 ? 'стоймя' : 'плашмя');
+    sound.uiClick();
+  }
   if (s.xrayPressed) { G.xray = (G.xray + 1) % 4; (ui as any).setXray?.(G.xray); }
   let working = false;
   pt = pnow();

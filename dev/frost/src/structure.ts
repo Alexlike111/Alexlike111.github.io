@@ -29,6 +29,8 @@ const MIN_ISLAND = 12, MAX_ISLAND = 5000;
 const QUEUE_PERIOD = 0.12, SWEEP_PERIOD = 2.5;
 const SWEEP_W = 360, SWEEP_H = 220;
 const MAX_SOLVES_PER_STEP = 2;
+const TUN_H = 26;          // a gap this low (1.3 m = crawl height) under a snow roof is a tunnel / burrow: the walls out of the plane carry the roof (3-D action the 2-D slice cannot see)
+const TUN_F = 0.18;        // lateral / hanging cost factor of such a roof when it is >= 1.2 m thick (scaled in from 0.6 m): a thin shell over a burrow gets no bonus
 const BEAM_GRACE = 8;      // s: a freshly placed beam is held up (anchor) so a structure can be built in any order
 
 const MAXN = (MAXD + 2) * (MAXD + 2);
@@ -43,6 +45,7 @@ const lfr = new Uint8Array(MAXN);   // 1 = cell of a beam still inside its place
 const cls = new Uint8Array(MAXN);   // 0 none, 1 structural, 2 granular carrier, 3 anchor
 const run = new Uint8Array(MAXN);   // contiguous structural run length in column (capped RUNCAP)
 const rtop = new Uint16Array(MAXN); // local row of the top of the cell's vertical structural (class 1) run
+const tun = new Uint8Array(MAXN);   // 1 = snow roof column above a crawl-height gap (burrow)
 const arch = new Uint8Array(MAXN);  // 1 = the shell around this cell is curved concave-down (compression arch)
 const load = new Uint16Array(MAXN); // kg/m2 resting on top
 const bear = new Uint8Array(MAXN);  // 1 = snow cell in an unbroken column under a placed timber/crate (a foundation: bears by compression)
@@ -130,6 +133,18 @@ function prep() {
     const t = rtop[l];
     if ((tl - t) + (tr - t) >= ARCH_KMIN) arch[l] = 1;
   }
+  // burrow roofs: walking up each column, a gap (air / loose snow) of <= TUN_H rows with solid floor under it and a structural run above it
+  tun.fill(0, 0, n);
+  for (let x = 1; x <= rw; x++) {
+    let gap = 0, floor = false;
+    for (let y = rh; y >= 1; y--) {
+      const l = y * pw + x, c = cls[l];
+      if (c === 1 || c === 3) {
+        if (gap > 0 && gap <= TUN_H && floor && c === 1 && (lm[l] === M.SNOW || lm[l] === M.ICE)) { for (let yy = y; yy >= 1 && cls[yy * pw + x] === 1; yy--) tun[yy * pw + x] = 1; }
+        gap = 0; floor = true;
+      } else if (floor) gap++;
+    }
+  }
   // cost tables for structural cells
   for (let y = 1; y <= rh; y++) for (let x = 1; x <= rw; x++) {
     const l = y * pw + x;
@@ -148,6 +163,7 @@ function prep() {
     const k = (3 / (1 + run[l] / 3)) * (1 + load[l] / (lref * (1 + run[l] / THICK_R)));
     h *= k; g *= k;
     if (arch[l]) h *= ARCH_F;
+    if (tun[l] && lm[l] === M.SNOW) { const tk = Math.max(0, Math.min(1, (run[l] - 12) / 12)), f = 1 - tk * (1 - TUN_F); h *= f; g *= f; dg *= f; }
     cu[l] = u < 1 ? 1 : Math.ceil(u); cdg[l] = dg < 1 ? 1 : Math.ceil(dg);
     chz[l] = h > 65535 ? 65535 : Math.max(1, Math.ceil(h)); chg[l] = g > 65535 ? 65535 : Math.max(1, Math.ceil(g));
   }

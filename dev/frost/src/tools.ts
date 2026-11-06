@@ -17,16 +17,17 @@ export const TOOLS = [
 ] as const;
 
 export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
-export const tool = { cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' as string, built: new Set<string>() };
+export const tool = { bite: 0, bfs: 0, outs: 0, ins: 0, tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' as string, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
 export const BLOCK_CAP = 8;
+const PW_HALF = 5; // half body width (cells)
 let sfx: Sound | null = null;
 export function bindSound(s: Sound) { sfx = s; }
 let fireId = 1;
 
 export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
-  Object.assign(tool, { cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' });
+  Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' });
   tool.built.clear();
   G.fires.length = 0; loadWarned = false; fireLatch = false;
 }
@@ -48,24 +49,45 @@ let lastNothingT = -99, loadWarned = false;
 /** Shovel bite at the aim: a round scoop (r 4.5), or - aiming near-horizontally at body height, i.e. into a wall / tunnel face - a tall ellipse 5 wide x 10 high
  *  (still <= 46 cells), so a crawl tunnel (20 cells high) takes two stacked scoops per 5 cells of length (~8-10 scoops per metre). */
 export function shovelBite(ax: number, ay: number): { rx: number; ry: number; tunnel: boolean } {
-  const [sx, sy] = shoulder();
-  const dx = ax - sx, dy = ay - sy;
-  const tun = Math.abs(dx) >= 6 && Math.abs(dy) <= Math.abs(dx) * 0.45 && ay >= pl.y - pl.h - 2 && ay <= pl.y + 1;
+  const dx = ax - pl.x, dy = ay - (pl.y - pl.h * 0.5); // slope measured from the middle of the body (crawling or standing)
+  const tun = Math.abs(dx) >= 6 && (pl.h < 34 || Math.abs(dy) <= Math.abs(dx) * 0.6) && ay >= pl.y - pl.h - 2 && ay <= pl.y + 1; // crawling: any aim at body height ahead is a tunnel bite
   return tun ? { rx: 2.5, ry: 5, tunnel: true } : { rx: 4.5, ry: 4.5, tunnel: false };
 }
 function dig(ax: number, ay: number) {
   const { rx, ry, tunnel } = shovelBite(ax, ay);
+  tool.tun = tunnel; tool.digDir = ax >= pl.x ? 1 : -1;
   let n = 0, sum = 0, hard = 0;
   const cap = 46 - tool.load;
   if (cap <= 2 || (tunnel && cap < 36 && tool.load > 0)) { throwLoad(ax, ay, true); return; } // tunnel: empty the blade before a full-size bite does not fit
-  for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
-    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1 || n >= cap) continue;
-    const x = Math.round(ax + dx), y = Math.round(ay + dy);
-    if (!inb(x, y)) continue;
+  // tunnel bite: a 5 x 10 slab (squared-off ellipse, offsets -2..2 x -5..4) that hugs the face - slid from the body outwards along the aim line to the first spot where it is nearly full of snow
+  const offs: number[] = [];
+  if (tunnel) {
+    for (let dy = -5; dy <= 4; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.pow(Math.abs(dx) / 2.3, 4) + Math.pow(Math.abs(dy + 0.5) / 4.8, 4) <= 1) offs.push(dx, dy);
+    const dir = ax >= pl.x ? 1 : -1, full = offs.length / 2;
+    let bestX = Math.round(ax), bestN = -1;
+    for (let cx = Math.round(pl.x + dir * (PW_HALF + 3)); dir > 0 ? cx <= Math.round(ax) : cx >= Math.round(ax); cx += dir) {
+      let c = 0;
+      for (let k = 0; k < offs.length; k += 2) {
+        const x = cx + offs[k], y = Math.round(ay) + offs[k + 1];
+        if (!inb(x, y)) continue; const i = idx(x, y);
+        if ((mat[i] === M.SNOW || mat[i] === M.ASH) && !body[i]) c++;
+      }
+      if (c > bestN) { bestN = c; bestX = cx; }
+      if (c >= full * 0.85) { bestX = cx; break; }
+    }
+    ax = bestX;
+  }
+  const take = (x: number, y: number) => {
+    if (n >= cap || !inb(x, y)) return;
     const i = idx(x, y);
-    if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) continue;
+    if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) return;
     n++; sum += dens[i]; hard += bond[i] / 255 * Math.min(1, dens[i] / 400);
     set(x, y, M.AIR);
+  };
+  if (tunnel) { for (let k = 0; k < offs.length; k += 2) take(ax + offs[k], Math.round(ay) + offs[k + 1]); }
+  else for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1) continue;
+    take(Math.round(ax + dx), Math.round(ay + dy));
   }
   if (n === 0) {
     const i = inb(ax | 0, ay | 0) ? idx(ax | 0, ay | 0) : 0;
@@ -73,6 +95,7 @@ function dig(ax: number, ay: number) {
     else if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say('Тут нечего копать — целься в снег в пределах 2 м'); }
     return;
   }
+  tool.bite = n;
   const h = hard / n;
   tool.loadDens = (tool.loadDens * tool.load + sum) / (tool.load + n);
   tool.load += n;
@@ -168,8 +191,49 @@ export function planSpoil(sx: number, sy: number): ThrowPlan {
   const a = (80 * Math.PI) / 180, side = -pl.face;
   return { ux: Math.cos(a) * side, uy: -Math.sin(a), sp: 330, where: 'blind', dist: 0 };
 }
+/** Tunnel spoil: from inside a roofed gallery the snow is shovelled out along the air path to the nearest open-sky cell (the entrance / shaft) and lands on the
+ *  surface 12-30 cells beside it, on the side away from the dig, so the tunnel never refills itself. Returns false when there is no air route out. */
+const bfsSeen = new Uint16Array(W * H); let bfsStamp = 0;
+function tunnelSpoil(n: number): boolean {
+  if (++bfsStamp > 65000) { bfsSeen.fill(0); bfsStamp = 1; }
+  const sx0 = Math.round(pl.x), sy0 = Math.round(pl.y) - 4;
+  const q = new Int32Array(9000); let qh = 0, qt = 0;
+  q[qt++] = idx(sx0, sy0); bfsSeen[idx(sx0, sy0)] = bfsStamp;
+  let ex = -1, ey = -1;
+  while (qh < qt) {
+    const i = q[qh++], x = i % W, y = (i / W) | 0;
+    if (skyOpen(x, y)) { ex = x; ey = y; break; }
+    for (let k = 0; k < 4; k++) {
+      const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0), ny = y + (k === 2 ? -1 : k === 3 ? 1 : 0);
+      if (!inb(nx, ny)) continue;
+      const j = idx(nx, ny);
+      if (bfsSeen[j] === bfsStamp || !(openAir(j) || isGranular(j)) || body[j]) continue; // loose spoil on the floor is waded through
+      bfsSeen[j] = bfsStamp;
+      if (qt < q.length) q[qt++] = j;
+    }
+  }
+  tool.bfs = qt;
+  if (ex < 0) return false;
+  const side = -tool.digDir;
+  const dn = Math.max(120, Math.min(400, Math.round(tool.loadDens * 0.8)));
+  let xr = ex, xl = ex; // the air span at the exit row (the shaft / entrance): the heap goes beside it, never into it
+  while (xr - ex < 80 && inb(xr + 1, ey) && (openAir(idx(xr + 1, ey)) || isGranular(idx(xr + 1, ey)))) xr++;
+  while (ex - xl < 80 && inb(xl - 1, ey) && (openAir(idx(xl - 1, ey)) || isGranular(idx(xl - 1, ey)))) xl--;
+  const base = side > 0 ? xr : xl;
+  for (let k = 0; k < n; k++) {
+    const x = Math.max(2, Math.min(W - 3, base + side * (6 + Math.floor(Math.random() * 80)))); // spread over ~4 m so the heap stays low and does not slide back into the entrance
+    let y = Math.max(1, ey - 130); while (y < H - 3 && mat[idx(x, y)] === M.AIR) y++;
+    spawn(PK.CLUMP, x, y - 5 - Math.random() * 3, side * (4 + Math.random() * 8), -6, CLUMP_LIFE, 1, dn, 0);
+  }
+  return true;
+}
 export function throwLoad(ax: number, ay: number, auto: boolean) {
   if (tool.load < 1) return;
+  if (auto && tool.tun && tunnelSpoil(Math.round(tool.load))) {
+    tool.outs++;
+    tool.load = 0; tool.loadDens = 0; loadWarned = false; sfx?.throwSnow(); pl.stamina -= 0.01; return;
+  }
+  if (auto) tool.ins++;
   const [sx, sy] = shoulder();
   let ux: number, uy: number, sp: number;
   if (auto) { const p = planSpoil(sx, sy); ux = p.ux; uy = p.uy; sp = p.sp; }
@@ -238,7 +302,7 @@ function saw(ax: number, ay: number, dt: number) {
 export const BEAM_MODES = 5;
 export const BEAM_MODE_NAMES = ['брус 1 м', 'брус 2 м', 'стойка 1 м', 'стойка 2 м', 'дверь 1 м (проходимая)'];
 export function beamShape() { const s = ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; return s === 4 ? { vert: true, len: 20, logs: 1, door: true } : { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1, door: false }; }
-const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
+const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.DOOR]: 'дверь', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
 /** placement classes of a world cell: 0 free (air, boughs, loose snow / ash: displaced), 1 rigid snow, 2 hard (rock, timber, ice, water, fallen bodies, world edge) */
 function pcls(x: number, y: number): number {
   if (!inb(x, y)) return 2;
@@ -339,6 +403,7 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
   const bs = beamShape();
   const vert = bs.vert;
   if (kind === 'beam' && inv.logs < bs.logs) { say(`Для бруса 2 м нужно ${bs.logs} бревна. R: сменить длину`); sfx?.uiDeny(); return; }
+  const door = kind === 'beam' && bs.door;
   if (kind === 'beam') {
     const mg = supportMargin(g.cells);
     if (mg <= 0.02) { say('Повиснет и упадёт — нужна опора'); sfx?.uiDeny(); return; }
@@ -352,7 +417,7 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
       if (y > g.y0 - 12 && y > 0) set(c.x, y, mat[i], dens[i], 0, F_DIST);
     }
     if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST);
-    else { set(c.x, c.y, M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
+    else { set(c.x, c.y, door ? M.DOOR : M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
   if (kind === 'beam') inv.logs -= bs.logs;
   tamp(g.x0, g.y0 + g.h, g.w);
@@ -394,7 +459,7 @@ function dismantleBeam(i0: number, cx: number, cy: number) {
   const st = [i0]; const seen = new Set<number>(); const cells: number[] = [];
   while (st.length && cells.length < cap) {
     const i = st.pop()!; if (seen.has(i)) continue; seen.add(i);
-    if (mat[i] !== M.PLANK || body[i] || beamId[i] !== bid) continue;
+    if ((mat[i] !== M.PLANK && mat[i] !== M.DOOR) || body[i] || beamId[i] !== bid) continue;
     cells.push(i);
     const x = i % W;
     if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); if (i >= W) st.push(i - W); if (i + W < W * H) st.push(i + W);
@@ -436,7 +501,7 @@ function chop(ax: number, ay: number) {
   let i0 = inb(cx, cy) ? idx(cx, cy) : -1;
   if (i0 < 0) return;
   const m0 = mat[i0];
-  if (m0 === M.PLANK && !body[i0]) { dismantleBeam(i0, cx, cy); return; }
+  if ((m0 === M.PLANK || m0 === M.DOOR) && !body[i0]) { dismantleBeam(i0, cx, cy); return; }
   if (m0 === M.NEEDLE && (flags[i0] & F_TREE)) {
     // cut a few branches for kindling
     let n = 0;

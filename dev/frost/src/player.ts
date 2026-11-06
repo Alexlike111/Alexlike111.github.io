@@ -123,20 +123,19 @@ function wade(px: number, top: number, bottom: number): number {
   return n;
 }
 
-/** Rows of free headroom above the feet (capped at PH + 2) over columns [xa, xb]: the same cells that bump the head (granular snow and bough snow do not count). */
-function headroom(xa: number, xb: number, feetY: number): number {
+/** Rows of free headroom above the feet (capped at PH + 2). Body columns [xa, xb] count fully; `look` extra columns on each side count only when they are a passage
+ *  (free for the first 8 rows above the feet) - a wall beside the hero is not a low ceiling. Granular snow and bough snow never count. */
+function headroom(xa: number, xb: number, feetY: number, look = 3): number {
   const cap = PH + 2;
-  for (let k = 1; k <= cap; k++) {
-    const y = feetY - k;
-    if (y < 0) return cap;
-    for (let x = xa; x <= xb; x++) {
-      if (!inb(x, y)) return k - 1;
-      const i = idx(x, y);
-      if (body[i]) return k - 1;
-      if (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)) return k - 1;
-    }
+  const hard = (x: number, y: number) => { if (!inb(x, y)) return true; const i = idx(x, y); return !!body[i] || (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)); };
+  let best = cap;
+  for (let x = xa - look; x <= xb + look; x++) {
+    const core = x >= xa && x <= xb;
+    if (!core) { let wall = false; for (let k = 1; k <= 8 && !wall; k++) wall = hard(x, feetY - k); if (wall) continue; }
+    for (let k = 1; k <= best; k++) if (hard(x, feetY - k)) { best = k - 1; break; }
+    if (best <= 0) return 0;
   }
-  return cap;
+  return best;
 }
 const FLOOR_Y = (y: number) => Math.round(y);
 
@@ -152,7 +151,7 @@ export function stepPlayer(inp: MoveIn) {
   if (pl.onGround || pl.h < PH) {
     if (pl.onGround) {
       const xc0 = Math.round(pl.x - PW / 2);
-      const room = headroom(xc0 + 1 - 3, xc0 + PW - 2 + 3, FLOOR_Y(pl.y));
+      const room = headroom(xc0 + 1, xc0 + PW - 2, FLOOR_Y(pl.y));
       if (pl.h >= PH && room < PH) pl.h = PH_CRAWL;
       else if (pl.h < PH && room >= PH) pl.h = PH;
     }
@@ -386,11 +385,13 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   if (hl < hungerLvl) { hungerLvl = hl; tool.msg = (hl === 0 ? 'Голод почти убил тебя' : 'Голод: осталось 20% сытости') + (inv.food + inv.crackers > 0 ? '. Q: съесть' : '. Еды нет — ищи ящики под оранжевыми вешками'); }
   else if (hl > hungerLvl && pl.food > 0.3) hungerLvl = hl;
   // snow on clothes melts when warm → wetness; dries near fire
+  // by a fire in freezing air the melt is slow and most of it steams off in the heat (only a third soaks in); drying below always beats it, so standing at a fire never leaves you colder
+  const nearFire = rad > 60 && pl.airT <= -1;
   const warm = pl.airT > -1 || rad > 60;
-  if (warm && pl.snowOn > 0) { const m = Math.min(pl.snowOn, dtReal * G.timeScale * 0.05); pl.snowOn -= m; pl.wet = Math.min(1, pl.wet + m * 0.9); }
+  if (warm && pl.snowOn > 0) { const m = Math.min(pl.snowOn, dtReal * G.timeScale * (nearFire ? 0.03 : 0.05)); pl.snowOn -= m; pl.wet = Math.min(1, pl.wet + m * (nearFire ? 0.3 : 0.9)); }
   else pl.snowOn = Math.max(0, pl.snowOn - dtReal * G.timeScale * 0.004); // brush off / sublimate
   if (G.snowfall > 0.02 && pl.shelter < 0.4) pl.snowOn = Math.min(1, pl.snowOn + dtReal * G.timeScale * G.snowfall * 0.03);
-  if (rad > 40) pl.wet = Math.max(0, pl.wet - dtReal * 0.004 * (rad / 100) * G.timeScale);
+  if (rad > 40) pl.wet = Math.max(0, pl.wet - dtReal * G.timeScale * (0.004 + 0.012 * rad / 100));
   if (pl.core < 28) die(pl.feelT < pl.airT - 8 ? 'Переохлаждение. Ветер выдул тепло быстрее, чем тело успевало его вырабатывать.' : pl.wet > 0.4 ? 'Переохлаждение. Мокрая одежда перестала держать тепло.' : pl.food <= 0.01 ? 'Переохлаждение от истощения. Телу не из чего было греться.' : 'Переохлаждение. Мороз оказался сильнее.');
 }
 
