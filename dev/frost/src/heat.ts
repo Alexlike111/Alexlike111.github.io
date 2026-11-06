@@ -1,7 +1,7 @@
 // Heat + local wind field. Heat cell = HS x HS world cells (20 cm). Temperatures in degC.
 // Units are "game units", not SI: air cell has C=1, snow ~30*dens/300 (see composition table below).
 // Everything runs per REAL second (the game clock is 60x faster; constants are tuned for that).
-import { W, H, HS, HW, HH, M, mat, dens, bond, flags, idx, inb, set, groundY, noise1 } from './world';
+import { W, H, HS, HW, HH, M, F_WET, mat, dens, bond, flags, idx, inb, set, groundY, noise1 } from './world';
 import { G } from './state';
 import { pnow, pend } from './prof';
 
@@ -10,17 +10,23 @@ export const WND = new Float32Array(HW * HH);  // local horizontal wind, m/s (+ 
 export const surf = new Int16Array(W);         // y of the topmost non-AIR/non-NEEDLE cell per column
 
 // ---------------- tuning constants ----------------
-const GK_AIR = 1.0;        // scale of air<->air conduction (k_air_eff 0.35 * GK)
-const GK_SOLID = 0.15;     // scale of any conduction pair touching a solid (film resistance at walls)
+const GK_AIR = 1.5;        // scale of air<->air conduction (k_air_eff 0.35 * GK): the mixing that spreads a fire's warmth through a room
+const GK_SOLID = 0.15;     // scale of any conduction pair touching a solid (film resistance at walls; snow k per Sturm, see SK)
 const SRC = 1 / 400;       // W -> heat units/s: a 4000 W fire = 10 u/s (Q/Ccell K/s into the cell it lands in)
-const FIRE_AIR = 5.2;        // multiplier on the share of fire power that warms the air around the flame (a campfire heats a closed shelter in ~1 min)
-const FIRE_CONTACT = 8;    // multiplier on the share of fire power going into the cell right below the flame
-const BUOY = 0.9;          // 1/s: warm air hands heat to the air cell above
-const VENT_SKY = 0.05;     // 1/s exchange of exposed air (open sky, no solid within EXPOSE_R cells on its row) with ambient
-const VENT_WIND = 0.12;   // extra 1/s per m/s of local wind, exposed air only: wind does not get into a pit or a roofed cave
-const VENT_OPEN = 0.02;    // 1/s: sheltered air under an open top (vertical shaft, pit) breathes out slowly
-const VENT_LEAK = 0.002;   // 1/s: roofed air (sealed cave, cabin) only leaks through cracks
+const FIRE_AIR = 4.5;      // multiplier on the share of fire power that warms the air around the flame (~2.6 kW of a 4.2 kW fire)
+// the flame's plume: [dx, dy, share] of the air heat per heat cell relative to the flame base (dy < 0 is above it), shares sum to 0.75
+const FIRE_PLUME = [0, 0, 0.10, 0, -1, 0.10, 0, -2, 0.08, 0, -3, 0.07, -1, 0, 0.10, 1, 0, 0.10, -1, -1, 0.06, 1, -1, 0.06, -2, -1, 0.03, 2, -1, 0.03, -2, -2, 0.01, 2, -2, 0.01];
+const FIRE_CONTACT = 8;    // multiplier on the share of fire power going into the cell right below the flame (melts the pit, the fire sinks)
+const BUOY = 0.9;          // 1/s: warm air hands heat to the air cell above (only where the air below is warmer: stack and plume)
+// ventilation towards ambient, per cell per second. Exposed air (above the ground, open, no solid within EXPOSE_R on its row) gets the
+// wind; a pit, a cave or a roofed chamber does not. Sheltered air under an open top only breathes through the walls; its mouth is
+// handled by OPEN_K. Roofed air leaks through cracks.
+const VENT_SKY = 0.05;     // exposed air relaxes to ambient
+const VENT_WIND = 0.12;    // extra per m/s of local wind, exposed air only
+const VENT_OPEN = 0.001;   // sheltered air under an open top (vertical shaft, pit)
+const VENT_LEAK = 0.002;   // roofed air (sealed cave, cabin, igloo)
 const EXPOSE_R = 2;        // heat cells: a solid this close on the same row shelters an open cell (pit walls, lip)
+const OPEN_K = 0.1;        // share of the air-air mixing and of the buoyant stack that crosses the mouth of a pit or cave (exposed <-> sheltered)
 const SKY_COOL = 0.012;    // 1/s: exposed surface snow relaxes to ambient-2
 const GROUND_T = -2, GROUND_RATE = 0.1, GROUND_DEEP = 6; // dirt/rock deeper than 6 cells below groundY is pinned
 const DEEP_SNOW_T = -4, SNOW_PROFILE_LEN = 40;           // initial snow profile: ambient at surface -> -4 at depth
@@ -30,7 +36,7 @@ const FREEZE_T = -0.5, FREEZE_HEAT = 0.4; // freezing returns 40% of MELT_E (T g
 const WIND_DECAY = 0.94;   // shelter retained per heat cell travelled downwind of an obstacle
 const MARGIN = 8;          // heat cells simulated beyond G.win
 // The solver integrates at most every HEAT_DT real seconds, using the accumulated dt (heat is slow: time constants of seconds).
-// Explicit conduction stays stable for any sub-step <= 0.1 s (fastest cell rate ~1.5 1/s), so 20 Hz is well inside the limit.
+// Explicit conduction stays stable for any sub-step <= 0.1 s (fastest cell rate ~2.1 1/s with GK_AIR 1.5), so 20 Hz is well inside the limit.
 const HEAT_DT = 0.05;
 const COMP_STRIDE = 8;     // composition: each heat row is re-read every 8 solver runs (~0.4 s; the surface and phase passes keep their own rhythm)
 const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_EVERY solver runs
@@ -66,12 +72,15 @@ const sDens = new Uint16Array(HW * HH);            // mean snow density
 const sky = new Uint8Array(HW * HH);               // 1 = no blocking heat cell above in the column
 const ex = new Uint8Array(HW * HH);                // 1 = exposed air: above the ground, sky-open, not sheltered by a solid on its row (wind and sky act here only)
 const grd = new Int16Array(HW);                    // ground row of each heat column: the highest surface within 3 heat columns (a pit does not lower it)
-const fireNear = new Uint8Array(HW * HH);          // 1 = within reach of an active fire: meltwater there does not freeze
+const fireNear = new Uint8Array(HW * HH);          // 1 = within reach of an active fire (the pit it melts): meltwater there does not freeze
+const fireSeen = new Uint8Array(HW * HH);          // 1 = a fire has burned here: a pit refreezes as slush, not as an ice slab
 // conduction coefficients derived from the composition (refreshed with it, so the solver does no divisions per step)
 const ic = new Float32Array(HW * HH).fill(1);      // 1 / cap
 const air = new Uint8Array(HW * HH);               // 1 = air-like cell (cap <= 2)
 const gR = new Float32Array(HW * HH);              // conductance of the pair (h, h+1)
 const gD = new Float32Array(HW * HH);              // conductance of the pair (h, h+HW)
+const ax = new Float32Array(HW * HH).fill(1);      // share of gR (pair h, h+1) that gets through: OPEN_K across the mouth of a pit, else 1
+const ay = new Float32Array(HW * HH).fill(1);      // same for the pair (h, h+HW)
 // per-cell relaxation rates (1/s): vR / sR from the wind and sky pass, gndR from the composition
 const vR = new Float32Array(HW * HH);              // ventilation towards ambient
 const sR = new Float32Array(HW * HH);              // sky cooling of exposed snow towards ambient-2
@@ -138,7 +147,7 @@ export function initHeat() {
   for (let h = 0; h < HW * HH; h++) dirty[h] = h;   // every cell: start from exact coefficients
   nDirty = HW * HH; applyDirty();
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) T[hy * HW + hx] = profileT(hx, hy);
-  WND.fill(0); vR.fill(0); sR.fill(0); meltAcc.fill(0); prevValid = false;
+  WND.fill(0); vR.fill(0); sR.fill(0); meltAcc.fill(0); fireSeen.fill(0); prevValid = false;
 }
 
 // ---------------- window ----------------
@@ -204,6 +213,7 @@ function windPass() {
       // the mouth of a pit (air below, pit walls beside it) is sheltered by the lip; open ground above a flat surface is not
       if (e && hy < hy1 && nSol[h + HW] < 8) for (let d = -EXPOSE_R; d <= EXPOSE_R && e; d++) if (hx + d >= hx0 && hx + d <= hx1 && nSol[h + HW + d] >= 8) e = 0;
       ex[h] = e;
+      if (!e && hy * HS + 2 >= grd[hx]) WND[h] = 0;                 // no wind inside a pit, a cave or a roofed chamber
       if (ns <= 4) {                                                // (mostly) air cells: ventilation
         const aw = Math.abs(WND[h]);
         vR[h] = ex[h] ? VENT_SKY + VENT_WIND * aw : open ? VENT_OPEN : VENT_LEAK;
@@ -214,6 +224,12 @@ function windPass() {
       }
       if (ns >= 8) open = 0;
     }
+  }
+  // the mouth of an opening: air exchange between the outside (exposed) and the sheltered air is only a share of the mixing
+  for (let hy = hy0; hy <= hy1; hy++) for (let hx = hx0; hx <= hx1; hx++) {
+    const h = hy * HW + hx;
+    ax[h] = hx < hx1 && nSol[h] <= 4 && nSol[h + 1] <= 4 && ex[h] !== ex[h + 1] ? OPEN_K : 1;
+    ay[h] = hy < hy1 && nSol[h] <= 4 && nSol[h + HW] <= 4 && ex[h] !== ex[h + HW] ? OPEN_K : 1;
   }
 }
 
@@ -237,13 +253,16 @@ function phase(hx: number, hy: number, dtRow: number) {
       T[h] = Math.max(-1, t - (done * cost) / cap[h]);
       if (done === 0) T[h] = t * 0.995;                           // buried snow: no air to drain into, stays wet
     }
-  } else if (nWat[h] > 0 && t < FREEZE_T && !fireNear[h]) {          // no ice forms under an active fire: the meltwater stays slush
+  } else if (nWat[h] > 0 && t < FREEZE_T && !fireNear[h]) {          // no freezing while a fire burns beside it
     const n = Math.min(nWat[h], Math.round(nWat[h] * Math.min(1, FREEZE_RATE * dtRow) + Math.random() - 0.5));
     let done = 0;
     for (let q = 0; q < 16 && done < n; q++) {
       const i = base + (q >> 2) * W + (q & 3);
       if (mat[i] !== M.WATER) continue;
-      set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, dens[i], 255, 0); done++; // ice keeps the water's mass
+      // ice keeps the water's mass; where a fire has burned the meltwater freezes into loose wet snow (slush the shovel digs)
+      if (fireSeen[h]) set(hx * HS + (q & 3), hy * HS + (q >> 2), M.SNOW, dens[i], 0, F_WET);
+      else set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, dens[i], 255, 0);
+      done++;
     }
     T[h] += (done * MELT_E * FREEZE_HEAT) / cap[h];
   }
@@ -283,7 +302,7 @@ export function stepHeat(dt: number) {
   for (const f of G.fires) {
     if (!f.lit) continue;
     const fx = (f.x / HS) | 0, fy = ((f.y - 2) / HS) | 0;
-    for (let yy = fy - 2; yy <= fy + 5; yy++) for (let xx = fx - 2; xx <= fx + 2; xx++) if (xx >= hx0 && xx <= hx1 && yy >= hy0 && yy <= hy1) fireNear[yy * HW + xx] = 1;
+    for (let yy = fy - 2; yy <= fy + 5; yy++) for (let xx = fx - 2; xx <= fx + 2; xx++) if (xx >= hx0 && xx <= hx1 && yy >= hy0 && yy <= hy1) { const h = yy * HW + xx; fireNear[h] = 1; fireSeen[h] = 1; }
   }
   for (let hy = hy0 + (tick & (COMP_STRIDE - 1)); hy <= hy1; hy += COMP_STRIDE) for (let hx = hx0; hx <= hx1; hx++) compose(hx, hy);
   applyDirty();
@@ -300,10 +319,9 @@ export function stepHeat(dt: number) {
   for (const f of G.fires) {
     if (!f.lit) continue;
     const fx = (f.x / HS) | 0, fy = ((f.y - 2) / HS) | 0;
-    if (fx <= hx0 + 1 || fx >= hx1 - 1 || fy <= hy0 + 2 || fy >= hy1 - 1) continue;
+    if (fx <= hx0 + 2 || fx >= hx1 - 2 || fy <= hy0 + 3 || fy >= hy1 - 2) continue;
     const q = f.power * SRC * dt;
-    const fa = FIRE_AIR;
-    addHeat(fx, fy, q, 0.25 * fa); addHeat(fx, fy - 1, q, 0.2 * fa); addHeat(fx, fy - 2, q, 0.1 * fa); addHeat(fx - 1, fy, q, 0.1 * fa); addHeat(fx + 1, fy, q, 0.1 * fa);
+    for (let k = 0; k < FIRE_PLUME.length; k += 3) addHeat(fx + FIRE_PLUME[k], fy + FIRE_PLUME[k + 1], q, FIRE_PLUME[k + 2] * FIRE_AIR);   // the plume: mostly above the flame, a share spreading sideways
     addHeat(fx, fy + 1, q, 0.25 * FIRE_CONTACT);   // flame touching the ground/snow underneath (extra, non-conserved, so fires sink into powder)
   }
   {
@@ -311,7 +329,7 @@ export function stepHeat(dt: number) {
     if (px > hx0 && px < hx1 && py > hy0 && py < hy1) { const h = py * HW + px; T[h] += p.heat * SRC * dt * ic[h]; }
   }
 
-  // conduction + buoyancy + ventilation: explicit Jacobi sub-steps (fastest cell rate ~1.5 1/s, so sdt <= 0.1 s is stable)
+  // conduction + buoyancy + ventilation: explicit Jacobi sub-steps (fastest cell rate ~2.1 1/s, so sdt <= 0.1 s is stable)
   const n = Math.max(1, Math.min(4, Math.ceil(dt * 10)));
   const sdt = dt / n;
   const bb = Math.min(0.3, BUOY * sdt);                     // buoyancy transfer cap per sub-step
@@ -321,13 +339,13 @@ export function stepHeat(dt: number) {
       for (let h = hy * HW + x0, e = hy * HW + x1; h <= e; h++) {
         const ti = T[h];
         // conduction: sum over the four neighbours of g * (T_nb - T) / C (gather form of the pairwise flux)
-        const dc = gR[h] * (T[h + 1] - ti) + gR[h - 1] * (T[h - 1] - ti) + gD[h] * (T[h + HW] - ti) + gD[h - HW] * (T[h - HW] - ti);
+        const dc = gR[h] * ax[h] * (T[h + 1] - ti) + gR[h - 1] * ax[h - 1] * (T[h - 1] - ti) + gD[h] * ay[h] * (T[h + HW] - ti) + gD[h - HW] * ay[h - HW] * (T[h - HW] - ti);
         let t = ti + dc * sdt * ic[h];
         // buoyancy between air cells: warm air hands heat to the air cell above, receives from the one below
-        if (air[h]) {
+        if (air[h]) {                                              // (the stack through the mouth of a pit runs at the same reduced share as the mixing)
           const tu = T[h - HW], tb = T[h + HW];
-          if (air[h - HW] && ti > tu) t -= bb * (ti - tu);
-          if (air[h + HW] && tb > ti) t += bb * (tb - ti);
+          if (air[h - HW] && ti > tu) t -= bb * ay[h - HW] * (ti - tu);
+          if (air[h + HW] && tb > ti) t += bb * ay[h] * (tb - ti);
         }
         // ventilation of (mostly) air cells, sky cooling of exposed snow
         const v = vR[h];
