@@ -22,11 +22,24 @@ export interface Player {
   alive: boolean; cause: string;  // death cause text (RU)
   anim: { state: 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'swim' | 'dig' | 'swing' | 'hurt' | 'dead'; t: number };
   hurtT: number;                  // invulnerability/hurt flash timer
+  // ---- DESIGN v2 body (owner: game/player) ----
+  water: number;                  // 0..100 hydration
+  energy: number;                 // 0..100 (fatigue; sleep restores)
+  frost: { hands: number; feet: number; face: number }; // 0..100 per extremity (40 frostnip, 80 frostbite)
+  co: number;                     // 0..100 carbon monoxide exposure
+  parkaOpen: boolean;             // vent toggle (less insulation, less sweat)
+  carry: number;                  // carried weight kg (slows)
+  sleeping: boolean;
 }
 
 export interface Drop { id: number; item: string; n: number; x: number; y: number; vx: number; vy: number; age: number } // item lying in the world (magnet to player)
 
-export type FixtureKind = 'campfire' | 'torch' | 'workbench' | 'furnace' | 'anvil' | 'chest' | 'door' | 'bed' | 'snare' | 'radio' | 'stove' | 'helipad' | 'sign' | 'lantern';
+export type FixtureKind =
+  // DESIGN v2
+  | 'campfire' | 'fat_lamp' | 'brazier' | 'pot' | 'drying_rack' | 'skin_bed' | 'hide_door' | 'cache' | 'snare' | 'torch'
+  | 'stove' | 'table' | 'shelf' | 'chest' | 'radio' | 'drum' | 'bed' | 'door' | 'mast' | 'barometer' | 'flag' | 'cairn' | 'cart' | 'kennel' | 'signal_fire'
+  // v1 leftovers (do not use in new code)
+  | 'workbench' | 'furnace' | 'anvil' | 'helipad' | 'sign' | 'lantern';
 export interface Fixture {
   id: number; kind: FixtureKind;
   tx: number; ty: number; tw: number; th: number; // footprint in TILES (top-left)
@@ -37,7 +50,7 @@ export interface Fixture {
   data?: Record<string, unknown>;
 }
 
-export type AnimalKind = 'hare' | 'ptarmigan' | 'wolf' | 'fox';
+export type AnimalKind = 'seal' | 'fox' | 'ptarmigan' | 'bear' | 'dog' | 'fish' | 'hare' | 'wolf'; // hare/wolf: v1 leftovers, unused
 export interface Animal {
   id: number; kind: AnimalKind; x: number; y: number; vx: number; vy: number; w: number; h: number;
   face: 1 | -1; hp: number; state: string; t: number; onGround: boolean; target?: number;
@@ -50,6 +63,9 @@ export const G = {
   time: 8 * 60, day: 1, timeScale: 1, frame: 0, realTime: 0, paused: false,
   // weather (owner: game/weather)
   ambientT: -18, wind: 2, storm: 0, snowfall: 0.2 /* 0..1 intensity */, visibility: 1, daylight: 1, moon: 0.5, aurora: 0,
+  // polar night (owner: game/weather) — sun elevation at the current moment in degrees (negative = below horizon)
+  sunElev: -12, noonElev: -9, endDay: 12, moonPhase: 0 /* 0 new .. 0.5 full .. 1 */, forecast: { stormAt: -1, text: '' },
+  shelter: null as null | { closed: boolean; tiles: number; temp: number; windIn: number; vent: boolean; co: number; stars: number; notes: string[] }, // owner: game/shelter
   // camera (owner: engine/camera) — centre in cells, scale = screen px per cell (device px)
   cam: { x: 1024, y: 300, scale: 3, shake: 0, viewW: 400, viewH: 200 },
   // simulation window in cells (owner: main) — fast processes only run here

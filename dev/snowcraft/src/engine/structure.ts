@@ -1,15 +1,15 @@
 // Structural support solver (SPEC §2 "Structure").
 //
 // Every solid cell with SPAN>0 that is not an anchor needs support. Support flows from anchors (natural ANCHOR
-// materials, bedrock, standing trees) and from any powder/liquid cell directly beneath ("floor").
+// materials, bedrock, standing tree trunks that are still rooted in the ground) and from any powder/liquid cell directly beneath ("floor").
 // It travels through structural cells with a Dijkstra-like cost (in half-cells):
 //     up 0 · straight down 1 (hanging) · diagonal-up 1 · sideways 2 · diagonal-down 3
 // and a cell is supported when its accumulated cost ≤ 2·SPAN[material] (natural, unplaced cells get ×2.5).
 // So a flat slab fails beyond SPAN cells from vertical support, while an arch or a corbelled dome — which keep
 // climbing — hold. Failing groups: detached ones fall as clusters; groups still attached to supported structure
 // crumble (snow types → loose SNOW powder, everything else → cluster).
-import { W, H, mat, aux, flags, shade, wakeRect, edited, onEdit, F_PLACED, F_TREE, F_FIXTURE } from './grid';
-import { MAT, SPAN, ANCHOR, PHASE, P_POWDER, P_LIQUID } from '../content/materials';
+import { W, H, mat, aux, flags, wakeRect, edited, onEdit, F_PLACED, F_TREE, F_FIXTURE } from './grid';
+import { MAT, SPAN, ANCHOR, PHASE, WALK, P_POWDER, P_LIQUID } from '../content/materials';
 import { makeCluster } from './bodies';
 import { spawnFx } from './particles';
 import { G } from '../game/state';
@@ -26,6 +26,7 @@ const NODES = MAXN * 6;
 const nodeCell = new Int32Array(NODES), nodeNext = new Int32Array(NODES);
 let nodeN = 0;
 
+const treeW = new Uint8Array(MAXN), rooted = new Uint8Array(MAXN);   // scratch for trunk rooting
 const CRUMBLE = new Uint8Array(256);
 CRUMBLE[MAT.PACKED] = 1; CRUMBLE[MAT.SNOWBLOCK] = 1;
 const NATURAL_X = 2.5;
@@ -44,7 +45,8 @@ function classify(m: number, f: number, placedOverride = false): number {
   const sp = SPAN[m];
   if (sp > 0) {
     const placed = placedOverride || (f & F_PLACED) !== 0;
-    if (m === MAT.BEDROCK || (ANCHOR[m] && !placed) || ((f & F_TREE) && m === MAT.WOOD)) return 2;
+    if (m === MAT.BEDROCK || (ANCHOR[m] && !placed)) return 2;
+    if ((f & F_TREE) && m === MAT.WOOD) return 2;   // gather() demotes trunk cells that are no longer rooted
     return 1;
   }
   const ph = PHASE[m];
@@ -62,10 +64,38 @@ function kindAtGlobal(x: number, y: number): number {
   return classify(mat[i], flags[i]);
 }
 
+/** Is the cell under (gx,gy) a floor/anchor? A trunk cell below only counts when it is rooted; inside the region the solver decides that. */
+function floorBelow(gx: number, gy: number): boolean {
+  const by = gy + 1;
+  if (gx < 0 || gx >= W || by >= H) return true;
+  const i = by * W + gx;
+  if (isTreeWood(i)) return by >= ry0 + rh ? groundedTrunk(gx, by) : false;
+  const k = kindAtGlobal(gx, by);
+  return k === 3 || k === 2;
+}
+const isTreeWood = (i: number) => mat[i] === MAT.WOOD && (flags[i] & F_TREE) !== 0;
+/** Walk down a trunk (also stepping diagonally) from a cell of the region's bottom row: does it end in ground? */
+function groundedTrunk(gx: number, gy: number): boolean {
+  for (let n = 0; n < 400; n++) {
+    gy++;
+    if (gy >= H) return true;
+    let nx = -1;
+    for (let k = 0; k < 3; k++) {
+      const xx = gx + (k === 0 ? 0 : k === 1 ? -1 : 1);
+      if (xx < 0 || xx >= W) continue;
+      const i = gy * W + xx;
+      if (isTreeWood(i)) { if (nx < 0) nx = xx; } else if (WALK[mat[i]]) return true;
+    }
+    if (nx < 0) return false;
+    gx = nx;
+  }
+  return true;
+}
+
 /** Copy the world region into the local arrays. Returns the number of structural (non-anchor) cells. */
 function gather(x0: number, y0: number, w: number, h: number): number {
   rx0 = x0; ry0 = y0; rw = w; rh = h;
-  let ns = 0;
+  let ns = 0, trees = 0;
   for (let ly = 0; ly < h; ly++) {
     const gy = y0 + ly;
     for (let lx = 0; lx < w; lx++) {
@@ -74,11 +104,39 @@ function gather(x0: number, y0: number, w: number, h: number): number {
       const k = classify(m, f);
       kind[li] = k;
       s0[li] = 0;
+      treeW[li] = 0;
+      if (k === 2 && (f & F_TREE) && m === MAT.WOOD) { treeW[li] = 1; trees++; }
       if (k === 1) {
         ns++;
         lim[li] = limitOf(m, f);
-        const kb2 = kindAtGlobal(gx, gy + 1);
-        if (kb2 === 3 || kb2 === 2) s0[li] = 1;
+        if (floorBelow(gx, gy)) s0[li] = 1;
+      }
+    }
+  }
+  if (trees > 0) {
+    // trunk cells are anchors only while a chain of trunk cells leads down to the ground; cut-off pieces must be supported like any block
+    for (let ly = h - 1; ly >= 0; ly--) {
+      for (let lx = 0; lx < w; lx++) {
+        const li = ly * w + lx;
+        if (!treeW[li]) continue;
+        const gx = x0 + lx, gy = y0 + ly;
+        let r = false;
+        if (ly === h - 1) r = groundedTrunk(gx, gy);
+        else {
+          for (let k = -1; k <= 1 && !r; k++) {
+            const nx = lx + k;
+            if (nx < 0 || nx >= w) continue;
+            const bl = li + w + k;
+            if (treeW[bl]) r = rooted[bl] === 1;
+            else r = WALK[mat[(gy + 1) * W + x0 + nx]] === 1;
+          }
+        }
+        rooted[li] = r ? 1 : 0;
+        if (!r) {
+          kind[li] = 1; ns++;
+          lim[li] = limitOf(MAT.WOOD, flags[gy * W + gx]);
+          if (floorBelow(gx, gy)) s0[li] = 1;
+        }
       }
     }
   }
@@ -278,6 +336,8 @@ const SWEEP: [number, number][] = (() => {
 })();
 
 interface Job { x0: number; y0: number; x1: number; y1: number }
+const BUDGET_MS = 1.8;   // soft per-frame budget (SPEC: <= 2.5 ms); a job is only started if the average job cost still fits
+let jobCost = 0.5;
 const jobs: Job[] = [];
 const BLOCK = 64;
 
@@ -303,11 +363,15 @@ export function stepStructure(dt: number) {
       }
     }
   }
+  // at least one job per frame (progress), then only while the estimated cost of the next one still fits the budget
   let guard = 0;
   while (jobs.length && guard++ < 256) {
     const j = jobs.shift() as Job;
+    const a = now();
     processRegion(j.x0, j.y0, j.x1, j.y1);
-    if (now() - t0 > 2.0) break;
+    const b = now();
+    jobCost = jobCost * 0.7 + (b - a) * 0.3;
+    if (b - t0 + jobCost > BUDGET_MS) break;
   }
 }
 
@@ -361,4 +425,3 @@ export function supportPreview(cells: PreviewCell[]): { ok: boolean; margin: num
 }
 function kindAtOverlay(_lx: number, _ly: number, gx: number, gy: number) { return kindAtGlobal(gx, gy); }
 
-void shade;

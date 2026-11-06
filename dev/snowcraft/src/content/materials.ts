@@ -42,7 +42,7 @@ export const MATS: MatDef[] = [
   S({ key: 'PACKED', name: 'наст', phase: P_SOLID, color: [208, 221, 238], vary: 0.05, tex: 'snow', hard: 0.25, tool: 'shovel', drop: 'snowbrick', span: 6, meltAt: 0.5, meltTo: 'WATER', k: 0.1, cap: 7, light: 0.7, snd: 'snow' }),
   S({ key: 'SNOWBLOCK', name: 'снежный блок', phase: P_SOLID, color: [222, 232, 246], vary: 0.04, tex: 'brick', hard: 0.3, tool: 'shovel', drop: 'snowbrick', span: 12, meltAt: 1, meltTo: 'WATER', k: 0.08, cap: 7, light: 0.6, snd: 'snow' }),
   S({ key: 'ICE', name: 'лёд', phase: P_SOLID, color: [150, 200, 236], vary: 0.06, tex: 'crystal', hard: 0.6, tool: 'pick', drop: 'ice', span: 16, meltAt: 1.5, meltTo: 'WATER', k: 0.4, cap: 10, light: 0.25, fric: 0.12, snd: 'ice' }),
-  S({ key: 'WATER', name: 'вода', phase: P_LIQUID, color: [38, 104, 178], vary: 0.04, tex: 'liquid', dens: 10, hard: 0, flow: 4, freezeAt: -1.5, freezeTo: 'ICE', boilAt: 100, boilTo: 'STEAM', k: 0.3, cap: 20, light: 0.15, wind: 0, walk: false, snd: 'water' }),
+  S({ key: 'WATER', name: 'морская вода', phase: P_LIQUID, color: [30, 70, 110], vary: 0.04, tex: 'liquid', dens: 10, hard: 0, flow: 4, freezeAt: -1.9, freezeTo: 'ICE', boilAt: 100, boilTo: 'STEAM', k: 0.3, cap: 20, light: 0.15, wind: 0, walk: false, snd: 'water' }),
   S({ key: 'DIRT', name: 'мёрзлая земля', phase: P_SOLID, color: [88, 68, 56], tex: 'noise', hard: 0.5, tool: 'shovel', drop: 'dirt', span: 20, anchor: true, k: 0.3, cap: 12, snd: 'dirt' }),
   S({ key: 'GRAVEL', name: 'щебень', phase: P_POWDER, color: [118, 116, 114], vary: 0.14, tex: 'speckle', speck: [80, 78, 76], dens: 20, hard: 0.3, tool: 'shovel', drop: 'gravel', slide: 0.8, k: 0.4, cap: 12, snd: 'stone' }),
   S({ key: 'STONE', name: 'камень', phase: P_SOLID, color: [104, 110, 122], tex: 'strata', hard: 1.0, tool: 'pick', tier: 1, drop: 'stone', span: 48, anchor: true, k: 0.5, cap: 12, snd: 'stone' }),
@@ -69,12 +69,16 @@ export const MATS: MatDef[] = [
   S({ key: 'METAL', name: 'обшивка', phase: P_SOLID, color: [148, 156, 166], tex: 'metal', hard: 1.8, tool: 'pick', tier: 1, drop: 'scrap', span: 64, k: 0.9, cap: 6, snd: 'metal' }),
   S({ key: 'FIXTURE', name: 'предмет', phase: P_SOLID, color: [0, 0, 0], tex: 'flat', hard: Infinity, tool: 'none', span: 30, k: 0.1, cap: 8, light: 0.6, snd: 'wood' }),
   S({ key: 'GLASS', name: 'стекло', phase: P_SOLID, color: [190, 220, 230], vary: 0.03, tex: 'crystal', hard: 0.4, tool: 'pick', drop: 'glass', span: 10, k: 0.4, cap: 8, light: 0.05, snd: 'ice' }),
+  S({ key: 'WHALEBONE', name: 'китовая кость', phase: P_SOLID, color: [214, 206, 186], vary: 0.06, tex: 'grain', hard: 1.0, tool: 'axe', drop: 'bone', span: 48, k: 0.2, cap: 8, snd: 'wood' }),
+  S({ key: 'SOAPSTONE', name: 'мыльный камень', phase: P_SOLID, color: [104, 112, 108], tex: 'speckle', speck: [150, 170, 156], hard: 0.9, tool: 'pick', tier: 1, drop: 'soapstone', span: 40, anchor: true, k: 0.5, cap: 12, snd: 'stone' }),
+  S({ key: 'LICHEN', name: 'ягель', phase: P_SOLID, color: [150, 156, 112], vary: 0.2, tex: 'noise', hard: 0.1, tool: 'any', drop: 'lichen', dropN: 0.5, flam: 0.3, burnTo: 'ASH', burnLife: 30, k: 0.05, cap: 3, light: 0.4, wind: 0.3, walk: false, snd: 'soft' }),
 ];
 
 /** Material ids by key, e.g. MAT.SNOW. */
 export const MAT = Object.fromEntries(MATS.map((m, i) => [m.key, i])) as Record<
   'AIR' | 'SNOW' | 'PACKED' | 'SNOWBLOCK' | 'ICE' | 'WATER' | 'DIRT' | 'GRAVEL' | 'STONE' | 'HARDROCK' | 'BEDROCK' | 'WOOD' | 'NEEDLES' | 'LOG' | 'PLANK' | 'BRICK' |
-  'COAL' | 'COPPER' | 'IRON' | 'CRYSTAL' | 'ASH' | 'FIRE' | 'EMBER' | 'SMOKE' | 'STEAM' | 'METHANE' | 'LAVA' | 'BASALT' | 'OIL' | 'METAL' | 'FIXTURE' | 'GLASS', number>;
+  'COAL' | 'COPPER' | 'IRON' | 'CRYSTAL' | 'ASH' | 'FIRE' | 'EMBER' | 'SMOKE' | 'STEAM' | 'METHANE' | 'LAVA' | 'BASALT' | 'OIL' | 'METAL' | 'FIXTURE' | 'GLASS' |
+  'WHALEBONE' | 'SOAPSTONE' | 'LICHEN', number>;
 export const NMAT = MATS.length;
 const id = (k?: string) => (k ? (MAT as Record<string, number>)[k] ?? 0 : 0);
 

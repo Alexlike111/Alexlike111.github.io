@@ -134,8 +134,8 @@ function gen(d: MatDef, seed: number): Uint32Array {
         const yy = y + Math.sin(x * 0.1 + seed) * 2.5 + vn(x, y, 4, 4, seed) * 7;
         const band = Math.floor(yy / 6.5), bl = 0.9 + h2(band & 15, 0, seed) * 0.2;
         let l = bl + (fbm(x, y, 8, seed + 3) - 0.5) * v * 2 + (fine - 0.5) * v * 0.7;
-        const crack = Math.abs(vn(x, y, 8, 8, seed + 5) - 0.5);
-        if (crack < 0.018) l *= 0.7;
+        const crack = Math.abs(vn(x + (y >> 2), y, 16, 5, seed + 5) - 0.5), crack2 = Math.abs(vn(x, y, 6, 22, seed + 9) - 0.5);
+        if (crack < 0.012 || crack2 < 0.01) l *= 0.72;
         r *= l * 0.98; g *= l; b *= l * 1.03;
         break;
       }
@@ -204,7 +204,7 @@ function genBg(kind: number): Uint32Array {
     } else if (kind === 2) { // stone
       const yy = y + Math.sin(x * 0.12) * 2 + vn(x, y, 4, 4, 33) * 6;
       let l = 0.78 + n * 0.38 + (h2(Math.floor(yy / 7), 0, 7) - 0.5) * 0.14 + (fine - 0.5) * 0.06;
-      if (Math.abs(vn(x, y, 8, 8, 35) - 0.5) < 0.016) l *= 0.7;
+      if (Math.abs(vn(x + (y >> 2), y, 16, 5, 35) - 0.5) < 0.011 || Math.abs(vn(x, y, 6, 22, 36) - 0.5) < 0.009) l *= 0.72;
       r = 64 * l; g = 72 * l; b = 90 * l;
     } else if (kind === 3) { // packed snow / ice wall: pale blue with layer lines
       let l = 0.85 + n * 0.3 + Math.sin((y + n * 8) * 0.6) * 0.04 + (fine - 0.5) * 0.04;

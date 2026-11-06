@@ -91,7 +91,7 @@ function step(dt: number) {
   updateCamera(dt, cam.x, cam.y);
   G.lights.length = 0;
   collectFixtureLights(G.lights);
-  if (viewerLight) G.lights.push({ x: G.cam.x, y: G.cam.y, r: 1, g: 0.78, b: 0.5, rad: 9 });
+  if (viewerLight) G.lights.push({ x: G.cam.x, y: G.cam.y, r: 1, g: 0.84, b: 0.6, rad: 14 });
   render(dt);
   perfAcc += perf.total; perfN++; perfMax = Math.max(perfMax, perf.total);
   if (perfN >= 60) { perfAvg = perfAcc / perfN; perfAcc = 0; perfN = 0; }

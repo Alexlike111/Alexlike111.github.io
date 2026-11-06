@@ -53,12 +53,14 @@ export function matBelow(x: number, y: number): number {
   return mat[cy * W + cx];
 }
 
-const res: MoveResult = { hitWall: false, hitCeil: false, landedSpeed: 0, inWater: 0 };
+
+const RES: MoveResult = { hitWall: false, hitCeil: false, landedSpeed: 0, inWater: 0 };   // reused: read the result before the next moveBox call
 
 /** Integrate the box by its own velocity (gravity is applied by the caller). Axis-separated, swept cell by cell. */
 export function moveBox(b: Box, dt: number, o?: MoveOpts): MoveResult {
   const stepUp = o?.stepUp ?? 0;
-  res.hitWall = false; res.hitCeil = false; res.landedSpeed = 0;
+  const res = RES;
+  res.hitWall = false; res.hitCeil = false; res.landedSpeed = 0; res.inWater = 0;
   // a box that starts inside a falling cluster must not be pinned by it
   ignoreBodies = false;
   if (clusters.length > 0 && !free(b.x, b.y, b.w, b.h)) ignoreBodies = true;

@@ -1,6 +1,6 @@
 // FX particles (struct-of-arrays) + flying cells that re-enter the grid where they land.
 // Pure data + integration: no allocation in stepParticles / drawParticles.
-import { W, H, mat, aux, shade, flags, setCell } from './grid';
+import { W, H, mat, shade, setCell } from './grid';
 import { MATS, WALK, PHASE, GLOW_RAD, P_GAS, P_FIRE, P_EMPTY } from '../content/materials';
 import { G } from '../game/state';
 import type { View } from '../game/state';
@@ -97,16 +97,20 @@ const LAND: number[] = (() => {
   return r;
 })();
 
+function landAt(i: number, x: number, y: number): boolean {
+  if (x < 1 || x >= W - 1 || y < 1 || y >= H - 1) return false;
+  const j = y * W + x, t = mat[j];
+  if (t === 0 || PHASE[t] === P_GAS || PHASE[t] === P_FIRE) {
+    setCell(x, y, FC.m[i], FC.a[i], 0, true); shade[j] = FC.s[i];
+    return true;
+  }
+  return false;
+}
+/** Settle a flying cell in the nearest free cell. Dense rock / packed piles: fall back to the first free cell above the column (mass is kept). */
 function landCell(i: number, px: number, py: number): boolean {
-  const m = FC.m[i];
-  for (let k = 0; k < LAND.length; k += 2) {
-    const x = px + LAND[k], y = py + LAND[k + 1];
-    if (x < 1 || x >= W - 1 || y < 1 || y >= H - 1) continue;
-    const j = y * W + x, t = mat[j];
-    if (t === 0 || PHASE[t] === P_GAS || PHASE[t] === P_FIRE) {
-      setCell(x, y, m, FC.a[i], 0, true); shade[j] = FC.s[i];
-      return true;
-    }
+  for (let k = 0; k < LAND.length; k += 2) if (landAt(i, px + LAND[k], py + LAND[k + 1])) return true;
+  for (let dy = 4; dy <= 90; dy++) for (let k = 0; k < 5; k++) {
+    if (landAt(i, px + (k === 0 ? 0 : (k & 1 ? 1 : -1) * ((k + 1) >> 1)), py - dy)) return true;
   }
   return false;
 }
@@ -247,5 +251,3 @@ export function drawParticles(ctx: CanvasRenderingContext2D, v: View, emissive: 
   ctx.globalAlpha = prevAlpha;
 }
 
-// silence unused-import lint for tables used only by other modules' typing
-void aux; void flags;

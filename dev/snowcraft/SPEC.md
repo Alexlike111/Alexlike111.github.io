@@ -1,6 +1,6 @@
 # SNOWCRAFT — spec & engineering contract
 
-A 2D pixel survival-and-building sandbox in an endless polar winter. **Terraria's loop** (explore → mine → build → craft → discover, precise tile digging, a home you built) inside **a Noita-style world where every pixel is a material** with phase, density and temperature. Snow piles and packs, water flows and freezes, fire warms, melts and spreads, unsupported structures fall. Original game: original names, art and story (no assets, names or levels from any existing game).
+**Game design lives in `DESIGN.md` (v2, authoritative): an original High-Arctic survival game — polar night, snowcraft shelters, the body, drifting sea ice. Not a forest/ore/mining sandbox.** This file is the engineering contract (engine, modules, process). Where they disagree on gameplay, DESIGN.md wins.
 
 Language of all player-facing text: **Russian**. Code, comments, this spec: English.
 Target: browser on PC and phones (landscape), 60 fps on a mid phone, one self-contained HTML file (Vite + vite-plugin-singlefile), no network at runtime. Fonts bundled via @fontsource (Pixelify Sans = display/HUD/numbers, Jura = longer text). Everything (art, sound) procedural or hand-written in code. No external assets.
@@ -102,78 +102,8 @@ Bodies (bodies.ts): a cluster = cell list with float position & velocity, transl
 - Overlays (via addLayer from game code): player & animal sprites lit by lightAt, held tool rotating toward the aim, target tile frame, dig cracks (4 stages), build ghost (green/amber/red + reason label), drops (bobbing icons), fixtures (campfire flames animated, torch, workbench, furnace glow, chest, door, bed, radio, helipad, helicopter), falling clusters, toppling trees, particles, weather (layered snowflakes with parallax; blizzard streaks + white fog by G.visibility), frost vignette when core < 35.5 °C, red flash on damage, screen shake.
 - Camera: smooth follow with look-ahead toward movement/aim, vertical dead zone, clamp to world.
 
-## 4. World (game/worldgen.ts, locations.ts)
-Left→right (x in cells, surface ≈ y 240–300): far-left **hunter's hut** (x≈260) in forest; **frozen lake** (x≈520–800, thin ice in the middle that cracks); forest; **Weather station** — start (x≈1000, flat plateau): small wooden house (LOG/PLANK) with door, stove, bed, chest (starter loot), broken **radio**, a **helipad** marked outside; hills; **hot spring** (x≈1250) in a hollow: warm water, steam, no snow around; **watchtower** on a hill (x≈1420, ladder-free: built with steps/platforms) with a chest; **avalanche ridge** (x≈1500–1800): steep slopes, deep packed snow slabs; beyond it the **plane wreck** (x≈1900): METAL fuselage half buried, chest with the **battery**. Spruce forests (trees 60–140 cells tall, F_TREE trunk WOOD + NEEDLES crown with snow on boughs) in patches, gaps around sites.
-Snowpack 8–40 cells: loose fresh top, packed below, deeper drifts in lee (east) of hills. Under it frozen DIRT 10–30 cells, then STONE. Caves: noise worms + chambers; upper **ice caves** (ICE walls, icicles, frozen pools); mid caverns with **coal** (common, shallow), **copper** (mid), **iron** (mid-deep), **gravel** pockets, sealed **methane pockets** (5–8, faint green shimmer — a torch near them = explosion), **oil** pockets; a **warm grotto** with a hot pool (safe warm spot, notes); deep zone (y > 560): HARDROCK, **lava** pools, BASALT, **crystal geode** chambers (glowing quartz, iron pick needed) — the deepest goal. Bedrock bottom 6 rows and world edges. 6–9 caches (chests) in caves and sites with loot tables. bg walls set for everything below the original surface.
-
-## 5. Items & recipes (game/items.ts, recipes.ts)
-ItemDef: `{ id, name, kind:'block'|'tool'|'fixture'|'food'|'mat'|'wear'|'quest', stack, icon /*sprite key*/, desc,
-  place?: matKey | FixtureKind, tool?: {type:'shovel'|'pick'|'axe'|'spear', tier, speed, dmg, dur}, food?: {food, warm?, hp?}, wear?: {slot:'body'|'feet', insul?, snowshoe?}, light?: rad, fuel?: minutes }`
-
-Blocks (place material, F_PLACED): snow (Снег→SNOW), snowbrick (Снежный кирпич→SNOWBLOCK), ice (Лёд→ICE), dirt (Земля→DIRT), gravel (Щебень→GRAVEL), stone (Камень→STONE), log (Бревно→LOG), plank (Доски→PLANK), brick (Кладка→BRICK), glass (Стекло→GLASS). Stack 99.
-Materials: stick (Палка), bough (Лапник), coal (Уголь), copper_ore (Медная руда), iron_ore (Железная руда), copper (Медь), iron (Железо), scrap (Металлолом), crystal (Кварц), hide (Шкура), feather (Перо), fat (Жир), rope (Верёвка).
-Tools (dur = uses): shovel Лопата (shovel t0, start), hatchet Топорик (axe t1, dmg 8, start), pick_stone Каменная кирка (pick t1), pick_iron Железная кирка (pick t2), axe_iron Железный топор (axe t2, dmg 14), spear Копьё (spear dmg 18, reach +1 tile), torch Факел (held = light 7 tiles, placeable fixture, burns 2 game h when placed), lantern Фонарь (held light 10, no fuel).
-Wear: fur_coat Меховая куртка (insul +0.8), snowshoes Снегоступы (no sinking in loose snow, +25 % speed on snow).
-Food: can Консервы (+35), cracker Сухари (+15), choc Шоколад (+20, warm +0.3 °C), meat_raw Сырое мясо (+8), meat Жареное мясо (+35, hp +10), tea Хвойный чай (+5, warm +1.5 °C over 60 s).
-Fixtures: campfire Костёр (2×1), workbench Верстак (3×2), furnace Горн (2×2), anvil Наковальня (2×1), chest Сундук (2×2), door Дверь (1×5, open = passable), bed Лежанка (4×1; sleep at night when sheltered & warm → skip to 07:00, sets respawn), snare Силок (1×1, catches hares over time), stove Печка (2×2, burns 6× longer than campfire, more heat), torch.
-Quest: coil Медная катушка, battery Аккумулятор, resonator Кварцевый резонатор, flare Сигнальная ракета.
-
-Recipes (station: hand = anywhere; others = within 6 tiles of the fixture; campfire/furnace/stove must be lit):
-| result ×n | ingredients | station |
-|---|---|---|
-| stick ×4 | log 1 | hand |
-| campfire | log 3, stone 3 | hand |
-| torch ×3 | stick 1, coal 1 | hand |
-| torch ×1 | stick 1, bough 2 | hand |
-| workbench | log 4 | hand |
-| bed | bough 10 | hand |
-| plank ×4 | log 1 | workbench |
-| brick ×2 | stone 2 | workbench |
-| pick_stone | stone 3, stick 2 | workbench |
-| spear | stick 2, stone 1 | workbench |
-| rope ×2 | hide 1 | workbench |
-| snare | rope 1, stick 2 | workbench |
-| snowshoes | stick 4, rope 2 | workbench |
-| fur_coat | hide 5, rope 2 | workbench |
-| chest | plank 6 | workbench |
-| door | plank 6 | workbench |
-| furnace | stone 12, coal 3 | workbench |
-| copper | copper_ore 2, coal 1 | furnace |
-| iron | iron_ore 2, coal 1 | furnace |
-| iron | scrap 2 | furnace |
-| glass ×2 | gravel 3, coal 1 | furnace |
-| anvil | iron 5 | workbench |
-| pick_iron | iron 3, stick 2 | anvil |
-| axe_iron | iron 3, stick 2 | anvil |
-| lantern | iron 2, glass 1, coal 1 | anvil |
-| stove | iron 6, stone 4 | anvil |
-| coil | copper 4 | anvil |
-| resonator | crystal 2, copper 1 | anvil |
-| meat | meat_raw 1 | campfire |
-| tea | bough 1, snow 1 | campfire |
-| flare | fat 1, coal 1, stick 1 | anvil |
-Start kit: shovel, hatchet, 3 cans, 2 torches, 4 logs. Station chest: 3 crackers, 1 choc, 6 stone, note #1.
-
-Tool rules: dig time = `hard × 3` with the wrong tool kind, `× 1/speed` with the right kind; tier below `tier` → cannot ("нужна каменная кирка" / "нужна железная кирка"). Hands-only digging allowed for powders and needles (×4 time). Reach 5.5 tiles from the chest. Durability wears per dug tile; broken tool disappears with a toast. Mined tile → its `drop` item as a Drop entity that pops out and magnets to the player within 3 tiles. Placing: 0.12 s per tile, tile must be free of solids/powders/creatures, adjacent (4-neighbour) to a WALK tile or a fixture; structure preview colours the ghost.
-
-## 6. Survival, goal and pacing (player.ts, weather.ts, quest.ts, events.ts, fauna.ts)
-Clock: 1 real second = 1.2 game minutes (day = 20 real minutes). Daylight 08:00–18:00, 1 h twilight. Ambient: day −12…−18 °C, night −24…−30 °C, storms −6 more, slowly colder each day (−1 °C/day).
-Body: core temperature heat balance. Losses ∝ (36 − feelT) / (insul × (1 − 0.45·shelter)) × (1 + 0.8·wet); gains: metabolism (walking/digging generate heat; shivering below 36 °C adds some), fires (radiant by distance and line of sight; strong within 4 tiles), warm air (tile temp). Tuning targets: night in the open without fire 37 → 35 °C in ~2 real min, death (≤ 30 °C) in ~5 real min; daytime while working ≈ neutral; standing at a fire warms ~+1 °C per 15 real s; a closed shelter with a lit fire stays comfortable; fur coat halves losses; wet ×1.8 (wet from water, from melting snow in a warm room if covered in snow, from snowfall over time outside). Feels-like uses the Environment-Canada wind-chill formula. Below 35 °C: blue frost vignette, slower, HP loss; below 32 °C stumbling. Food 100 → 0 in 2 game days; starving drains HP. Stamina for run/jump/dig. HP regen when fed & warm. Death screen names the cause ("замёрз", "упал", "завалило", "волки", "взрыв газа", "утонул в ледяной воде", "голод") and respawns at the bed (or station) with a dropped backpack of the inventory at the death spot (marker on HUD/map). "No death for nothing": every danger is telegraphed (barometer warning before storms, rumble + cracks before avalanches/cave-ins, ice crack sounds and visuals, wolves howl first, gas shimmer + hint "здесь пахнет газом").
-
-Objectives (quest tracker always visible top-centre; journal lists all; each completion toasts + chime):
-1. Наруби дров — get 3 logs (chop a spruce) → 2. Разведи костёр (craft + place campfire; first win < 5 min) → 3. Построй укрытие (closed space around you with a lit fire; HUD chip "Укрытие ✓") → 4. Сделай верстак и каменную кирку → 5. Найди медь (dig copper ore) → 6. Построй горн → 7. Сделай медную катушку → 8. Найди аккумулятор в обломках самолёта (east, beyond the ridge) → 9. Добудь железо и сделай железную кирку → 10. Спустись к кристаллам и сделай кварцевый резонатор → 11. Почини рацию на метеостанции (interact with all three parts) → call: "Вертолёт прилетит на рассвете. Продержись." — a blizzard and wolf night follows → 12. На рассвете зажги сигнальную ракету на площадке / meet the helicopter at the helipad → **win** screen with stats; option to keep playing (free sandbox).
-Storms: night 2 (day 2 20:00 → day 3 04:00) then every ~1.5 days, warned 2 game hours ahead. Fauna: hares (surface, flee, leave footprints in snow, snares), ptarmigans (flocks, fly up when approached), foxes (rare), wolves (night/blizzard, packs of 2–3, howl first, flank, bite 8–12, fear fire within 8 tiles and the held torch, flee at low hp). Drops: meat_raw, hide, feather, fat.
-Events: avalanche on the ridge (deep slabs on steep slopes released by explosions, loud digging under them or occasionally during storms; slab turns to rushing snow as flying cells + powder, buries what is below; rumble 3 s before), lake ice cracking under the player (thin ice: cracks spread with sound, break into floating ice + water; cold water = soaked + rapid cooling), methane explosions (fire/torch/lava touching gas), cave-ins (unsupported cave ceilings after digging, dust + rumble first), rescue finale. Discovering a site: toast + journal note + map marker.
-
-## 7. UI (src/ui/*) — "field instrument" style
-Dark navy panels (#0b1220 / #121c2b, 1 px #24364c borders, 6 px radius), ice blue accent (#7cc6ee), ember orange (#f0894a) for warmth/fire, ok green (#6cc59a), warn amber (#e6b84f), bad red (#e5604f). Pixelify Sans for labels/numbers/headings, Jura for longer text. Hand-drawn pixel icons from sprites.ts (no emoji). Everything readable on a 6" phone in landscape; touch targets ≥ 48 px; respects safe-area insets.
-- Top-left vitals: HP, thermometer (core °C coloured), food, stamina, wet drop; line with air °C, feels-like °C, wind arrow + m/s; shelter chip.
-- Top-right: day + clock + sun/moon, barometer/weather warning, small minimap (explored only, sites marked).
-- Top-centre: current objective + toasts.
-- Bottom-centre: hotbar (9 on desktop; on phones the selected item + quick slots), item name pop on change; durability bars.
-- Cursor tooltip: target material/fixture name, tool requirement, ghost reason.
-- Panels: Inventory + Crafting (one panel; recipes filtered by available stations, craftable first, missing items highlighted; drag/tap to move items; equip wear), Journal (objectives, notes, map tab, "Вещества" — materials learned with properties), Pause (resume, settings: sound/music volume, quality auto/low/high, x-ray toggle, controls help; new game), Title (logo "SNOWCRAFT" pixel title over a live animated world background, "Новая игра" / "Продолжить" if save exists), Death, Win.
-- Hints: contextual one-liners for the first minutes (controls per device), never blocking.
+## 4–7. World, items, survival, UI
+Replaced by DESIGN.md (v2). Engine-level notes kept: fixtures with solid footprints write MAT.FIXTURE + F_FIXTURE cells; non-solid fixtures (campfire, lamp, torch, bed, snare, cache, rack) are entities only. Player-facing text only via i18n `strings()`.
 
 ## 8. Quality bar, tests, critique
 - 60 fps target; quality ladder: auto-lower sim window, light margin, particle counts, glow when fps < 50 for 3 s (G.quality).

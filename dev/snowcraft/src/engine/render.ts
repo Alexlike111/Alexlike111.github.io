@@ -180,6 +180,10 @@ function drawTerrain(v: View, t: number) {
           if (OPEN[mat[i + W]]) mul -= 58;
           if (OPEN[mat[i - 1]]) mul += 8; if (OPEN[mat[i + 1]]) mul -= 14;
         }
+        if (m === MAT_ICE && aux[i] !== 0) {   // cracked ice (events agent sets aux = crack level)
+          const cr = aux[i]; mul -= 30 + (cr >> 2);
+          const hh = hash32(wx >> 1, wy >> 1, 7) & 7; if (hh < 2 + (cr >> 5)) mul = 120 + (hh << 4); else if (((wx * 3 + wy * 5) % 11) === 0) mul += 110;
+        }
         if (TRANS[m] !== 0 && bgid !== 0) {
           // translucent (ice/glass): blend toward the lit wall behind
           const bt = BGTEX[bgid][tix], tr = TRANS[m];
@@ -288,7 +292,7 @@ function drawTerrain(v: View, t: number) {
   }
   tctx.putImageData(timg, 0, 0);
 }
-const MAT_CRYSTAL = MAT.CRYSTAL, MAT_FIRE = MAT.FIRE, MAT_LAVA = MAT.LAVA;
+const MAT_ICE = MAT.ICE, MAT_CRYSTAL = MAT.CRYSTAL, MAT_FIRE = MAT.FIRE, MAT_LAVA = MAT.LAVA;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // weather & vignette
@@ -345,7 +349,7 @@ export function render(dt: number) {
 
   // light
   const t1 = performance.now();
-  computeLight(x0, y0, v.w, v.h, t);
+  computeLight(v, t);
   const t2 = performance.now();
 
   // sky

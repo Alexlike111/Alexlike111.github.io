@@ -7,12 +7,15 @@ import { G } from '../game/state';
 import { W, H, TW, TH, mat } from './grid';
 import { LIGHT, GLOW_R, GLOW_G, GLOW_B, GLOW_RAD } from '../content/materials';
 
-const STEP_AIR_SKY = 0.09;     // sky energy lost per tile of open air when spreading sideways
-const K_OP_SKY = 0.30;         // extra loss per tile = opacity * K_OP_SKY (sideways spread)
-const K_OP_SEED = 0.30;        // loss per tile when sky light travels DOWN through material
+const STEP_AIR_SKY = 0.09;     // sky energy lost per tile when spreading through open air
+const K_IN_SKY = 0.09;         // entering a solid tile costs STEP + opacity * K (gentle: surfaces glow, depth fades over ~30 cells)
+const K_LEAVE_SKY = 0.5;       // leaving a solid tile into open air costs opacity * K (closed rooms stay dim; windows let light in)
 const STEP_PT = 0.1;           // point light: energy lost per air tile  (source energy = rad * STEP_PT)
-const K_OP_PT = 0.62;
+const K_IN_PT = 0.25;
+const K_LEAVE_PT = 0.5;
 const DIAG = 1.4142;
+const AIR_T = 0.3;             // tile opacity below this counts as open air
+const SOLID_AMBIENT = 0.1;    // faint floor so strata/ores read in unlit rock
 
 /** Region of tiles currently covered by the light arrays. */
 export const lt = { tx0: 0, ty0: 0, w: 0, h: 0 };
@@ -23,13 +26,13 @@ export let glowRGBA = new Uint8ClampedArray(0);
 export const skyTint = { r: 1, g: 1, b: 1, e: 1 }; // current sky light colour/energy (for debugging & sprites)
 
 let cap = 0;
-let opac = new Float32Array(0), costSky = new Float32Array(0), costPt = new Float32Array(0), skyE = new Float32Array(0);
+let opac = new Float32Array(0), cinSky = new Float32Array(0), lvSky = new Float32Array(0), cinPt = new Float32Array(0), lvPt = new Float32Array(0), airF = new Float32Array(0), skyE = new Float32Array(0);
 let pR = new Float32Array(0), pG = new Float32Array(0), pB = new Float32Array(0);
 
 function ensure(n: number) {
   if (n <= cap) return;
   cap = n + 256;
-  opac = new Float32Array(cap); costSky = new Float32Array(cap); costPt = new Float32Array(cap); skyE = new Float32Array(cap);
+  opac = new Float32Array(cap); cinSky = new Float32Array(cap); lvSky = new Float32Array(cap); cinPt = new Float32Array(cap); lvPt = new Float32Array(cap); airF = new Float32Array(cap); skyE = new Float32Array(cap);
   pR = new Float32Array(cap); pG = new Float32Array(cap); pB = new Float32Array(cap);
   lightR = new Float32Array(cap); lightG = new Float32Array(cap); lightB = new Float32Array(cap);
   glowR = new Float32Array(cap); glowG = new Float32Array(cap); glowB = new Float32Array(cap);
@@ -39,18 +42,18 @@ function ensure(n: number) {
 function hash3(a: number, b: number, c: number) { let h = (a * 374761393 + b * 668265263 + c * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 
 // ---- sweeps -------------------------------------------------------------------------------------------------------
-function sweep1(E: Float32Array, cost: Float32Array, w: number, h: number, iters: number) {
+// cost of moving from tile j into tile i = cin[i] + (air[i] ? lv[j] : 0)   (diagonals ×1.414)
+function sweep1(E: Float32Array, cin: Float32Array, lv: Float32Array, w: number, h: number, iters: number) {
   for (let it = 0; it < iters; it++) {
     for (let y = 0; y < h; y++) {
       let i = y * w;
       for (let x = 0; x < w; x++, i++) {
-        const c = cost[i]; let v = E[i], t: number;
-        if (x > 0) { t = E[i - 1] - c; if (t > v) v = t; }
+        const c = cin[i], a = airF[i]; let v = E[i], t: number;
+        if (x > 0) { t = E[i - 1] - c - a * lv[i - 1]; if (t > v) v = t; }
         if (y > 0) {
-          t = E[i - w] - c; if (t > v) v = t;
-          const cd = c * DIAG;
-          if (x > 0) { t = E[i - w - 1] - cd; if (t > v) v = t; }
-          if (x < w - 1) { t = E[i - w + 1] - cd; if (t > v) v = t; }
+          t = E[i - w] - c - a * lv[i - w]; if (t > v) v = t;
+          if (x > 0) { t = E[i - w - 1] - (c + a * lv[i - w - 1]) * DIAG; if (t > v) v = t; }
+          if (x < w - 1) { t = E[i - w + 1] - (c + a * lv[i - w + 1]) * DIAG; if (t > v) v = t; }
         }
         E[i] = v;
       }
@@ -58,13 +61,12 @@ function sweep1(E: Float32Array, cost: Float32Array, w: number, h: number, iters
     for (let y = h - 1; y >= 0; y--) {
       let i = y * w + w - 1;
       for (let x = w - 1; x >= 0; x--, i--) {
-        const c = cost[i]; let v = E[i], t: number;
-        if (x < w - 1) { t = E[i + 1] - c; if (t > v) v = t; }
+        const c = cin[i], a = airF[i]; let v = E[i], t: number;
+        if (x < w - 1) { t = E[i + 1] - c - a * lv[i + 1]; if (t > v) v = t; }
         if (y < h - 1) {
-          t = E[i + w] - c; if (t > v) v = t;
-          const cd = c * DIAG;
-          if (x > 0) { t = E[i + w - 1] - cd; if (t > v) v = t; }
-          if (x < w - 1) { t = E[i + w + 1] - cd; if (t > v) v = t; }
+          t = E[i + w] - c - a * lv[i + w]; if (t > v) v = t;
+          if (x > 0) { t = E[i + w - 1] - (c + a * lv[i + w - 1]) * DIAG; if (t > v) v = t; }
+          if (x < w - 1) { t = E[i + w + 1] - (c + a * lv[i + w + 1]) * DIAG; if (t > v) v = t; }
         }
         E[i] = v;
       }
@@ -73,18 +75,18 @@ function sweep1(E: Float32Array, cost: Float32Array, w: number, h: number, iters
 }
 
 /** 3-channel sweep restricted to the box [bx0,bx1]×[by0,by1] (region-local tile coords, inclusive). */
-function sweep3(R: Float32Array, Gc: Float32Array, B: Float32Array, cost: Float32Array, w: number, bx0: number, by0: number, bx1: number, by1: number, iters: number) {
+function sweep3(R: Float32Array, Gc: Float32Array, B: Float32Array, cin: Float32Array, lv: Float32Array, w: number, bx0: number, by0: number, bx1: number, by1: number, iters: number) {
   for (let it = 0; it < iters; it++) {
     for (let y = by0; y <= by1; y++) {
       let i = y * w + bx0;
       for (let x = bx0; x <= bx1; x++, i++) {
-        const c = cost[i], cd = c * DIAG;
-        let r = R[i], g = Gc[i], b = B[i], t: number;
-        if (x > bx0) { const j = i - 1; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
+        const ci = cin[i], a = airF[i];
+        let r = R[i], g = Gc[i], b = B[i], t: number, j: number, c: number;
+        if (x > bx0) { j = i - 1; c = ci + a * lv[j]; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
         if (y > by0) {
-          let j = i - w; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t;
-          if (x > bx0) { j = i - w - 1; t = R[j] - cd; if (t > r) r = t; t = Gc[j] - cd; if (t > g) g = t; t = B[j] - cd; if (t > b) b = t; }
-          if (x < bx1) { j = i - w + 1; t = R[j] - cd; if (t > r) r = t; t = Gc[j] - cd; if (t > g) g = t; t = B[j] - cd; if (t > b) b = t; }
+          j = i - w; c = ci + a * lv[j]; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t;
+          if (x > bx0) { j = i - w - 1; c = (ci + a * lv[j]) * DIAG; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
+          if (x < bx1) { j = i - w + 1; c = (ci + a * lv[j]) * DIAG; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
         }
         R[i] = r; Gc[i] = g; B[i] = b;
       }
@@ -92,13 +94,13 @@ function sweep3(R: Float32Array, Gc: Float32Array, B: Float32Array, cost: Float3
     for (let y = by1; y >= by0; y--) {
       let i = y * w + bx1;
       for (let x = bx1; x >= bx0; x--, i--) {
-        const c = cost[i], cd = c * DIAG;
-        let r = R[i], g = Gc[i], b = B[i], t: number;
-        if (x < bx1) { const j = i + 1; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
+        const ci = cin[i], a = airF[i];
+        let r = R[i], g = Gc[i], b = B[i], t: number, j: number, c: number;
+        if (x < bx1) { j = i + 1; c = ci + a * lv[j]; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
         if (y < by1) {
-          let j = i + w; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t;
-          if (x > bx0) { j = i + w - 1; t = R[j] - cd; if (t > r) r = t; t = Gc[j] - cd; if (t > g) g = t; t = B[j] - cd; if (t > b) b = t; }
-          if (x < bx1) { j = i + w + 1; t = R[j] - cd; if (t > r) r = t; t = Gc[j] - cd; if (t > g) g = t; t = B[j] - cd; if (t > b) b = t; }
+          j = i + w; c = ci + a * lv[j]; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t;
+          if (x > bx0) { j = i + w - 1; c = (ci + a * lv[j]) * DIAG; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
+          if (x < bx1) { j = i + w + 1; c = (ci + a * lv[j]) * DIAG; t = R[j] - c; if (t > r) r = t; t = Gc[j] - c; if (t > g) g = t; t = B[j] - c; if (t > b) b = t; }
         }
         R[i] = r; Gc[i] = g; B[i] = b;
       }
@@ -116,7 +118,7 @@ function updateSky() {
   const moon = G.moon;
   const night = 1 - day;
   // energy
-  let e = day * 1.0 + night * (0.13 + 0.16 * moon + 0.07 * aur);
+  let e = day * 1.0 + night * (0.09 + 0.13 * moon + 0.05 * aur);
   e *= 1 - 0.4 * G.storm;
   // tint: night is deep blue, aurora adds green, twilight is orange
   let r = day + night * 0.42, g = day + night * 0.64, b = day + night * 1.0;
@@ -128,16 +130,19 @@ function updateSky() {
 // tone curve per channel: shadows pick up blue
 const KR = 1.45, KG = 1.62, KB = 2.0;
 const NR = 1 / (1 - Math.exp(-KR)), NG = 1 / (1 - Math.exp(-KG)), NB = 1 / (1 - Math.exp(-KB));
-const AMBIENT = 0.012;
+
 
 /** Compute the light map for the view (cells: x0,y0,w,h of the canvas) + margin. Call once per frame before drawing. */
-export function computeLight(vx0: number, vy0: number, vw: number, vh: number, time: number) {
+export function computeLight(v: { x0: number; y0: number; w: number; h: number }, time: number) {
+  const vx0 = v.x0, vy0 = v.y0, vw = v.w, vh = v.h;
   updateSky();
   const q = G.quality;
   const M = q === 0 ? 6 : q === 1 ? 8 : 11;
   const tx0 = Math.max(0, (vx0 >> 2) - M), ty0 = Math.max(0, (vy0 >> 2) - M);
-  const tx1 = Math.min(TW, ((vx0 + vw) >> 2) + 1 + M), ty1 = Math.min(TH, ((vy0 + vh) >> 2) + 1 + M);
+  const tx1 = Math.min(TW, (vx0 >> 2) + Math.ceil(vw / 4) + 1 + M), ty1 = Math.min(TH, (vy0 >> 2) + Math.ceil(vh / 4) + 1 + M);
   const w = Math.max(1, tx1 - tx0), h = Math.max(1, ty1 - ty0), n = w * h;
+  // low/mid quality: the light map only needs refreshing at 30 Hz while the covered region is unchanged
+  if (q <= 1 && (G.frame & 1) === 1 && lt.w === w && lt.h === h && lt.tx0 === tx0 && lt.ty0 === ty0 && cap >= n) return;
   ensure(n);
   lt.tx0 = tx0; lt.ty0 = ty0; lt.w = w; lt.h = h;
 
@@ -161,8 +166,12 @@ export function computeLight(vx0: number, vy0: number, vw: number, vh: number, t
       }
       o *= 0.0625;
       opac[i] = o;
-      costSky[i] = STEP_AIR_SKY + o * K_OP_SKY;
-      costPt[i] = STEP_PT + o * K_OP_PT;
+      const isAir = o < AIR_T;
+      airF[i] = isAir ? 1 : 0;
+      cinSky[i] = isAir ? STEP_AIR_SKY : 0.05 + o * K_IN_SKY;
+      lvSky[i] = o * K_LEAVE_SKY;
+      cinPt[i] = isAir ? STEP_PT : STEP_PT + o * K_IN_PT;
+      lvPt[i] = o * K_LEAVE_PT;
       if (gr + gg + gb > 0) {
         const f = STEP_PT * 0.0625 * 2.4 * (0.85 + 0.15 * hash3(tx0 + tx, ty0 + ty, (time * 9) | 0)) * flick;
         pR[i] = gr * f; pG[i] = gg * f; pB[i] = gb * f;
@@ -191,7 +200,7 @@ export function computeLight(vx0: number, vy0: number, vw: number, vh: number, t
   if (nSrc > 0) {
     const g = 12;
     const bx0 = Math.max(0, sMinX - g), by0 = Math.max(0, sMinY - g), bx1 = Math.min(w - 1, sMaxX + g), by1 = Math.min(h - 1, sMaxY + g);
-    sweep3(pR, pG, pB, costPt, w, bx0, by0, bx1, by1, q === 0 ? 1 : 2);
+    sweep3(pR, pG, pB, cinPt, lvPt, w, bx0, by0, bx1, by1, q === 0 ? 1 : 2);
   }
 
   // 3. sky seeds: walk each column from the world top; light enters through transparent tiles
@@ -199,35 +208,44 @@ export function computeLight(vx0: number, vy0: number, vw: number, vh: number, t
   if (skyOn) {
     for (let tx = 0; tx < w; tx++) {
       const wx = (tx0 + tx) * 4 + 2;
-      let E = 1;
+      let E = 1, prev = 0;
       // above the region: coarse (single sample per tile)
       for (let ty = 0; ty < ty0 && E > 0.01; ty++) {
         const o = LIGHT[mat[(ty * 4 + 2) * W + wx]];
-        if (o > 0) E -= o * K_OP_SEED;
+        if (o < AIR_T) { if (prev >= AIR_T) E -= prev * K_LEAVE_SKY; } else E -= 0.05 + o * K_IN_SKY;
+        prev = o;
       }
+      if (E < 0) E = 0;
       for (let ty = 0; ty < h; ty++) {
-        const i = ty * w + tx;
-        if (E > 0.001) { E -= opac[i] * K_OP_SEED; if (E < 0) E = 0; }
+        const i = ty * w + tx, o = opac[i];
+        if (E > 0.001) {
+          if (o < AIR_T) { if (prev >= AIR_T) E -= prev * K_LEAVE_SKY; } else E -= 0.05 + o * K_IN_SKY;
+          if (E < 0) E = 0;
+        }
+        prev = o;
         skyE[i] = E;
       }
     }
-    sweep1(skyE, costSky, w, h, q === 0 ? 1 : 2);
+    sweep1(skyE, cinSky, lvSky, w, h, q === 0 ? 1 : 2);
   } else skyE.fill(0, 0, n);
 
   // 4. compose + tone map
   const se = skyTint.e, sr = skyTint.r * se, sg = skyTint.g * se, sb = skyTint.b * se;
-  const bloom = q === 0 ? 0 : 0.5;
+  const bloom = q === 0 ? 0 : 0.3;
+  const AMBIENT = 0.028 + 0.05 * Math.max(0, Math.min(1, G.daylight));
+  const solidAmb = SOLID_AMBIENT * (0.5 + 0.5 * Math.max(0, Math.min(1, G.daylight)));
   for (let i = 0; i < n; i++) {
     const s = skyE[i];
-    const er = s * sr + pR[i], eg = s * sg + pG[i], eb = s * sb + pB[i];
+    const er = Math.max(0, s * sr + pR[i]), eg = Math.max(0, s * sg + pG[i]), eb = Math.max(0, s * sb + pB[i]);
     const mr = (1 - Math.exp(-KR * er)) * NR, mg = (1 - Math.exp(-KG * eg)) * NG, mb = (1 - Math.exp(-KB * eb)) * NB;
-    const lr = mr + AMBIENT, lg = mg + AMBIENT * 1.2, lb = mb + AMBIENT * 1.8;
+    const sa = opac[i] > 0.5 ? solidAmb : 0;
+    const lr = mr + AMBIENT + sa * 0.8, lg = mg + AMBIENT * 1.2 + sa * 0.9, lb = mb + AMBIENT * 1.8 + sa * 1.2;
     lightR[i] = lr; lightG[i] = lg; lightB[i] = lb;
     const j = i * 4;
     lightRGBA[j] = lr * 255; lightRGBA[j + 1] = lg * 255; lightRGBA[j + 2] = lb * 255; lightRGBA[j + 3] = 255;
     // bloom: only point lights, squared so it hugs the sources
     const br = pR[i], bg = pG[i], bb = pB[i];
-    const gr = br * br * bloom, gg = bg * bg * bloom, gb = bb * bb * bloom;
+    const gr = Math.min(0.32, br * br * bloom), gg = Math.min(0.32, bg * bg * bloom), gb = Math.min(0.32, bb * bb * bloom);
     glowR[i] = gr; glowG[i] = gg; glowB[i] = gb;
     glowRGBA[j] = gr * 255; glowRGBA[j + 1] = gg * 255; glowRGBA[j + 2] = gb * 255; glowRGBA[j + 3] = 255;
   }

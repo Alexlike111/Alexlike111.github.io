@@ -111,7 +111,7 @@ defSprite('chest', WOOD, [
   for (let y = 0; y < 20; y++) {
     if (y === 0 || y === 19) closed.push('DDDD');
     else if (y === 3 || y === 4 || y === 15 || y === 16) closed.push('DBBD');
-    else if (y === 10) closed.push('DPPD'.replace('P', 'P'));
+    else if (y === 10) closed.push('DPPD');
     else if (y === 11) closed.push('DPYD');
     else closed.push(y % 2 ? 'DPQD' : 'DSQD');
   }

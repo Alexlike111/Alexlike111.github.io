@@ -11,7 +11,7 @@ import {
 import { G } from '../game/state';
 import { temp, wind, drainHeat } from './heat';
 import { explode } from './explode';
-import { spawnFx } from './particles';
+import { throwCell } from './particles';
 
 // ------------------------------------------------------------------ constants
 const TICK = 1 / 60;
@@ -85,7 +85,8 @@ function swap(i: number, j: number) {
   mat[j] = m; aux[j] = a; shade[j] = s; flags[j] = f;
 }
 const isFluidCell = (t: number) => t === 0 || PHASE[t] >= P_LIQUID;                                   // air, liquid, gas, fire
-const canFall = (t: number, d: number) => t === 0 || PHASE[t] >= P_GAS || (PHASE[t] === P_LIQUID && DENS[t] < d);
+// powders/liquids pass through air and gases and sink through lighter liquids; flames are not displaced (burning oil must stay burning)
+const canFall = (t: number, d: number) => t === 0 || PHASE[t] === P_GAS || (PHASE[t] === P_LIQUID && DENS[t] < d);
 const gasLike = (t: number) => t === 0 || PHASE[t] >= P_GAS;
 const gasLife = (m: number) => (LIFE_MIN[m] + rnd() * (LIFE_MAX[m] - LIFE_MIN[m])) >> 1;
 function put(i: number, m: number, a: number, f: number) { mat[i] = m; aux[i] = a; flags[i] = f; shade[i] = (rnd() * 256) | 0; }
@@ -124,7 +125,7 @@ function igniteCell(n: number) {
   if (f <= 0) return;
   if (m === METHANE) { if (boomQ.length < 64) boomQ.push(n); return; }
   const ph = PHASE[m];
-  if (ph === P_LIQUID) { setFire(n); aux[n] = 30 + ((rnd() * 40) | 0); return; }
+  if (ph === P_LIQUID) { if (!(flags[n] & F_BURN)) { flags[n] |= F_BURN; const y = (n / W) | 0; mark(n - y * W, y); } return; }   // burning liquid keeps flowing (see burnLiquid)
   if (ph === P_SOLID) {
     if (flags[n] & F_BURN) return;
     if (!addBurn(n, m)) return;
@@ -176,11 +177,18 @@ function stepFire(i: number, x: number, y: number) {
   }
 }
 
-function stepBurning() {
+/** Burning solids only progress (age, spread) inside the processed window. Outside they are parked, like every other
+ *  process of the CA, and resume when the window reaches them. If the budget gets tight, parked fires are put out instead. */
+function stepBurning(x0: number, y0: number, x1: number, y1: number) {
+  const squeeze = nBurn >= MAXB * 0.75;
   for (let k = 0; k < nBurn;) {
     const i = burnIdx[k], m = mat[i];
     if (!(flags[i] & F_BURN) || BURN_LIFE[m] === 0) { burnIdx[k] = burnIdx[--nBurn]; burnT[k] = burnT[nBurn]; continue; }
     const y = (i / W) | 0, x = i - y * W;
+    if (x < x0 || x > x1 || y < y0 || y > y1) {
+      if (squeeze) { flags[i] &= ~F_BURN; burnIdx[k] = burnIdx[--nBurn]; burnT[k] = burnT[nBurn]; continue; }
+      k++; continue;
+    }
     mark(x, y);
     let t = burnT[k] - 1;
     let doused = false;
@@ -271,7 +279,7 @@ function stepPowder(i: number, x: number, y: number, m: number) {
   if (canFall(mb, d)) {
     if (PHASE[mb] === P_LIQUID && rnd() > 0.55) { mark(x, y); return; }
     let j = b;
-    if (mb === AIR && y < H - 2 && mat[b + W] === AIR) j = b + W;
+    if ((mb === AIR || PHASE[mb] === P_GAS) && y < H - 2) { const t2 = mat[b + W]; if (t2 === AIR || PHASE[t2] === P_GAS) j = b + W; }   // two cells per tick through air / gas
     swap(i, j); mark(x, y);
     return;
   }
@@ -300,8 +308,7 @@ function levelAttempt(i: number, x: number, y: number, m: number) {
     // free slot above this liquid cell?
     const above = u - W;
     if (uy - 1 >= y + 1 && gasLike(mat[above]) && uy > 1) {
-      mat[above] = m; aux[above] = aux[i]; flags[above] = flags[i] & ~F_TICK; shade[above] = shade[i];
-      mat[i] = AIR; aux[i] = 0; flags[i] = 0;
+      swap(i, above); flags[above] &= ~F_TICK;   // swap (not overwrite) so a gas cell up there is conserved
       const ax = above - (uy - 1) * W;
       mark(x, y); mark(ax, uy - 1); dirty(ax, uy - 1);
       return;
@@ -331,7 +338,21 @@ function stepLava(i: number, x: number, y: number): boolean {
   return false;
 }
 
+/** A burning liquid cell (F_BURN travels with the cell): flames above it, spreads to flammable neighbours, is slowly consumed. */
+function burnLiquid(i: number, x: number, y: number) {
+  mark(x, y);
+  for (let d = 0; d < 4; d++) {
+    const n = i + OFF[d], nm = mat[n];
+    if (nm === AIR) { if (d === 0 ? rnd() < 0.3 : rnd() < 0.04) setFire(n); continue; }
+    if (nm === WATER) { if (rnd() < 0.3) { flags[i] &= ~F_BURN; return; } continue; }
+    const f = FLAM[nm];
+    if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < f * 0.4) igniteCell(n); }
+  }
+  if (rnd() < 0.006) { setFire(i); aux[i] = 20 + ((rnd() * 20) | 0); }
+}
+
 function stepLiquid(i: number, x: number, y: number, m: number, dir: number) {
+  if (flags[i] & F_BURN) { burnLiquid(i, x, y); if (mat[i] !== m) return; }
   if (m === LAVA) { if (stepLava(i, x, y)) return; if (rnd() > 0.25) return; }
   const d = DENS[m], b = i + W, mb = mat[b];
   if (canFall(mb, d)) {
@@ -374,7 +395,7 @@ function stepGas(i: number, x: number, y: number, m: number, dir: number) {
       if (a <= 1) {
         const t = temp[(y >> 2) * TW + (x >> 2)];
         if (m === STEAM) {
-          if (t < 0.5) { mat[i] = SNOW; aux[i] = 0; flags[i] = 0; return; }
+          if (t < 0) { mat[i] = SNOW; aux[i] = 0; flags[i] = 0; return; }
           if (WALK[mat[i - W]]) { mat[i] = WATER; aux[i] = 0; flags[i] = 0; return; }
         }
         mat[i] = AIR; aux[i] = 0; return;
@@ -425,7 +446,7 @@ function slowCell(i: number, x: number, y: number, m: number) {
       if (WALK[mat[i + W]]) {
         let load = 0;
         for (let k = 1; k <= 6; k++) { const a = mat[i - k * W]; if (a === SNOW || PHASE[a] === P_SOLID) load++; else break; }
-        const tf = t > -1 ? 1.4 : t < -25 ? 0.15 : 0.35 + 0.65 * (t + 25) / 24;
+        const tf = t >= 0 ? 1.4 : t > -1 ? 1 + 0.4 * (t + 1) : t < -25 ? 0.15 : 0.35 + 0.65 * (t + 25) / 24;
         let inc = (1 + load * 1.5) * tf * ((f & F_WET) ? 3 : 1);
         let a = aux[i] + inc;
         if (a >= 200) { mat[i] = PACKED; aux[i] = 0; flags[i] = f & F_PLACED; return; }
@@ -459,7 +480,8 @@ function slowCell(i: number, x: number, y: number, m: number) {
     case 4: { // stray lava cools into basalt
       let n = 0;
       if (mat[i - W] === LAVA) n++; if (mat[i + W] === LAVA) n++; if (mat[i - 1] === LAVA) n++; if (mat[i + 1] === LAVA) n++;
-      const p = n === 0 ? 0.3 : gasLike(mat[i - W]) ? 0.012 : 0;
+      // lava is a thermostat at ~110 C in the tile map: a lone cell in hot ground lingers, one in cold ground cools quickly
+      const p = n === 0 ? (t < 90 ? 0.3 : 0.04) : gasLike(mat[i - W]) ? 0.012 : 0;
       if (rnd() < p) { mat[i] = BASALT; aux[i] = 0; flags[i] = 0; }
       return;
     }
@@ -491,6 +513,24 @@ function snowfallTick(x0: number, x1: number) {
   while (depAcc >= 1) { depAcc -= 1; depositAt(x0 + ((rnd() * ncol) | 0)); }
 }
 
+/** Strong wind (> 8 m/s) lifts loose surface snow as flying cells; it comes down further downwind → drifts in the lee. */
+function windLift(x0: number, x1: number) {
+  const aw = Math.abs(G.wind);
+  if (aw <= 8) return;
+  const want = (aw - 8) * 1.4;
+  const n = (want | 0) + (rnd() < want - (want | 0) ? 1 : 0);
+  for (let k = 0; k < n; k++) {
+    const x = x0 + ((rnd() * (x1 - x0 + 1)) | 0);
+    const y = surfaceY(x), i = y * W + x;
+    if (y < 3 || mat[i] !== SNOW || (flags[i] & F_WET) || !gasLike(mat[i - W])) continue;
+    const w = wind[((y - 1) >> 2) * TW + (x >> 2)];
+    if (w > -6 && w < 6) continue;   // sheltered column
+    if (!throwCell(x, y - 1, SNOW, 0, w * 7 + (rnd() - 0.5) * 20, -10 - rnd() * 26)) continue;   // flying-cell pool full: leave the snow where it is
+    mat[i] = AIR; aux[i] = 0; flags[i] = 0; surf[x] = -1;
+    mark(x, y);
+  }
+}
+
 // ------------------------------------------------------------------ main tick
 function tick() {
   tickN++;
@@ -502,7 +542,7 @@ function tick() {
   const cx0 = x0 >> 5, cx1 = x1 >> 5, cy0 = y0 >> 5, cy1 = y1 >> 5;
   levelBudget = 6;
 
-  stepBurning();
+  stepBurning(x0, y0, x1, y1);
 
   for (let cy = cy1; cy >= cy0; cy--) {
     const crow = cy * CW;
@@ -531,6 +571,7 @@ function tick() {
 
   if (boomQ.length) processBooms();
   snowfallTick(x0, x1);
+  windLift(x0, x1);
 
   // slow stochastic pass
   const nS = ((x1 - x0 + 1) * (y1 - y0 + 1)) / SAMPLE_PERIOD;
@@ -575,7 +616,7 @@ export function initSim() {
   nBurn = 0;
   for (let i = 0; i < W * H && nBurn < MAXB; i++) {
     if ((flags[i] & F_BURN) && BURN_LIFE[mat[i]] > 0) addBurn(i, mat[i]);
-    else if (flags[i] & F_BURN) flags[i] &= ~F_BURN;
+    else if ((flags[i] & F_BURN) && !(PHASE[mat[i]] === P_LIQUID && FLAM[mat[i]] > 0)) flags[i] &= ~F_BURN;   // burning liquids carry F_BURN without a timer
   }
   prevX0 = prevX1 = -1;
   dRect.n = 0;

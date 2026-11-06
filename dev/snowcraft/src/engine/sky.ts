@@ -35,6 +35,8 @@ const NS = 2048;
 const mtn: Float32Array[] = [];      // 3 layers of heights 0..1
 const forest = new Float32Array(NS);
 const stars = { x: new Float32Array(420), y: new Float32Array(420), b: new Float32Array(420), ph: new Float32Array(420) };
+interface Cloud { x: number; y: number; w: number; spans: number[]; speed: number }   // spans: [row, x0, x1] triples relative to (x,y)
+const clouds: Cloud[] = [];
 let inited = false;
 function ridged(x: number, f: number, seed: number) {
   // sum of ridged triangle waves with hashed lattice
@@ -52,6 +54,7 @@ function initSky() {
   for (const c of cfg) {
     const a = new Float32Array(NS);
     for (let x = 0; x < NS; x++) a[x] = Math.pow(ridged(x, c.f, c.seed), c.p);
+    for (let pass = 0; pass < 3; pass++) { const b = a.slice(); for (let x = 0; x < NS; x++) a[x] = (b[(x + NS - 2) % NS] + b[(x + NS - 1) % NS] + b[x] * 2 + b[(x + 1) % NS] + b[(x + 2) % NS]) / 6; }
     mtn.push(a);
   }
   // distant spruce silhouettes: overlapping tiered triangles
@@ -64,6 +67,21 @@ function initSky() {
       const xi = (((Math.floor(cx) + dx) % NS) + NS) % NS;
       if (hgt > forest[xi]) forest[xi] = hgt;
     }
+  }
+  for (let c = 0; c < 14; c++) {
+    const w = 34 + hash(c * 4.1) * 50, h = 5 + Math.floor(hash(c * 6.7) * 5), spans: number[] = [];
+    const lumps = 2 + Math.floor(hash(c * 2.3) * 3);
+    for (let r = 0; r < h; r++) {
+      // union of a few ellipses stacked along x gives a cumulus-like flat-bottomed puff
+      let x0 = 1e9, x1 = -1e9;
+      for (let k = 0; k < lumps; k++) {
+        const ex = (k / Math.max(1, lumps - 1) - 0.5) * w * 0.7, er = w * (0.2 + 0.13 * hash(c * 9 + k)), ey = h * (0.55 + 0.35 * hash(c * 5 + k * 3));
+        const dy = (r + 0.5) / ey - 0.92; const q = 1 - dy * dy; if (q <= 0) continue;
+        const hw = er * Math.sqrt(q); x0 = Math.min(x0, ex - hw); x1 = Math.max(x1, ex + hw);
+      }
+      if (x1 > x0) spans.push(r, Math.round(x0), Math.round(x1));
+    }
+    clouds.push({ x: hash(c * 3.9) * 760, y: 14 + hash(c * 8.3) * 88, w, spans, speed: 0.6 + hash(c * 1.7) * 1.2 });
   }
   for (let i = 0; i < 420; i++) {
     stars.x[i] = hash(i * 1.37) * NS; stars.y[i] = hash(i * 7.71) * 215;
@@ -190,9 +208,30 @@ export function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number, x0:
     halo.addColorStop(0, `rgba(190,210,255,${0.2 * night})`); halo.addColorStop(1, 'rgba(160,190,255,0)');
     ctx.fillStyle = halo; ctx.fillRect(mx - 40, my - 40, 80, 80);
     ctx.fillStyle = css([226, 232, 246], Math.min(1, night * 1.3) * (1 - storm * 0.7));
-    disc(ctx, mx, my, 4);
     const ph = 1 - Math.max(0, Math.min(1, G.moon));
-    if (ph > 0.05) { ctx.fillStyle = css(mix(top, hor, 0.45)); disc(ctx, mx + 7 * ph + 1, my - 1 * ph, 4.2); }
+    crescent(ctx, mx, my, 4.2, 7 * ph + 0.5, ph);
+  }
+
+  // clouds (soft pixel cumulus drifting slowly); dim and bluish at night, warm at dusk/dawn
+  {
+    const vis = (1 - storm * 0.3) * (day * 0.95 + night * 0.28);
+    if (vis > 0.05) {
+      const top = mix([78, 96, 140], [255, 255, 255], day), body = mix([46, 60, 102], [226, 234, 246], day), under = mix([28, 38, 76], [150, 170, 204], day);
+      const tt = mix(top, [255, 206, 170], warm * 0.7), bb = mix(body, [236, 170, 150], warm * 0.6), uu = mix(under, [150, 110, 140], warm * 0.5);
+      const ctop = css(tt, vis), cbody = css(bb, vis), cunder = css(uu, vis);
+      for (const c of clouds) {
+        const span = 760;
+        let cx = ((c.x - camX * 0.12 + t * c.speed) % span + span) % span - 60;
+        if (cx > w + 60) continue;
+        const cy = c.y * (horizonY / 150) - (camY - 270) * 0.05;
+        const n = c.spans.length;
+        for (let k = 0; k < n; k += 3) {
+          const r = c.spans[k], x0 = Math.round(cx + c.spans[k + 1]), x1 = Math.round(cx + c.spans[k + 2]);
+          ctx.fillStyle = r < 2 ? ctop : r >= (n / 3) - 2 ? cunder : cbody;
+          ctx.fillRect(x0, Math.round(cy) + r, x1 - x0, 1);
+        }
+      }
+    }
   }
 
   // mountains (3 layers) + forest
@@ -202,33 +241,39 @@ export function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number, x0:
   const capDay: RGB[] = [[240, 246, 255], [236, 243, 253], [226, 236, 250]];
   const capNight: RGB[] = [[70, 90, 140], [56, 74, 120], [44, 60, 100]];
   const pxk = [0.1, 0.22, 0.4], pyk = [0.28, 0.48, 0.72];
-  const baseY = [274, 280, 287], amp = [92, 62, 44];
+  const baseY = [276, 282, 288], amp = [66, 46, 32];
   for (let L = 0; L < 3; L++) {
     let c = mix(nightTone[L], dayTone[L], day);
     let cap = mix(capNight[L], capDay[L], day);
     c = mix(c, hor, warm * 0.28 * (1 - L * 0.25)); cap = mix(cap, [255, 190, 150], warm * 0.35);
     c = mix(c, gray, storm * 0.5); cap = mix(cap, gray, storm * 0.4);
-    const shade = mix(c, [c[0] * 0.78, c[1] * 0.8, c[2] * 0.9], 1);
-    const lit = mix(c, [Math.min(255, c[0] * 1.1 + 6), Math.min(255, c[1] * 1.1 + 6), Math.min(255, c[2] * 1.08 + 8)], 1);
     const yShift = baseY[L] + (camY - 270) * (1 - pyk[L]) - y0;     // canvas row of the layer baseline
     const m = mtn[L];
     const u0 = Math.floor(x0 * pxk[L]) + 5000 * L;
-    const cs = css(c), cl = css(lit), csh = css(shade), cc = css(cap), cca = css(mix(cap, c, 0.5));
+    const cs = css(c), cc = css(cap), cca = css(mix(cap, c, 0.45));
+    const shadeCol = `rgba(${(c[0] * 0.5) | 0},${(c[1] * 0.55) | 0},${Math.min(255, c[2] * 0.75) | 0},0.34)`;
+    const litCol = `rgba(255,255,255,0.09)`;
     for (let i = 0; i < w; i++) {
-      const u = (((u0 + i) % NS) + NS) % NS, un = (u + 2) % NS, up = (u + NS - 2) % NS;
+      const u = (((u0 + i) % NS) + NS) % NS, un = (u + 3) % NS, up = (u + NS - 3) % NS;
       const hgt = m[u] * amp[L];
       const top = yShift - hgt;
       if (top >= h) continue;
       const slope = m[un] - m[up];
-      ctx.fillStyle = slope > 0.012 ? csh : slope < -0.012 ? cl : cs;
       const y1 = Math.max(0, Math.floor(top));
-      ctx.fillRect(i, y1, 1, h - y1);
-      if (m[u] > 0.34) {
-        const capLen = Math.min(hgt * 0.5, (m[u] - 0.34) * amp[L] * 0.9 + 1);
-        ctx.fillStyle = slope > 0.012 ? cca : cc;
+      ctx.fillStyle = cs; ctx.fillRect(i, y1, 1, h - y1);
+      const face = Math.min(hgt * 0.8, 10 + hgt * 0.45) | 0;
+      if (slope > 0.01) { ctx.fillStyle = shadeCol; ctx.fillRect(i, y1, 1, face); }
+      else if (slope < -0.01) { ctx.fillStyle = litCol; ctx.fillRect(i, y1, 1, face); }
+      if (m[u] > 0.4) {
+        const capLen = Math.min(hgt * 0.5, (m[u] - 0.4) * amp[L] * 0.9 + 1);
+        ctx.fillStyle = slope > 0.01 ? cca : cc;
         ctx.fillRect(i, y1, 1, Math.max(1, capLen | 0));
       }
     }
+    // aerial perspective: fade the lower part of the layer toward the horizon colour
+    const hz = ctx.createLinearGradient(0, yShift - amp[L] * 0.5, 0, yShift + 2);
+    hz.addColorStop(0, css(hor, 0)); hz.addColorStop(1, css(hor, 0.42 - L * 0.08));
+    ctx.fillStyle = hz; ctx.fillRect(0, Math.max(0, yShift - amp[L] * 0.5), w, h);
   }
   // spruce forest silhouette (front-most background layer)
   {
@@ -256,5 +301,21 @@ function disc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) 
   for (let dy = -ri; dy <= ri; dy++) {
     const hw = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy) + 0.25));
     ctx.fillRect(Math.round(cx) - hw, Math.round(cy) + dy, hw * 2 + 1, 1);
+  }
+}
+
+/** Moon disc minus a shifted shadow disc (spans per row, no background colour needed). */
+function crescent(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, shift: number, phase: number) {
+  const ri = Math.ceil(r), X = Math.round(cx), Y = Math.round(cy);
+  for (let dy = -ri; dy <= ri; dy++) {
+    const hw = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy) + 0.25));
+    if (phase < 0.06) { ctx.fillRect(X - hw, Y + dy, hw * 2 + 1, 1); continue; }
+    // shadow disc centred at +shift
+    const sh = Math.sqrt(Math.max(0, r * r - dy * dy));
+    const s0 = Math.round(shift - sh), s1 = Math.round(shift + sh);
+    // lit = [-hw, hw] minus [s0, s1]
+    if (s1 < -hw || s0 > hw) { ctx.fillRect(X - hw, Y + dy, hw * 2 + 1, 1); continue; }
+    if (s0 > -hw) ctx.fillRect(X - hw, Y + dy, s0 + hw, 1);
+    if (s1 < hw) ctx.fillRect(X + s1 + 1, Y + dy, hw - s1, 1);
   }
 }

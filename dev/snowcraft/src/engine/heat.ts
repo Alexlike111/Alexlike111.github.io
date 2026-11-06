@@ -174,6 +174,8 @@ export function isSkyOpen(x: number, y: number): boolean { return sky[clampT(y >
 export function addHeat(x: number, y: number, power: number): void {
   const tx = x >> 2, ty = y >> 2;
   if (tx < 0 || ty < 0 || tx >= TW || ty >= TH) return;
+  const w = G.win;   // tiles outside the simulated window would only pile up energy that is never consumed
+  if (tx < (w.x0 >> 2) - HM || tx > (w.x1 >> 2) + HM || ty < (w.y0 >> 2) - HM || ty > (w.y1 >> 2) + HM) return;
   pend[ty * TW + tx] += power * lastDt;
 }
 /** One-off temperature change spread over a radius (cells): explosions, lightning, splashes. */
@@ -317,7 +319,7 @@ export function stepHeat(dt: number): void {
         else if (dpt === 1) T += (amb - T) * (RS_SURF * 0.25) * dt;
       }
       const e = srcP[t] * dt + pend[t];
-      if (e !== 0) { T += e * ic; pend[t] = 0; }
+      if (e !== 0) { T += e * ic; pend[t] = 0; if (T > 160) T = 160; }   // runaway guard: a burning house must not boil the map
       const lv = lavaN[t];
       if (lv) T += (LAVA_T - T) * Math.min(1, lv * 0.125 * dt);
       // conduction to the right and downward neighbours (energy-conserving pair exchange, never overshoots)

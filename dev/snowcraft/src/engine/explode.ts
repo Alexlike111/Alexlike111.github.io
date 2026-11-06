@@ -8,7 +8,10 @@ import { G } from '../game/state';
 type BlastFn = (x: number, y: number, radius: number, power: number) => void;
 const blastFns: BlastFn[] = [];
 /** Listen for blasts (damage to player / animals / fixtures). radius in cells, power ≈ 0..1+. */
-export function onBlast(fn: BlastFn) { blastFns.push(fn); }
+export function onBlast(fn: BlastFn): () => void {
+  blastFns.push(fn);
+  return () => { const i = blastFns.indexOf(fn); if (i >= 0) blastFns.splice(i, 1); };   // unsubscribe on new game / load
+}
 
 const HARD = new Float32Array(256);
 MATS.forEach((m, i) => { HARD[i] = m.hard; });

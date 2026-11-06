@@ -10,12 +10,12 @@ export const LOC = {
   hut: { x: 260, y: 268 },
   lake: { l: 505, r: 815, y: 283 },
   station: { x: 1000, y: 272 },
-  spring: { x: 1252, y: 294, r: 38 },        // y = water level (set by worldgen)
+  spring: { x: 1252, y: 294, r: 46 },        // y = water level (set by worldgen)
   tower: { x: 1405, y: 212 },
   ridge: { l: 1470, r: 1830 },
   wreck: { x: 1900, y: 262 },
   grotto: { x: 1292, y: 404, rx: 32, ry: 12 },
-  spawn: { x: 1024, y: 272 },
+  spawn: { x: 1028, y: 272 },
 };
 
 const S = strings('site', {
@@ -46,6 +46,7 @@ export function resetLocations() { sites.length = 0; warmZones.length = 0; G.fix
 
 // ---- stamping helpers ----
 function rectCells(x0: number, y0: number, x1: number, y1: number, m: number, fl = 0, onlyAir = false) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
   for (let y = Math.max(0, y0); y < Math.min(H, y1); y++) for (let x = Math.max(0, x0); x < Math.min(W, x1); x++) {
     const i = y * W + x; if (onlyAir && mat[i] !== MAT.AIR) continue;
     mat[i] = m; aux[i] = 0; flags[i] = fl;
@@ -187,9 +188,9 @@ function stampSpring(info: WorldInfo) {
     let py = y - 14; while (py < H && (mat[py * W + px] === MAT.AIR)) py++;
     if (mat[(py - 1) * W + px] === MAT.AIR) { mat[(py - 1) * W + px] = MAT.STONE; if (rand() < 0.55) mat[(py - 2) * W + px] = MAT.STONE; }
   }
-  for (let k = 0; k < 16; k++) {
-    const px = x + randInt(-15, 15), py = y - randInt(1, 22);
-    if (mat[py * W + px] === MAT.AIR) { mat[py * W + px] = MAT.STEAM; aux[py * W + px] = randInt(80, 300); }
+  for (let k = 0; k < 140; k++) {
+    const py = y - 1 - randInt(0, 38), spread = 4 + (y - py) * 0.35, px = Math.round(x + (rand() + rand() + rand() - 1.5) * spread * 1.4);
+    if (mat[py * W + px] === MAT.AIR) { mat[py * W + px] = MAT.STEAM; aux[py * W + px] = randInt(120, 400); }
   }
   addSite('spring', x, y - 4, r * 2, 50);
   addFixture('sign', Math.floor((x - r - 4) / 4), Math.floor((info.surf[x - r - 4] - 8) / 4), 2, 2, { data: { text: S.sign_spring, key: 'site.sign_spring' } });
@@ -214,7 +215,7 @@ function stampTower(info: WorldInfo) {
   rectT(px0 - 1, pr, px1 + 1, pr, MAT.PLANK);
   for (const c of [px0 - 1, px0 + 3, px0 + 6, px1 + 1]) floorBelow(c * 4, c * 4 + 4, (pr + 1) * 4);
   // cross braces
-  for (let k = 0; k < 8; k++) { rectCells((px0 + 3) * 4 + k * 3, (pr + 1) * 4 + k * 4, (px0 + 3) * 4 + k * 3 + 3, (pr + 1) * 4 + k * 4 + 3, MAT.LOG); }
+  for (let k = 0; k < 8; k++) { rectCells((px0 + 3) * 4 + k * 3, (pr + 1) * 4 + k * 4, (px0 + 3) * 4 + k * 3 + 4, (pr + 1) * 4 + k * 4 + 4, MAT.LOG); }
   // cabin on the deck: east wall + lintel, roof, open doorway to the west
   const top = pr - 6;
   rectT(px0, top - 1, px1, top - 1, MAT.LOG);
@@ -247,7 +248,7 @@ function stampWreck(info: WorldInfo) {
   // axis from the raised tail (east) down into the snow at the nose (west)
   const ax = cx0 + 40, ay = info.surf[cx0 + 40] - 26, bx = cx0 - 38, by = info.surf[cx0 - 38] - 4;
   const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy, len = Math.sqrt(len2);
-  const Ro = 14.5, Ri = 11.2;
+  const Ro = 15, Ri = 10.8;
   // trench scraped by the crash, west of the nose
   for (let x = cx0 - 110; x < cx0 - 36; x++) {
     const d = Math.round(7 * Math.min(1, (x - (cx0 - 110)) / 30) * (1 - Math.max(0, (x - (cx0 - 50)) / 14)));
@@ -279,13 +280,25 @@ function stampWreck(info: WorldInfo) {
       else { mat[i] = MAT.AIR; aux[i] = 0; flags[i] = 0; }
     }
   }
+  // the roof of the cabin section is ripped open (daylight pours in, the cargo is visible from above)
+  for (let y = Math.min(ay, by) - 24; y < Math.max(ay, by) + 6; y++) for (let x = Math.min(ax, bx) - 4; x < Math.max(ax, bx) + 4; x++) {
+    const t = ((x - ax) * dx + (y - ay) * dy) / len2;
+    if (t < 0.22 || t > 0.62) continue;
+    const qx = ax + dx * t, qy = ay + dy * t, jag = ((x * 5 + y * 3) % 7) * 0.4;
+    if (y < qy - 3 - jag && y > qy - Ro - 3 && Math.hypot(x - qx, y - qy) <= Ro + 0.5) { const i = y * W + x; if (mat[i] === MAT.METAL) mat[i] = MAT.AIR; }
+  }
+  // torn openings in the shell let the light in
+  for (let k = 0; k < 3; k++) {
+    const t = 0.2 + k * 0.28 + rand() * 0.06, qx = ax + dx * t, qy = ay + dy * t - Ro + 1;
+    for (let yy = -3; yy <= 3; yy++) for (let xx = -4; xx <= 4; xx++) { if (xx * xx + yy * yy * 2.2 > 18 + rand() * 6) continue; const i = (Math.round(qy) + yy) * W + Math.round(qx) + xx; if (mat[i] === MAT.METAL) { mat[i] = MAT.AIR; } }
+  }
   // windows along the upper side
   for (let k = 1; k <= 5; k++) {
     const t = 0.1 + k * 0.14, qx = ax + dx * t, qy = ay + dy * t - (Ro - 1.5);
     for (let yy = -2; yy <= 2; yy++) for (let xx = -2; xx <= 2; xx++) { const i = (Math.round(qy) + yy) * W + Math.round(qx) + xx; if (mat[i] === MAT.METAL) { mat[i] = MAT.GLASS; } }
   }
   // tail fin and a wing stub
-  for (let k = 0; k < 24; k++) { const w = Math.max(1, 5 - (k >> 2)); rectCells(ax + 6 - k * 0.5 | 0, ay - Ro - k, (ax + 6 - k * 0.5 | 0) + w, ay - Ro - k + 1, MAT.METAL); }
+  for (let k = 0; k < 26; k++) { const w = Math.max(2, 7 - (k >> 2)), fx = Math.round(ax - 14 + k * 0.55); rectCells(fx, ay - Ro - k + 3, fx + w, ay - Ro - k + 4, MAT.METAL); }
   for (let k = 0; k < 46; k++) { const wx = Math.round(cx0 + 4 + k * 0.9), wy = Math.round(by - 2 + k * 0.28 - 4); rectCells(wx, wy, wx + 1, wy + 3, MAT.METAL); }
   // interior background and seats
   const bx0 = Math.min(ax, bx) >> 2, bx1 = Math.max(ax, bx) >> 2, by0 = (Math.min(ay, by) - 18) >> 2, by1 = (Math.max(ay, by) + 18) >> 2;
@@ -294,8 +307,14 @@ function stampWreck(info: WorldInfo) {
     for (let k = 0; k < 16; k++) { const x = tx * 4 + (k & 3), y = ty * 4 + (k >> 2); if (mat[y * W + x] === MAT.AIR) inside++; }
     if (inside > 10) {
       const wx = tx * 4 + 2, wy = ty * 4 + 2, t = ((wx - ax) * dx + (wy - ay) * dy) / len2, d = Math.hypot(wx - (ax + dx * t), wy - (ay + dy * t));
-      if (t > 0 && t < 0.95 && d < Ri) bg[ty * TW + tx] = 2;
+      if (t > 0 && t < 0.95 && d < Ri) bg[ty * TW + tx] = 4;
     }
+  }
+  // passenger seats: low METAL benches along the cabin floor
+  for (let k = 0; k < 5; k++) {
+    const t = 0.34 + k * 0.085, qx = Math.round(ax + dx * t), qy = Math.round(ay + dy * t);
+    let fy = qy; while (mat[fy * W + qx] === MAT.AIR && fy < qy + 30) fy++;
+    if (mat[fy * W + qx] === MAT.METAL) { rectCells(qx - 2, fy - 4, qx + 3, fy, MAT.METAL); rectCells(qx - 2, fy - 8, qx - 1, fy - 4, MAT.METAL); }
   }
   // the cache: chest on a small cargo box near the tail section
   {

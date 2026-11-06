@@ -12,7 +12,10 @@ import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let playwright;
-try { playwright = require('playwright'); } catch { playwright = createRequire('/usr/lib/node_modules/')('playwright'); }
+try { playwright = require('playwright'); } catch {
+  for (const dir of ['/opt/node-tools/node_modules/', '/usr/lib/node_modules/', '/usr/local/lib/node_modules/']) { try { playwright = createRequire(dir)('playwright'); break; } catch { /* next */ } }
+  if (!playwright) throw new Error('playwright not found (npm i -g playwright)');
+}
 const { chromium } = playwright;
 
 const args = process.argv.slice(2);
@@ -54,7 +57,8 @@ let failures = 0;
 const log = (...a) => console.log(...a);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 for (const prof of PROFILES) {
-  if (only.length && !only.some(o => prof.name.includes(o) || SCENES.some(s => s.name.includes(o)))) continue;
+  const profSel = only.filter(o => PROFILES.some(p => p.name === o)), sceneSel = only.filter(o => !PROFILES.some(p => p.name === o));
+  if (profSel.length && !profSel.includes(prof.name)) continue;
   const ctx = await browser.newContext({ viewport: prof.viewport, deviceScaleFactor: prof.deviceScaleFactor, hasTouch: prof.hasTouch, isMobile: prof.isMobile });
   const page = await ctx.newPage();
   const errors = [];
@@ -65,7 +69,7 @@ for (const prof of PROFILES) {
   const info = await page.evaluate(() => ({ genMs: window.__sc.genMs, sites: window.__sc.sites(), scale: window.__sc.G.cam.scale, vw: window.__sc.G.cam.viewW, vh: window.__sc.G.cam.viewH }));
   log(`[${prof.name}] worldgen ${info.genMs.toFixed(0)} ms, scale ${info.scale}, view ${info.vw.toFixed(0)}x${info.vh.toFixed(0)} cells, sites: ${info.sites.map(s => s.key).join(',')}`);
   for (const sc of SCENES) {
-    if (only.length && !only.some(o => sc.name.includes(o) || prof.name.includes(o))) continue;
+    if (sceneSel.length && !sceneSel.some(o => sc.name.includes(o))) continue;
     const [x, y] = sc.at(info.sites);
     const scp = { time: sc.time, aurora: sc.aurora, lit: sc.lit, torch: sc.torch, weather: sc.weather };
     await page.evaluate(({ sc, x, y }) => {
@@ -82,6 +86,19 @@ for (const prof of PROFILES) {
     await page.screenshot({ path: file });
     const p = await page.evaluate(() => window.__sc.perf());
     log(`  ${sc.name.padEnd(22)} render avg ${p.avg.toFixed(2)} ms  (sky ${p.last.sky.toFixed(1)} light ${p.last.light.toFixed(1)} terrain ${p.last.terrain.toFixed(1)} layers ${p.last.layers.toFixed(1)})`);
+  }
+  // perf: average render() time over ~2 s at the start surface view, unthrottled and with CPU throttled x4 (informational + loose bound)
+  if (!sceneSel.length) {
+    await page.evaluate(() => { const S = window.__sc; S.setTime(12 * 60); S.lightStation(false); S.viewerLight(false); S.teleport(1042, 252); });
+    const cdp = await ctx.newCDPSession(page);
+    for (const rate of [1, 4]) {
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+      await page.waitForTimeout(400);
+      const r = await page.evaluate(() => new Promise(res => { const S = window.__sc; const t0 = performance.now(); let n = 0, sum = 0, max = 0; const iv = setInterval(() => { const p = S.perf().last.total; sum += p; n++; max = Math.max(max, p); if (performance.now() - t0 > 2000) { clearInterval(iv); res({ avg: sum / n, max, n }); } }, 16); }));
+      log(`  perf x${rate} cpu: render avg ${r.avg.toFixed(2)} ms, max ${r.max.toFixed(1)} ms (${r.n} samples)`);
+      if (rate === 1 && r.avg > 8) { failures++; log('  FAIL: render budget exceeded (avg > 8 ms)'); }
+    }
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
   if (errors.length) { failures += errors.length; log(`[${prof.name}] ERRORS:\n  ` + errors.join('\n  ')); }
   await ctx.close();

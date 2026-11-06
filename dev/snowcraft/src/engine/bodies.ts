@@ -1,6 +1,6 @@
 // Falling clusters (translation only) and toppling trees (rotating sprite).
-import { W, H, mat, aux, shade, flags, setCell, wakeRect, edited, F_TREE, F_PLACED } from './grid';
-import { MAT, MATS, WALK, PHASE, P_LIQUID, P_GAS, P_FIRE } from '../content/materials';
+import { W, H, mat, aux, shade, flags, wakeRect, edited, F_TREE, F_PLACED } from './grid';
+import { MAT, WALK, PHASE, P_LIQUID, P_GAS, P_FIRE } from '../content/materials';
 import { throwCell, spawnFx, burstFx, cellColor } from './particles';
 import { G } from '../game/state';
 import type { View } from '../game/state';
@@ -39,7 +39,11 @@ type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 let nextId = 1;
 const treeFns: ((x: number, y: number, logs: number, boughs: number) => void)[] = [];
-export function onTreeLanded(fn: (x: number, y: number, logs: number, boughs: number) => void) { treeFns.push(fn); }
+/** Listen for felled trees that hit the ground. Returns an unsubscribe function (call it on new game / load to avoid duplicate drops). */
+export function onTreeLanded(fn: (x: number, y: number, logs: number, boughs: number) => void): () => void {
+  treeFns.push(fn);
+  return () => { const i = treeFns.indexOf(fn); if (i >= 0) treeFns.splice(i, 1); };
+}
 
 // ---------------------------------------------------------------- clusters
 /** Remove the given grid cells (indices) from the world and turn them into one falling cluster. */
@@ -112,7 +116,7 @@ export function bodyCellAt(x: number, y: number): boolean {
 }
 
 /** Does any falling cluster overlap the box (feet-centre x,y; w×h)? speed = its downward speed (cells/s). */
-export function clusterHitsBox(x: number, y: number, w: number, h: number): { hit: boolean; speed: number } {
+export function clusterHitsBox(x: number, y: number, w: number, h: number): { hit: boolean; speed: number; mass: number } {
   const left = Math.floor(x - w / 2), right = Math.ceil(x + w / 2) - 1, top = Math.floor(y - h), bot = Math.ceil(y) - 1;
   for (let k = 0; k < clusters.length; k++) {
     const c = clusters[k];
@@ -120,13 +124,11 @@ export function clusterHitsBox(x: number, y: number, w: number, h: number): { hi
     if (right < cx || left >= cx + c.w || bot < cy || top >= cy + c.h) continue;
     const ax = Math.max(left, cx), bx = Math.min(right, cx + c.w - 1), ay = Math.max(top, cy), by = Math.min(bot, cy + c.h - 1);
     for (let yy = ay; yy <= by; yy++) for (let xx = ax; xx <= bx; xx++) {
-      if (c.occ[(yy - cy) * c.w + (xx - cx)]) { hitSpeed.hit = true; hitSpeed.speed = Math.hypot(c.vx, c.vy); return hitSpeed; }
+      if (c.occ[(yy - cy) * c.w + (xx - cx)]) return { hit: true, speed: Math.hypot(c.vx, c.vy), mass: c.mass };
     }
   }
-  hitSpeed.hit = false; hitSpeed.speed = 0;
-  return hitSpeed;
+  return { hit: false, speed: 0, mass: 0 };
 }
-const hitSpeed = { hit: false, speed: 0 };
 
 function blocked(c: Cluster, skin: Int32Array, ix: number, iy: number, dx: number, dy: number): boolean {
   for (let k = 0; k < skin.length; k++) {
@@ -161,7 +163,7 @@ function land(c: Cluster, speed: number) {
   }
   // find a placement where nothing solid/powder is overlapped (rise if needed)
   let up = 0;
-  for (; up < 10; up++) {
+  for (; up < 40; up++) {
     let ok = true;
     for (let k = 0; k < c.n && ok; k++) {
       const x = ix + c.ox[k], y = iy - up + c.oy[k];
@@ -176,6 +178,10 @@ function land(c: Cluster, speed: number) {
     const x = ix + c.ox[k], y = oy0 + c.oy[k];
     if (x < 1 || x >= W - 1 || y < 1 || y >= H - 1) continue;
     const i = y * W + x, m = c.m[k];
+    if (WALK[mat[i]]) {           // never overwrite terrain (only when no clear spot was found): re-emit the cell instead of deleting it
+      throwCell(x, y - 1, m, c.a[k], (rnd() - 0.5) * 30, -20 - rnd() * 30);
+      continue;
+    }
     if (hard && FRAGILE[m]) {
       const r = rnd();
       const svx = (rnd() - 0.5) * speed * 0.6, svy = -rnd() * speed * 0.25;
@@ -192,15 +198,34 @@ function land(c: Cluster, speed: number) {
     displaceLiquid(i, x, y);
     mat[i] = m; aux[i] = c.a[k]; flags[i] = c.f[k]; shade[i] = c.s[k];
   }
+  flushDisplaced(oy0);
   removeCluster(c);
   wakeRect(ix - 3, oy0 - 3, ix + c.w + 3, oy0 + c.h + 3, 90);
   edited(ix, oy0, ix + c.w, oy0 + c.h);
 }
 
-/** A cell is about to be overwritten: a liquid there is thrown up instead of being destroyed. */
-function displaceLiquid(i: number, x: number, y: number) {
+// Liquid cells that a landing cluster overwrites are collected and re-placed on the free surface above/next to it (mass is conserved).
+const dispM: number[] = [], dispA: number[] = [], dispS: number[] = [], dispX: number[] = [];
+function displaceLiquid(i: number, x: number, _y: number) {
   const t = mat[i];
-  if (t !== 0 && (PHASE[t] === P_LIQUID)) throwCell(x, y - 1, t, aux[i], (rnd() - 0.5) * 40, -30 - rnd() * 40);
+  if (t === 0 || PHASE[t] !== P_LIQUID) return;
+  dispM.push(t); dispA.push(aux[i]); dispS.push(shade[i]); dispX.push(x);
+}
+function flushDisplaced(topY: number) {
+  for (let n = 0; n < dispM.length; n++) {
+    let placed = false;
+    for (let k = 0; k < 40 && !placed; k++) {
+      const xx = dispX[n] + (k === 0 ? 0 : (k & 1 ? 1 : -1) * ((k + 1) >> 1));
+      if (xx < 1 || xx >= W - 1) continue;
+      for (let yy = topY - 1; yy > Math.max(1, topY - 120); yy--) {
+        const j = yy * W + xx, tj = mat[j];
+        if (tj === 0 || PHASE[tj] === P_GAS || PHASE[tj] === P_FIRE) { mat[j] = dispM[n]; aux[j] = dispA[n]; flags[j] = 0; shade[j] = dispS[n]; placed = true; break; }
+        if (PHASE[tj] !== P_LIQUID) break;   // blocked by a solid: try the next column
+      }
+    }
+    if (!placed) throwCell(dispX[n], topY - 1, dispM[n], dispA[n], (rnd() - 0.5) * 40, -30 - rnd() * 40);   // last resort
+  }
+  dispM.length = dispA.length = dispS.length = dispX.length = 0;
 }
 
 function stepCluster(c: Cluster, dt: number) {
@@ -262,20 +287,48 @@ export function fellTree(x: number, y: number, dir: 1 | -1): boolean {
     }
   }
   if (start < 0) return false;
-  // BFS over F_TREE cells (8-connected)
-  const list: number[] = [start];
-  const seen = new Set<number>([start]);
-  for (let h = 0; h < list.length && list.length < 20000; h++) {
-    const i = list[h], cx = i % W, cy = (i / W) | 0;
+  // BFS over F_TREE cells (8-connected): the whole connected stand
+  const all: number[] = [start];
+  const pos = new Map<number, number>([[start, 0]]);
+  for (let h = 0; h < all.length && all.length < 20000; h++) {
+    const i = all[h], cx = i % W, cy = (i / W) | 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue;
       const xx = cx + dx, yy = cy + dy;
       if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
       const j = yy * W + xx;
-      if (seen.has(j) || !(flags[j] & F_TREE) || mat[j] === 0) continue;
-      seen.add(j); list.push(j);
+      if (pos.has(j) || !(flags[j] & F_TREE) || mat[j] === 0) continue;
+      pos.set(j, all.length); all.push(j);
     }
   }
+  // Touching crowns must not drag the neighbours down: label every trunk (connected WOOD) and grow the labels through the
+  // needles with a multi-source BFS, so each needle cell belongs to its nearest trunk. Only the label of the hit tree is felled.
+  const n = all.length;
+  const lab = new Int32Array(n).fill(-1);
+  let comps = 0;
+  const q: number[] = [];
+  const nb = (u: number, fn: (v: number) => void) => {
+    const i = all[u], cx = i % W, cy = (i / W) | 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const xx = cx + dx, yy = cy + dy;
+      if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      const v = pos.get(yy * W + xx);
+      if (v !== undefined) fn(v);
+    }
+  };
+  for (let u = 0; u < n; u++) {
+    if (mat[all[u]] === MAT.NEEDLES || lab[u] >= 0) continue;
+    const c = comps++;
+    lab[u] = c; const st = [u];
+    while (st.length) { const a = st.pop() as number; q.push(a); nb(a, (v) => { if (lab[v] < 0 && mat[all[v]] !== MAT.NEEDLES) { lab[v] = c; st.push(v); } }); }
+  }
+  if (comps === 0) return false;
+  for (let h = 0; h < q.length; h++) nb(q[h], (v) => { if (lab[v] < 0) { lab[v] = lab[q[h]]; q.push(v); } });
+  const target = lab[0];
+  if (target < 0) return false;
+  const list: number[] = [];
+  for (let u = 0; u < n; u++) if (lab[u] === target) list.push(all[u]);
   let x0 = W, y0 = H, x1 = -1, y1 = -1, trunk = 0, needles = 0, baseY = -1;
   for (const i of list) {
     const cx = i % W, cy = (i / W) | 0;
@@ -332,7 +385,6 @@ function stepTree(t: Tree, dt: number) {
     const s = t.len * (0.55 + rnd() * 0.45);
     const wx = t.px + Math.sin(a) * t.dir * s, wy = t.py - Math.cos(a) * s;
     spawnFx('flake', wx + (rnd() - 0.5) * 6, wy, (rnd() - 0.5) * 20 + t.dir * w * 6, -5 + rnd() * 10, 0.9 + rnd() * 0.8);
-    if (rnd() < 0.12) throwCell(Math.floor(wx), Math.floor(wy), MAT.SNOW, 0, (rnd() - 0.5) * 30, 5 + rnd() * 20);
   }
   if (hit) {
     const wx = t.px + Math.sin(na) * t.dir * hitS, wy = t.py - Math.cos(na) * hitS;
@@ -348,6 +400,8 @@ function stepTree(t: Tree, dt: number) {
 }
 
 // ---------------------------------------------------------------- step / draw
+const stepResult = { impacts: impactList };
+/** The returned object (and its impacts array) is reused: read it before the next call. */
 export function stepBodies(dt: number): { impacts: Impact[] } {
   if (dt > 0.05) dt = 0.05;
   impactList.length = 0;
@@ -359,7 +413,7 @@ export function stepBodies(dt: number): { impacts: Impact[] } {
     stepTree(trees[i], dt);
     if (!trees[i].alive) trees.splice(i, 1);
   }
-  return { impacts: impactList };
+  return stepResult;
 }
 
 export function drawBodies(ctx: CanvasRenderingContext2D, v: View): void {
@@ -388,4 +442,3 @@ export function drawBodies(ctx: CanvasRenderingContext2D, v: View): void {
 /** Remove everything (new game / load). Cells held by clusters are discarded. */
 export function clearBodies() { clusters.length = 0; trees.length = 0; impactList.length = 0; }
 
-void P_GAS; void P_FIRE; void MATS; void setCell;
