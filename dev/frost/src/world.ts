@@ -140,8 +140,8 @@ export function generate(s = 20261106) {
     let top = groundY[x];
     for (let y = top - 1; y > 0; y--) { if (mat[idx(x, y)] === M.AIR) { top = y + 1; break; } }
     const slope = (groundY[Math.min(W - 1, x + 6)] - groundY[Math.max(0, x - 6)]) / 12; // >0: ground going down to the east (lee)
-    let depth = 1.7 + (fbm(x * 0.008 + 7, 4) - 0.5) * 1.0 + Math.max(0, slope) * 2.2;
-    depth += 1.6 * Math.exp(-(((x - 1250) / 90) ** 2)) + 1.4 * Math.exp(-(((x - 820) / 60) ** 2)) + 1.2 * Math.exp(-(((x - 2260) / 70) ** 2));
+    let depth = 2.3 + (fbm(x * 0.008 + 7, 4) - 0.5) * 1.4 + Math.max(0, slope) * 2.6;
+    depth += 2.0 * Math.exp(-(((x - 1250) / 90) ** 2)) + 1.8 * Math.exp(-(((x - 820) / 60) ** 2)) + 1.6 * Math.exp(-(((x - 2260) / 70) ** 2));
     if (x > lakeA && x < lakeB) depth *= 0.55;
     const cells = Math.max(6, Math.round(depth / CELL));
     for (let k = 0; k < cells; k++) {
@@ -190,15 +190,14 @@ export { surfaceAt };
 function placeCrate(x: number, loot: string[]) {
   const g = groundY[x];
   const w = 16, h = 11;
-  // lay on the ground under the snow
-  let base = g;
-  for (let yy = g - 1; yy > 0; yy--) if (mat[idx(x, yy)] !== M.SNOW) { break; } else base = yy;
-  const y0 = Math.max(base, g - 30) ; // crate sits on ground but may poke if snow is thin
-  const top = g - h;
-  for (let yy = top; yy < g; yy++) for (let xx = x; xx < x + w; xx++) { const i = idx(xx, yy); mat[i] = M.CRATE; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
-  void y0;
+  // supply cache: buried about 1.2 m under the snow surface (or on the ground if the snow is thinner)
+  let s0 = H;
+  for (let xx = x; xx < x + w; xx++) s0 = Math.min(s0, surfaceAt(xx));
+  const bottom = Math.min(g, s0 + 24 + h);
+  const top = bottom - h;
+  for (let yy = top; yy < bottom; yy++) for (let xx = x; xx < x + w; xx++) { const i = idx(xx, yy); mat[i] = M.CRATE; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
   crates.push({ x, y: top, w, h, loot: loot.slice(), opened: false });
-  // pole sticks out of the snow ~1 m above surface
+  // marker pole sticks out of the snow ~1.2 m above the surface
   const s = surfaceAt(x + 2);
   for (let yy = s - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; treeId[i] = 0; }
 }

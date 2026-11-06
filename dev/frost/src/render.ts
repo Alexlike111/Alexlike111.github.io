@@ -101,7 +101,7 @@ vec3 pointLights(vec2 wp, ivec2 c, vec2 n, float hasN, float jr){
     vec3 warm = mix(vec3(1.), vec3(1.,.74,.5), clamp(q*.5,0.,1.));
     acc += uLC[i]*warm*pw*exp(-A)*facing;
   }
-  return acc;
+  return acc*(1.-.55*uDay);   // a campfire barely shows in full daylight
 }
 
 vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, bool top, vec2 nn, float hasN){
@@ -118,9 +118,9 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     b += g*amp;
     b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.04*t;
     // subsurface blue grows with distance from the nearest air (cuts, caves), not with the global height
-    float d1 = 1.-exp(-depth/13.), d2 = 1.-exp(-depth/46.);
-    b = mix(b, vec3(.36,.56,.79), d1*.55);
-    b = mix(b, vec3(.17,.31,.53), d2*.6);
+    float d1 = 1.-exp(-depth/16.), d2 = 1.-exp(-depth/52.);
+    b = mix(b, vec3(.36,.56,.79), d1*.5);
+    b = mix(b, vec3(.17,.31,.53), d2*.55);
     return b;
   }
   if(m==2){
@@ -367,7 +367,7 @@ void main(){
       float w = .5+.28*(2.-fl)*.5;
       acc += (1.-smoothstep(.15,w,perp))*(1.-smoothstep(len*.25,len,along))*(.75-.12*fl);
     }
-    vec3 wo = min(uSkyHor*1.1+.03, vec3(1.));
+    vec3 wo = min(uSkyHor*1.1+.05, vec3(1.));
     vec3 sc = min(max(uAmb*1.08+.05, wo*1.6+.08), vec3(1.));
     col = mix(col, sc, clamp(acc,0.,.8)*uStorm*.8);
     float wf = uStorm*(.2+.62*smoothstep(.1,.85,dd)) + uStorm*.12*vn(vec2(wp.x*.01-uTime*uWind*.05, wp.y*.02));
@@ -389,7 +389,8 @@ void main(){
     } else if(uXray==2 && m==1){
       float t = bn/255.;
       xc = t<.5 ? mix(vec3(.71,.322,.231), vec3(.851,.761,.478), t*2.) : mix(vec3(.851,.761,.478), vec3(.435,.761,.545), (t-.5)*2.);
-      if(abs(bn-48.)<1.5) xc = vec3(1.);                                // BOND_SOLID threshold
+      vec4 xr = fetchW(c+ivec2(1,0)), xd = fetchW(c+ivec2(0,1));          // contour where bond crosses BOND_SOLID (48)
+      if((xr.r==1. && (bn>=48.)!=(xr.b>=48.)) || (xd.r==1. && (bn>=48.)!=(xd.b>=48.))) xc = vec3(1.);
       use = true;
     } else if(uXray==3){
       float tc = texture(uHeat, wp/vec2(float(WI),float(HI))).r*127.5-60.;
