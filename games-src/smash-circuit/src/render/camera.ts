@@ -20,6 +20,8 @@ export class CameraRig {
   track: TrackGeometry | null = null;
   /** heading-up camera wanted (the aspect rule fades it out on landscape screens) */
   rotating = false;
+  /** Demolition Arena: minimum zoom (1 = off) so the whole ring is in view; bypasses the readable-car cap */
+  arenaZoom = 1;
   /** azimuth applied to the race view (rad); 0 = north-up */
   viewAz = 0;
 
@@ -132,7 +134,8 @@ export class CameraRig {
     let cap: number = C.zoomMax;
     if (this.pxW > 0) cap = Math.min(cap, this.pxW / (C.minPxPerMetre * bw));
     cap = Math.min(cap, C.maxRadius / Math.hypot(hw0, hh0));
-    const zoomTarget = clamp(Math.max(speedZoom, need), 1, Math.max(1, cap)) + C.introZoom * clamp(intro, 0, 1);
+    let zoomTarget = clamp(Math.max(speedZoom, need), 1, Math.max(1, cap)) + C.introZoom * clamp(intro, 0, 1);
+    if (this.arenaZoom > 1) zoomTarget = this.arenaZoom;
     this.zoom += (zoomTarget - this.zoom) * (this.fresh ? 1 : damp(zoomTarget > this.zoom ? C.zoomOutFollow : C.zoomFollow, dt));
     const PX = CONFIG.items.fx;
     this.boostK += (this.boostTarget - this.boostK) * damp(this.boostTarget > this.boostK ? PX.zoomIn : PX.zoomOut, dt);

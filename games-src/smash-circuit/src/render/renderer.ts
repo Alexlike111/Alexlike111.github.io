@@ -138,6 +138,7 @@ export class GameRenderer {
   // ------------------------------------------------------------------ quality / size
 
   /** heading-up (rotating) camera on / off; landscape screens stay north-up whatever this says */
+  setArenaView(zoom: number): void { this.rig.arenaZoom = zoom; if (zoom > 1) this.rig.rotating = false; this.dirty = true; }
   setCameraRotating(on: boolean): void { this.rig.rotating = on; this.dirty = true; }
   /** Azimuth (rad) and ground tilt (rad) of the race camera: the Point scheme turns a screen direction into a world heading with them. */
   get viewAzimuth(): number { return this.rig.viewAz; }

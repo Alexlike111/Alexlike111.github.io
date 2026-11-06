@@ -433,6 +433,7 @@ export class Game {
     this.userPaused = false;
     this.wasGo = false;
     this.applyCamera();
+    this.renderer.setArenaView(2.0);
     this.renderer.loadRace(sim);
     this.state = 'racing';
     this.applyControls();
@@ -456,6 +457,7 @@ export class Game {
     stepArena(sim, m, dt);
     if (m.dead.size > wasDead) { this.ui.toast(t('arena.wreck')); this.audio.ui('buy'); }
     this.arenaUi.update(m, sim.cars.filter((c) => !m.dead.has(c.id)).length, dt);
+    this.arenaUi.arrows(sim.cars.filter((c) => c.id !== 0 && !m.dead.has(c.id)).map((c) => this.renderer.worldToScreen(c.x, c.y)));
     if (m.ended) this.endArenaRound(m);
   }
 
@@ -479,6 +481,8 @@ export class Game {
   private endArenaMode(): void {
     if (!this.arena) return;
     this.arena = null;
+    this.renderer.setArenaView(1);
+    this.applyCamera();
     this.arenaUi.hideAll();
     document.body.classList.remove('arena-mode');
   }

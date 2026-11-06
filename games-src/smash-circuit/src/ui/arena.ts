@@ -26,6 +26,7 @@ const CSS = `
 .arena-res .ar-btns{display:flex;gap:10px;justify-content:center;}
 .arena-res button{flex:1;min-height:48px;border-radius:14px;border:3px solid #14213d;font:inherit;font-weight:900;font-size:18px;color:#fff;cursor:pointer;box-shadow:0 4px 0 #14213d;}
 .arena-res .ar-again{background:#ff5a36;}
+.ah-arrow{position:fixed;z-index:30;pointer-events:none;color:#ff5a36;font-size:22px;text-shadow:0 2px 0 #14213d;display:none;}
 .arena-res .ar-menu{background:#5b6b8c;}
 `;
 
@@ -59,8 +60,36 @@ export class ArenaUi {
       <div class="ah-goal" data-k="goal">${t('arena.goal')}</div>`;
     document.body.appendChild(el);
     this.hud = el;
+    this.arrowEls = [];
     this.last = { score: -1, time: '', left: -1, combo: -1 };
     this.goalT = 6;
+  }
+
+  private arrowEls: HTMLElement[] = [];
+  /** Edge arrows towards rivals that are off screen (points are screen fractions 0..1, y down). */
+  arrows(pts: ({ x: number; y: number } | null)[]): void {
+    if (!this.hud) return;
+    let n = 0;
+    for (const p of pts) {
+      if (!p) continue;
+      const dx = p.x - 0.5, dy = p.y - 0.5;
+      if (Math.abs(dx) < 0.46 && Math.abs(dy) < 0.46) continue;   // visible
+      const k = 0.43 / Math.max(Math.abs(dx), Math.abs(dy));
+      let el = this.arrowEls[n];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'ah-arrow';
+        el.textContent = '▲';
+        this.hud.appendChild(el);
+        this.arrowEls.push(el);
+      }
+      el.style.display = 'block';
+      el.style.left = `${(0.5 + dx * k) * 100}%`;
+      el.style.top = `${(0.5 + dy * k) * 100}%`;
+      el.style.transform = `translate(-50%,-50%) rotate(${Math.atan2(dy, dx) + Math.PI / 2}rad)`;
+      n++;
+    }
+    for (let i = n; i < this.arrowEls.length; i++) this.arrowEls[i].style.display = 'none';
   }
 
   update(m: ArenaMatch, carsLeft: number, dt: number): void {
