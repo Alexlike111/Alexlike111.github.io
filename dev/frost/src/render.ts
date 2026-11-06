@@ -109,14 +109,35 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
   float upN = hasN>.5 ? clamp(-nn.y,0.,1.) : (top?1.:0.);
   bool vert = (fl & 8) != 0;
   if(m==1){
-    float t = clamp((dn-60.)/400.,0.,1.);
-    vec3 b = mix(vec3(.915,.955,.99), vec3(.80,.85,.90), t);           // fresh -> compacted (slightly greyer)
-    b = mix(b, b*vec3(.95,.97,1.), smoothstep(30.,255.,bn)*.5);
-    float amp = .05;
-    if((fl&16)!=0){ b = mix(b, vec3(.93,.96,.995), .5); amp = .02; }
+    // stratigraphy: fresh powder (bright, grainy) / settled (smooth grey-blue) / old pack (wind slab = chalky) / depth hoar at the ground
+    float fresh = 1.-smoothstep(115.,140.,dn);
+    float old = smoothstep(205.,240.,dn);
+    float slab = (fl&16)!=0 ? 1. : 0.;
+    vec3 b = mix(vec3(.795,.855,.93), vec3(.95,.975,1.), fresh);
+    b = mix(b, mix(vec3(.835,.88,.935), vec3(.92,.915,.895), slab), old);
+    b = mix(b, b*vec3(.95,.97,1.), smoothstep(30.,255.,bn)*.4);
+    float amp = mix(mix(.028,.02+.03*slab,old), .08, fresh);
     if((fl&2)!=0) b = mix(b, vec3(.58,.63,.70), .6);
+    float trail = ((fl&1)!=0 && dn>=300. && depth<3.5) ? 1. : 0.;          // trodden path: a hair darker and smoother
+    amp *= 1.-.7*trail;
+    b = mix(b, b*vec3(.9,.935,.975), trail*.8);
     b += g*amp;
-    b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.04*t;
+    b += (vn(vec2(cf.x*.025, cf.y*.9))-.5)*.05*(1.-fresh);                  // thin horizontal strata
+    b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.03*(1.-fresh);
+    if(dn>=140.){
+      ivec2 ic = ivec2(cf);
+      float hoar = 0.;
+      if(mAt(ic+ivec2(0,1))==4) hoar = 1.; else if(mAt(ic+ivec2(0,2))==4) hoar = .8; else if(mAt(ic+ivec2(0,3))==4) hoar = .45;
+      if(hoar>0.){
+        vec3 hc = vec3(.70,.755,.82)*(.82+.32*vn(cf*.8));
+        if(hh>.82) hc = mix(hc, vec3(.92,.95,.98), .5);
+        b = mix(b, hc, hoar*.8);
+      }
+    }
+    if((fl&16)!=0 && depth<2.6){                                           // sastrugi: wind ripples along the surface
+      float rp = sin(cf.x*.62 + vn(vec2(cf.x*.045, cf.y*.4))*5.5);
+      b *= 1.+.035*rp*(1.-trail);
+    }
     // subsurface blue grows with distance from the nearest air (cuts, caves), not with the global height
     float d1 = 1.-exp(-depth/16.), d2 = 1.-exp(-depth/52.);
     b = mix(b, vec3(.36,.56,.79), d1*.5);
@@ -135,35 +156,50 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     return b;
   }
   if(m==4){
-    float blot = vn(cf*.2), fine = vn(cf*.85);
-    vec3 b = mix(vec3(.25,.175,.125), vec3(.39,.29,.21), blot*.65+fine*.35);
-    b *= (.93+.14*vn(vec2(cf.x*.02, cf.y*.55)))*(1.+g*.32);
-    if(fract(hh*91.3)>.93) b *= .68;                                   // dark pebbles
-    if(fract(hh*37.7)>.968) b = mix(b, vec3(.72,.8,.88), .5);          // frost crystals
-    if(depth<3.5 && fract(hh*37.3)>.88) b = mix(b, vec3(.75,.82,.9), .6);
+    float nn2 = vn(cf*.16)*.65 + vn(cf*.55+7.)*.35;                          // two octaves, no directional stripes
+    vec3 b = mix(vec3(.235,.168,.118), vec3(.385,.29,.21), nn2);
+    b *= 1.+g*.3;
+    vec2 pc = floor(cf*.5); float ph = hf(pc*1.7+3.);
+    if(ph>.962){                                                           // sparse 2x2 pebbles
+      vec2 lf = cf*.5-pc;
+      vec3 pb = vec3(.46,.43,.40)*(.8+.4*hf(pc));
+      if(lf.x<.5 && lf.y<.5) pb *= 1.2; else if(lf.x>=.5 && lf.y>=.5) pb *= .72;
+      b = mix(b, pb, .85);
+    }
+    float fz = (1.-smoothstep(.5,4.,depth));
+    float fm = smoothstep(.38,.72, vn(cf*.45+3.) + fz*.45) * fz;           // frozen top layer: frosted
+    b = mix(b, vec3(.72,.8,.9)*(.9+.2*hh), fm*.6);
+    if(fract(hh*37.7)>.968) b = mix(b, vec3(.78,.85,.93), .5*(.3+fz));
     return b;
   }
   if(m==5){
-    float band = .5+.5*sin(cf.y*.3 + vn(cf*.05)*5. + cf.x*.01);
-    float sn = vn(cf*vec2(.06,.5));
-    vec3 b = mix(vec3(.30,.32,.37), vec3(.52,.54,.58), band*.55+sn*.45);
-    b *= (.82+.32*vn(cf*.35))*(1.+g*.2);
-    if(fract(hh*53.1)>.965) b *= 1.3;                                  // mineral speckle
+    float st = cf.y/4.5 + vn(vec2(cf.x*.012, cf.y*.08))*1.6;               // thin, nearly horizontal strata
+    float si = floor(st), sf = fract(st);
+    float tone = hf(vec2(si, 3.7));
+    vec3 b = mix(vec3(.27,.29,.34), vec3(.50,.52,.57), tone*.75+.12);
+    b *= .84+.32*(vn(cf*.2)*.6+vn(cf*.75)*.4);
+    if(sf<.14) b *= .72;                                                   // dark joint line
+    else if(sf>.86) b *= 1.1;
+    b *= 1.+g*.2;
+    if(fract(hh*53.1)>.965) b *= 1.3;                                      // mineral speckle
     if(fract(hh*17.9)>.985) b *= .6;
     float rim = (1.-smoothstep(0.,2.6,depth))*(1.-upN);
-    b *= 1.-rim*.42;                                                   // darker rim / sides
+    b *= 1.-rim*.42;                                                       // darker rim / sides
     float topH = upN*(1.-smoothstep(1.2,3.5,depth));
-    b = mix(b, vec3(.82,.88,.95), topH*.42)*(1.+topH*.12);             // frosted top highlight
+    b = mix(b, vec3(.82,.88,.95), topH*.42)*(1.+topH*.12);                 // frosted top highlight
     return b;
   }
   if(m==12){
     return vec3(.15,.16,.20)*(.8+.4*vn(cf*.3))*(1.+g*.2);
   }
   if(m==6){
-    float s = vert ? vn(vec2(cf.x*.9, cf.y*.05)) : vn(vec2(cf.x*.05, cf.y*.9));
-    vec3 b = vec3(.31,.21,.12)*(.7+.6*s)*(1.+g*.15);
-    if(s<.18) b *= .6;
-    return b;
+    float s = vert ? vn(vec2(cf.x*1.4, cf.y*.07)) : vn(vec2(cf.x*.07, cf.y*1.4));
+    float s2 = vert ? vn(vec2(cf.x*.5+3., cf.y*.3)) : vn(vec2(cf.x*.3, cf.y*.5+3.));
+    vec3 b = mix(vec3(.22,.135,.08), vec3(.43,.29,.175), s*.65+s2*.35);   // dark brown bark
+    if(s<.3) b *= .62;                                                     // furrows
+    if(hh>.93) b *= 1.32;                                                  // lighter bark flakes
+    if(top) b = mix(b, vec3(.85,.9,.95), .4);
+    return b*(1.+g*.15);
   }
   if(m==11){
     float s = vert ? vn(vec2(cf.x*.7, cf.y*.03)) : vn(vec2(cf.x*.03, cf.y*.7));
@@ -173,9 +209,13 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     return b;
   }
   if(m==7){
-    vec3 b = mix(vec3(.05,.17,.1), vec3(.1,.26,.15), hh)*(.8+.4*vn(cf*.5));
-    if(fract(hh*91.7)>.8) b = mix(b, vec3(.85,.9,.95), .45);
-    if(top) b = mix(b, vec3(.85,.9,.95), .35);
+    float core = smoothstep(1.,4.,depth);                                  // three tones: dark core, mid, lighter tips
+    float tip = 1.-smoothstep(0.,2.4,depth);
+    vec3 b = mix(mix(vec3(.07,.22,.13), vec3(.17,.37,.23), tip), vec3(.03,.1,.075), core);
+    b *= .84+.32*hh;
+    if(mod(cf.y,3.)<1. && hh>.35) b *= .8;                                 // bough rows
+    if(top) b = mix(b, vec3(.8,.89,.94), .45+.25*hh);                      // frost on the upper side of boughs
+    else if(fract(hh*91.7)>.9) b = mix(b, vec3(.85,.9,.95), .3);
     return b;
   }
   if(m==8) return vec3(.19,.19,.2)*(1.+g*.3);
@@ -314,21 +354,34 @@ void main(){
     vec3 L3 = normalize(vec3(uSkyDir,.55));
     float diff = hasN>.5 ? max(dot(n3,L3),0.) : .55;
     vec3 alb = albedo(m, dn, bn, fl, cf, hh, depth, mUp==0, n, hasN);
+    float lip = 0.;
+    if(hasN>.5 && uSteps>12){
+      // soft 1-cell AO at concave corners; convex lips catch light, undersides sink into shadow
+      int air = 0;
+      for(int j=-1;j<=1;j++) for(int i2=-1;i2<=1;i2++){ if(i2==0&&j==0) continue; if(mAt(c+ivec2(i2,j))==0) air++; }
+      if(air>=1) alb *= 1.-.08*float(3-min(air,3));
+      lip = smoothstep(4.,6.,float(air));
+      if(m==1){ alb += lip*.035*(.5+.5*uDay); alb = mix(alb, alb*vec3(.8,.86,1.), smoothstep(.2,.8,n.y)*.5); }
+    }
     vec3 pl = uNL>0 ? pointLights(wp, c, n, hasN, hh) : vec3(0.);
     vec3 scat = m==1 ? vec3(.12,.2,.3)*exp(-depth/30.) : vec3(0.);
     // thick snow still scatters plenty of light: neutral (hue-free) falloff, the blue lives in the albedo gradient
     float svL = smoothstep(0.,.18,dot(sv3,vec3(.33)));
     vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
+    if(m==6 || m==7) lit = max(lit, uAmb*.58 + pl);                       // trunks and boughs under the crown never go black
     col = alb*lit;
-    if(m==1){
-      // never darker than moon-lit snow where it can see the sky
-      col = max(col, vec3(.078,.137,.227)*smoothstep(.12,.45,sv3.b)*(1.-.5*smoothstep(8.,30.,depth)));
-      if(depth<1.5){
-        float gl = hash3(c, int(floor(uTime*3.)));
-        float lum = dot(uDirCol,vec3(.33))*dirT.g + dot(pl,vec3(.33));
-        if(gl>.994) col += vec3(1.,.98,.92)*lum*1.6;
-        else if(hh>.93 && gl>.8) col += vec3(.9,.96,1.)*dot(uDirCol,vec3(.33))*dirT.g*.5;   // crisp daytime sparkle
-      }
+    if(m==1 && hasN>.5 && depth<1.7){
+      float fac = clamp(dot(n, uSkyDir)*1.3+.35, 0., 1.);                 // surface cells facing the sun / moon
+      float night = (1.-uDay)*uVis.y*(1.-uStorm);
+      // moon rim light along the surface edge
+      col += vec3(.10,.17,.34)*night*smoothstep(.1,.8,dot(n,uSkyDir))*(.6+.4*dirT.g);
+      float lum = dot(uDirCol,vec3(.33))*dirT.g;
+      float plL = dot(pl,vec3(.33));
+      float site = step(.985, hh) * pow(.5+.5*sin(uTime*(2.5+hh*30.)+hh*200.), 6.);   // crisp glints flickering in time
+      float churn = step(.995, hash3(c, int(floor(uTime*3.))));
+      float gl = max(site, churn);
+      float inten = lum*1.7 + plL*1.5 + .3*uDay*(1.-uStorm) + .35*night;
+      col += mix(vec3(.85,.93,1.), vec3(1.,.97,.9), uDay) * gl * inten * (.35+.65*fac);
     }
   }
 
@@ -640,19 +693,19 @@ export class Renderer {
         let sz = 1, hd = 1, r = 1, g = 1, b = 1, a = 1, add = false;
         switch (k) {
           case PK.FLAKE:
-            if (lay === 0) { sz = 1.2 + s; hd = 0.6; a = 0.9; }
+            if (lay === 0) { sz = 1 + s * 0.9; hd = 0.6; a = 0.9; }
             else if (lay === 1) { sz = 0.8 + s * 0.7; hd = 0.3; a = 0.5; }
-            else { sz = 4 + s * 3; hd = 0; a = 0.16; }
+            else { sz = 3.4 + s * 2.4; hd = 0; a = 0.16; }
             a *= Math.min(1, lr * 8); break;
           case PK.DRIFT: sz = 1 + s * 0.6; hd = 0.7; a = 0.7 * Math.min(1, lr * 4); break;
-          case PK.CLUMP: sz = 2 + s; hd = 1; a = 0.95; break;
+          case PK.CLUMP: { const v = 0.9 + 0.1 * ((s * 7.31) % 1); sz = 1.2 + s * 1.1; hd = 1; r = g = v; b = Math.min(1, v + 0.04); a = 0.95; break; }
           case PK.SPARK: add = true; sz = 1.2 * m; hd = 0.8; r = 1; g = 0.5 + 0.45 * lr; b = 0.12 + 0.2 * lr * lr; a = lr; break;
           case PK.FLAME: add = true; sz = (2 + 3 * lr) * m * (0.8 + 0.4 * s); hd = 0; r = 1; g = 0.25 + 0.55 * lr; b = 0.05 + 0.15 * lr * lr; a = 0.55 * Math.min(1, lr * 2.5); break;
           case PK.SMOKE: sz = (3 + (1 - lr) * 6) * m; hd = 0; r = 0.35; g = 0.35; b = 0.37; a = 0.4 * sstep(0, 0.3, lr) * Math.min(1, (1 - lr) * 8 + 0.2); break;
           case PK.STEAM: sz = (2 + (1 - lr) * 5) * m; hd = 0; a = 0.25 * lr; break;
           case PK.CHIP: sz = 1.2; hd = 1; r = 0.45; g = 0.3; b = 0.15; a = 1; break;
-          case PK.BREATH: sz = (2 + (1 - lr) * 4) * m; hd = 0; a = 0.3 * lr; break;
-          default: sz = (1.2 + (1 - lr)) * m; hd = 0.3; a = 0.5 * lr; break; // DUST
+          case PK.BREATH: sz = (2.4 + (1 - lr) * 3.2) * m * (0.85 + 0.3 * s); hd = 0; r = 0.96; g = 0.985; b = 1; a = 0.6 * Math.min(1, (1 - lr) * 7 + 0.15) * lr; break; // soft white puff, 2-4 cells, fading
+          default: sz = (0.8 + s * 1.0 + (1 - lr) * 0.5) * m; hd = 0.3 + 0.4 * s; r = 0.94; g = 0.97; a = (0.5 + 0.3 * s) * lr; break; // DUST: small, varied spray
         }
         if (!add) { r *= tn[0]; g *= tn[1]; b *= tn[2]; }
         buf[o] = x; buf[o + 1] = y; buf[o + 2] = add ? -sz : sz; buf[o + 3] = hd;

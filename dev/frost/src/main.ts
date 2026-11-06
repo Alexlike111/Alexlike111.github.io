@@ -34,9 +34,9 @@ function resize() {
   renderer.resize(cssW, cssH, dpr);
   fx.width = Math.round(cssW * dpr); fx.height = Math.round(cssH * dpr);
   fx.style.width = cssW + 'px'; fx.style.height = cssH + 'px';
-  // ~24 m wide view on phones, ~30 m on desktop; never less than 9 m tall
-  const viewW = G.mobile ? 420 : 560;
-  G.cam.zoom = Math.max(cssW / viewW, cssH / 300);
+  // ~17 m wide view on phones, ~22 m on desktop (zoomed in for readability); never less than 13 m tall
+  const viewW = G.mobile ? 340 : 440;
+  G.cam.zoom = Math.max(cssW / viewW, cssH / 260);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -365,7 +365,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const oc = spC(PAL.outline[0], PAL.outline[1], PAL.outline[2]);
   // rim colour and direction
   let rimLx = 0, rimStr = 0, rimWarm = false;
-  if (nf && nfd < 260) { rimLx = Math.abs(nf.x - x) < 4 ? 0 : nf.x > x ? 1 : -1; rimStr = Math.min(1, 0.3 + (1 - nfd / 260) * 1.1); rimWarm = true; }
+  if (nf && nfd < 320) { rimLx = Math.abs(nf.x - x) < 4 ? 0 : nf.x > x ? 1 : -1; rimStr = Math.min(1, 0.4 + (1 - nfd / 320) * 1.2); rimWarm = true; }
   const tod = ((G.time / 60) % 24 + 24) % 24;
   const skyX = G.daylight > 0.25 ? Math.sign(12.5 - tod) || 1 : Math.sign(0.5 - Math.max(0, Math.min(1, ((tod - 17 + 24) % 24) / 14))) || -1;
   const skyStr = 0.28 + 0.2 * (1 - G.daylight);
@@ -378,6 +378,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     }
     let rs = 0, wr = false;
     if (rimWarm && rimLx !== 0 && !filled(i + rimLx)) { rs = rimStr; wr = true; }
+    else if (rimWarm && rimLx !== 0 && !filled(i + 2 * rimLx)) { rs = rimStr * 0.55; wr = true; }     // second cell: warm glow on the fire-facing side
     else if (rimWarm && rimLx === 0 && !filled(i - SPW)) { rs = rimStr; wr = true; }
     if (!wr || rs < 0.5) {
       const c2 = !filled(i + skyX) ? skyStr : !filled(i - SPW) ? skyStr * 0.6 : 0;
@@ -397,12 +398,66 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
 }
 const mix3c = (a: C3, b: C3, t: number): C3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
+/** Glowing log base of every campfire: 3 small crossed logs with an ember glow (the flames themselves are GL particles). */
+function drawFireBase() {
+  const t = G.realTime, vw = cssW / G.cam.zoom;
+  for (const f of G.fires) {
+    if (Math.abs(f.x - G.cam.x) > vw * 0.6) continue;
+    const lit = f.lit, pw = lit ? Math.min(1, f.fuel / 30) : 0;
+    const fl = 0.85 + 0.15 * Math.sin(t * 9 + f.id * 2.1) + 0.08 * Math.sin(t * 23 + f.id);
+    const by = f.y - 1.2;
+    const logs: [number, number, number, number][] = [[-0.42, -4.2, 0.4, 7.2], [0.38, 4.2, 0.2, 7.2], [0.02, 0, -1.7, 6.2]];   // [tilt, dx, dy, half-length]
+    ctx.save();
+    ctx.translate(f.x, by);
+    for (let k = 0; k < 3; k++) {
+      const [tilt, dx, dy, hl] = logs[k];
+      ctx.save(); ctx.translate(dx, dy); ctx.rotate(tilt);
+      ctx.fillStyle = '#1c110a'; ctx.fillRect(-hl - 0.4, -1.9, hl * 2 + 0.8, 3.8);        // dark outline
+      ctx.fillStyle = k === 2 ? '#4a2f1b' : '#3d2616'; ctx.fillRect(-hl, -1.5, hl * 2, 3);
+      ctx.fillStyle = '#6a4527'; ctx.fillRect(-hl, -1.5, hl * 2, 0.9);                      // lit top edge
+      ctx.fillStyle = '#2a1a0f'; ctx.fillRect(-hl + 1, 0.2, hl * 2 - 2, 0.5);               // bark groove
+      if (lit) {                                                                            // glowing, charred ends
+        ctx.fillStyle = `rgba(255,${(110 + 80 * fl) | 0},40,${0.85 * pw})`;
+        ctx.fillRect(-hl, -1.5, 1.8, 3); ctx.fillRect(hl - 1.8, -1.5, 1.8, 3);
+        ctx.fillStyle = `rgba(255,60,10,${0.55 * pw * fl})`; ctx.fillRect(-hl + 1.8, 0.4, hl * 2 - 3.6, 0.7);
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+    if (lit) {                                                                              // ember glow
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const r = 15 * (0.55 + 0.45 * pw) * fl, g = ctx.createRadialGradient(f.x, by - 1, 0, f.x, by - 1, r);
+      g.addColorStop(0, `rgba(255,150,60,${0.6 * pw})`); g.addColorStop(0.45, `rgba(255,90,20,${0.22 * pw})`); g.addColorStop(1, 'rgba(255,60,0,0)');
+      ctx.fillStyle = g; ctx.fillRect(f.x - r, by - 1 - r, r * 2, r * 2);
+      ctx.restore();
+    } else if (f.fuel > 0) {
+      ctx.fillStyle = `rgba(200,50,20,${0.5 + 0.3 * Math.sin(t * 2 + f.id)})`; ctx.fillRect(f.x - 1, by - 1.6, 2, 1);
+    }
+  }
+}
+/** soft elliptical contact shadow on the snow under the feet */
+function drawContactShadow() {
+  if (!pl.alive && pl.vy !== 0) return;
+  const x = pl.x, y = pl.y + 0.4;
+  let lift = 0; if (!pl.onGround) { for (let k = 0; k < 40; k++) { if (mat[idx(x | 0, Math.min(H - 1, (y | 0) + k))] !== M.AIR) { lift = k; break; } lift = 40; } }
+  const k = Math.max(0, 1 - lift / 30);
+  if (k <= 0.02) return;
+  const a = (0.26 + 0.14 * G.daylight) * k, rx = 9.5 * (0.7 + 0.3 * k);
+  ctx.save(); ctx.translate(x, y + lift); ctx.scale(1, 0.2);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, `rgba(14,26,58,${a})`); g.addColorStop(0.6, `rgba(14,26,58,${a * 0.55})`); g.addColorStop(1, 'rgba(14,26,58,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
 function drawOverlay(aim: [number, number] | null) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, fx.width, fx.height);
   const s = G.cam.zoom * dpr;
   ctx.setTransform(s, 0, 0, s, (cssW / 2 - G.cam.x * G.cam.zoom) * dpr + (Math.random() - 0.5) * shake * dpr, (cssH / 2 - G.cam.y * G.cam.zoom) * dpr + (Math.random() - 0.5) * shake * dpr);
   ctx.imageSmoothingEnabled = false;
+  drawFireBase();
+  drawContactShadow();
   drawPlayer(aim, 0, 0);
   // aim reticle & ghost (dark under-stroke so they read on white snow)
   if (aim && pl.alive) {
@@ -499,7 +554,7 @@ function frame(now: number) {
   // (bodies stamped over the player's head push the player down via collision; heavy impact = injury → cold)
   // lights
   G.lights.length = 0;
-  for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 5, r: 240, power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
+  for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 11, r: 240, power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
   // audio ambient
   let fireNear = 0; for (const f of G.fires) if (f.lit) fireNear = Math.max(fireNear, 1 - Math.hypot(f.x - pl.x, f.y - pl.y) / 200);
   sound.update({ wind: Math.abs(pl.wind), exposure: 1 - pl.shelter, storm: G.storm, fire: Math.max(0, fireNear), airTemp: pl.airT, night: 1 - G.daylight, coreTemp: pl.core }, dt);

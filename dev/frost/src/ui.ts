@@ -42,6 +42,10 @@ const ICONS: Record<string, string> = {
   moon: '<path d="M19.500 14.800A8 8 0 0 1 9.200 4.500a8 8 0 1 0 10.300 10.300z"/>',
   baro: '<path d="M4 17a8 8 0 0 1 16 0"/><path d="M12 17l-3.500-5.200"/><path d="M6 13.500l1 .6M18 13.500l-1 .6M12 8.500v1.100"/><path d="M5 20.500h14"/>',
   phone: '<rect x="6" y="2.500" width="12" height="19" rx="2.200"/><path d="M10.500 18.500h3"/>',
+  flask: '<path d="M9.500 3h5M10.500 3v6L5 19.200c-.5 1 .2 1.800 1.200 1.800h11.600c1 0 1.700-.8 1.200-1.800L13.500 9V3"/><path d="M7.800 15h8.400" opacity=".7"/>',
+  chev: '<path d="M6 9l6 6 6-6"/>',
+  stick: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.400"/><path d="M12 4.200V6M12 18v1.800M4.200 12H6M18 12h1.800" opacity=".6"/>',
+  pad: '<circle cx="7.500" cy="7.500" r="3.100"/><circle cx="16.500" cy="7.500" r="3.100"/><circle cx="7.500" cy="16.500" r="3.100"/><circle cx="16.500" cy="16.500" r="3.100"/>',
   swap: '<path d="M4 8.500h14.500M15 4.800l3.700 3.700-3.700 3.700"/><path d="M20 15.500H5.500M9 11.800l-3.700 3.700L9 19.200"/>',
 };
 
@@ -163,6 +167,10 @@ export class UI {
   private toasts!: HTMLElement;
   private hintCard: HTMLElement;
   private hintText: HTMLElement;
+  private hudTc!: HTMLElement;
+  private chipsTid = 0;
+  private compactMQ: MediaQueryList | null = null;
+  private btnEat!: HTMLElement;
   private warnLine!: Cached;
   private warnText!: Cached;
   private reticleEl: HTMLElement;
@@ -225,6 +233,13 @@ export class UI {
     this.hintCard.appendChild(this.hintText);
     this.hintCard.setAttribute('aria-live', 'polite');
     this.hud.appendChild(this.hintCard);
+    // phone landscape: the note lives in the top-centre flow (under chips / log), never over the player
+    try {
+      this.compactMQ = window.matchMedia('(max-height: 460px)');
+      const fit = () => this.fitCompact();
+      if (this.compactMQ.addEventListener) this.compactMQ.addEventListener('change', fit); else this.compactMQ.addListener(fit);
+    } catch { this.compactMQ = null; }
+    this.fitCompact();
 
     this.reticleEl = el('div', 'reticle', '<i></i><i></i><i></i><i></i><b></b>');
     root.appendChild(this.reticleEl);
@@ -233,6 +248,18 @@ export class UI {
   }
 
   // ------------------------------------------------------------ build
+  /** Re-seat things that differ on a phone in landscape: hint card parent, thermometer crop. */
+  private fitCompact(): void {
+    const compact = !!this.compactMQ?.matches;
+    const host = compact ? this.hudTc : this.hud;
+    if (this.hintCard.parentElement !== host) {
+      if (compact) this.hudTc.insertBefore(this.hintCard, this.toasts); else this.hud.appendChild(this.hintCard);
+    }
+    const svg = this.thermo?.querySelector('.thermo-svg');
+    if (svg) svg.setAttribute('viewBox', compact ? '9 6 48 240' : '-28 0 112 252');
+    this.thermo?.classList.toggle('compact', compact);
+  }
+
   private readColours(): void {
     try {
       const cs = getComputedStyle(document.documentElement);
@@ -245,12 +272,12 @@ export class UI {
     } catch { /* keep defaults */ }
   }
 
-  /** A gauge glass: graduated tube, liquid column, scale ticks (danger zone tinted). */
+  /** A gauge glass: graduated tube with brass collars, liquid column, engraved label, scale ticks (danger zone tinted). */
   private gauge(key: 'food' | 'stamina' | 'wet' | 'shelter', label: string, icon: string): HTMLElement {
-    const root = el('div', `plate gauge g-${key}`);
+    const root = el('div', `gauge g-${key}`);
     const zone = (i: number) => (key === 'wet' ? i >= 6 : key === 'shelter' ? false : i <= 2) ? ' class="z"' : '';
     const ticks = Array.from({ length: 11 }, (_, i) => `<i${zone(i)}></i>`).join('');
-    root.innerHTML = `<span class="g-ico">${ico(icon)}</span><span class="g-lab">${label}</span><span class="g-val mono"><b>0</b><i>%</i></span><span class="g-glass"><i class="g-liq"></i></span><span class="g-scale">${ticks}</span>`;
+    root.innerHTML = `<span class="g-ico">${ico(icon)}</span><span class="g-lab">${label}</span><span class="g-val mono"><b>0</b><i>%</i></span><span class="g-tube"><span class="g-glass"><i class="g-liq"></i></span></span><span class="g-scale">${ticks}</span>`;
     root.setAttribute('role', 'meter');
     root.setAttribute('aria-label', label.charAt(0) + label.slice(1).toLowerCase());
     root.setAttribute('aria-valuemin', '0'); root.setAttribute('aria-valuemax', '100'); root.setAttribute('aria-valuenow', '0');
@@ -279,6 +306,7 @@ export class UI {
     col.appendChild(this.gauge('stamina', 'СИЛЫ', 'bolt'));
     col.appendChild(this.gauge('wet', 'СЫРОСТЬ', 'drop'));
     col.appendChild(this.gauge('shelter', 'УКРЫТИЕ', 'hut'));
+    col.insertAdjacentHTML('beforeend', '<i class="rivet r1"></i><i class="rivet r2"></i><i class="rivet r3"></i><i class="rivet r4"></i>');
     box.appendChild(col);
     this.hud.appendChild(box);
   }
@@ -286,17 +314,32 @@ export class UI {
   private buildTopCentre(): void {
     const box = el('div', 'hud-tc');
     const chips = el('div', 'chips');
-    const defs: [string, string, string][] = [
-      ['logs', 'beam', 'брёвна'], ['branches', 'branches', 'хворост'], ['matches', 'matches', 'спички'],
-      ['food', 'food', 'еда'], ['blocks', 'block', 'блоки'], ['snowshoes', 'snowshoes', 'снегоступы'], ['thermos', 'thermos', 'термос'],
+    // [key, icon, label, tier]: pri = what keeps you alive, sec = quiet extras, badge = equipped gear
+    const defs: [string, string, string, string][] = [
+      ['logs', 'beam', 'брёвна', 'pri'], ['branches', 'branches', 'хворост', 'pri'], ['matches', 'matches', 'спички', 'pri'],
+      ['food', 'food', 'еда', 'pri'], ['blocks', 'block', 'блоки', 'sec grp'], ['thermos', 'thermos', 'термос', 'sec'],
+      ['snowshoes', 'snowshoes', 'снегоступы', 'badge'],
     ];
-    for (const [k, icon, lab] of defs) {
-      const root = el('div', `chip c-${k}`);
+    for (const [k, icon, lab, tier] of defs) {
+      const root = el('div', `chip c-${k} ${tier}`);
       root.title = lab;
       root.innerHTML = `${ico(icon)}<span class="chip-n mono"></span><span class="chip-l">${lab}</span>`;
       chips.appendChild(root);
       this.chips[k] = { root, n: root.querySelector('.chip-n') as Cached };
     }
+    // phone: only non-zero items are listed; this chip opens the full row for a few seconds
+    const more = el('button', 'chip more', '<span>…</span>');
+    more.type = 'button';
+    more.tabIndex = -1;
+    more.title = 'Весь рюкзак';
+    more.setAttribute('aria-label', 'Показать весь рюкзак');
+    this.bindPress(more, () => {
+      const open = !chips.classList.contains('open');
+      chips.classList.toggle('open', open);
+      window.clearTimeout(this.chipsTid);
+      if (open) this.chipsTid = window.setTimeout(() => chips.classList.remove('open'), 5000);
+    });
+    chips.appendChild(more);
     box.appendChild(chips);
 
     this.warnLine = el('div', 'warn-line') as Cached;
@@ -307,6 +350,7 @@ export class UI {
     box.appendChild(this.warnLine);
     this.toasts = el('div', 'toasts');
     box.appendChild(this.toasts);
+    this.hudTc = box;
     this.hud.appendChild(box);
   }
 
@@ -464,6 +508,7 @@ export class UI {
       this.bindPress(b, fn);
       pad.appendChild(b);
       if (id === 'wait') { this.btnWait = b; b.setAttribute('aria-pressed', 'false'); }
+      if (id === 'eat') this.btnEat = b;
     }
     touch.appendChild(pad);
     this.hud.appendChild(touch);
@@ -571,9 +616,21 @@ export class UI {
     const inv = h.inv;
     this.setChip('logs', inv.logs); this.setChip('branches', inv.branches); this.setChip('matches', inv.matches);
     this.setChip('food', inv.food); this.setChip('blocks', inv.blocks);
-    this.setChip('snowshoes', inv.snowshoes ? 1 : 0, inv.snowshoes ? 'есть' : 'нет');
+    this.setChip('snowshoes', inv.snowshoes ? 1 : 0, '', inv.snowshoes);
     this.setChip('thermos', inv.thermos, undefined, inv.thermos > 0);
     this.m('lowmatch', inv.matches, () => this.chips.matches.root.classList.toggle('warn', inv.matches <= 1));
+    const hungry = h.food < 0.3 && inv.food > 0;
+    this.m('hungry', hungry, () => this.chips.food.root.classList.toggle('warn', hungry));
+
+    // ---- state colour on the touch keys: eat pulses ember when hungry and there is food; wait glows when sheltered
+    const eatNone = inv.food <= 0;
+    this.m('eatst', (hungry ? 1 : 0) + (eatNone ? 2 : 0), () => {
+      this.btnEat?.classList.toggle('urgent', hungry);
+      this.btnEat?.classList.toggle('none', eatNone);
+      this.btnEat?.setAttribute('aria-disabled', String(eatNone));
+    });
+    const sheltered = h.shelter >= 0.6;
+    this.m('waitready', sheltered, () => this.btnWait?.classList.toggle('ready', sheltered));
 
     // ---- tool tags
     h.tools.forEach((t, i) => {
@@ -720,6 +777,11 @@ export class UI {
         <circle cx="200" cy="200" r="196"/><circle cx="200" cy="200" r="168"/><circle cx="200" cy="200" r="120" class="dash"/>
         ${Array.from({ length: 72 }, (_, i) => { const a = (i * 5 * Math.PI) / 180, r1 = i % 6 === 0 ? 176 : 184; return `<line x1="${(200 + Math.cos(a) * r1).toFixed(1)}" y1="${(200 + Math.sin(a) * r1).toFixed(1)}" x2="${(200 + Math.cos(a) * 192).toFixed(1)}" y2="${(200 + Math.sin(a) * 192).toFixed(1)}"/>`; }).join('')}
       </svg>
+      <svg class="title-ridge" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+        <path class="rg-far" d="M0 240V150l64-26 52 22 78-62 66 52 54-26 92 74 74-46 58 36 116-96 84 86 66-38 88 56 70-64 62 46 72-38 90 68 76-30 66 36 88-52V240Z"/>
+        <path class="rg-near" d="M0 240V196l92-32 66 24 112-62 82 52 104-38 88 40 134-58 100 52 92-26 108 46 96-30 126 42V240Z"/>
+        <path class="rg-edge" d="M0 196l92-32 66 24 112-62 82 52 104-38 88 40 134-58 100 52 92-26 108 46 96-30 126 42"/>
+      </svg>
       <div class="title-frame">
         <div class="kicker"><i></i><span>Полевой журнал · плато</span><i></i></div>
         <h1 class="title-name"><span>БЕЛАЯ</span><span>МГЛА</span></h1>
@@ -740,14 +802,13 @@ export class UI {
           <div><span class="kk">${keys(['Esc'])}</span><em>пауза</em></div>
         </div>
         <div class="controls controls-touch">
-          <div><span class="tk">${ico('take')}</span><em>Левый стик: ход. Вверх: прыжок. Сильный наклон: бег</em></div>
-          <div><span class="tk">${ico('shovel')}</span><em>Коснись мира: прицел и работа. Держи палец, чтобы продолжать</em></div>
-          <div><span class="tk">${ico('put')}</span><em>Справа: положить, взять, съесть, ждать, повернуть, рентген</em></div>
-          <div><span class="tk">${ico('axe')}</span><em>Снизу полоса инструментов. Только в ландшафте</em></div>
+          <div><span class="tk">${ico('stick')}</span><em><b>Стик</b><i>ход, вверх — прыжок</i></em></div>
+          <div><span class="tk">${ico('shovel')}</span><em><b>Касание</b><i>копать, рубить, строить</i></em></div>
+          <div><span class="tk">${ico('pad')}</span><em><b>Кнопки</b><i>съесть, ждать, взять</i></em></div>
         </div>
         <div class="title-actions"></div>
       </div>
-      <div class="ground" aria-hidden="true"></div>`;
+      `;
     const actions = ov.querySelector('.title-actions') as HTMLElement;
     const start = this.btn('В путь', 'btn-primary btn-start', () => { onStart(); });
     const snd = el('button', 'btn btn-ghost btn-sound', ico(this.soundOn ? 'sound' : 'mute'));
@@ -788,21 +849,35 @@ export class UI {
     });
     acts.append(resume, restart);
 
-    const phys = el('section', 'plate phys');
-    phys.setAttribute('aria-label', 'Сравнение физики');
+    // physics comparison: kept on purpose, presented as a deliberate "laboratory" drawer (closed by default)
+    const lab = el('section', 'lab');
+    lab.setAttribute('aria-label', 'Лаборатория: физика');
+    const toggle = el('button', 'lab-toggle', `<i class="lab-line"></i>${ico('flask', 'lab-ico')}<span>Лаборатория: физика</span>${ico('chev', 'lab-chev')}<i class="lab-line"></i>`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    const phys = el('div', 'plate phys');
+    phys.hidden = true;
     phys.innerHTML = `
-      <div class="phys-head"><span class="cap">Сравнение физики</span><i class="phys-led"></i></div>
+      <div class="phys-head"><span class="cap">Сравнение физики · Rapier и planck</span><i class="phys-led"></i></div>
       <div class="phys-row">
         <button type="button" class="pbtn pb-engine"><span class="pb-lab">Движок</span><span class="pb-val"></span>${ico('swap')}<kbd>P</kbd></button>
         <button type="button" class="pbtn pb-stress"><span class="pb-lab">Нагрузка</span><span class="pb-val">Сбросить 40 тел</span>${ico('put')}<kbd>K</kbd></button>
       </div>
       <p class="phys-info mono" aria-live="off"></p>
       <i class="rivet r1"></i><i class="rivet r2"></i><i class="rivet r3"></i><i class="rivet r4"></i>`;
+    toggle.addEventListener('click', () => {
+      const open = phys.hidden;
+      phys.hidden = !open;
+      lab.classList.toggle('open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.blur();
+    });
     const eb = phys.querySelector('.pb-engine') as HTMLButtonElement;
     const engLabel = eb.querySelector('.pb-val') as HTMLElement;
     eb.addEventListener('click', () => { eb.classList.add('busy'); window.setTimeout(() => eb.classList.remove('busy'), 800); this.onEngine(); eb.blur(); });
     (phys.querySelector('.pb-stress') as HTMLButtonElement).addEventListener('click', (e) => { this.onStress(); (e.currentTarget as HTMLElement).blur(); });
-    card.appendChild(phys);
+    lab.append(toggle, phys);
+    card.appendChild(lab);
 
     ov.appendChild(card);
     this.setOverlay(ov, 'pause');
@@ -818,20 +893,25 @@ export class UI {
     const built = names.length
       ? `<ul class="built">${names.map(() => `<li></li>`).join('')}</ul>`
       : '<p class="built-none">Ничего не построено</p>';
+    const two = (n: number) => String(Math.max(0, Math.round(n))).padStart(2, '0');
+    const ro = (cap: string, val: number, unit: string) =>
+      `<div class="ro"><span class="ro-cap">${cap}</span><b class="ro-val mono">${two(val)}</b><i class="ro-ticks"></i><span class="ro-unit">${unit}</span></div>`;
     card.innerHTML = `
+      <div class="end-medal">${ico(win ? 'sun' : 'moon')}</div>
       <div class="kicker"><i></i><span>${win ? 'Рассвет' : 'Конец записей'}</span><i></i></div>
       <h2 class="card-title">${win ? 'Ты пережил три ночи' : 'Мгла победила'}</h2>
-      <p class="card-sub cause"></p>
+      <div class="note"><span class="note-tag">${win ? 'Запись' : 'Причина'}</span><p class="cause"></p><i class="note-ul"></i></div>
       <div class="stats">
-        <div><b class="mono">${stats.days}</b><span>${plural(stats.days, 'день', 'дня', 'дней')}</span></div>
-        <div><b class="mono">${stats.hours}</b><span>${plural(stats.hours, 'час', 'часа', 'часов')} в пути</span></div>
-        <div><b class="mono">${names.length}</b><span>${plural(names.length, 'постройка', 'постройки', 'построек')}</span></div>
+        ${ro('Дни', stats.days, plural(stats.days, 'день', 'дня', 'дней'))}
+        ${ro('В пути', stats.hours, plural(stats.hours, 'час', 'часа', 'часов'))}
+        ${ro('Лагерь', names.length, plural(names.length, 'постройка', 'постройки', 'построек'))}
       </div>
       <div class="built-wrap"><span class="cap">Построено</span>${built}</div>
       <div class="card-actions"></div>`;
-    (card.querySelector('.cause') as HTMLElement).textContent = cause;
+    const text = cause.trim() || (win ? 'Солнце встало над плато. Огонь и укрытие выдержали.' : 'Холод оказался сильнее.');
+    (card.querySelector('.cause') as HTMLElement).textContent = text.charAt(0).toUpperCase() + text.slice(1);
     card.querySelectorAll('.built li').forEach((li, i) => { li.textContent = names[i]; });
-    const again = this.btn(win ? 'Ещё раз' : 'Попробовать снова', 'btn-primary', () => { onRestart(); });
+    const again = this.btn('Ещё раз', 'btn-primary', () => { onRestart(); });
     (card.querySelector('.card-actions') as HTMLElement).appendChild(again);
     ov.appendChild(card);
     this.setOverlay(ov, 'end');

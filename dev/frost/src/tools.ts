@@ -354,9 +354,13 @@ export function placeFire(ax: number, ay: number) {
   if (inv.matches < 1) { say('Нет спичек'); sfx?.uiDeny(); return; }
   if (inv.logs < 1 || inv.branches < 2) { say('Для костра нужно 1 бревно и 2 хвороста'); sfx?.uiDeny(); return; }
   // settle onto the surface below the aim
+  // never hide the fire behind the player: aim close to the body -> push it out to 26 cells in the facing direction
+  let pushed = false;
+  if (Math.abs(ax - pl.x) < 16) { ax = pl.x + (Math.abs(ax - pl.x) > 2 ? Math.sign(ax - pl.x) : pl.face) * 26; ay = pl.y - 30; pushed = true; }
   let x = Math.round(ax), y = Math.round(ay);
   if (!inb(x, y)) return;
   while (y < H - 2 && mat[idx(x, y)] === M.AIR) y++;
+  if (pushed) ay = y;
   if (Math.abs(y - ay) > 30 || !inReach(x, y)) { say('Слишком далеко'); return; }
   inv.matches--; inv.logs--; inv.branches -= 2;
   G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++ });
@@ -401,10 +405,17 @@ export function stepFires(dt: number) {
       const q = G.quality ? 1 : 0.5;
       const pw = Math.min(1, f.fuel / 30);          // flames shrink as the fuel runs out
       const burst = (rate: number) => { const n = rate * dt * q; return Math.floor(n) + (Math.random() < n - Math.floor(n) ? 1 : 0); };
-      // tongues of flame: many, large, rising from a wide base
-      for (let n = burst(60 * (0.5 + 0.5 * pw)); n > 0; n--) {
-        const u = (Math.random() - 0.5) * 2;
-        spawn(PK.FLAME, f.x + u * 5, f.y - 1 - Math.random() * 3, u * -6 + (Math.random() - 0.5) * 8, -26 - Math.random() * 34, 0.5 + Math.random() * 0.5, (1.3 + Math.random() * 0.8) * (0.6 + 0.4 * pw), 0, 0);
+      // 3 licking tongues of flame with independent phase, each swaying on its own sinus (x1.5 bigger than before)
+      const tt = G.realTime;
+      for (let j = 0; j < 3; j++) {
+        const ph = f.id * 1.7 + j * 2.3;
+        const sway = Math.sin(tt * (2.6 + j * 0.9) + ph);
+        const lick = 0.78 + 0.32 * Math.sin(tt * (4.1 + j * 1.3) + ph * 1.3);
+        const cx = f.x + (j - 1) * 4.6 + sway * 2.4;
+        const big = j === 1 ? 1.15 : 0.9;
+        for (let n = burst((j === 1 ? 32 : 22) * (0.5 + 0.5 * pw)); n > 0; n--) {
+          spawn(PK.FLAME, cx + (Math.random() - 0.5) * 4.5, f.y - 1.5 - Math.random() * 3, sway * 9 + (Math.random() - 0.5) * 7, -(30 + Math.random() * 34) * lick * (0.6 + 0.4 * pw), 0.5 + Math.random() * 0.5, (1.95 + Math.random() * 1.2) * big * (0.6 + 0.4 * pw), 0, 0);
+        }
       }
       // glowing embers bed at the base (SPARK particles: bright orange, barely moving) and the odd flying spark
       for (let n = burst(14); n > 0; n--) spawn(PK.SPARK, f.x + (Math.random() - 0.5) * 12, f.y - 0.5 - Math.random() * 2, (Math.random() - 0.5) * 6, -4 - Math.random() * 8, 0.35 + Math.random() * 0.45, 2.2 + Math.random() * 1.2, 0, 0);
