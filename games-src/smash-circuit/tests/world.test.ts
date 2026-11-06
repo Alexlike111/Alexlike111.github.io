@@ -157,7 +157,7 @@ describe('SimCar', () => {
     const ev: SimEvent[] = [];
     // synthetic impacts at nose, then all around
     const hit = (lx: number, ly: number, imp: number) => {
-      car.recordImpact(car.state.x + lx, car.state.y + ly, imp, 'wall');
+      car.recordImpact(car.state.x + lx, car.state.y + ly, imp * 1.8, 'wall');
       car.flushDamage(ev);
     };
     hit(2.1, 0, 20000);
