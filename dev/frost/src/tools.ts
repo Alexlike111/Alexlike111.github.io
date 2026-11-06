@@ -99,7 +99,7 @@ function dig(ax: number, ay: number) {
   const h = hard / n;
   tool.loadDens = (tool.loadDens * tool.load + sum) / (tool.load + n);
   tool.load += n;
-  if (!loadWarned && tool.load >= 46 * 0.8) { loadWarned = true; say('Лопата полна — ПКМ: выбросить'); }
+  if (!loadWarned && tool.load >= 46 * 0.8) { loadWarned = true; say(G.mobile ? 'Лопата полна — копай дальше: снег сам полетит за спину' : 'Лопата полна — копай дальше (снег полетит за спину) или ПКМ — бросить, куда целишься'); }
   pl.stamina -= 0.012 + h * 0.02;
   pl.snowOn = Math.min(1, pl.snowOn + 0.01);
   tool.cool = 0.22 + h * 0.45;
@@ -180,7 +180,7 @@ export function planSpoil(sx: number, sy: number): ThrowPlan {
         if (f === 1 && j > 0 && ox > 0) ld = d;
       }
       if (pass === 0 || minD < 8) continue;
-      const score = -sp * 0.06 - Math.abs(a - 40) * 0.05 - Math.max(0, minD - 70) * 0.05 - (roofed ? 40 : 0);
+      const score = -sp * 0.06 - Math.abs(a - 40) * 0.05 - Math.max(0, minD - 70) * 0.05 - (roofed ? 40 : 0) + (side === -tool.digDir ? 8 : 0); // over the shoulder, behind the back: never onto the snow still to be dug
       if (pass === n && minD >= 20) { if (score > bestScore) { bestScore = score; best = { ux, uy, sp, where: roofed ? 'cave' : 'out', dist: ld }; } }
       else { const sc = pass / n * 100 + score; if (sc > fbScore) { fbScore = sc; fb = { ux, uy, sp, where: 'part', dist: ld }; } } // best partial: a deep, narrow shaft
     }
@@ -236,6 +236,8 @@ export function throwLoad(ax: number, ay: number, auto: boolean) {
   if (auto) tool.ins++;
   const [sx, sy] = shoulder();
   let ux: number, uy: number, sp: number;
+  // a throw aimed back into the snow being dug (or right at his feet / on a touch screen, where the aim is the dig spot) is tossed clear automatically
+  if (!auto) { const ai = inb(Math.round(ax), Math.round(ay)) ? idx(Math.round(ax), Math.round(ay)) : -1; if (G.mobile || Math.hypot(ax - pl.x, ay - (pl.y - pl.h * 0.6)) < 16 || (ai >= 0 && mat[ai] === M.SNOW && !isGranular(ai))) auto = true; }
   if (auto) { const p = planSpoil(sx, sy); ux = p.ux; uy = p.uy; sp = p.sp; }
   else {
     const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy));
