@@ -19,8 +19,10 @@ export const PW = 10, PH = 34, PH_CRAWL = 20, JUMP_V = 72; // jump apex ~ JUMP_V
 // heat balance tunables
 const LOSS_K = 4.3;       // W/K of (33 - feel) heat loss through the clothes (x wet factor)
 const SHIVER_ON = 36.6;   // core temperature where shivering starts
-const SHIVER_RAMP = 1.1;  // ... and reaches its maximum this many degrees lower
-const SHIVER_W = 240;     // W of extra heat at full shiver (costs food, slows stamina regeneration)
+const SHIVER_RAMP = 0.4;  // ... and reaches its maximum this many degrees lower (was 1.1: a dressed idle body settles near 36.2 at -20, and at -36 shivering cannot keep up)
+const SHIVER_W = 140;     // W of extra heat at full shiver, total 230 W = 2.5 x rest (was 240: 330 W covered the -36 night loss, so the core plateaued at 35.7)
+const WET_K = 1.0;        // soaked clothes add WET_K x wetness to the loss factor: x1.5 at half wet, x2 soaked (was 1.4: x2.4)
+const HUNGER_LOSS = 0.05; // extra loss as the food gauge runs out (ramps in below 30 %, +5 % when empty)
 const FOOD_K = 0.21;      // gauge scale (see stepBody)
 let hungerLvl = 2;
 

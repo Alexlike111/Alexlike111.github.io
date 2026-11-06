@@ -188,9 +188,9 @@ function updateEnclosure() {
   pitSince = pl.alive && pitDepth() >= 1.2 ? (pitSince < 0 ? G.realTime : pitSince) : -1;
 }
 // one-time shelter tips, per game: each shows once, one at a time, while its condition holds (the tip keeps its text on screen for its own time)
-const TIP_PIT = 'Землянка: камера и ход — в полный рост (~1,8 м). Шахту накрой брусьями или блоками — тёплый воздух уходит вверх';
+const TIP_PIT = 'Землянка: камера и ход не ниже 1,8 м, чтобы встать в полный рост. Шахту накрой брусьями или блоками — тёплый воздух уходит вверх';
 const TIP_CLOSED = 'Закрыто. Разведи костёр (6) — станет тепло';
-const TIP_IGLOO = 'Иглу: два ряда блоков стоймя по краям, сверху плоские блоки внахлёст к центру, последний — замковый';
+const TIP_IGLOO = 'Иглу: выкопай яму ~1 м, по её краям поставь блоки стоймя в 2 ряда, сверху плоские внахлёст к центру — внутри нужно 1,8 м';
 const tipSeen = new Set<string>();
 let tipShow: { text: string; until: number } | null = null;
 /** the tip on screen, else the first unseen tip whose condition holds now (null = none) */
