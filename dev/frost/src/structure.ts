@@ -2,6 +2,9 @@
 // "support flow" from anchors (ground, rooted trees, rect border) through rigid cells; cost = how
 // hard it is for a cell to be held up. Cells whose cost exceeds BUDGET (or that are unreachable)
 // fail: snow loses cohesion (pours as granular), wood/ice/crates fall as rigid bodies.
+// Beam action: a cell's lateral cost shrinks with the depth (run) of its own material and the load penalty is
+// divided by that depth; compression arch: thin snow/ice shells whose top surface curves down on both sides
+// (concave-down, radius < ~2.4 m) carry thrust laterally at ARCH_F of the flat-beam cost.
 import {
   W, H, M, F_DIST, F_TREE, BOND_SOLID, mat, dens, bond, flags, body, set, wake,
 } from './world';

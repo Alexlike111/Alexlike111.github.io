@@ -3,7 +3,7 @@
 // as lazily built static box colliders per world chunk.
 import * as planck from 'planck';
 import {
-  M, F_DIST, CH, CW, CHH, W, H, CELL, rigidAt, set as setCell, wake,
+  M, F_DIST, F_TREE, CH, CW, CHH, W, H, CELL, rigidAt, set as setCell, wake,
   mat, dens, bond, flags, body as bodyGrid, awake, gpuDirty, solidVer,
 } from './world';
 import { spawn, PK } from './particles';
@@ -64,6 +64,16 @@ export function initBodies(): void {
       }
     }
   });
+}
+
+/** Tear everything down (engine switch): destroys all planck bodies and terrain colliders and drops the world. */
+export function disposeBodies(): void {
+  if (pw) {
+    for (const r of [...bodies.values()]) pw.destroyBody(r.b);
+    for (const c of colliders.values()) if (c.b) pw.destroyBody(c.b);
+  }
+  pw = null;
+  bodies.clear(); aux.clear(); colliders.clear(); hitMax.clear(); shatterQ.clear();
 }
 
 // ---------------------------------------------------------------- helpers
@@ -143,17 +153,26 @@ export function bodyAtIndex(i: number): BodyRec | null {
   return id ? bodies.get(id) ?? null : null;
 }
 
-export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null {
-  if (!pw) initBodies();
+interface Gathered { list: number[]; x0: number; y0: number; x1: number; y1: number; }
+/** Free (unbodied, non-air) cells of the request; null if fewer than 4 or nothing solid (only needles). */
+function gather(cells: number[]): Gathered | null {
   const list: number[] = [];
-  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, solid = false;
   for (const i of cells) {
     if (mat[i] === M.AIR || bodyGrid[i] !== 0) continue;
     list.push(i);
+    if (!solid && cellKey(mat[i], dens[i]) !== 0) solid = true;
     const x = i % W, y = (i / W) | 0;
     if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
   }
-  if (list.length < 4) return null;
+  if (list.length < 4 || !solid) return null;
+  return { list, x0, y0, x1, y1 };
+}
+
+export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null {
+  if (!pw) initBodies();
+  let g = gather(cells);
+  if (!g) return null; // nothing to make: do not evict anybody for it
   if (bodies.size >= MAX_BODIES) {
     let victim: BodyRec | undefined;
     for (const r of bodies.values()) if ((r.kind === 'slab' || r.kind === 'debris') && r.settle > 0.2) { victim = r; break; }
@@ -161,7 +180,10 @@ export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0
     if (!victim) for (const r of bodies.values()) if (r.kind !== 'tree') { victim = r; break; }
     if (!victim) return null;
     removeBody(victim, true);
+    g = gather(cells); // the evicted body's cells may have landed in / displaced ours
+    if (!g) return null;
   }
+  const { list, x0, y0, x1, y1 } = g;
   const w = x1 - x0 + 1, h = y1 - y0 + 1;
   const lm = new Uint8Array(w * h), ld = new Uint16Array(w * h), lf = new Uint8Array(w * h), lb = new Uint8Array(w * h);
   let sx = 0, sy = 0, sw = 0;
@@ -262,7 +284,7 @@ function paint(rec: BodyRec, mode: PaintMode): number {
         const ci = ((y / CH) | 0) * CW + ((x / CH) | 0);
         if (ci !== lastC) { lastC = ci; wake(x, y); }
       } else {
-        let b = lb[k], f = lf[k];
+        let b = lb[k], f = lf[k] & ~F_TREE; // a felled tree is no longer rooted
         if (mode === 2) { b = 0; f |= F_DIST; } else if (m === M.SNOW) { b = Math.round(b * 0.7); f |= F_DIST; }
         setCell(x, y, m, ld[k], b, f);
         placed++; sumX += x; sumY += y;

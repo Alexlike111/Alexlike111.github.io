@@ -34,6 +34,8 @@ export class Input {
   currentTool = 0;
   toolCount = 6;
   onModeChange: ((mobile: boolean) => void) | null = null;
+  /** performance.now() of the last touch down / move / up on the world; the UI fades the reticle 1.5 s after it */
+  touchAt = 0;
 
   private canvas: HTMLElement;
   private keys = new Set<string>();
@@ -139,6 +141,7 @@ export class Input {
       this.touchId = e.pointerId;
       try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       this.setAim(e);
+      this.touchAt = performance.now();
       s.primary = true;
       e.preventDefault();
       return;
@@ -152,7 +155,7 @@ export class Input {
 
   private onMove = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') {
-      if (e.pointerId === this.touchId) this.setAim(e);
+      if (e.pointerId === this.touchId) { this.setAim(e); this.touchAt = performance.now(); }
       return;
     }
     this.setAim(e);
@@ -160,7 +163,7 @@ export class Input {
 
   private onUp = (e: PointerEvent): void => {
     if (e.pointerType === 'touch') {
-      if (e.pointerId === this.touchId) { this.touchId = null; this.state.primary = false; }
+      if (e.pointerId === this.touchId) { this.touchId = null; this.state.primary = false; this.touchAt = performance.now(); }
       return;
     }
     if (e.button === 0 || e.type === 'pointercancel') this.state.primary = false;

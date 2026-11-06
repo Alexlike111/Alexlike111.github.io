@@ -1,12 +1,12 @@
 // Rigid bodies (Rapier2D) living inside the cell grid: trees, snow slabs, beams, debris.
 // Drop-in alternative to bodies.ts (planck) with the same exported API. Bodies are rasterised
 // ("stamped") into the grid every step; terrain is exposed to Rapier either as lazily built
-// static cuboid colliders per world chunk ('cuboid') or as ONE world-sized voxel collider that is
-// patched incrementally with setVoxel ('voxel', default). Switch with globalThis.__FROST_TERRAIN.
+// static cuboid colliders per world chunk ('cuboid', the default) or as ONE world-sized voxel collider that is
+// patched incrementally with setVoxel ('voxel'). Switch with globalThis.__FROST_TERRAIN = 'voxel' (before initBodies()).
 // Call (and await) initPhysics() once before initBodies().
 import RAPIER from '@dimforge/rapier2d-compat';
 import {
-  M, F_DIST, CH, CW, CHH, W, H, CELL, rigidAt, set as setCell, wake,
+  M, F_DIST, F_TREE, CH, CW, CHH, W, H, CELL, rigidAt, set as setCell, wake,
   mat, dens, bond, flags, body as bodyGrid, awake, gpuDirty, solidVer,
 } from './world';
 import { spawn, PK } from './particles';
@@ -87,6 +87,20 @@ export function initBodies(): void {
   pw.timestep = FIXED;
   pw.numSolverIterations = 4;
   eq = new RAPIER.EventQueue(true);
+}
+
+/** Tear everything down (engine switch): bodies, terrain colliders / voxel collider, event queue and the wasm world. */
+export function disposeBodies(): void {
+  if (pw) {
+    for (const e of colliders.values()) { if (e.b) pw.removeRigidBody(e.b); e.b = null; e.mask = null; }
+    if (vox) { pw.removeCollider(vox, false); vox = null; }
+    if (voxBody) { pw.removeRigidBody(voxBody); voxBody = null; }
+    for (const r of bodies.values()) pw.removeRigidBody(r.b.rb);
+    pw.free(); pw = null;
+  }
+  if (eq) { eq.free(); eq = null; }
+  bodies.clear(); aux.clear(); colliders.clear(); hitMax.clear(); shatterQ.clear(); colToId.clear();
+  vox = null; voxBody = null;
 }
 
 function drainImpacts(): void {
@@ -198,17 +212,26 @@ export function bodyAtIndex(i: number): BodyRec | null {
   return id ? bodies.get(id) ?? null : null;
 }
 
-export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null {
-  if (!pw) initBodies();
+interface Gathered { list: number[]; x0: number; y0: number; x1: number; y1: number; }
+/** Free (unbodied, non-air) cells of the request; null if fewer than 4 or nothing solid (only needles). */
+function gather(cells: number[]): Gathered | null {
   const list: number[] = [];
-  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, solid = false;
   for (const i of cells) {
     if (mat[i] === M.AIR || bodyGrid[i] !== 0) continue;
     list.push(i);
+    if (!solid && cellKey(mat[i], dens[i]) !== 0) solid = true;
     const x = i % W, y = (i / W) | 0;
     if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
   }
-  if (list.length < 4) return null;
+  if (list.length < 4 || !solid) return null;
+  return { list, x0, y0, x1, y1 };
+}
+
+export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null {
+  if (!pw) initBodies();
+  let g = gather(cells);
+  if (!g) return null; // nothing to make: do not evict anybody for it
   if (bodies.size >= MAX_BODIES) {
     let victim: BodyRec | undefined;
     for (const r of bodies.values()) if ((r.kind === 'slab' || r.kind === 'debris') && r.settle > 0.2) { victim = r; break; }
@@ -216,7 +239,10 @@ export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0
     if (!victim) for (const r of bodies.values()) if (r.kind !== 'tree') { victim = r; break; }
     if (!victim) return null;
     removeBody(victim, true);
+    g = gather(cells); // the evicted body's cells may have landed in / displaced ours
+    if (!g) return null;
   }
+  const { list, x0, y0, x1, y1 } = g;
   const w = x1 - x0 + 1, h = y1 - y0 + 1;
   const lm = new Uint8Array(w * h), ld = new Uint16Array(w * h), lf = new Uint8Array(w * h), lb = new Uint8Array(w * h);
   let sx = 0, sy = 0, sw = 0;
@@ -317,7 +343,7 @@ function paint(rec: BodyRec, mode: PaintMode): number {
         const ci = ((y / CH) | 0) * CW + ((x / CH) | 0);
         if (ci !== lastC) { lastC = ci; wake(x, y); }
       } else {
-        let b = lb[k], f = lf[k];
+        let b = lb[k], f = lf[k] & ~F_TREE; // a felled tree is no longer rooted
         if (mode === 2) { b = 0; f |= F_DIST; } else if (m === M.SNOW) { b = Math.round(b * 0.7); f |= F_DIST; }
         setCell(x, y, m, ld[k], b, f);
         placed++; sumX += x; sumY += y;

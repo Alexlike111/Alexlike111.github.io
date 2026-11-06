@@ -118,9 +118,9 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     b += g*amp;
     b += (vn(vec2(cf.x*.02, cf.y*.45))-.5)*.04*t;
     // subsurface blue grows with distance from the nearest air (cuts, caves), not with the global height
-    float d1 = 1.-exp(-depth/10.), d2 = 1.-exp(-depth/38.);
-    b = mix(b, vec3(.36,.56,.79), d1*.72);
-    b = mix(b, vec3(.17,.31,.53), d2*.65);
+    float d1 = 1.-exp(-depth/13.), d2 = 1.-exp(-depth/46.);
+    b = mix(b, vec3(.36,.56,.79), d1*.55);
+    b = mix(b, vec3(.17,.31,.53), d2*.6);
     return b;
   }
   if(m==2){
@@ -316,7 +316,7 @@ void main(){
     vec3 alb = albedo(m, dn, bn, fl, cf, hh, depth, mUp==0, n, hasN);
     vec3 pl = uNL>0 ? pointLights(wp, c, n, hasN, hh) : vec3(0.);
     vec3 scat = m==1 ? vec3(.12,.2,.3)*exp(-depth/30.) : vec3(0.);
-    vec3 svS = m==1 ? mix(pow(sv3, vec3(.5)), vec3(1.), .12) : sv3;   // thick snow still scatters plenty of light
+    vec3 svS = m==1 ? mix(pow(sv3, vec3(.32)), vec3(1.), .2) : sv3;   // thick snow still scatters plenty of light
     vec3 lit = uAmb*((m==1?.3:.45)+(m==1?.7:.84)*svS+scat) + uDirCol*diff*dirT + pl;
     col = alb*lit;
     if(m==1){
@@ -574,7 +574,7 @@ export class Renderer {
     const tod = ((G.time / 60) % 24 + 24) % 24;
     // ambient
     const dayAmb: V3 = [0.88 * (1 - 0.3 * storm), 0.93 * (1 - 0.3 * storm), 1.0 * (1 - 0.25 * storm)];
-    const nm = 0.7 + 0.55 * moon, nightAmb: V3 = [0.125 * nm, 0.185 * nm, 0.36 * nm];
+    const nm = 0.7 + 0.55 * moon, nightAmb: V3 = [0.15 * nm, 0.205 * nm, 0.345 * nm];
     const amb = mix3(nightAmb, dayAmb, day);
     amb[0] += 0.10 * dusk; amb[1] += 0.03 * dusk; amb[2] = Math.max(0, amb[2] - 0.03 * dusk);
     // directional light (sun / moon)

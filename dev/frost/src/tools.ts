@@ -171,22 +171,48 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
 }
 
 // ---------------- axe ----------------
-function treeCells(sx: number, sy: number): number[] {
-  // flood fill wood+needle tree cells connected to (sx,sy) above the cut, limited
+const isTrunkOf = (i: number, tid: number) => mat[i] === M.WOOD && (flags[i] & F_TREE) !== 0 && treeId[i] === tid && body[i] === 0;
+const isTreeOf = (i: number, tid: number) => (mat[i] === M.WOOD || mat[i] === M.NEEDLE) && (flags[i] & F_TREE) !== 0 && treeId[i] === tid && body[i] === 0;
+/** Trunk cells of tree `tid` in row y near column cx, left to right. */
+function trunkRow(y: number, cx: number, tid: number): number[] {
+  const xs: number[] = [];
+  if (y < 0 || y >= H) return xs;
+  for (let x = Math.max(0, cx - 10); x <= Math.min(W - 1, cx + 10); x++) if (isTrunkOf(idx(x, y), tid)) xs.push(x);
+  return xs;
+}
+/** Flood the tree `tid` (trunk + needles, that tree only) from a seed, never below row `maxRow`. Trunk-only when `trunkOnly`. */
+function treeCells(seed: number, tid: number, maxRow: number, trunkOnly = false): number[] {
   const out: number[] = []; const seen = new Set<number>();
-  const st = [idx(sx, sy)];
+  const st = [seed];
   while (st.length && out.length < 9000) {
     const i = st.pop()!; if (seen.has(i)) continue; seen.add(i);
-    const m = mat[i];
-    if (!((m === M.WOOD || m === M.NEEDLE) && (flags[i] & F_TREE)) || body[i]) continue;
+    if (!(trunkOnly ? isTrunkOf(i, tid) : isTreeOf(i, tid))) continue;
+    if (((i / W) | 0) > maxRow) continue;
     out.push(i);
     const x = i % W;
-    if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); st.push(i - W); st.push(i + W);
+    if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); if (i >= W) st.push(i - W); if (i + W < W * H) st.push(i + W);
   }
   return out;
 }
+function dismantleBeam(i0: number, cx: number, cy: number) {
+  const bid = beamId[i0];
+  const cap = bid ? 600 : 80; // untracked planks (re-formed from debris): bounded search
+  const st = [i0]; const seen = new Set<number>(); const cells: number[] = [];
+  while (st.length && cells.length < cap) {
+    const i = st.pop()!; if (seen.has(i)) continue; seen.add(i);
+    if (mat[i] !== M.PLANK || body[i] || beamId[i] !== bid) continue;
+    cells.push(i);
+    const x = i % W;
+    if (x > 0) st.push(i - 1); if (x < W - 1) st.push(i + 1); if (i >= W) st.push(i - W); if (i + W < W * H) st.push(i + W);
+  }
+  for (const i of cells) set(i % W, (i / W) | 0, M.AIR);
+  const logs = Math.max(1, Math.round(cells.length / 80));
+  inv.logs += logs; sfx?.chop(true); tool.cool = 0.4;
+  say(logs === 1 ? '+1 бревно' : `+${logs} брёвен`);
+  markStruct(cx - 30, cy - 30, cx + 30, cy + 30);
+}
 function chop(ax: number, ay: number) {
-  const cx = Math.round(ax), cy = Math.round(ay);
+  let cx = Math.round(ax), cy = Math.round(ay);
   // fallen tree / beam body?
   for (let r = 0; r <= 3; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     if (!inb(cx + dx, cy + dy)) continue;
@@ -213,15 +239,10 @@ function chop(ax: number, ay: number) {
       }
     }
   }
-  const i0 = inb(cx, cy) ? idx(cx, cy) : -1;
+  let i0 = inb(cx, cy) ? idx(cx, cy) : -1;
   if (i0 < 0) return;
   const m0 = mat[i0];
-  if (m0 === M.PLANK) {
-    // dismantle placed beam: remove connected plank cells (up to one log's worth)
-    const st = [i0]; const seen = new Set<number>(); let n = 0;
-    while (st.length && n < 80) { const i = st.pop()!; if (seen.has(i) || mat[i] !== M.PLANK) continue; seen.add(i); n++; set(i % W, (i / W) | 0, M.AIR); st.push(i - 1, i + 1, i - W, i + W); }
-    inv.logs += 1; sfx?.chop(true); tool.cool = 0.4; say('+1 бревно'); markStruct(cx - 30, cy - 30, cx + 30, cy + 30); return;
-  }
+  if (m0 === M.PLANK && !body[i0]) { dismantleBeam(i0, cx, cy); return; }
   if (m0 === M.NEEDLE && (flags[i0] & F_TREE)) {
     // cut a few branches for kindling
     let n = 0;
@@ -229,33 +250,63 @@ function chop(ax: number, ay: number) {
     if (n > 8) { inv.branches += 1; say('+1 хворост'); }
     sfx?.chop(false); tool.cool = 0.35; pl.stamina -= 0.015; return;
   }
-  if (m0 !== M.WOOD || !(flags[i0] & F_TREE)) { sfx?.chop(false); tool.cool = 0.4; return; }
-  // notch the trunk
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-    const x = cx + dx, y = cy + dy; if (!inb(x, y)) continue; const i = idx(x, y);
-    if (mat[i] === M.WOOD && (flags[i] & F_TREE)) set(x, y, M.AIR);
+  if (m0 !== M.WOOD || !(flags[i0] & F_TREE)) {
+    // the aimed cell may just have been cut away: keep working on the nearest trunk cell of the same notch
+    let best = -1, bd = 1e9;
+    if (m0 === M.AIR || m0 === M.SNOW) {
+      for (let r = 0; r <= 3 && best < 0; r++) for (const dy of r === 0 ? [0] : [-r, r]) { // same row first, then neighbouring rows
+        const y = cy + dy; if (y < 0 || y >= H) continue;
+        for (let dx = -8; dx <= 8; dx++) {
+          if (!inb(cx + dx, y)) continue;
+          const j = idx(cx + dx, y), dd = Math.abs(dx);
+          if (dd < bd && mat[j] === M.WOOD && (flags[j] & F_TREE) && !body[j]) { bd = dd; best = j; }
+        }
+        bd = 1e9;
+      }
+    }
+    if (best < 0) { sfx?.chop(false); tool.cool = 0.4; return; }
+    i0 = best; cx = best % W; cy = (best / W) | 0;
   }
-  for (let k = 0; k < 5; k++) spawn(PK.CHIP, ax, ay, (Math.random() - 0.5) * 70, -20 - Math.random() * 40, 2.5, 1, 0, 0);
+
+  // ---- notch the trunk: each hit removes a 3-row slice across a few columns, from the player's side ----
+  const tid = treeId[i0];
+  const hitRow = trunkRow(cy, cx, tid);
+  if (!hitRow.length) { sfx?.chop(false); tool.cool = 0.4; say('Руби по стволу'); return; }
+  const xc = (hitRow[0] + hitRow[hitRow.length - 1]) / 2;
+  if (Math.abs(xc - pl.x) < 1.5) { tool.cool = 0.4; say('Руби с другой стороны'); sfx?.chop(false); return; } // standing in line with the trunk
+  const away = xc > pl.x ? 1 : -1;               // the tree falls away from the player; the notch is on the player's side
+  for (let dy = -1; dy <= 1; dy++) {
+    const y = cy + dy, xs = trunkRow(y, cx, tid);
+    if (!xs.length) continue;
+    const d = Math.min(xs.length, xs.length <= 4 ? 1 : 2);
+    for (let k = 0; k < d; k++) set(away > 0 ? xs[k] : xs[xs.length - 1 - k], y, M.AIR);
+  }
+  const sideX = away > 0 ? hitRow[0] : hitRow[hitRow.length - 1];
+  for (let k = 0; k < 5; k++) spawn(PK.CHIP, sideX, cy, (Math.random() - 0.5) * 70 - away * 20, -20 - Math.random() * 40, 2.5, 1, 0, 0);
   sfx?.chop(true);
   pl.stamina -= 0.035; tool.cool = 0.4;
-  // severed? check whether trunk cells above the notch still connect to the ground
-  const above: number[] = [];
-  for (let dx = -4; dx <= 4; dx++) { const x = cx + dx, y = cy - 2; if (inb(x, y) && mat[idx(x, y)] === M.WOOD && (flags[idx(x, y)] & F_TREE)) above.push(idx(x, y)); }
-  if (!above.length) return;
-  const cells = treeCells(above[0] % W, (above[0] / W) | 0);
+  // severed? every row of the 3-row band must be cut through
+  let left = 0;
+  for (let dy = -1; dy <= 1; dy++) left += trunkRow(cy + dy, cx, tid).length;
+  if (left > 0) { say('Подруби ещё'); return; }
+  // trunk above the band (this tree only)
+  let seed = -1;
+  for (let y = cy - 2; y >= Math.max(0, cy - 12) && seed < 0; y--) { const xs = trunkRow(y, cx, tid); if (xs.length) seed = idx(xs[0], y); }
+  if (seed < 0) { say('Пень. Ствол выше уже спилен'); markStruct(cx - 20, cy - 20, cx + 20, cy + 20); return; }
+  const bandBottom = cy + 1;
+  // grounded = this tree's trunk still reaches a trunk cell below the band (never true after a full cut)
+  const trunk = treeCells(seed, tid, H, true);
   let grounded = false;
-  for (const i of cells) { const b = i + W; if (b < W * H && (mat[b] === M.DIRT || mat[b] === M.ROCK || mat[b] === M.SNOW && (b / W | 0) > cy + 1)) { if (mat[i] === M.WOOD && (i / W | 0) >= cy) { grounded = true; break; } } }
-  // trunk cells below the notch row are part of the stump: exclude them
-  const top = cells.filter((i) => ((i / W) | 0) < cy);
-  if (!grounded && top.length > 20) {
-    sfx?.treeCreak();
-    const away = Math.sign(cx - pl.x) || 1;
-    // snow resting on the boughs loses support → it will fall as granular snow
-    for (const i of top) { const a = i - W; if (a >= 0 && mat[a] === M.SNOW) { bond[a] = 0; flags[a] |= F_DIST; wake(a % W, (a / W) | 0); } }
-    const rec = makeBody(top, 'tree', away * 0.2, 0, away * 0.25);
-    if (rec) say('Дерево падает!');
-  } else if (!grounded) say('Подруби ещё');
-  else say('Подрубай ниже, у самого ствола');
+  for (const i of trunk) if (((i / W) | 0) > bandBottom) { grounded = true; break; }
+  if (grounded) { say('Подрубай ниже, у самого ствола'); return; }
+  const top = treeCells(seed, tid, bandBottom);   // trunk + boughs above the cut, this tree only
+  sfx?.treeCreak();
+  // snow resting on the boughs loses support → it will fall as granular snow
+  for (const i of top) { const a = i - W; if (a >= 0 && mat[a] === M.SNOW) { bond[a] = 0; flags[a] |= F_DIST; wake(a % W, (a / W) | 0); } }
+  const rec = makeBody(top, 'tree', away * 0.3, 0, away * 0.3);
+  if (rec) say('Дерево падает!');
+  else { for (const i of top) set(i % W, (i / W) | 0, M.AIR); say('Верхушка рассыпалась'); }
+  markStruct(cx - 20, cy - 20, cx + 20, cy + 20);
 }
 
 // ---------------- fire ----------------
@@ -274,9 +325,14 @@ export function placeFire(ax: number, ay: number) {
   tool.built.add('fire');
 }
 export function feedFire(f: Fire): boolean {
+  if (!f.lit) {
+    // an unlit fire first needs relighting; never throw fuel on cold embers
+    if (f.fuel <= 0) { say('Костёр прогорел'); return false; }
+    if (inv.matches < 1) { say('Костёр потух. Нужна спичка, чтобы разжечь'); return false; }
+    inv.matches--; f.lit = true; sfx?.ignite(); say('Костёр разожжён снова'); return true;
+  }
   if (inv.logs > 0) { inv.logs--; f.fuel += 120; sfx?.place(true); say('+2 часа огня'); return true; }
   if (inv.branches > 0) { inv.branches--; f.fuel += 35; sfx?.place(true); say('+35 минут огня'); return true; }
-  if (!f.lit && inv.matches > 0 && f.fuel > 0) { inv.matches--; f.lit = true; sfx?.ignite(); return true; }
   say('Нечем подкинуть'); return false;
 }
 export function stepFires(dt: number) {
@@ -297,7 +353,7 @@ export function stepFires(dt: number) {
     for (let dy = -2; dy <= 0; dy++) for (let dx = -4; dx <= 4; dx++) { if (inb(f.x + dx, f.y + dy) && mat[idx(f.x + dx, f.y + dy)] === M.WATER) water++; }
     if (f.lit && water > 0) {
       if (Math.random() < dt * 2) { sfx?.sizzle(); spawn(PK.STEAM, f.x, f.y - 3, 0, -10, 2, 1, 0, 0); }
-      if (water > 14) { f.lit = false; say('Костёр залило талой водой. Ставь его на брёвна'); }
+      if (water > 14) { f.lit = false; f.power = 0; say('Костёр залило талой водой. Ставь его на брёвна'); }
       // evaporate some water
       for (let dx = -4; dx <= 4; dx++) { const i = idx(f.x + dx, f.y - 1); if (inb(f.x + dx, f.y - 1) && mat[i] === M.WATER && Math.random() < dt * 0.6) set(f.x + dx, f.y - 1, M.AIR); }
     }
@@ -317,7 +373,8 @@ export function stepFires(dt: number) {
 // ---------------- interact / eat ----------------
 export function interact(): boolean {
   // fire nearby?
-  for (const f of G.fires) if (Math.hypot(f.x - pl.x, f.y - pl.y) < 30) return feedFire(f);
+  // (if feeding is not possible, fall through to crates / loose logs; feedFire leaves its reason in tool.msg)
+  for (const f of G.fires) if (Math.hypot(f.x - pl.x, f.y - pl.y) < 30 && feedFire(f)) return true;
   // crate nearby (touching body)?
   for (const c of crates) {
     if (c.opened) continue;

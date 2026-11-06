@@ -301,20 +301,16 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const hy0 = -32;
   spDisc(-0.5, hy0, 5.3, lc(PAL.parka));
   spDisc(-2.5, hy0 + 1, 3.2, lc(PAL.parkaSh));
-  const fcx = 2.4, fcy = hy0 + 0.4;
-  for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 7; dx++) {
-    const px = Math.round(fcx) + dx, py = Math.round(fcy) + dy;
-    const rr = Math.hypot((dx - (fcx % 1)) * 0.92, (dy - (fcy % 1)) * 1.0);
-    if (rr > 4.9 || rr < 2.0 || px < -4) continue;
-    if (px < 0 && rr > 4.3) continue;
-    const hsh = hash1(px * 7.3 + py * 13.1);
-    const c = hsh > 0.72 ? PAL.furHi : hsh < 0.28 ? PAL.furLo : PAL.fur;
-    spR(px, py, 1, 1, lc(c));
-  }
+  const fcx = 3, fcy = hy0 + 0.5;
   const cold = Math.max(0, Math.min(1, (36.6 - pl.core) / 3));
   const skin = mix3c(PAL.skin, [196, 160, 160] as C3, cold);
-  for (let dy = -3; dy <= 3; dy++) for (let dx = -2; dx <= 2; dx++) {
-    if ((dx / 2.0) ** 2 + (dy / 3.2) ** 2 <= 1.05) spR(Math.round(fcx) + dx, Math.round(fcy) + dy, 1, 1, lc(dx > 1 ? dim(skin, 0.9) : skin));
+  for (let dy = -7; dy <= 7; dy++) for (let dx = -8; dx <= 6; dx++) {
+    const px = Math.round(fcx) + dx, py = Math.round(fcy) + dy;
+    const ei = Math.hypot(dx / 2.3, dy / 3.1), eo = Math.hypot(dx / 5.3, dy / 5.7);
+    if (eo > 1) continue;
+    if (ei < 1) { spR(px, py, 1, 1, lc(dx > 1 ? dim(skin, 0.88) : skin)); continue; }
+    const hsh = hash1(px * 7.3 + py * 13.1);
+    spR(px, py, 1, 1, lc(hsh > 0.7 ? PAL.furHi : hsh < 0.26 ? PAL.furLo : PAL.fur));
   }
   spR(Math.round(fcx) + 1, Math.round(fcy) - 1, 1, 1, lc([30, 36, 52] as C3));              // eye
   if (!pl.alive || (pl.shiver > 0.3 && jr(5) > 0.3)) spR(Math.round(fcx) + 1, Math.round(fcy) - 1, 1, 1, lc(skin));   // eyes shut
@@ -353,7 +349,7 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
       if (col) spPut(Math.round(hx) + px, Math.round(hy) + py, col);
     }
     // mitten over the grip
-    spLine(hx - dx * 2.5, hy - dy * 2.5, hx + dx * 1.5, hy + dy * 1.5, 4, lc(PAL.mitt));
+    spLine(hx - dx * 2, hy - dy * 2, hx + dx * 1, hy + dy * 1, 3, lc(PAL.mitt));
     spPut(Math.round(hx - dx * 2 - dy), Math.round(hy - dy * 2 + dx), lc(PAL.mittHi));
   } else {
     const a = Math.PI / 2 - vf * (0.2 + 0.9 * slump);

@@ -651,7 +651,7 @@ export class UI {
     // the aim stays in Input for the secondary/fire buttons; the mark itself fades 1.5 s after the finger lifts
     const now = performance.now();
     if (s.primary) this.retUntil = now + 1500;
-    const show = this.input.mobile && s.hasAim && now < this.retUntil;
+    const show = this.input.mobile && s.hasAim && (now < this.retUntil || now - this.input.touchAt < 1500);
     this.m('ret-show', show, () => this.reticleEl.classList.toggle('on', show));
     if (!show) return;
     this.m('ret-down', s.primary, () => this.reticleEl.classList.toggle('down', s.primary));

@@ -2,7 +2,7 @@
 // Same API as bodies.ts. Each backend keeps its own module state (own world, own `bodies` Map).
 import * as PL from './bodies';
 import * as RP from './bodies_rapier';
-import { M, W, CELL, mat, set as setCell, idx, inb } from './world';
+import { M, W, CELL, mat, body as bodyGrid, set as setCell, idx, inb } from './world';
 
 export type BodyKind = PL.BodyKind;
 /** Common view of both backends' records (`b` is a planck Body or the Rapier wrapper). */
@@ -22,6 +22,7 @@ export async function setEngine(e: 'planck' | 'rapier'): Promise<void> {
   if (e === 'rapier') await RP.initPhysics();
   // hand the old backend's bodies back to the grid as plain cells (structure.ts re-bodies unsupported islands)
   for (const r of [...impl.bodies.values()]) (impl as typeof PL).removeBody(r as PL.BodyRec, true);
+  (impl as typeof PL | typeof RP).disposeBodies(); // free the old world (Rapier: wasm world, colliders, event queue)
   engine = e; impl = e === 'rapier' ? RP : PL;
   bodies = impl.bodies as unknown as Map<number, BodyRec>;
   impl.initBodies();
@@ -50,12 +51,12 @@ export function spawnStressTest(n: number, x: number, y: number): number {
     const len = Math.round((log ? 40 + rnd() * 80 : 10 + rnd() * 20)), th = log ? 4 + ((rnd() * 4) | 0) : 5 + ((rnd() * 5) | 0);
     const x0 = Math.round(x - 150 + rnd() * 300 - len / 2);
     let y0 = Math.round(y - 20 - th);
-    // search upward for a free air box
+    // search upward for a free box: every cell must be AIR and not belong to a body (never overwrite terrain / bodies)
     let ok = false;
     for (let t = 0; t < 40 && y0 > 2; t++, y0 -= th + 3) {
-      if (!inb(x0, y0) || !inb(x0 + len, y0 + th)) break;
+      if (!inb(x0, y0) || !inb(x0 + len - 1, y0 + th - 1)) break;
       ok = true;
-      for (let yy = y0; yy < y0 + th && ok; yy++) for (let xx = x0; xx < x0 + len; xx += 2) if (mat[idx(xx, yy)] !== M.AIR) { ok = false; break; }
+      for (let yy = y0; yy < y0 + th && ok; yy++) for (let xx = x0; xx < x0 + len; xx++) { const i = idx(xx, yy); if (mat[i] !== M.AIR || bodyGrid[i] !== 0) { ok = false; break; } }
       if (ok) break;
     }
     if (!ok) continue;
@@ -67,6 +68,7 @@ export function spawnStressTest(n: number, x: number, y: number): number {
     }
     const rec = makeBody(cells, log ? 'beam' : 'slab', (rnd() - 0.5) * 2, 0, (rnd() - 0.5) * 2);
     if (rec) made++;
+    else for (const i of cells) if (bodyGrid[i] === 0) setCell(i % W, (i / W) | 0, M.AIR); // makeBody refused: take the cells back
   }
   void W; void CELL;
   return made;
