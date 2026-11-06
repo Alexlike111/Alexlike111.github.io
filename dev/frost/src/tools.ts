@@ -16,18 +16,19 @@ export const TOOLS = [
   { id: 'fire', name: 'Костёр', key: '6' },
 ] as const;
 
-export const inv = { logs: 0, branches: 0, matches: 5, food: 1, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
+export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
 export const tool = { cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' as string, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
+export const BLOCK_CAP = 8;
 let sfx: Sound | null = null;
 export function bindSound(s: Sound) { sfx = s; }
 let fireId = 1;
 
 export function resetTools() {
-  Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 1, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
+  Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
   Object.assign(tool, { cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, msg: '' });
   tool.built.clear();
-  G.fires.length = 0;
+  G.fires.length = 0; loadWarned = false; fireLatch = false;
 }
 
 const shoulder = () => [pl.x, pl.y - PH * 0.72] as const;
@@ -43,7 +44,7 @@ export function reachPoint(ax: number, ay: number): [number, number] {
 function say(m: string) { tool.msg = m; }
 
 // ---------------- shovel ----------------
-let lastNothingT = -99;
+let lastNothingT = -99, loadWarned = false;
 function dig(ax: number, ay: number) {
   const r = 4.5;
   let n = 0, sum = 0, hard = 0;
@@ -67,6 +68,7 @@ function dig(ax: number, ay: number) {
   const h = hard / n;
   tool.loadDens = (tool.loadDens * tool.load + sum) / (tool.load + n);
   tool.load += n;
+  if (!loadWarned && tool.load >= 46 * 0.8) { loadWarned = true; say('Лопата полна — ПКМ: выбросить'); }
   pl.stamina -= 0.012 + h * 0.02;
   pl.snowOn = Math.min(1, pl.snowOn + 0.01);
   tool.cool = 0.22 + h * 0.45;
@@ -78,44 +80,103 @@ function dig(ax: number, ay: number) {
   }
   markStruct(ax - 8, ay - 8, ax + 8, ay + 8);
 }
-/** Direction (not normalised) with the longest clear throw from the shoulder: 8 rays in the upper half-plane, behind the player preferred. */
-function openDirection(sx: number, sy: number): [number, number] {
-  const SP = 130, RANGE = 40;
-  let best = -1, bx = -pl.face * 30, by = -20;
-  for (let k = 0; k < 8; k++) {
-    const a = ((k < 4 ? 15 + k * 20 : 105 + (k - 4) * 20) * Math.PI) / 180; // 15..75 deg to the right, 105..165 deg to the left
-    const ux = Math.cos(a), uy = -Math.sin(a);
-    let len = 0;
-    for (; len < RANGE; len++) {
-      const s = len + 1, t = s / SP;
-      const x = Math.round(sx + ux * s), y = Math.round(sy + uy * s - 25 * t + 98 * t * t); // straight line bent by the toss's gravity
-      if (!inb(x, y)) { len = RANGE; break; }
-      const i = idx(x, y);
-      if (mat[i] !== M.AIR && mat[i] !== M.NEEDLE) break;
-      if (body[i]) break;
+// ---- spoil throw: ballistic planner ----
+const CLUMP_G = 196, CLUMP_LIFE = 4;
+/** Where a clump thrown from (sx,sy) with velocity (vx,vy) comes to rest: mirrors stepParticles (1 cell steps, first non-air cell stops it). */
+export function simulateClump(sx: number, sy: number, vx: number, vy: number): [number, number] {
+  let x = sx, y = sy;
+  const dt = 1 / 60;
+  for (let t = 0; t < CLUMP_LIFE; t += dt) {
+    vy += CLUMP_G * dt;
+    const nx = x + vx * dt, ny = y + vy * dt;
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y))));
+    let px0 = x | 0, py0 = y | 0;
+    for (let k = 1; k <= n; k++) {
+      const cx = (x + ((nx - x) * k) / n) | 0, cy = (y + ((ny - y) * k) / n) | 0;
+      if (!inb(cx, cy) || cy >= H - 2 || cx < 1 || cx >= W - 1) return [px0, 1e4];  // leaves the world
+      const c = idx(cx, cy);
+      if (mat[c] !== M.AIR || body[c]) return [px0, py0];
+      px0 = cx; py0 = cy;
     }
-    const behind = (ux > 0 ? 1 : -1) === -pl.face;
-    const elev = (Math.asin(-uy) * 180) / Math.PI;
-    const score = len + (behind ? 6 : 0) - Math.abs(elev - 35) / 20 - (elev > 70 ? 4 : 0); // prefer a ~35 deg toss; steep ones rain back on the player
-    if (score > best) { best = score; bx = ux * 30; by = uy * 30; }
+    x = nx; y = ny;
   }
-  return [bx, by];
+  return [x | 0, y | 0];
+}
+const openAir = (i: number) => mat[i] === M.AIR || mat[i] === M.NEEDLE;
+/** width of the air span in row y around x (capped) */
+function airSpan(x: number, y: number, cap: number): number {
+  if (!inb(x, y) || !openAir(idx(x, y))) return 0;
+  let a = 0, b = 0;
+  while (a < cap && inb(x - a - 1, y) && openAir(idx(x - a - 1, y))) a++;
+  while (b < cap && inb(x + b + 1, y) && openAir(idx(x + b + 1, y))) b++;
+  return a + b + 1;
+}
+/** true if nothing roofs cell (x,y) for 60 rows */
+export function skyOpen(x: number, y: number): boolean {
+  for (let k = 1; k <= 60; k++) { if (y - k < 0) return true; if (!openAir(idx(x, y - k))) return false; }
+  return true;
+}
+/** Row of the hole's rim when the hero stands in an open-topped pit/shaft (-1: no pit, or roofed over: a tunnel/cave). */
+function holeRim(): number {
+  const px = Math.round(pl.x), y0 = Math.round(pl.y) - 10;
+  if (!inb(px, y0) || !openAir(idx(px, y0))) return -1;
+  if (!skyOpen(px, y0 - PH + 10)) return -1;
+  if (airSpan(px, y0, 30) >= 45) return -1;
+  for (let r = y0; r > Math.max(2, y0 - 160); r--) if (airSpan(px, r, 30) >= 45) return r;
+  return Math.max(2, y0 - 160);
+}
+export interface ThrowPlan { ux: number; uy: number; sp: number; where: string; dist: number; }
+/** Choose a direction/speed whose spoil lands outside the hole, >= 20 cells away; deep shaft: out and up over the rim. Every candidate is
+ *  simulated for the toss scatter (speed +-12 %, angle +-4 %, spawn +-2 cells) and must pass for all of it. */
+export function planSpoil(sx: number, sy: number): ThrowPlan {
+  const rim = holeRim();
+  const px = pl.x;
+  let best: ThrowPlan | null = null, bestScore = -1e9, fb: ThrowPlan | null = null, fbScore = -1e9;
+  const speeds = [85, 105, 130, 160, 200, 250, 310];
+  for (const sp of speeds) {
+    if (best && bestScore > -sp * 0.06 + 6 && bestScore > -30) break; // a gentler speed already works
+    for (let a = 10; a <= 85; a += 5) for (const side of [-1, 1]) {
+      const rad = (a * Math.PI) / 180, ux = Math.cos(rad) * side, uy = -Math.sin(rad);
+      let minD = 1e9, pass = 0, n = 0, ld = 0, roofed = 0;
+      for (const f of [0.9, 1, 1.1]) for (const j of [-0.02, 0.02]) for (const ox of [-2, 2]) {
+        const [lx, ly] = simulateClump(sx + ox, sy, (ux + j) * sp * f, (uy + j) * sp * f - 25);
+        const d = Math.abs(lx - px);
+        n++;
+        if (ly >= 1e4 || (rim >= 0 && ly > rim + 3)) continue;           // left the world / down in the same pit
+        if (!skyOpen(lx, ly)) { if (rim >= 0 || d < 25) continue; roofed++; } // inside a tunnel/cave: acceptable only far from the hero
+        pass++;
+        if (d < minD) minD = d;
+        if (f === 1 && j > 0 && ox > 0) ld = d;
+      }
+      if (pass === 0 || minD < 8) continue;
+      const score = -sp * 0.06 - Math.abs(a - 40) * 0.05 - Math.max(0, minD - 70) * 0.05 - (roofed ? 40 : 0);
+      if (pass === n && minD >= 20) { if (score > bestScore) { bestScore = score; best = { ux, uy, sp, where: roofed ? 'cave' : 'out', dist: ld }; } }
+      else { const sc = pass / n * 100 + score; if (sc > fbScore) { fbScore = sc; fb = { ux, uy, sp, where: 'part', dist: ld }; } } // best partial: a deep, narrow shaft
+    }
+  }
+  if (best) return best;
+  if (fb) return fb;
+  // nothing clears the walls: straight up-and-out as hard as the arm goes
+  const a = (80 * Math.PI) / 180, side = -pl.face;
+  return { ux: Math.cos(a) * side, uy: -Math.sin(a), sp: 330, where: 'blind', dist: 0 };
 }
 export function throwLoad(ax: number, ay: number, auto: boolean) {
   if (tool.load < 1) return;
   const [sx, sy] = shoulder();
-  let dx = ax - sx, dy = ay - sy;
-  if (auto) [dx, dy] = openDirection(sx, sy); // toss where the air is most open (out of the tunnel, not back into the wall)
-  const L = Math.max(1, Math.hypot(dx, dy));
-  const sp = 95 + Math.min(60, L * 1.2);
+  let ux: number, uy: number, sp: number;
+  if (auto) { const p = planSpoil(sx, sy); ux = p.ux; uy = p.uy; sp = p.sp; }
+  else {
+    const dx = ax - sx, dy = ay - sy, L = Math.max(1, Math.hypot(dx, dy));
+    ux = dx / L; uy = dy / L; sp = 95 + Math.min(60, L * 1.2);
+  }
   const n = Math.round(tool.load);
   for (let k = 0; k < n; k++) {
-    const j = (Math.random() - 0.5) * 0.25;
-    const vx = (dx / L + j) * sp * (0.85 + Math.random() * 0.3);
-    const vy = (dy / L + j) * sp * (0.85 + Math.random() * 0.3) - 25;
-    spawn(PK.CLUMP, sx + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4, vx, vy, 4, 1, Math.max(120, Math.min(400, Math.round(tool.loadDens * 0.8))), 0);
+    const j = auto ? (Math.random() - 0.5) * 0.04 : (Math.random() - 0.5) * 0.25;
+    const vx = (ux + j) * sp * (auto ? 0.9 + Math.random() * 0.2 : 0.85 + Math.random() * 0.3);
+    const vy = (uy + j) * sp * (auto ? 0.9 + Math.random() * 0.2 : 0.85 + Math.random() * 0.3) - 25;
+    spawn(PK.CLUMP, sx + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4, vx, vy, CLUMP_LIFE, 1, Math.max(120, Math.min(400, Math.round(tool.loadDens * 0.8))), 0);
   }
-  tool.load = 0; tool.loadDens = 0;
+  tool.load = 0; tool.loadDens = 0; loadWarned = false;
   sfx?.throwSnow();
   pl.stamina -= 0.01;
 }
@@ -146,7 +207,7 @@ export function sawCheck(ax: number, ay: number): { ok: boolean; avg: number } {
 }
 function saw(ax: number, ay: number, dt: number) {
   if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
-  if (inv.blocks.length >= 4) { say('Больше 4 блоков не унести. Сложи их'); return; }
+  if (inv.blocks.length >= BLOCK_CAP) { say(`Больше ${BLOCK_CAP} блоков не унести. Сложи их`); return; }
   const { x0, y0, w, h } = blockRect(ax, ay);
   const pr = sawProbe(ax, ay);
   if (!pr.solid) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
@@ -165,23 +226,32 @@ function saw(ax: number, ay: number, dt: number) {
 }
 
 /** cells a snow block / beam would occupy at the aim */
+/** Beam shape from R: 0 = 1 m horizontal, 1 = 2 m horizontal (2 logs), 2 = 1 m vertical, 3 = 2 m vertical (2 logs). Blocks only alternate flat/upright. */
+export function beamShape() { const s = tool.rot & 3; return { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1 }; }
+const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
 export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
-  const vert = tool.rot % 2 === 1;
   let w: number, h: number;
-  if (kind === 'block') { w = vert ? 5 : 10; h = vert ? 10 : 5; } else { w = vert ? 4 : 20; h = vert ? 20 : 4; }
+  if (kind === 'block') { const vert = tool.rot % 2 === 1; w = vert ? 5 : 10; h = vert ? 10 : 5; }
+  else { const bs = beamShape(); w = bs.vert ? 4 : bs.len; h = bs.vert ? bs.len : 4; }
   const x0 = Math.round(ax - w / 2), y0 = Math.round(ay - h / 2);
   const cells: { x: number; y: number; m: number; d: number; b: number }[] = [];
   let blocked = false;
+  const why = new Map<string, number>();
+  const bump = (k: string) => why.set(k, (why.get(k) ?? 0) + 1);
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
-    if (!inb(x, y)) { blocked = true; continue; }
+    if (!inb(x, y)) { blocked = true; bump('край мира'); continue; }
     const i = idx(x, y);
-    if ((rigidAt(i) && !isGranular(i)) || body[i] || mat[i] === M.WATER) blocked = true; // water never turns into snow
+    if (body[i]) { blocked = true; bump('упавшее бревно'); }
+    else if (mat[i] === M.WATER) { blocked = true; bump(MAT_NAME[M.WATER]); } // water never turns into snow
+    else if (rigidAt(i) && !isGranular(i)) { blocked = true; bump(MAT_NAME[mat[i]] ?? 'твёрдое'); }
     cells.push({ x, y, m: kind === 'block' ? M.SNOW : M.PLANK, d: kind === 'block' ? (inv.blocks[inv.blocks.length - 1] ?? 300) : 500, b: kind === 'block' ? 170 : 0 });
   }
   // the player's own body
   const px0 = pl.x - 5, px1 = pl.x + 5, py0 = pl.y - PH, py1 = pl.y;
-  if (x0 < px1 && x0 + w > px0 && y0 < py1 && y0 + h > py0) blocked = true;
-  return { cells, blocked, x0, y0, w, h };
+  let reason = '';
+  if (x0 < px1 && x0 + w > px0 && y0 < py1 && y0 + h > py0) { blocked = true; reason = 'ты стоишь на этом месте — отойди'; }
+  else if (blocked) { let bk = '', bn = 0; for (const [k, n] of why) if (n > bn) { bn = n; bk = k; } reason = `${bk} (${Math.round((bn * 100) / (w * h))}% места)`; }
+  return { cells, blocked, x0, y0, w, h, reason };
 }
 let marginCache = { key: '', v: 1 };
 export function ghostMargin(kind: 'block' | 'beam', ax: number, ay: number) {
@@ -210,8 +280,14 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
   if (kind === 'block' && inv.blocks.length === 0) { say('Нет снежных блоков. Вырежи пилой из плотного наста'); sfx?.uiDeny(); return; }
   if (kind === 'beam' && inv.logs < 1) { say('Нет брёвен. Свали ель топором'); sfx?.uiDeny(); return; }
   const g = ghostCells(kind, ax, ay);
-  if (g.blocked) { say('Мешает: тут твёрдое или стоишь ты сам'); sfx?.uiDeny(); return; }
-  const vert = tool.rot % 2 === 1;
+  if (g.blocked) { say(`Мешает: ${g.reason}${kind === 'block' && !g.reason.startsWith('ты') ? '. Блок кладут на ровное место или на другой блок' : ''}`); sfx?.uiDeny(); return; }
+  const bs = beamShape();
+  const vert = bs.vert;
+  if (kind === 'beam' && inv.logs < bs.logs) { say(`Для бруса 2 м нужно ${bs.logs} бревна. R: сменить длину`); sfx?.uiDeny(); return; }
+  if (kind === 'beam') {
+    const mg = supportMargin(g.cells);
+    if (mg <= 0.02) { say('Повиснет и упадёт — нужна опора'); sfx?.uiDeny(); return; }
+  }
   const d = kind === 'block' ? inv.blocks.pop()! : 500;
   const bid = kind === 'beam' ? nextBeamId() : 0;
   for (const c of g.cells) {
@@ -223,7 +299,7 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
     if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST);
     else { set(c.x, c.y, M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
-  if (kind === 'beam') inv.logs--;
+  if (kind === 'beam') inv.logs -= bs.logs;
   tamp(g.x0, g.y0 + g.h, g.w);
   if (kind === 'beam') freshBeam(bid, g.x0, g.y0, g.x0 + g.w, g.y0 + g.h);
   sfx?.place(kind === 'beam');
@@ -377,14 +453,14 @@ export function placeFire(ax: number, ay: number) {
   if (inv.matches < 1) { say('Нет спичек'); sfx?.uiDeny(); return; }
   if (inv.logs < 1 || inv.branches < 2) { say('Для костра нужно 1 бревно и 2 хвороста'); sfx?.uiDeny(); return; }
   // settle onto the surface below the aim
-  // never hide the fire behind the player: aim close to the body -> push it out to 26 cells in the facing direction
-  let pushed = false;
-  if (Math.abs(ax - pl.x) < 16) { ax = pl.x + (Math.abs(ax - pl.x) > 2 ? Math.sign(ax - pl.x) : pl.face) * 26; ay = pl.y - 30; pushed = true; }
+  // exactly where aimed; only if the aim is inside the body (< 6 cells from the centre) step 8 cells along the facing direction
+  let shifted = false;
+  if (Math.abs(ax - pl.x) < 6) { ax = pl.x + (Math.abs(ax - pl.x) > 1 ? Math.sign(ax - pl.x) : pl.face) * 8; ay = Math.min(ay, pl.y - 2); shifted = true; }
   let x = Math.round(ax), y = Math.round(ay);
   if (!inb(x, y)) return;
+  if (shifted) for (let k = 0; k < 14 && y > 2 && mat[idx(x, y)] !== M.AIR && mat[idx(x, y)] !== M.NEEDLE; k++) y--; // the spot beside the body may be a step higher
   while (y < H - 2 && (mat[idx(x, y)] === M.AIR || mat[idx(x, y)] === M.NEEDLE)) y++;   // boughs are no ground
-  if (pushed) ay = y;
-  if (Math.abs(y - ay) > 30 || (!pushed && !inReach(x, y))) { say('Слишком далеко'); return; }
+  if (Math.abs(y - ay) > 30 || !inReach(x, y)) { say('Слишком далеко'); return; }
   inv.matches--; inv.logs--; inv.branches -= 2;
   G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++ });
   sfx?.ignite();
@@ -454,21 +530,45 @@ export function stepFires(dt: number) {
 }
 
 // ---------------- interact / eat ----------------
+const CRATE_REACH = 6;
+/** Snow cells on the best straight line from the hero (chest or feet) to the crate lid (left/middle/right); 0 = clear air path. */
+function snowToLid(c: { x: number; y: number; w: number }): number {
+  let best = 1e9;
+  const ys = [pl.y - 20, pl.y - 4];
+  for (const sy of ys) for (const tx of [c.x + 1, c.x + (c.w >> 1), c.x + c.w - 2]) {
+    const sx = pl.x;
+    const n = Math.max(1, Math.ceil(Math.hypot(tx - sx, c.y - 1 - sy)));
+    let sn = 0, last = -1;
+    for (let k = 0; k <= n; k++) {
+      const x = Math.round(sx + ((tx - sx) * k) / n), y = Math.round(sy + ((c.y - 1 - sy) * k) / n);
+      if (!inb(x, y)) continue;
+      const i = idx(x, y), key = y * W + x;
+      if (key === last) continue; last = key;
+      if (mat[i] === M.SNOW || mat[i] === M.ASH) sn++;
+      else if (mat[i] !== M.AIR && mat[i] !== M.NEEDLE && mat[i] !== M.CRATE && mat[i] !== M.POLE) sn += 2; // ground/ice in the way counts as digging too
+    }
+    if (sn < best) best = sn;
+  }
+  return best;
+}
 export function interact(): boolean {
   // fire nearby?
   // (if feeding is not possible, fall through to crates / loose logs; feedFire leaves its reason in tool.msg)
   tool.msg = '';
   for (const f of G.fires) if (Math.hypot(f.x - pl.x, f.y - pl.y) < 30 && feedFire(f)) return true;
-  // crate nearby (player body box within 14 cells of the crate box)?
+  // crate nearby (player body box within 6 cells of the crate box AND an air path to the lid)?
   let buried = -1; // cm of digging still needed to the nearest crate that is close but under snow
   for (const c of crates) {
     if (c.opened) continue;
     const dx = Math.max(c.x - (pl.x + 5), 0, (pl.x - 5) - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - PH) - (c.y + c.h));
-    if (!(dx < 14 && dy < 14)) {
+    if (dx <= CRATE_REACH && dy <= CRATE_REACH) {
+      const sn = snowToLid(c);
+      if (sn > 0) { const cm = Math.max(5, Math.round((sn * CELL * 100) / 5) * 5); if (buried < 0 || cm < buried) buried = cm; continue; }
+    }
+    if (!(dx <= CRATE_REACH && dy <= CRATE_REACH)) {
       if (dx < 20 && dy < 70 && pl.y < c.y) { // above the crate with snow between
-        let snow = false;
-        for (let y = Math.round(pl.y); y < c.y && !snow; y++) for (let x = Math.max(c.x, Math.round(pl.x) - 5); x < Math.min(c.x + c.w, Math.round(pl.x) + 6); x++) if (mat[idx(x, y)] === M.SNOW) { snow = true; break; }
-        if (snow) { const cm = Math.max(5, Math.round((dy - 13) * CELL * 100 / 5) * 5); if (buried < 0 || cm < buried) buried = cm; }
+        const sn = snowToLid(c);
+        if (sn > 0) { const cm = Math.max(5, Math.round((sn * CELL * 100) / 5) * 5); if (buried < 0 || cm < buried) buried = cm; }
       }
       continue;
     }
@@ -512,6 +612,7 @@ export function eat(): boolean {
 }
 
 // ---------------- dispatch ----------------
+let fireLatch = false;   // set by a fire click, released by idleTool (button up)
 export function usePrimary(ax: number, ay: number, dt: number) {
   tool.cool -= dt;
   const [x, y] = reachPoint(ax, ay);
@@ -523,7 +624,7 @@ export function usePrimary(ax: number, ay: number, dt: number) {
   else if (id === 'axe') chop(x, y);
   else if (id === 'beam') place('beam', x, y);
   else if (id === 'block') place('block', x, y);
-  else if (id === 'fire') { placeFire(x, y); tool.cool = 0.6; }
+  else if (id === 'fire') { if (fireLatch) return; fireLatch = true; placeFire(x, y); tool.cool = 0.6; } // one fire per press
 }
 export function useSecondary(ax: number, ay: number) {
   const [x, y] = reachPoint(ax, ay);
@@ -533,5 +634,5 @@ export function useSecondary(ax: number, ay: number) {
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);
 }
-export function idleTool(dt: number) { tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
+export function idleTool(dt: number) { fireLatch = false; tool.cool -= dt; tool.sawT = Math.max(0, tool.sawT - dt * 2); }
 export { CELL };

@@ -706,7 +706,9 @@ boot();
   act: (toolId: string, x: number, y: number, secondary = false, sec = 0.5) => {
     const k = TOOLS.findIndex((t) => t.id === toolId); if (k >= 0) tool.cur = k;
     if (secondary) { useSecondary(x, y); return; }
+    idleTool(0);
     for (let t = 0; t < sec; t += 1 / 60) usePrimary(x, y, 1 / 60);
+    idleTool(0);
   },
   rot: (r: number) => { tool.rot = r; },
   interact: () => interact(),

@@ -1,5 +1,6 @@
 // Player controller (cells, y down) + body heat balance.
-import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, CELL } from './world';
+import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, F_CAP, CELL } from './world';
+import { tool, inv } from './tools';
 import { G } from './state';
 import { tempAt, windAt, shelterAt } from './heat';
 import { spawn, PK } from './particles';
@@ -8,17 +9,61 @@ import { bodyAtIndex, impulseAt } from './phys';
 export const pl = {
   x: 600, y: 380, vx: 0, vy: 0, face: 1, onGround: false,
   sink: 0,          // 0..1 how deep in snow (fraction of height)
-  core: 37, food: 0.72, stamina: 1, wet: 0, snowOn: 0,
+  core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0,
   snowshoes: false, alive: true, cause: '', work: 0, walkPhase: 0, stepAcc: 0,
   feelT: -20, airT: -20, wind: 0, shelter: 0, shiver: 0, fireRad: 0,
   breathT: 0, lastStepDens: 100,
 };
 export const PW = 10, PH = 34;
+// heat balance tunables
+const LOSS_K = 4.3;       // W/K of (33 - feel) heat loss through the clothes (x wet factor)
+const SHIVER_ON = 36.6;   // core temperature where shivering starts
+const SHIVER_RAMP = 1.1;  // ... and reaches its maximum this many degrees lower
+const SHIVER_W = 240;     // W of extra heat at full shiver (costs food, slows stamina regeneration)
+const FOOD_K = 0.21;      // gauge scale (see stepBody)
+let hungerLvl = 2;
 
 function solid(x: number, y: number) {
   if (!inb(x, y)) return true;
   return blocksPlayer(idx(x, y));
 }
+
+/** Snow lying on boughs (flagged as a cap, or a snow stack whose bottom is needles): never blocks the hero, it slides off when he pushes through. */
+function boughSnow(i: number): boolean {
+  if (mat[i] !== M.SNOW) return false;
+  if (flags[i] & F_CAP) return true;
+  let j = i;
+  for (let k = 0; k < 14; k++) {
+    j += W; if (j >= W * H) return false;
+    const m = mat[j];
+    if (m === M.NEEDLE) return true;
+    if (m !== M.SNOW) return false;
+    if (flags[j] & F_CAP) return true;
+  }
+  return false;
+}
+const rigidSnowAt = (x: number, y: number) => { if (!inb(x, y)) return false; const i = idx(x, y); return mat[i] === M.SNOW && !isGranular(i) && !body[i]; };
+/** width of the rigid-snow run through (x,y) (capped at 7) */
+function runW(x: number, y: number): number {
+  let n = 1;
+  for (let k = 1; k <= 3 && rigidSnowAt(x - k, y); k++) n++;
+  for (let k = 1; k <= 3 && rigidSnowAt(x + k, y); k++) n++;
+  return n;
+}
+/** Turn snow in a rect granular (bond 0). all: every snow cell; otherwise only loose (<250 kg/m3) or thin (<= 2 wide) ones. Returns cells crumbled. */
+function crumble(x0: number, x1: number, y0: number, y1: number, all: boolean): number {
+  let n = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (!inb(x, y)) continue;
+    const i = idx(x, y);
+    if (mat[i] !== M.SNOW || body[i]) continue;
+    if (!all && !(isGranular(i) || dens[i] < 250 || runW(x, y) <= 2)) continue;
+    if (isGranular(i) && bond[i] === 0) continue;
+    bond[i] = 0; if (dens[i] > 400) dens[i] = 400; flags[i] |= F_DIST; wake(x, y); n++;
+  }
+  return n;
+}
+let stuckT = 0, pushT = 0, stuckMsgT = -99;
 
 /** bearing density: snow under the foot compacts until it reaches this (boots vs snowshoes) */
 const bearing = () => (pl.snowshoes ? 190 : 360);
@@ -96,22 +141,39 @@ export function stepPlayer(inp: MoveIn) {
   // ---- horizontal move with step-up ----
   let nx = pl.x + pl.vx * dt;
   const dirx = Math.sign(nx - pl.x);
+  const x00 = pl.x;
+  let blockedSnow = false;
+  if (dirx === 0) pushT = 0;
   if (dirx !== 0) {
     const lead = Math.round(nx + dirx * PW / 2 - (dirx > 0 ? 1 : 0));
     let blockedAt = -1;
     for (let y = Math.round(pl.y - PH); y < Math.round(pl.y); y++) {
       const i = inb(lead, y) ? idx(lead, y) : -1;
       if (i < 0) { blockedAt = y; break; }
-      if (blocksPlayer(i) && !isGranular(i)) { blockedAt = y; break; }
+      if (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)) { blockedAt = y; break; }
       if (body[i]) { blockedAt = y; break; }
     }
     if (blockedAt >= 0) {
       const stepH = Math.round(pl.y) - blockedAt;
       // can we step up?
       let free = stepH <= 7;
-      if (free) for (let y = Math.round(pl.y - PH - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y))) { free = false; break; }
-      if (free) { pl.y -= stepH; }
+      if (free) for (let y = Math.round(pl.y - PH - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y)) && !boughSnow(idx(lead, y))) { free = false; break; }
+      if (free) { pl.y -= stepH; pushT = 0; }
       else {
+        // a thin snow pillar (<= 2 cells wide) in the way gives way after 0.3 s of pushing
+        let thin = true, any = false;
+        for (let y = Math.round(pl.y - PH); y < Math.round(pl.y) - 1; y++) {
+          if (!inb(lead, y)) continue;
+          const i = idx(lead, y);
+          if (!blocksPlayer(i) || isGranular(i) || boughSnow(i)) continue;
+          any = true;
+          if (mat[i] !== M.SNOW || runW(lead, y) > 2) { thin = false; break; }
+        }
+        blockedSnow = any && mat[idx(lead, blockedAt)] === M.SNOW;
+        if (any && thin && Math.abs(inp.moveX) > 0.1) {
+          pushT += dt;
+          if (pushT > 0.3) { pushT = 0; crumble(lead - dirx * 2, lead + dirx * 2, Math.round(pl.y - PH), Math.round(pl.y) - 2, false); }
+        } else pushT = 0;
         // push rigid bodies
         const bi = inb(lead, blockedAt) ? idx(lead, blockedAt) : -1;
         if (bi >= 0 && body[bi]) { const rec = bodyAtIndex(bi); if (rec) impulseAt(rec, lead, blockedAt, dirx * 30 * dt * 60, 0); }
@@ -154,11 +216,33 @@ export function stepPlayer(inp: MoveIn) {
     const yA = Math.round(pl.y - PH), yB = Math.round(ny - PH);
     for (let y = yA; y >= yB; y--) {
       let hit = false;
-      for (let x = x0 + 1; x <= x1 - 1; x++) if (solid(x, y) && !isGranular(idx(x, y))) { hit = true; break; }
+      for (let x = x0 + 1; x <= x1 - 1; x++) if (solid(x, y) && !isGranular(idx(x, y)) && !boughSnow(idx(x, y))) { hit = true; break; }
       if (hit) { ny = y + 1 + PH; pl.vy = 0; break; }
     }
   }
   pl.y = Math.max(PH + 2, Math.min(H - 8, ny));
+  // snow on boughs that the body overlaps loses its grip and falls; rigid snow overlapping the body means he is buried
+  let buried = 0;
+  {
+    const yt = Math.round(pl.y - PH), yb = Math.round(pl.y) - 1;
+    for (let y = yt; y <= yb; y++) for (let x = x0; x <= x1; x++) {
+      if (!inb(x, y)) continue;
+      const i = idx(x, y);
+      if (mat[i] !== M.SNOW || body[i]) continue;
+      if (boughSnow(i)) { bond[i] = 0; if (dens[i] > 400) dens[i] = 400; flags[i] |= F_DIST; wake(x, y); }
+      else if (!isGranular(i) && y < yb - 1) buried++;
+    }
+  }
+  // stuck: pressing a direction without moving for > 1 s, or sitting inside rigid snow -> loose/thin snow round the body crumbles
+  const pressing = Math.abs(inp.moveX) > 0.1;
+  if ((pressing && Math.abs(pl.x - x00) < dt * 3) || buried > 3) stuckT += dt; else stuckT = Math.max(0, stuckT - dt * 2);
+  if (stuckT > 1) {
+    const yt = Math.round(pl.y - PH), yb = Math.round(pl.y) - 1;
+    const n = crumble(x0 - 2, x1 + 2, yt - 2, yb, false) + (buried > 3 ? crumble(x0 - 3, x1 + 3, yt - 1, yb - 1, true) : 0); // buried: also the 3-cell ring touching the body, whatever its density
+    if (buried > 3) pl.vy = Math.min(pl.vy, -30);
+    stuckT = buried > 3 ? 0.4 : -1;
+    if ((n > 0 || buried > 3 || blockedSnow) && G.realTime - stuckMsgT > 4) { stuckMsgT = G.realTime; tool.msg = 'Застрял — копай вокруг себя'; }
+  }
   // depth in snow: fraction of body height surrounded by snow on both sides
   let snowCells = 0;
   for (let y = Math.round(pl.y - PH); y < Math.round(pl.y); y += 2) {
@@ -181,7 +265,7 @@ export function stepPlayer(inp: MoveIn) {
   } else pl.walkPhase *= 0.9;
   // stamina
   if (run) pl.stamina -= dt * 0.07;
-  else pl.stamina += dt * (inp.working ? 0.0 : 0.09) * (pl.core < 35 ? 0.5 : 1) * (pl.food > 0.02 ? 1 : 0.3);
+  else pl.stamina += dt * (inp.working ? 0.0 : 0.09) * (pl.core < 35 ? 0.5 : 1) * (pl.food > 0.02 ? 1 : 0.3) * (1 - 0.5 * pl.shiver);
   pl.stamina = Math.max(0, Math.min(1, pl.stamina));
   G.player.x = pl.x; G.player.y = pl.y;
   pl.work = Math.max(0, pl.work - dt);
@@ -230,21 +314,25 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   pl.fireRad = rad;
   // metabolism (W)
   let met = 90;
-  if (moving > 0.1) met = running ? 380 : 220;
+  if (moving > 0.1) met = running ? 400 : 260;
   if (pl.work > 0) met += 330;
-  pl.shiver = pl.core < 36.6 && pl.food > 0.01 ? Math.min(1, (36.6 - pl.core) / 1.5) : 0;
-  met += pl.shiver * 200;
+  pl.shiver = pl.core < SHIVER_ON && pl.food > 0.01 ? Math.min(1, (SHIVER_ON - pl.core) / SHIVER_RAMP) : 0;
+  met += pl.shiver * SHIVER_W * (moving > 0.1 || pl.work > 0 ? 0.5 : 1); // exercise heat overlaps with shivering
   if (pl.food <= 0.001) met *= 0.6;
   // losses
   const insul = 1 + pl.wet * 1.4;
-  const loss = (33 - pl.feelT) * 4.3 * insul - rad;
+  const loss = (33 - pl.feelT) * LOSS_K * insul - rad;
   const net = met - loss;
   pl.core += (net * dtG) / 243000;
   pl.core = Math.min(37.4, pl.core);
-  if (pl.core > 37.05 && net > 0) pl.core -= (pl.core - 37) * 0.02 * dtG / 60; // thermoregulation (sweating cap)
+  if (pl.core > 37.05 && net > 0) pl.core -= (pl.core - 37) * 0.15 * dtG / 60; // thermoregulation (sweating cap)
   // calories: 1 kcal = 4184 J
-  pl.food -= (met * dtG) / 4184 / 2000;
+  // the bar is a rough fed/starving gauge, not literal kcal: FOOD_K stretches it so a normal day costs ~60 %; waiting (time compression) burns at the resting rate
+  pl.food -= (Math.min(met, G.timeScale > 2 ? 90 + pl.shiver * SHIVER_W * 0.5 : 9999) * dtG * FOOD_K) / 4184 / 2000;
   pl.food = Math.max(0, pl.food);
+  const hl = pl.food < 0.05 ? 0 : pl.food < 0.2 ? 1 : 2;
+  if (hl < hungerLvl) { hungerLvl = hl; tool.msg = (hl === 0 ? 'Голод почти убил тебя' : 'Голод: осталось 20% сытости') + (inv.food + inv.crackers > 0 ? '. Q: съесть' : '. Еды нет — ищи ящики под оранжевыми вешками'); }
+  else if (hl > hungerLvl && pl.food > 0.3) hungerLvl = hl;
   // snow on clothes melts when warm → wetness; dries near fire
   const warm = pl.airT > -1 || rad > 60;
   if (warm && pl.snowOn > 0) { const m = Math.min(pl.snowOn, dtReal * G.timeScale * 0.05); pl.snowOn -= m; pl.wet = Math.min(1, pl.wet + m * 0.9); }
@@ -257,5 +345,5 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
 export function die(cause: string) { if (!pl.alive) return; pl.alive = false; pl.cause = cause; }
 
 export function resetPlayer(x: number, y: number) {
-  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.72, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0 });
+  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0 }); stuckT = 0; pushT = 0; hungerLvl = 2;
 }

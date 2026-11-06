@@ -315,6 +315,9 @@ void main(){
     // enclosed air (cut pockets, caves): dim blue-grey, lit by the snow around it, never black. sv3 only darkens it, it keeps a floor
     vec3 bw = vec3(.52,.64,.84)*(1.+(hh-.5)*.06+(vn(wp*.15)-.5)*.2);
     float gloom = .40+.60*dot(sv3,vec3(.33));
+#ifdef HIQ
+    if(gloom<.98 && mAt(c+ivec2(0,3))!=0) gloom *= 1.22;                         // snow floor right below: bounce light, the pocket brightens toward its floor
+#endif
     vec3 inner = bw*(uAmb*gloom + pl*.9) + vec3(.020,.030,.052)*(1.-.6*uDay);
     col = inner;
     if(open>.004){ col = inner*(1.-open) + pl*.4*open; openA = open; }   // screen pass adds background*openA
@@ -727,7 +730,7 @@ void main(){
   }
 #endif
   col *= 1.-.3*smoothstep(.35,.75,length(sUV-.5));
-  col += (float(ihash(uvec2(gl_FragCoord.xy)))*(1./4294967296.)-.5)/255.;
+  col += (float(ihash(uvec2(gl_FragCoord.xy)))*(1./4294967296.) + float(ihash(uvec2(gl_FragCoord.xy)+uvec2(17u,91u)))*(1./4294967296.) - 1.)/255.;   // triangular dither (+-1 LSB): no banding in the sky gradient
   fragColor = vec4(col,1.);
 }`;
 const SF = { STORM: 1, DRIFT: 2, NIGHT: 4, XRAY: 8 };
