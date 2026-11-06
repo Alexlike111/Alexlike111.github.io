@@ -7,6 +7,7 @@ import {
 import { G } from './state';
 import { P, PK, spawn, kill } from './particles';
 import { tempAt, windAt, surf } from './heat';
+import { pnow, pend } from './prof';
 
 let frameStamp = 1;
 const pending = new Float32Array(W); // fresh snow (cells) waiting to be deposited per column (outside window)
@@ -235,7 +236,7 @@ function stepSlow(dtReal: number) {
 }
 
 // ---------- snowfall & wind ----------
-let flakeAcc = 0;
+let flakeAcc = 0, lowSkip = false;
 function stepWeather(dt: number) {
   const { x0, x1, y0 } = G.win;
   const gs = 60 * G.timeScale;
@@ -256,6 +257,7 @@ function stepWeather(dt: number) {
     flakeAcc -= 1;
     const r = Math.random();
     const layer = r < 0.62 ? 0 : r < 0.92 ? 1 : 2;
+    if (layer !== 0 && G.quality === 0 && (lowSkip = !lowSkip)) continue;           // quality 0: half of the (massless) decorative flakes
     const x = clampX(x0 - wind * 6 + Math.random() * (cols + Math.abs(wind) * 12));
     const fall = 14 + Math.random() * 14; // 0.7–1.4 m/s
     const fm = layer === 0 ? massPerFlake * 1.6 : 0;
@@ -424,10 +426,11 @@ export function stepParticles(dt: number) {
 
 /** dt: physics step (clamped by the caller); dtReal: wall-clock share of this step, used for weather and sintering/compaction so game time does not crawl on slow devices. */
 export function stepSim(dt: number, dtReal: number = dt) {
-  stepWeather(dtReal);
-  stepCA();
-  stepSlow(dtReal);
-  stepParticles(dt);
+  let t = pnow();
+  stepWeather(dtReal); pend('weather', t); t = pnow();
+  stepCA(); pend('ca', t); t = pnow();
+  stepSlow(dtReal); pend('slow', t); t = pnow();
+  stepParticles(dt); pend('particles', t);
 }
 
 export { rigidAt, isAirLike };

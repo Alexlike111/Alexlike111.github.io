@@ -12,6 +12,7 @@ import { Renderer } from './render';
 import { Input } from './input';
 import { UI, HudData } from './ui';
 import { Sound } from './audio';
+import { prof, pnow, pend } from './prof';
 
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
@@ -25,7 +26,8 @@ try { renderer = new Renderer(glCanvas); }
 catch (e) { const p = document.createElement('p'); p.style.cssText = 'color:#e8f0f6;background:#0c1420;font:16px system-ui;padding:24px;margin:0;min-height:100%'; p.textContent = 'Игра не смогла запустить графику: ' + ((e as Error).message || e) + '. Нужен браузер с WebGL2 (Chrome, Edge, Safari 15+, Firefox).'; document.body.replaceChildren(p); throw e; }
 
 G.mobile = input.mobile || matchMedia('(pointer: coarse)').matches;
-G.quality = G.mobile ? 0 : 1;
+// start low on phones and on software / old GPUs; the adaptive controller below walks dynamic resolution and quality from there
+G.quality = G.mobile || /swiftshader|llvmpipe|softpipe|software|mali-4|mali-t[0-7]|adreno \(tm\) [2-4]\d\d|powervr (sgx|ge8)/.test(renderer.gpu) ? 0 : 1;
 
 let running = false, paused = false, ended = false;
 let cssW = 0, cssH = 0, dpr = 1;
@@ -507,16 +509,45 @@ function drawOverlay(aim: [number, number] | null) {
   }
 }
 
+
+// ---------------- adaptive quality ----------------
+// Frame-time EMA drives (1) dynamic resolution of the screen pass (nearest upscale, UI stays crisp), (2) auto drop to quality 0.
+// The GPU headroom is invisible while vsync-locked, so resolution is raised again by probing: try a step up after a hold-off, undo and back off if it hurts.
+const AD = { avg: 16.7, n: 0, t: 0, hold: 0, probing: false, backoff: 4, lastDown: -99 };
+function adaptQuality(ms: number) {
+  if ((window as unknown as { __noAdapt?: boolean }).__noAdapt) return;
+  if (ms > 1000 || !running || paused) { AD.n = 0; return; }            // tab switch / title screen / pause: not representative
+  AD.avg += (ms - AD.avg) * 0.1; AD.t += ms / 1000; AD.n++;
+  if (AD.n < 20 || AD.t < 0.6) return;
+  AD.t = 0;
+  const dyn = renderer.getDyn(), lo = renderer.dynMin();
+  if (AD.avg > 22) {                                                      // under ~45 fps
+    AD.hold = 0;
+    if (AD.probing) { AD.probing = false; AD.backoff = Math.min(40, AD.backoff * 2); }
+    if (dyn > lo + 0.01) { renderer.setDyn(Math.max(lo, dyn * 0.85)); AD.lastDown = G.realTime; AD.n = 0; }
+    else if (G.quality === 1) { G.quality = 0; renderer.setDyn(1); resize(); AD.lastDown = G.realTime; AD.n = 0; }
+  } else if (dyn < 0.999) {
+    AD.hold += 0.6;
+    if (AD.probing && AD.hold > 1.8) { AD.probing = false; AD.backoff = Math.max(4, AD.backoff * 0.7); }
+    else if (!AD.probing && AD.hold > AD.backoff) { AD.probing = true; AD.hold = 0; renderer.setDyn(Math.min(1, dyn / 0.85)); AD.n = 0; }
+  }
+}
+
 // ---------------- main loop ----------------
-let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, lowFpsT = 0;
+let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60;
 let aimWorld: [number, number] | null = null;
 let waitToggle = false;
 function frame(now: number) {
   requestAnimationFrame(frame);
-  const realDt = Math.max(0, Math.min(0.25, (now - last) / 1000)); last = now; // wall clock: game time, survival, fires, weather
+  if ((window as unknown as { __freeze?: boolean }).__freeze) { renderer.render(0); return; }   // dev/test: hold the world still, keep rendering
+  const t0 = pnow();
+  const rawMs = now - last;
+  const realDt = Math.max(0, Math.min(0.25, rawMs / 1000)); last = now; // wall clock: game time, survival, fires, weather
   const dt = Math.min(0.05, realDt);                                          // physics / CA / bodies step (2 substeps when the frame is slow)
   fpsAcc += realDt; fpsN++;
-  if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; if (fps < 40 && G.quality === 1) { lowFpsT++; if (lowFpsT > 3) { G.quality = 0; resize(); } } else lowFpsT = 0; }
+  if (prof.on) prof.frameMs = prof.frameMs === undefined ? realDt * 1000 : prof.frameMs + (realDt * 1000 - prof.frameMs) * 0.1;
+  if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  adaptQuality(rawMs);
   const s = input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
@@ -530,7 +561,9 @@ function frame(now: number) {
   const canWait = pl.alive && Math.abs(s.moveX) < 0.1 && !s.primary;
   G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, realDt * 3);
   G.time += realDt * G.timeScale;
+  let pt = pnow();
   const { day, warn } = weather(realDt);
+  pend('weatherMain', pt);
   // aim
   if (s.hasAim) aimWorld = renderer.screenToWorld(s.aimX, s.aimY);
   // tools
@@ -538,6 +571,7 @@ function frame(now: number) {
   if (s.rotatePressed) { tool.rot++; sound.uiClick(); }
   if (s.xrayPressed) { G.xray = (G.xray + 1) % 4; (ui as any).setXray?.(G.xray); }
   let working = false;
+  pt = pnow();
   if (pl.alive) {
     if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], realDt); working = true; if (tutorial === 0 && tool.load > 0) tutorial = 1; }
     else idleTool(realDt);
@@ -546,20 +580,28 @@ function frame(now: number) {
     if (s.eatPressed) eat();
     if (s.firePressed && aimWorld) placeFire(aimWorld[0], aimWorld[1]);
   }
+  pend('tools', pt); pt = pnow();
   stepBody(realDt, Math.abs(s.moveX), s.run); // survival runs on wall-clock time
   updateCamera(realDt);
+  pend('survival', pt);
   stepFires(realDt);
-  stepHeat(realDt);
+  pt = pnow();
+  stepHeat(realDt); pend('heat', pt);
   const nSub = realDt > 0.05 ? 2 : 1;
   for (let sub = 0; sub < nSub; sub++) {
+    pt = pnow();
     stepPlayer({ moveX: s.moveX, jump: s.jump, run: s.run, working, dt });
     for (const st of events.steps) sound.footstep(st.dens, tempAt(pl.x | 0, pl.y | 0), st.run, st.sink);
     if (events.landed > 120) { sound.thump(80); shake = 1; }
+    pend('player', pt);
     stepSim(dt, realDt / nSub);
+    pt = pnow();
     const br = stepBodies(dt);
     for (const im of br.impacts) { if (im.massKg > 20 && Math.abs(im.x - pl.x) < 300) { sound.thump(im.massKg); shake = Math.min(3, shake + im.massKg / 200); } }
+    pend('bodies', pt); pt = pnow();
     const sr = stepStructure(dt);
     if (sr.collapsed > 30) { sound.collapse(Math.min(1, sr.collapsed / 400)); shake = Math.min(3, shake + 0.8); }
+    pend('structure', pt);
   }
   shake *= Math.pow(0.02, realDt);
   // falling slab / log hitting the player
@@ -569,7 +611,9 @@ function frame(now: number) {
   for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 11, r: 240, power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
   // audio ambient
   let fireNear = 0; for (const f of G.fires) if (f.lit) fireNear = Math.max(fireNear, 1 - Math.hypot(f.x - pl.x, f.y - pl.y) / 200);
+  pt = pnow();
   sound.update({ wind: Math.abs(pl.wind), exposure: 1 - pl.shelter, storm: G.storm, fire: Math.max(0, fireNear), airTemp: pl.airT, night: 1 - G.daylight, coreTemp: pl.core }, dt);
+  pend('audio', pt);
   // dawn bonus / win
   const nightsSurvived = Math.floor((G.time - 9 * 60 + 15 * 60) / 1440); // count of 08:30 crossings approx
   if (G.time >= 3 * 1440 + 8.5 * 60 && !ended && pl.alive) { ended = true; sound.dawn(); ui.showEnd(true, '', { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }); }
@@ -587,10 +631,15 @@ function frame(now: number) {
     inv: { logs: inv.logs, branches: inv.branches, matches: inv.matches, food: inv.food + inv.crackers, blocks: inv.blocks.length, snowshoes: inv.snowshoes, thermos: inv.thermos },
     hint: hint(), shovelLoad: Math.min(1, tool.load / 46), waiting: G.timeScale > 2,
   };
+  pt = pnow();
   ui.update(h);
   input.endFrame();
+  pend('hud', pt); pt = pnow();
   renderer.render(dt);
+  pend('render', pt); pt = pnow();
   drawOverlay(aimWorld);
+  pend('overlay', pt);
+  if (prof.on) pend('frameJS', t0);
 }
 
 ui.onSound = (on) => { sound.init(); sound.setMuted(!on); };
@@ -606,6 +655,7 @@ async function boot() {
   try { await setEngine('rapier'); } catch (e) { console.warn('Rapier failed, using planck', e); }
   newGame();
   requestAnimationFrame(frame);
+  setTimeout(() => { try { renderer.prewarm(); } catch (e) { console.warn('shader prewarm', e); } }, 400);
   ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); });
 }
 boot();
@@ -628,7 +678,7 @@ boot();
   rot: (r: number) => { tool.rot = r; },
   interact: () => interact(),
   eat: () => eat(),
-  fps: () => fps,
+  fps: () => fps, prof, dyn: () => renderer.getDyn(),
   sawCheck, tutorial: () => tutorial,
 };
 void PW; void dens; void bond;

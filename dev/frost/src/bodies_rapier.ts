@@ -502,11 +502,14 @@ function updateColliders(): void {
 }
 
 // ---------------------------------------------------------------- main step
+const impactsBuf: { x: number; y: number; massKg: number; speed: number }[] = [];   // reused every call (the caller consumes it immediately)
+const outOfWorldBuf: BodyRec[] = [], settledBuf: BodyRec[] = [];
+const retObj = { impacts: impactsBuf };
 export function stepBodies(dt: number): { impacts: { x: number; y: number; massKg: number; speed: number }[] } {
-  const impacts: { x: number; y: number; massKg: number; speed: number }[] = [];
+  const impacts = impactsBuf; impacts.length = 0;
   if (!pw) initBodies();
   clock += dt;
-  if (bodies.size === 0) { updateColliders(); return { impacts }; }
+  if (bodies.size === 0) { updateColliders(); return retObj; }
   updateColliders();
 
   acc = Math.min(acc + dt, FIXED * 4);
@@ -541,7 +544,7 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   }
   shatterQ.clear();
 
-  const outOfWorld: BodyRec[] = [], settled: BodyRec[] = [];
+  const outOfWorld = outOfWorldBuf, settled = settledBuf; outOfWorld.length = 0; settled.length = 0;
   for (const r of bodies.values()) {
     const p = r.b.getPosition();
     if (p.y > H * CELL + 10 || p.x < -10 || p.x > W * CELL + 10) { outOfWorld.push(r); continue; }
@@ -554,5 +557,5 @@ export function stepBodies(dt: number): { impacts: { x: number; y: number; massK
   }
   for (const r of outOfWorld) removeBody(r, false);
   for (const r of settled) removeBody(r, true);
-  return { impacts };
+  return retObj;
 }

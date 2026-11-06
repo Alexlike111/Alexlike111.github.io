@@ -3,6 +3,7 @@
 // Everything runs per REAL second (the game clock is 60x faster; constants are tuned for that).
 import { W, H, HS, HW, HH, M, mat, dens, bond, flags, idx, inb, set, groundY, noise1 } from './world';
 import { G } from './state';
+import { pnow, pend } from './prof';
 
 export const T = new Float32Array(HW * HH);    // temperature per heat cell
 export const WND = new Float32Array(HW * HH);  // local horizontal wind, m/s (+ toward +x)
@@ -94,7 +95,7 @@ export function initHeat() {
 }
 
 // ---------------- window ----------------
-let hx0 = 0, hx1 = 0, hy0 = 0, hy1 = 0, prevValid = false, tick = 0, dtAvg = 1 / 60;
+let hx0 = 0, hx1 = 0, hy0 = 0, hy1 = 0, prevValid = false, tick = 0, dtAvg = 1 / 60, hAcc = 0;
 const meltAcc = new Float32Array(HW * HH);
 
 function updateWindow() {
@@ -190,20 +191,28 @@ export function stepHeat(dt: number) {
   const w = G.win;
   if (w.x1 <= w.x0 || w.y1 <= w.y0) return;
   dt = Math.min(dt, 0.25);
+  // fast frames (>= ~50 fps): integrate at ~30 Hz with the accumulated dt instead of every frame (heat is slow; same physics, half the CPU)
+  hAcc += dt;
+  if (hAcc < 0.025 && prevValid) return;
+  dt = Math.min(hAcc, 0.25); hAcc = 0;
   tick++; dtAvg += (dt - dtAvg) * 0.2;
   updateWindow();
   const amb = G.ambientT;
 
+  let pt = pnow();
   // staggered: surface scan (a quarter of the columns), composition + phase change (a quarter of the rows)
   // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
   for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
   for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) { compose(hx, hy); }
+  pend('hCompose', pt); pt = pnow();
   if ((tick & 1) === 0) windPass();
+  pend('hWind', pt); pt = pnow();
   for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) {
     const h = hy * HW + hx;
     if ((nSnow[h] > 0 && T[h] > 0) || nWat[h] > 0) phase(hx, hy, dtRow);
   }
+  pend('hPhase', pt); pt = pnow();
 
   // sources
   for (const f of G.fires) {
@@ -259,6 +268,7 @@ export function stepHeat(dt: number) {
       }
     }
   }
+  pend('hCond', pt);
   // boundary: open air at the window edge and the top rows is ambient
   for (let hx = hx0; hx <= hx1; hx++) for (let hy = hy0; hy <= hy0 + 1; hy++) { const h = hy * HW + hx; if (nSol[h] < 8) T[h] = amb; }
   for (let hy = hy0; hy <= hy1; hy++) { let h = hy * HW + hx0; if (nSol[h] < 8) T[h] = amb; h = hy * HW + hx1; if (nSol[h] < 8) T[h] = amb; }
