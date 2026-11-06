@@ -4,7 +4,7 @@
 // The lake reuses the ice-filled hollow that generate() carves (LAKE_A..LAKE_B): its lower part becomes WATER under a 20-40 cm ice lid.
 // Sites are placed on the ground generate() made: each stamp levels its own pad (fill or carve up to one floor row) and updates
 // groundY there, so heat / events keep reading the right ground line. The start area (START_X +- 150) is never touched.
-import { W, H, M, mat, treeId, beamId, groundY, crates, putCell, nextBeamId, F_VERT, F_BOULDER, idx } from './world';
+import { W, H, M, mat, flags, treeId, beamId, groundY, crates, putCell, nextBeamId, F_VERT, F_BOULDER, idx } from './world';
 
 export type LocationKind = 'station' | 'lake' | 'grotto' | 'wreck' | 'tower' | 'spring';
 export interface Pt { x: number; y: number }
@@ -66,9 +66,12 @@ function levelGround(x0: number, x1: number, F: number): void {
     groundY[x] = F;
   }
 }
-/** Remove all snow in columns x0..x1 above row yEnd (the pad is rebuilt from here). */
-function clearSnow(x0: number, x1: number, yEnd: number): void {
-  for (let x = x0; x <= x1; x++) for (let y = 0; y < yEnd; y++) if (mat[idx(x, y)] === M.SNOW) putCell(x, y, M.AIR, 0, 0, 0);
+/** Remove the loose stuff above row yEnd in columns x0..x1: snow and the boulders generate() dropped there (the pad is rebuilt from here). */
+function clearLoose(x0: number, x1: number, yEnd: number): void {
+  for (let x = x0; x <= x1; x++) for (let y = 0; y < yEnd; y++) {
+    const i = idx(x, y);
+    if (mat[i] === M.SNOW || (mat[i] === M.ROCK && (flags[i] & F_BOULDER) !== 0)) putCell(x, y, M.AIR, 0, 0, 0);
+  }
 }
 /** A buried supply-style crate (16 x 11 cells, top-left at x, y). Returns the centre of its lid. */
 function crate(x: number, y: number, loot: string[]): Pt {
@@ -106,7 +109,7 @@ function stampSpring(r: () => number): void {
   const PAD0 = C - HW - 14, PAD1 = C + HW + 14;
   const F = median(C - HW, C + HW);
   levelGround(PAD0, PAD1, F);
-  clearSnow(PAD0, PAD1, F);
+  clearLoose(PAD0, PAD1, F);
   const WL = F + 3;                                                 // water surface
   for (let x = C - HW; x <= C + HW; x++) {
     const u = (x - C) / HW;
@@ -130,7 +133,7 @@ function stampTower(): void {
   const X = TOWER_X;
   const F = median(X - 14, X + 14);
   levelGround(X - 16, X + 16, F);
-  clearSnow(X - 16, X + 16, F);
+  clearLoose(X - 16, X + 16, F);
   const TOP = F - 150;                                              // platform rows [TOP, TOP + 3)
   for (let y = TOP + 3; y < F; y++) for (const x of [X - 9, X - 8, X - 7, X + 7, X + 8, X + 9]) put(x, y, M.POLE, 0, 0, F_VERT);
   const id = nextBeamId();
@@ -185,7 +188,7 @@ function stampStation(r: () => number): void {
   const PAD0 = HX - 18, PAD1 = HX + HW + 30;
   const F = median(HX, HX + HW - 1);                                // floor row
   levelGround(PAD0, PAD1, F);
-  clearSnow(PAD0, PAD1, F);
+  clearLoose(PAD0, PAD1, F);
   const roofTop = F - 42, S = F - 48;                               // roof rows; snow surface 6 cells above the roof
   const id = nextBeamId();
   // shell: planked walls and a two-row roof; the interior is open air
@@ -208,8 +211,11 @@ function stampStation(r: () => number): void {
   // snow over the roof and the sides (the pit and the posts are cut out afterwards)
   for (let x = PAD0; x <= PAD1; x++) {
     if (x >= PIT0 && x <= PIT1) continue;
-    const yEnd = x >= HX && x < HX + HW ? roofTop : F;
-    for (let y = S; y < yEnd; y++) if (mat[idx(x, y)] === M.AIR) snowCell(x, y, y - S, r);
+    // over the hut: level snow up to the roof; east of it a 45-degree ramp of snow down to the ground (no wall)
+    const inHut = x >= HX && x < HX + HW;
+    const t0 = inHut ? S : Math.min(F, S + Math.max(0, x - (HX + HW)));
+    const yEnd = inHut ? roofTop : F;
+    for (let y = t0; y < yEnd; y++) if (mat[idx(x, y)] === M.AIR) snowCell(x, y, y - t0, r);
   }
   // radio mast: through the roof and the snow, 2 m above the surface, orange crossbar at its top
   for (let x = HX + 17; x <= HX + 18; x++) for (let y = S - 40; y < F - 21; y++) put(x, y, M.POLE, 0, 0, F_VERT);
@@ -243,7 +249,7 @@ function stampWreck(r: () => number): void {
   const PAD0 = X0 - 10, PAD1 = X0 + L + 24;
   const F = median(X0, X0 + L);
   levelGround(PAD0, PAD1, F);
-  clearSnow(PAD0, PAD1, F);
+  clearLoose(PAD0, PAD1, F);
   const TOP = F - 12;
   for (let x = X0; x < X0 + L; x++) for (let y = TOP; y < F; y++) {
     const hollow = x >= X0 + 3 && x < X0 + L - 4 && y >= TOP + 2 && y < F - 1;

@@ -17,11 +17,11 @@
 //             The first such episode that ends (storm < 0.3) makes ONE roll at 35%; on success a release is
 //             queued 1-5 game h later. One roll per game, at most one slab. At the release time all of these must hold, else it is dropped:
 //             hero not sheltered, timeScale <= 2, a slope >= 0.6 (31 deg) over 1 m with >= 0.5 m snow,
-//             5-45 m from the hero, and the hero not inside the 30 m runout below the slab.
+//             8-45 m from the hero, and the hero not inside the 30 m runout below the slab.
 //             Warning: "Снег трещит", three crack cues over 1.2 s; the slab is released 3.5 real s later.
 //  WOLVES     Each night (20:00-05:00) plans 0-2 howls (60% each, >= 90 game min apart). A howl is skipped
 //             while G.storm >= 0.4. Cue only, no combat. Tracks (10-14 prints, 30-70 m away) appear at 07:00
-//             next morning, stay full for 2 h and fade out by 09:00 + 6 h.
+//             next morning, are full until 09:00 and gone by 15:00.
 //  WHITEOUT   Continuous. level = smoothstep(storm 0.25..0.8) * (0.45 + 0.55 * burst). A burst (40-120 real s,
 //             peak 0.6-1) starts every 150-300 real s while storm >= 0.5. visibility = max(0.12, 1 - 0.88 * level).
 //             Toast once per storm when level > 0.75 (marker poles and the compass help).
@@ -691,10 +691,12 @@ export function stepEvents(dt: number, gameDtMinutes: number, ctx: EventCtx): vo
     s.episode = true;
   } else if (s.episode && ctx.G.storm < 0.3) {
     s.episode = false;
-    if (!s.avalancheRolled && s.rng() < 0.35) {
-      s.avalancheRolled = true;
-      s.avalancheArmed = true;
-      s.gameQ.push({ at: now + 60 + s.rng() * 240, run: (c) => { s.avalancheArmed = false; tryAvalanche(core(), c); } });
+    if (!s.avalancheRolled) {
+      s.avalancheRolled = true;                       // the one roll of the game, win or lose
+      if (s.rng() < 0.35) {
+        s.avalancheArmed = true;
+        s.gameQ.push({ at: now + 60 + s.rng() * 240, run: (c) => { s.avalancheArmed = false; tryAvalanche(core(), c); } });
+      }
     }
   }
 

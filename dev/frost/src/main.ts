@@ -438,17 +438,10 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   const shY = -24 + spBob + spDrop, shX = vf * 0.5;
   const swingB = pl.alive ? Math.sin(ph + Math.PI) * 0.6 * amt : 0.15;
   const armL = 9;
-  {
-    let a = Math.PI / 2 + (pl.alive ? swingB * vf : 0.5 * vf * kneel + 0.6 * vf * slump);
+  if (!holdBlock) {     // the free arm hangs; with a block held, both hands are drawn after the tool (see below)
+    const a = Math.PI / 2 + (pl.alive ? swingB * vf : 0.5 * vf * kneel + 0.6 * vf * slump);
     const sxp = -vf * 3 + (spLean ? vf * Math.round(spLean * 0.5) : 0);
-    let reach = armL * 0.95;
-    if (holdBlock) {
-      // the far hand reaches under the block: its lower edge sits 6.5 cells below the near hand, across the forearm
-      const ba = vf > 0 ? 0.55 : Math.PI - 0.55, bx = Math.cos(ba), by = Math.sin(ba);
-      const tx = shX + bx * armL - by * vf * 6.5, ty = shY + by * armL + bx * vf * 6.5;
-      a = Math.atan2(ty - shY, tx - sxp); reach = armL * 1.12;
-    }
-    const hx = sxp + Math.cos(a) * reach, hy = shY + Math.sin(a) * reach;
+    const hx = sxp + Math.cos(a) * armL * 0.95, hy = shY + Math.sin(a) * armL * 0.95;
     spLine(sxp, shY, hx, hy, 3, lc(PAL.parkaSh));
     spLine(hx, hy, hx + Math.cos(a) * 3, hy + Math.sin(a) * 3, 3, lc(PAL.mitt));
   }
@@ -549,6 +542,14 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     // mitten over the grip
     spLine(hx - dx * 2, hy - dy * 2, hx + dx * 1, hy + dy * 1, 3, lc(PAL.mitt));
     spPut(Math.round(hx - dx * 2 - dy), Math.round(hy - dy * 2 + dx), lc(PAL.mittHi));
+    if (holdBlock) {
+      // block in both hands: the near hand grips its top edge, the free arm comes across from the far shoulder to its lower edge
+      const px = -dy * flipY, py = dx * flipY, sxF = -vf * 3 + (spLean ? vf * Math.round(spLean * 0.5) : 0);
+      const nx = hx - px * 5, ny = hy - py * 5, fx = hx + px * 5, fy = hy + py * 5;
+      spLine(sxF, shY, fx, fy, 3, lc(PAL.parkaSh));
+      spLine(nx - dx * 1.5, ny - dy * 1.5, nx + dx * 1.5, ny + dy * 1.5, 3, lc(PAL.mitt));
+      spLine(fx - dx * 1.5, fy - dy * 1.5, fx + dx * 1.5, fy + dy * 1.5, 3, lc(PAL.mitt));
+    }
   } else {
     const a = Math.PI / 2 - vf * (0.2 + 0.9 * slump);
     const sxp = vf * 1 + vf * Math.round(spLean * 0.6), sy = shY;
@@ -1290,5 +1291,7 @@ boot();
   benchReport: () => { const r = bench.last(); return r ? makeReport(r) : ''; },
   sawCheck, tutorial: () => tutorial,
   spoil: () => spoilInFlight(), pendingSnow: () => pendingTotal(), P, FORCE,
+  aimDig: (x: number, y: number, mv = 0) => { const t = aimTarget(x, y, mv); return { tx: t.tx, ty: t.ty, ok: t.ok, far: t.far, reason: t.reason, snapped: t.snapped, n: t.tiles.length, time: +t.time.toFixed(3), key: t.key }; },
+  digState: () => ({ key: DIG.key, p: DIG.p }),
 };
 void PW; void dens; void bond;
