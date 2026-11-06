@@ -22,7 +22,7 @@ const sound = new Sound();
 bindSound(sound);
 let renderer: Renderer;
 try { renderer = new Renderer(glCanvas); }
-catch (e) { document.body.innerHTML = '<p style="color:#e8f0f6;font:16px system-ui;padding:24px">Нужен браузер с WebGL2 (Chrome, Edge, Safari 15+, Firefox).</p>'; throw e; }
+catch (e) { const p = document.createElement('p'); p.style.cssText = 'color:#e8f0f6;background:#0c1420;font:16px system-ui;padding:24px;margin:0;min-height:100%'; p.textContent = 'Игра не смогла запустить графику: ' + ((e as Error).message || e) + '. Нужен браузер с WebGL2 (Chrome, Edge, Safari 15+, Firefox).'; document.body.replaceChildren(p); throw e; }
 
 G.mobile = input.mobile || matchMedia('(pointer: coarse)').matches;
 G.quality = G.mobile ? 0 : 1;
@@ -208,6 +208,9 @@ function frame(now: number) {
   const s = input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   if (!running || paused) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
+  if (ended) { // after win/death: world keeps living in the background but ignores game input
+    G.realTime += dt; G.frame++; updateCamera(dt); stepHeat(dt); stepSim(dt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
+  }
   G.realTime += dt; G.frame++;
   // waiting (time compression) only when calm: not moving, sheltered or by a fire
   if (s.waitHeld !== waitToggle) waitToggle = s.waitHeld;
@@ -254,7 +257,7 @@ function frame(now: number) {
   sound.update({ wind: Math.abs(pl.wind), exposure: 1 - pl.shelter, storm: G.storm, fire: Math.max(0, fireNear), airTemp: pl.airT, night: 1 - G.daylight, coreTemp: pl.core }, dt);
   // dawn bonus / win
   const nightsSurvived = Math.floor((G.time - 9 * 60 + 15 * 60) / 1440); // count of 08:30 crossings approx
-  if (G.time >= 3 * 1440 + 8.5 * 60 && !ended && pl.alive) { ended = true; sound.dawn(); ui.showEnd(true, '', { days: 4, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }); }
+  if (G.time >= 3 * 1440 + 8.5 * 60 && !ended && pl.alive) { ended = true; sound.dawn(); ui.showEnd(true, '', { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }); }
   if (!pl.alive && !ended) { ended = true; sound.death(); setTimeout(() => ui.showEnd(false, pl.cause, { days: day, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); }), 1400); }
   void nightsSurvived;
   hintT -= dt;
@@ -288,7 +291,7 @@ const labelEngine = () => { engBtn.textContent = 'Физика: ' + (engine === 
 async function toggleEngine() { await setEngine(engine === 'rapier' ? 'planck' : 'rapier'); labelEngine(); ui.toast('Движок физики: ' + (engine === 'rapier' ? 'Rapier 2D (wasm)' : 'planck.js'), 'info'); }
 engBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleEngine(); });
 physChip.querySelector('#phys-stress')!.addEventListener('click', (e) => { e.stopPropagation(); const n = spawnStressTest(40, pl.x, pl.y - 140); ui.toast(`Сброшено ${n} брёвен и пластов`, 'info'); });
-window.addEventListener('keydown', (e) => { if (e.code === 'KeyP') toggleEngine(); if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
+window.addEventListener('keydown', (e) => { if (e.repeat || !running || ended) return; if (e.code === 'KeyP') toggleEngine(); if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
 setInterval(() => { fpsSpan.textContent = `${Math.round(fps)} к/с · тел ${allBodies().size}`; }, 500);
 
 async function boot() {

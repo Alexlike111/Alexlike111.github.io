@@ -183,7 +183,7 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
       float x = sUV.x*asp*2.2 + uCam.x*.0005;
       float band = .32 + .1*sin(x*1.7+uTime*.07) + .05*sin(x*4.1-uTime*.11);
       float wd = .07+.05*vn(vec2(x*2.,uTime*.05));
-      float inten = exp(-pow((sUV.y-band)/wd,2.));
+      float auU = (sUV.y-band)/wd; float inten = exp(-auU*auU);
       float curtain = vn(vec2(x*5.+uTime*.1, sUV.y*3.));
       vec3 ac = mix(vec3(.15,1.,.55), vec3(.6,.25,.95), smoothstep(0.,.15,band-sUV.y));
       sky += ac*inten*curtain*.35*clamp((nightClear-.3)/.7,0.,1.);

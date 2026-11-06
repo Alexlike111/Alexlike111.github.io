@@ -1,7 +1,7 @@
 // World grid: 5 cm cells, y grows downward.
 export const CELL = 0.05; // m
 export const W = 2400;
-export const H = 600;
+export const H = 608;
 export const CH = 32; // chunk size (cells)
 export const CW = W / CH;
 export const CHH = H / CH;

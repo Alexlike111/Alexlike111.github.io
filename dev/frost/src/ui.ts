@@ -473,7 +473,7 @@ export class UI {
       this.clockIcon.innerHTML = ico(h.night ? 'moon' : 'sun');
       this.root.classList.toggle('is-night', h.night);
     });
-    const waiting = h.waiting || inp.state.waitHeld;
+    const waiting = h.waiting;
     this.m('wait', waiting, () => {
       this.clockWait.classList.toggle('on', waiting);
       this.btnWait?.classList.toggle('on', waiting);
