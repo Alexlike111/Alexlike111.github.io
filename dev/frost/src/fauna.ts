@@ -234,7 +234,7 @@ function think(a: Animal, dt: number, hero: FaunaHero) {
   const dh = Math.sqrt(ddx * ddx + ddy * ddy);
   if (hideAll) {                                                 // night or storm: burrow into the snow under the trees
     if (a.state !== ST_HIDE && a.state !== ST_GOHIDE) { a.state = ST_GOHIDE; a.tx = a.home + (rnd() * 2 - 1) * 40; }
-    if (a.state === ST_GOHIDE) { if (walkTo(a, dt, 12, 2)) a.state = ST_HIDE; }
+    if (a.state === ST_GOHIDE) { if (walkTo(a, dt, 25, 2)) a.state = ST_HIDE; }   // hurries to a burrow (~1.2 m/s)
     a.z = 0;
     return;
   }
