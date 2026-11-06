@@ -896,6 +896,21 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .end .built-wrap { flex-direction: row; justify-content: center; margin-bottom: 0.7em; gap: 0.7em; }
   .end .btn-primary { padding-top: 0.8em; padding-bottom: 0.8em; }
 }
+/* narrowest phones (667 px and below): shave another few percent off the HUD */
+@media (max-height: 460px) and (max-width: 700px) {
+  :root { --wl: 236px; --wr: 160px; }
+  .thermo-body { height: 92px; }
+  .gauge, .gauge + .gauge { width: 42px; height: 38px; padding: 4px 4px; }
+  .g-val { font-size: 10.5px; }
+  .dial { width: 58px; }
+  .actions { grid-template-columns: repeat(2, 54px); grid-auto-rows: 44px; gap: 3px; }
+  .abtn .ico { width: 17px; height: 17px; }
+  .abtn span { font-size: 10px; }
+  [data-input='touch'] .tag { width: 40px; min-height: 42px; }
+  [data-input='touch'] .belt { gap: 2px; }
+  .warn-line, .hint, .toast { font-size: 10.5px; }
+  .stick:not(.active) { --R: 40px; }
+}
 @media (max-width: 760px) {
   .chip { padding: 0.28em 0.5em; }
 }

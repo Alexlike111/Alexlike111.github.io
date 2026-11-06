@@ -494,7 +494,7 @@ export class UI {
       ['take', 'Взять', 'take', () => this.input.press('interact')],
       ['eat', 'Съесть', 'eat', () => this.input.press('eat')],
       ['wait', 'Ждать', 'wait', () => this.input.toggleWait()],
-      ['rotate', 'Повернуть', 'rotate', () => this.input.press('rotate' as InputButton)],
+      ['rotate', 'Поворот', 'rotate', () => this.input.press('rotate' as InputButton)],
       ['xray', 'Рентген', 'xray', () => this.input.press('xray')],
     ];
     for (const [id, label, icon, fn] of defs) {
