@@ -172,9 +172,12 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
       }
     }
 #endif
-    if((fl&16)!=0 && depth<2.6){                                           // sastrugi: wind ripples along the surface
+    if(depth<2.6){                                                         // wind ripples / sastrugi along the surface: strong on wind slab, a whisper on plain slopes
       float rp = sin(cf.x*.62 + vn(vec2(cf.x*.045, cf.y*.4))*5.5);
-      b *= 1.+.035*rp*(1.-trail);
+      float rq = sin(cf.x*.23 - cf.y*.9 + vn(vec2(cf.x*.02, cf.y*.3))*7.);
+      float ra = (fl&16)!=0 ? .035 : .013;
+      b *= 1.+(ra*rp + .009*rq*(1.-slab))*(1.-trail);
+      b += (vn(vec2(cf.x*.05, cf.y*1.3))-.5)*.022*(1.-trail);             // long, flat wind streaks
     }
     // subsurface blue grows with distance from the nearest air (cuts, caves), not with the global height
     float d1 = 1.-exp(-depth/16.), d2 = 1.-exp(-depth/52.);
@@ -309,8 +312,10 @@ void main(){
 #else
     vec3 pl = vec3(0.);
 #endif
-    vec3 bw = vec3(.26,.33,.45)*(1.+(hh-.5)*.06+(vn(wp*.15)-.5)*.2);
-    vec3 inner = bw*(uAmb*(.07+.93*sv3) + pl*.9);
+    // enclosed air (cut pockets, caves): dim blue-grey, lit by the snow around it, never black. sv3 only darkens it, it keeps a floor
+    vec3 bw = vec3(.52,.64,.84)*(1.+(hh-.5)*.06+(vn(wp*.15)-.5)*.2);
+    float gloom = .40+.60*dot(sv3,vec3(.33));
+    vec3 inner = bw*(uAmb*gloom + pl*.9) + vec3(.020,.030,.052)*(1.-.6*uDay);
     col = inner;
     if(open>.004){ col = inner*(1.-open) + pl*.4*open; openA = open; }   // screen pass adds background*openA
     // low drifting snow hugging the local ground when it blows: height above the ground below this cell
@@ -351,10 +356,24 @@ void main(){
       if(m==1 && mAt(c+ivec2(0,2))==0 && mAt(c+ivec2(0,1))!=0) alb *= vec3(.95,.96,.99);   // second row under an overhang
     }
 #endif
+    float wallF = 0.;
     if(m==1 && hasN>.5){
       // cut edges: exposed upper edges get a 1-cell lighter lip, the cell under an overhang sinks into shadow (softens the stair-step look)
-      if(mUp==0) alb = mix(alb, vec3(.97,.985,1.), .22);
+      if(mUp==0){
+        bool trench = mAt(c+ivec2(-3,-3))!=0 || mAt(c+ivec2(3,-3))!=0;     // floor of a cut / cave: a bright, crisp edge
+        alb = mix(alb, vec3(.97,.985,1.), trench ? .4 : .22);
+      }
       else if(mAt(c+ivec2(0,1))==0) alb *= vec3(.82,.86,.95);
+      // exposed cut faces (steep, sheltered from the sky): tool-cut strata, a fine horizontal grain and darker joints; deeper = bluer (the depth tint above)
+      wallF = smoothstep(.35,.8,abs(n.x)) * step(.5, float(mUp!=0)) * (1.-smoothstep(1.6,2.6,depth));
+      if(wallF>0.){
+        float sy = cf.y*.42 + vn(vec2(cf.x*.05, cf.y*.12))*2.4;
+        float band = smoothstep(.68,.9,fract(sy));
+        float cutg = (hash2(ivec2(c.x>>1, c.y)) - .5);
+        alb *= 1. - wallF*(.075*band + .035*(fract(cf.y*.16+ vn(vec2(cf.x*.03,cf.y*.05))*3.)<.12 ? 1. : 0.));
+        alb += wallF*cutg*.028;
+        alb = mix(alb, alb*vec3(.9,.95,1.03), wallF*.4);
+      }
     }
     #ifdef LIGHTS
     vec3 pl = pointLights(wp, c, n, hasN, hh);
@@ -390,6 +409,12 @@ void main(){
           col = mix(col, tint, clamp(smoothstep(.06,.3,tw)*(.6+.6*str)*(.8+.2*fac),0.,1.));
         }
       }
+      // ice glaze: snow that a fire has warmed and refrozen, a thin glassy film on the walls and floor of cuts near the fire (needs the lit side and a bit of depth)
+      if(plL>.1){
+        float gz = smoothstep(.1,.5,plL) * (.45+.55*vn(vec2(cf.x*.28, cf.y*.1))) * (1.-smoothstep(.9,2.1,depth));
+        col = mix(col, vec3(.70,.90,1.06)*min(1.4,.5+plL*1.3), gz*.5);
+        col += vec3(1.,.78,.55)*gz*smoothstep(.55,.9,vn(vec2(cf.x*.5,cf.y*.7)+4.))*.16;
+      }
       // wind crust: a glossy sheen sliding over the slab as the view moves
       if((fl&16)!=0){
         float sheen = smoothstep(.45,.95, vn(vec2(cf.x*.045 + uCamX*.006, cf.y*.5)+3.));
@@ -418,9 +443,23 @@ uniform vec3 uAmb, uSkyTop, uSkyHor;
 uniform vec4 uBody;
 out vec4 fragColor;
 
+// coverage of one spruce silhouette (tv = (x - tree x, height, ground y, present)); tone 0..1 = position inside the tier (for light tips)
+float spruce(vec4 tv, float ly, float w0, float w1, float tier, out float tone, out float side){
+  float dy = tv.z - ly; tone = 0.; side = 0.;
+  if(tv.w>.5 && dy>0. && dy<tv.y){
+    float fr = fract(dy/tier);
+    float hw = (1.-dy/tv.y)*(w0+tv.y*w1)*(.62+.38*fr);
+    if(abs(tv.x)<hw){ tone = fr; side = clamp(tv.x/max(hw,1.),-1.,1.); return 1.; }
+  }
+  return 0.;
+}
+
 vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   float asp = uRes.x/uRes.y;
-  vec3 sky = mix(uSkyTop, uSkyHor, smoothstep(0.,.8,sUV.y));
+  float skyT = smoothstep(0.,.9,sUV.y);
+  vec3 sky = mix(uSkyTop, uSkyHor, skyT);
+  sky += vec3(-.02,.0,.04)*sin(skyT*3.14159)*uDay*(1.-uStorm);              // a touch more saturated blue half-way down, so the gradient is not a straight lerp
+  sky += uSkyHor*exp(-pow((sUV.y-.8)/.24,2.))*(.08+.34*uStorm);              // horizon haze glow
   float nightClear = (1.-uDay)*(1.-smoothstep(.1,.35,uStorm));
 #ifdef NIGHT
   if(nightClear>.02){
@@ -454,24 +493,47 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   float fg = uFog + uStorm*.35;
   float nt = (1.-uDay);
   vec3 col = sky;
+  // light direction for the ridges: the sun by day, the moon at night (screen-space, y down)
+  float lbx = uVis.x >= uVis.y ? uBody.x : uBody.z;
+  vec2 Ld = normalize(vec2((lbx-.5)*2.6 + (lbx>=.5 ? .18 : -.18), -.62));
 #ifdef COLTEX
   vec4 cm = texelFetch(uCol, ivec2(int(gl_FragCoord.x), 0), 0);
+  int gx = int(gl_FragCoord.x), gw = textureSize(uCol,0).x;
 #endif
-  // far mountains
+  float cpx = uView.x/uRes.x;                                                 // cells per canvas pixel
+  // far mountains: snow ridges shaded by the light direction, rock streaks, mist at the foot
   {
     float ly = sOff.y + (uCam.y-380.)*.10;
 #ifdef COLTEX
     float e = cm.x;
 #else
     float Lx = uCam.x*.06 + sOff.x;
-    float rr = 1.-abs(2.*fbm1(Lx*.012+3.)-1.);
-    float e = 20. - 100.*pow(rr,1.5);
+    float e = eMtn(Lx);
 #endif
     float a = smoothstep(-.7,.7,ly-e);
-    vec3 c = mix(vec3(.70,.79,.92), vec3(.46,.58,.78), clamp((ly-e)/60.,0.,1.))*bgL;
-    c += vec3(.05,.08,.15)*nt*(1.-uStorm)*exp(-max(ly-e,0.)/7.)*(.5+.5*uVis.y);   // moonlit snowcaps
-    c = mix(c, uSkyHor, clamp((.55-.2*nt)+.35*fg,0.,1.));
-    col = mix(col, c, a);
+    if(a>0.){
+      float dz = max(ly-e,0.);
+#ifdef COLTEX
+      float dedx = (texelFetch(uCol, ivec2(min(gx+4,gw-1),0),0).x - texelFetch(uCol, ivec2(max(gx-4,0),0),0).x)/(8.*cpx);
+      float Lx = uCam.x*.06 + sOff.x;
+#else
+      float dedx = (eMtn(Lx+4.*cpx)-eMtn(Lx-4.*cpx))/(8.*cpx);
+#endif
+      vec2 nrm = normalize(vec2(clamp(dedx,-2.5,2.5)*1.1, -1.));
+      float lit = smoothstep(-.3,.85,dot(nrm,Ld));
+      float fx = vn(vec2(Lx*.07 + dz*.012*sign(dedx+.001), dz*.011));       // facets / gullies running down the flank
+      lit = clamp(lit + (fx-.5)*1.1*smoothstep(2.,22.,dz), 0., 1.);
+      float rk = vn(vec2(Lx*.5 + dz*.05*sign(dedx+.001), dz*.07));
+      float streak = smoothstep(.64,.8,rk)*smoothstep(9.,26.,dz)*(1.-smoothstep(60.,105.,dz))*(.35+.65*smoothstep(.1,.8,abs(dedx)));
+      vec3 c = mix(vec3(.50,.60,.79), vec3(.95,.975,1.), lit);
+      c = mix(c, vec3(.30,.35,.48)*(.65+.55*lit), streak*.62);
+      c = mix(c, vec3(.46,.58,.78), clamp(dz/120.,0.,1.)*.4);
+      c += vec3(.1,.11,.12)*lit*(1.-smoothstep(0.,1.6,dz));                    // rim light along the sunny crest
+      c *= bgL;
+      c += vec3(.05,.08,.15)*nt*(1.-uStorm)*exp(-dz/7.)*(.5+.5*uVis.y);        // moonlit snowcaps
+      c = mix(c, uSkyHor, clamp(.50-.2*nt+.35*fg + .3*smoothstep(50.,130.,dz),0.,1.));   // far layer: strongest atmospheric haze, thick mist in the valley
+      col = mix(col, c, a);
+    }
   }
   // mid hills
   {
@@ -480,21 +542,35 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
     float e = cm.y;
 #else
     float Lx = uCam.x*.15 + sOff.x;
-    float e = 48. - 50.*fbm1(Lx*.02+41.);
+    float e = eHill(Lx);
 #endif
     float a = smoothstep(-.7,.7,ly-e);
-    vec3 c = mix(vec3(.52,.63,.80), vec3(.34,.46,.68), clamp((ly-e)/50.,0.,1.))*bgL*(1.-.28*nt);
-    c = mix(c, uSkyHor, clamp(.42+.4*fg,0.,1.));
-    col = mix(col, c, a);
+    if(a>0.){
+      float dz = max(ly-e,0.);
+#ifdef COLTEX
+      float dedx = (texelFetch(uCol, ivec2(min(gx+5,gw-1),0),0).y - texelFetch(uCol, ivec2(max(gx-5,0),0),0).y)/(10.*cpx);
+      float Lx = uCam.x*.15 + sOff.x;
+#else
+      float dedx = (eHill(Lx+5.*cpx)-eHill(Lx-5.*cpx))/(10.*cpx);
+#endif
+      float lit = smoothstep(-.3,.85,dot(normalize(vec2(clamp(dedx,-2.,2.)*1.4,-1.)),Ld));
+      lit = clamp(lit + (vn(vec2(Lx*.05, dz*.03))-.5)*.5*smoothstep(1.,14.,dz), 0., 1.);
+      vec3 c = mix(vec3(.52,.63,.80), vec3(.34,.46,.68), clamp(dz/50.,0.,1.));
+      c *= .84 + .3*lit;
+      c += vec3(.07,.08,.09)*lit*(1.-smoothstep(0.,1.4,dz));
+      c *= bgL*(1.-.28*nt);
+      c = mix(c, uSkyHor, clamp(.36+.4*fg + .2*smoothstep(24.,60.,dz),0.,1.));
+      col = mix(col, c, a);
+    }
   }
-  // near snow field + spruce forest
+  // near snow field + two spruce rows: a far, small one (parallax .30) and a nearer, bigger one (.46) that stands behind the playfield
   {
     float ly = sOff.y + (uCam.y-380.)*.27;
 #ifdef COLTEX
     float hy = cm.z;
 #else
     float Lx = uCam.x*.30 + sOff.x;
-    float hy = 74. - 16.*fbm1(Lx*.03+90.);
+    float hy = eNear(Lx);
 #endif
     float a = smoothstep(-.7,.7,ly-hy);
     vec3 c = vec3(.86,.91,.97)*bgL*(1.+.25*nt);
@@ -504,29 +580,52 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
       float aT = 0.;
 #ifdef COLTEX
       for(int j=0;j<3;j++){
-        vec4 tv = texelFetch(uCol, ivec2(int(gl_FragCoord.x), 1+j), 0);          // (tx - Lx, th, ground y below the tree, present)
-        float dy = tv.z - ly;
-        if(tv.w>.5 && dy>0. && dy<tv.y){
-          float hw = (1.-dy/tv.y)*(7.+tv.y*.06)*(.62+.38*fract(dy/6.5));
-          if(abs(tv.x)<hw) aT = 1.;
-        }
+        vec4 tv = texelFetch(uCol, ivec2(gx, 1+j), 0);                       // (tx - Lx, th, ground y below the tree, present)
+        float tn, sd; aT = max(aT, spruce(tv, ly, 7., .06, 6.5, tn, sd));
       }
 #else
-      float sp = 11.; float k0 = floor(Lx/sp);
       for(int j=-1;j<=1;j++){
-        float k = k0 + float(j);
-        if(h1(k*7.3+1.)<.22) continue;
-        float tx = (k + .15 + .7*h1(k*3.1+5.))*sp;
-        float th = 24. + 36.*h1(k*5.7+2.);
-        float dy = (74. - 16.*fbm1(tx*.03+90.) + 3.) - ly;
-        if(dy>0. && dy<th){
-          float hw = (1.-dy/th)*(7.+th*.06)*(.62+.38*fract(dy/6.5));
-          if(abs(Lx-tx)<hw) aT = 1.;
-        }
+        float tn, sd; aT = max(aT, spruce(treeRow(Lx, 0, j), ly, 7., .06, 6.5, tn, sd));
       }
 #endif
       vec3 tc = mix(vec3(.10,.18,.24)*bgL*(1.-.35*nt), uSkyHor, clamp(.18+.4*fg,0.,1.));
       col = mix(col, tc, aT);
+    }
+  }
+  {
+    float ly = sOff.y + (uCam.y-380.)*.36;
+#ifdef COLTEX
+    float hy = cm.w;
+#else
+    float Lx2 = uCam.x*.46 + sOff.x;
+    float hy = eNear2(Lx2);
+#endif
+    float a = smoothstep(-.7,.7,ly-hy);
+    vec3 c = mix(vec3(.80,.87,.95), vec3(.66,.76,.90), clamp((ly-hy)/40.,0.,1.))*bgL*(1.+.2*nt);
+    c = mix(c, uSkyHor, clamp(.12+.38*fg,0.,1.));
+    col = mix(col, c, a);
+    if(ly>-20.){
+      float aT = 0., tnA = 0., sdA = 0.;
+#ifdef COLTEX
+      for(int j=0;j<3;j++){
+        vec4 tv = texelFetch(uCol, ivec2(gx, 4+j), 0);
+        float tn, sd; float cv = spruce(tv, ly, 8., .13, 8.5, tn, sd);
+        if(cv>aT){ aT = cv; tnA = tn; sdA = sd; }
+      }
+#else
+      for(int j=-1;j<=1;j++){
+        float tn, sd; float cv = spruce(treeRow(Lx2, 1, j), ly, 8., .13, 8.5, tn, sd);
+        if(cv>aT){ aT = cv; tnA = tn; sdA = sd; }
+      }
+#endif
+      if(aT>0.){
+        float sunS = lbx>=.5 ? 1. : -1.;
+        vec3 tc = vec3(.07,.15,.20)*(.8+.5*tnA)*(1.+.28*sdA*-sunS);           // lighter on the sun side, boughs lighter at the top of a tier
+        tc = mix(tc, vec3(.50,.62,.78), smoothstep(.62,1.,tnA)*.28*(1.-nt*.7)*(1.-uStorm));   // frost on the bough tips
+        tc *= bgL*(1.-.3*nt);
+        tc = mix(tc, uSkyHor, clamp(.10+.4*fg,0.,1.));
+        col = mix(col, tc, aT);
+      }
     }
   }
   return col;
@@ -641,6 +740,19 @@ const BGF = `
 uniform int uOct;
 float vn1(float x){ float i=floor(x), f=fract(x); f=f*f*(3.-2.*f); return mix(h1(i),h1(i+1.),f); }
 float fbm1(float x){ float a=.5,s=0.,n=0.; for(int o=0;o<4;o++){ if(o>=uOct) break; s+=a*vn1(x); n+=a; x=x*2.03+17.; a*=.5; } return s/n; }
+float eMtn(float Lx){ float rr = 1.-abs(2.*fbm1(Lx*.012+3.)-1.); float r2 = 1.-abs(2.*fbm1(Lx*.037+11.)-1.); return 20. - 100.*pow(rr,1.5) - 15.*r2*rr*rr; }   // ridged peaks + crags on the crests
+float eHill(float Lx){ return 48. - 50.*fbm1(Lx*.02+41.); }
+float eNear(float Lx){ return 74. - 16.*fbm1(Lx*.03+90.); }
+float eNear2(float Lx){ return 70. - 11.*fbm1(Lx*.027+130.); }
+// spruce j (-1..1 around the pixel) of layer 0 (far, small) / 1 (near, big, in clumps): (x - tree x, height, ground y below it, present)
+vec4 treeRow(float Lx, int layer, int j){
+  float sp = layer==0 ? 11. : 19.;
+  float k = floor(Lx/sp) + float(j);
+  float tx = (k + .15 + .7*h1(k*3.1+5.))*sp;
+  if(layer==0) return vec4(Lx - tx, 24. + 36.*h1(k*5.7+2.), eNear(tx)+3., h1(k*7.3+1.)<.22 ? 0. : 1.);
+  float pf = fbm1(k*.17+60.);
+  return vec4(Lx - tx, 46. + 40.*h1(k*5.7+2.), eNear2(tx)+3., h1(k*7.3+1.) < clamp(.78-1.15*pf,.04,.75) ? 0. : 1.);
+}
 `;
 const FS_COL = '#version 300 es\n' + COMMON + BGF + `
 uniform vec2 uCam, uView, uRes;
@@ -649,17 +761,11 @@ void main(){
   int row = int(gl_FragCoord.y);
   float sx = (gl_FragCoord.x/uRes.x - .5)*uView.x;
   if(row==0){
-    float rr = 1.-abs(2.*fbm1((uCam.x*.06 + sx)*.012+3.)-1.);
-    float em = 20. - 100.*pow(rr,1.5);
-    float eh = 48. - 50.*fbm1((uCam.x*.15 + sx)*.02+41.);
-    float hy = 74. - 16.*fbm1((uCam.x*.30 + sx)*.03+90.);
-    o = vec4(em, eh, hy, 0.);
+    o = vec4(eMtn(uCam.x*.06 + sx), eHill(uCam.x*.15 + sx), eNear(uCam.x*.30 + sx), eNear2(uCam.x*.46 + sx));
+  } else if(row<4){
+    o = treeRow(uCam.x*.30 + sx, 0, row-2);
   } else {
-    float Lx = uCam.x*.30 + sx, sp = 11.;
-    float k = floor(Lx/sp) + float(row-2);
-    float tx = (k + .15 + .7*h1(k*3.1+5.))*sp;
-    float th = 24. + 36.*h1(k*5.7+2.);
-    o = vec4(Lx - tx, th, 74. - 16.*fbm1(tx*.03+90.) + 3., h1(k*7.3+1.)<.22 ? 0. : 1.);
+    o = treeRow(uCam.x*.46 + sx, 1, row-5);
   }
 }`;
 
@@ -850,12 +956,12 @@ export class Renderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  /** Background column target: 4 rows x canvas width, float32. */
+  /** Background column target: 7 rows x canvas width, float32. */
   private ensureCol() {
     const gl = this.gl, w = this.canvas.width;
     if (!this.progCol || (this.colTex && this.colW === w)) return;
     if (this.colTex) { gl.deleteTexture(this.colTex); gl.deleteFramebuffer(this.colFbo); }
-    this.colW = w; this.colTex = this.tex(w, 4, gl.NEAREST, gl.RGBA32F);
+    this.colW = w; this.colTex = this.tex(w, 7, gl.NEAREST, gl.RGBA32F);
     this.colFbo = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.colFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.colTex, 0);
@@ -1112,7 +1218,7 @@ export class Renderer {
     if (this.progCol) {
       this.ensureCol();
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.colFbo);
-      gl.viewport(0, 0, this.canvas.width, 4);
+      gl.viewport(0, 0, this.canvas.width, 7);
       gl.useProgram(this.progCol);
       const uk = this.uk;
       gl.uniform2f(uk.uCam, c.x, c.y); gl.uniform2f(uk.uView, c.vw, c.vh); gl.uniform2f(uk.uRes, this.canvas.width, this.canvas.height); gl.uniform1i(uk.uOct, lowQ ? 2 : 4);

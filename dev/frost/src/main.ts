@@ -107,9 +107,16 @@ function advanceTutorial() {
   else if (tutorial < 3 && crates.some((c) => c.opened)) tutorial = 3;
   else if (tutorial === 3 && (inv.blocks.length > 0 || inv.logs > 0 || tool.built.size > 0 || pl.shelter > 0.7)) tutorial = 4;
 }
+let hintSig = '', hintLast = '', hintLastT = -99;
+/** tool messages: live <= 2.5 s; any successful action (snow dug / thrown, inventory or build change, tool switch) wipes a stale message at once; the same refusal is not repeated for 4 s while a button is held */
 function hint(): string | null {
-  if (tool.msg) { const m = tool.msg; if (hintT <= 0) { hintText = m; hintT = 3.2; tool.msg = ''; } }
-  if (hintT > 0) return hintText;
+  const sig = `${tool.cur}|${Math.round(tool.load)}|${inv.logs}|${inv.branches}|${inv.matches}|${inv.food}|${inv.crackers}|${inv.blocks.length}|${tool.built.size}`;
+  if (sig !== hintSig) { if (hintSig) { hintT = 0; hintText = null; } hintSig = sig; }
+  if (tool.msg) {
+    const m = tool.msg; tool.msg = '';
+    if (m !== hintLast || G.realTime - hintLastT > 4) { hintText = m; hintT = 2.5; hintLast = m; hintLastT = G.realTime; }
+  }
+  if (hintT > 0 && hintText) return hintText;
   advanceTutorial();
   const mob = G.mobile;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
