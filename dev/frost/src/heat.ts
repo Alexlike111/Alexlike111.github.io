@@ -41,10 +41,10 @@ const MK = new Float32Array(16), MC = new Float32Array(16);
 const setM = (m: number, k: number, c: number) => { MK[m] = k; MC[m] = c; };
 setM(M.AIR, 0.35, 1); setM(M.NEEDLE, 0.3, 2); setM(M.ASH, 0.2, 5); setM(M.SNOW, 0.126, 30);
 setM(M.ICE, 2.2, 60); setM(M.WATER, 0.56, 70); setM(M.DIRT, 1.2, 60); setM(M.ROCK, 2.0, 60); setM(M.BEDROCK, 2.0, 60);
-setM(M.WOOD, 0.12, 25); setM(M.CRATE, 0.12, 25); setM(M.PLANK, 0.12, 25); setM(M.POLE, 0.12, 25);
+setM(M.WOOD, 0.12, 25); setM(M.CRATE, 0.12, 25); setM(M.PLANK, 0.12, 25); setM(M.POLE, 0.12, 25); setM(M.DOOR, 0.12, 25);
 // blocking for wind / shelter / sky: solid enough to stop air
 const BLOCK = new Uint8Array(16);
-for (const m of [M.SNOW, M.ICE, M.DIRT, M.ROCK, M.WOOD, M.PLANK, M.CRATE, M.BEDROCK]) BLOCK[m] = 1;
+for (const m of [M.SNOW, M.ICE, M.DIRT, M.ROCK, M.WOOD, M.PLANK, M.DOOR, M.CRATE, M.BEDROCK]) BLOCK[m] = 1;
 
 // ---------------- per heat-cell composition cache ----------------
 const cap = new Float32Array(HW * HH).fill(1);     // mean heat capacity per cell

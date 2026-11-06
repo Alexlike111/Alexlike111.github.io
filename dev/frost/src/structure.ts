@@ -77,7 +77,7 @@ function loadRect(x0: number, y0: number, x1: number, y1: number): boolean {
     for (let x = 0; x < rw; x++, wi++, l++) {
       if (body[wi] !== 0) continue; // rigid bodies are not part of the static structure
       lm[l] = mat[wi]; lb[l] = bond[wi]; ld[l] = dens[wi]; lf[l] = flags[wi];
-      if (anyFresh && mat[wi] === M.PLANK && fresh.has(beamId[wi])) lfr[l] = 1;
+      if (anyFresh && (mat[wi] === M.PLANK || mat[wi] === M.DOOR) && fresh.has(beamId[wi])) lfr[l] = 1;
     }
   }
   return true;
@@ -95,8 +95,8 @@ function prep() {
       switch (m) {
         case M.SNOW: c = (lb[l] >= BOND_SOLID || ld[l] >= 420) ? 1 : 2; break;
         case M.ASH: c = 2; break;
-        case M.ICE: case M.WOOD: case M.CRATE: case M.POLE: case M.PLANK: c = 1; break;
-        case M.DIRT: case M.ROCK: case M.BEDROCK: c = 3; break;
+        case M.ICE: case M.WOOD: case M.POLE: case M.PLANK: case M.DOOR: c = 1; break;
+        case M.CRATE: case M.DIRT: case M.ROCK: case M.BEDROCK: c = 3; break; // a supply crate is part of the ground: undermining it leaves it hanging like a buried box, it never drops
       }
       if (c === 1 && (border || x === 1 || x === rw || lfr[l] === 1 || (m === M.WOOD && (lf[l] & F_TREE)))) c = 3;
       cls[l] = c;
@@ -108,7 +108,7 @@ function prep() {
     // run = depth of the cell's own material (snow on a beam is load, not depth)
     run[l] = cls[l] === 1 ? Math.min(RUNCAP, (cls[a] === 1 && grp8(lm[a]) === grp8(lm[l]) ? run[a] : 0) + 1) : 0;
     rtop[l] = cls[l] === 1 ? (cls[a] === 1 ? rtop[a] : y) : 0;
-    bear[l] = (cls[l] === 1 || cls[l] === 2) && lm[l] === M.SNOW && (bear[a] === 1 || lm[a] === M.PLANK || lm[a] === M.CRATE || lm[a] === M.POLE) ? 1 : 0;
+    bear[l] = (cls[l] === 1 || cls[l] === 2) && lm[l] === M.SNOW && (bear[a] === 1 || lm[a] === M.PLANK || lm[a] === M.DOOR || lm[a] === M.CRATE || lm[a] === M.POLE) ? 1 : 0;
     if (lm[a] !== 0) {
       const ma = lm[a];
       const mass = (ma === M.SNOW || ma === M.ASH) ? ld[a] * CELLM : 0;
@@ -212,7 +212,7 @@ function noteChange(l: number) {
 }
 const wIdx = (l: number) => (ry0 + ((l / pw) | 0) - 1) * W + rx0 + (l % pw) - 1;
 
-function isWoodM(m: number) { return m === M.WOOD || m === M.PLANK || m === M.POLE; }
+function isWoodM(m: number) { return m === M.WOOD || m === M.PLANK || m === M.POLE || m === M.DOOR; }
 
 function spawnBody(list: Int32Array, n: number): boolean {
   const cells: number[] = new Array(n);

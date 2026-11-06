@@ -1,7 +1,7 @@
 // Tools: shovel, snow saw, axe, beams, snow blocks, campfire; crates, eating.
 import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
 import { G, Fire } from './state';
-import { pl, PH } from './player';
+import { pl } from './player';
 import { spawn, PK } from './particles';
 import { markStruct, supportMargin, freshBeam } from './structure';
 import { makeBody, bodyAtIndex, removeBody, bodies } from './phys';
@@ -31,7 +31,7 @@ export function resetTools() {
   G.fires.length = 0; loadWarned = false; fireLatch = false;
 }
 
-const shoulder = () => [pl.x, pl.y - PH * 0.72] as const;
+const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
 export function inReach(x: number, y: number) { const [sx, sy] = shoulder(); return Math.hypot(x - sx, y - sy) <= REACH; }
 /** Clamp aim to reach along the ray from the shoulder; stop at the first rigid non-target cell. */
 export function reachPoint(ax: number, ay: number): [number, number] {
@@ -45,13 +45,21 @@ function say(m: string) { tool.msg = m; }
 
 // ---------------- shovel ----------------
 let lastNothingT = -99, loadWarned = false;
+/** Shovel bite at the aim: a round scoop (r 4.5), or - aiming near-horizontally at body height, i.e. into a wall / tunnel face - a tall ellipse 5 wide x 10 high
+ *  (still <= 46 cells), so a crawl tunnel (20 cells high) takes two stacked scoops per 5 cells of length (~8-10 scoops per metre). */
+export function shovelBite(ax: number, ay: number): { rx: number; ry: number; tunnel: boolean } {
+  const [sx, sy] = shoulder();
+  const dx = ax - sx, dy = ay - sy;
+  const tun = Math.abs(dx) >= 6 && Math.abs(dy) <= Math.abs(dx) * 0.45 && ay >= pl.y - pl.h - 2 && ay <= pl.y + 1;
+  return tun ? { rx: 2.5, ry: 5, tunnel: true } : { rx: 4.5, ry: 4.5, tunnel: false };
+}
 function dig(ax: number, ay: number) {
-  const r = 4.5;
+  const { rx, ry, tunnel } = shovelBite(ax, ay);
   let n = 0, sum = 0, hard = 0;
   const cap = 46 - tool.load;
-  if (cap <= 2) { throwLoad(ax, ay, true); return; }
-  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-    if (dx * dx + dy * dy > r * r || n >= cap) continue;
+  if (cap <= 2 || (tunnel && cap < 36 && tool.load > 0)) { throwLoad(ax, ay, true); return; } // tunnel: empty the blade before a full-size bite does not fit
+  for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+    if ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1 || n >= cap) continue;
     const x = Math.round(ax + dx), y = Math.round(ay + dy);
     if (!inb(x, y)) continue;
     const i = idx(x, y);
@@ -120,7 +128,7 @@ export function skyOpen(x: number, y: number): boolean {
 function holeRim(): number {
   const px = Math.round(pl.x), y0 = Math.round(pl.y) - 10;
   if (!inb(px, y0) || !openAir(idx(px, y0))) return -1;
-  if (!skyOpen(px, y0 - PH + 10)) return -1;
+  if (!skyOpen(px, y0 - pl.h + 10)) return -1;
   if (airSpan(px, y0, 30) >= 45) return -1;
   for (let r = y0; r > Math.max(2, y0 - 160); r--) if (airSpan(px, r, 30) >= 45) return r;
   return Math.max(2, y0 - 160);
@@ -227,31 +235,78 @@ function saw(ax: number, ay: number, dt: number) {
 
 /** cells a snow block / beam would occupy at the aim */
 /** Beam shape from R: 0 = 1 m horizontal, 1 = 2 m horizontal (2 logs), 2 = 1 m vertical, 3 = 2 m vertical (2 logs). Blocks only alternate flat/upright. */
-export function beamShape() { const s = tool.rot & 3; return { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1 }; }
+export const BEAM_MODES = 5;
+export const BEAM_MODE_NAMES = ['брус 1 м', 'брус 2 м', 'стойка 1 м', 'стойка 2 м', 'дверь 1 м (проходимая)'];
+export function beamShape() { const s = ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; return s === 4 ? { vert: true, len: 20, logs: 1, door: true } : { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1, door: false }; }
 const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
+/** placement classes of a world cell: 0 free (air, boughs, loose snow / ash: displaced), 1 rigid snow, 2 hard (rock, timber, ice, water, fallen bodies, world edge) */
+function pcls(x: number, y: number): number {
+  if (!inb(x, y)) return 2;
+  const i = idx(x, y);
+  if (body[i]) return 2;
+  const m = mat[i];
+  if (m === M.AIR || m === M.NEEDLE) return 0;
+  if (m === M.WATER) return 2;
+  if (isGranular(i)) return 0;
+  if (m === M.SNOW) return 1;
+  return rigidAt(i) ? 2 : 0;
+}
+/** the object may sit here: nothing hard inside, and at most 5 % of its cells in firm snow (those are replaced) */
+function fitsAt(x0: number, y0: number, w: number, h: number): boolean {
+  let snow = 0;
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { const c = pcls(x, y); if (c === 2) return false; if (c === 1) snow++; }
+  return snow <= Math.floor(w * h * 0.05);
+}
+/** something firm (not a fallen body) directly under the bottom row */
+function restsAt(x0: number, y0: number, w: number, h: number): boolean {
+  const y = y0 + h;
+  for (let x = x0; x < x0 + w; x++) { if (!inb(x, y)) return true; const i = idx(x, y); if (!body[i] && pcls(x, y) >= 1) return true; }
+  return false;
+}
+/** Auto-snap: out of firm terrain it overlaps (up to 8 cells up), then DOWN onto the first support within 9 cells (loose snow on the way is displaced).
+ *  A horizontal beam therefore lands flush on the highest post / wall top below it, a post stands on the surface. Returns the snapped top row. */
+function snapY(x0: number, y0: number, w: number, h: number): number {
+  let y = y0;
+  if (!fitsAt(x0, y, w, h)) {
+    let ok = false;
+    for (let k = 1; k <= 8; k++) if (fitsAt(x0, y - k, w, h)) { y -= k; ok = true; break; }
+    if (!ok) return y0;
+  }
+  for (let d = 0; d <= 9; d++) {
+    if (!fitsAt(x0, y + d, w, h)) break;
+    if (restsAt(x0, y + d, w, h)) return y + d;
+  }
+  return y;
+}
 export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
-  let w: number, h: number;
+  let w: number, h: number, door = false;
   if (kind === 'block') { const vert = tool.rot % 2 === 1; w = vert ? 5 : 10; h = vert ? 10 : 5; }
-  else { const bs = beamShape(); w = bs.vert ? 4 : bs.len; h = bs.vert ? bs.len : 4; }
-  const x0 = Math.round(ax - w / 2), y0 = Math.round(ay - h / 2);
+  else { const bs = beamShape(); w = bs.vert ? 4 : bs.len; h = bs.vert ? bs.len : 4; door = bs.door; }
+  const x0 = Math.round(ax - w / 2);
+  const y0 = snapY(x0, Math.round(ay - h / 2), w, h);
   const cells: { x: number; y: number; m: number; d: number; b: number }[] = [];
-  let blocked = false;
+  let hard = 0, firm = 0;
   const why = new Map<string, number>();
   const bump = (k: string) => why.set(k, (why.get(k) ?? 0) + 1);
+  const cm = kind === 'block' ? M.SNOW : door ? M.DOOR : M.PLANK;
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
-    if (!inb(x, y)) { blocked = true; bump('край мира'); continue; }
-    const i = idx(x, y);
-    if (body[i]) { blocked = true; bump('упавшее бревно'); }
-    else if (mat[i] === M.WATER) { blocked = true; bump(MAT_NAME[M.WATER]); } // water never turns into snow
-    else if (rigidAt(i) && !isGranular(i)) { blocked = true; bump(MAT_NAME[mat[i]] ?? 'твёрдое'); }
-    cells.push({ x, y, m: kind === 'block' ? M.SNOW : M.PLANK, d: kind === 'block' ? (inv.blocks[inv.blocks.length - 1] ?? 300) : 500, b: kind === 'block' ? 170 : 0 });
+    const c = pcls(x, y);
+    if (c === 2) {
+      hard++;
+      if (!inb(x, y)) bump('край мира');
+      else if (body[idx(x, y)]) bump('упавшее бревно');
+      else bump(MAT_NAME[mat[idx(x, y)]] ?? 'твёрдое');
+    } else if (c === 1) firm++;
+    if (inb(x, y)) cells.push({ x, y, m: cm, d: kind === 'block' ? (inv.blocks[inv.blocks.length - 1] ?? 300) : 500, b: kind === 'block' ? 170 : 0 });
   }
-  // the player's own body
-  const px0 = pl.x - 5, px1 = pl.x + 5, py0 = pl.y - PH, py1 = pl.y;
+  let blocked = hard > 0;
+  if (!blocked && firm > Math.floor(w * h * 0.05)) { blocked = true; bump('плотный снег'); }
+  // the player's own body (a door is passable)
+  const px0 = pl.x - 5, px1 = pl.x + 5, py0 = pl.y - pl.h, py1 = pl.y;
   let reason = '';
-  if (x0 < px1 && x0 + w > px0 && y0 < py1 && y0 + h > py0) { blocked = true; reason = 'ты стоишь на этом месте — отойди'; }
-  else if (blocked) { let bk = '', bn = 0; for (const [k, n] of why) if (n > bn) { bn = n; bk = k; } reason = `${bk} (${Math.round((bn * 100) / (w * h))}% места)`; }
-  return { cells, blocked, x0, y0, w, h, reason };
+  if (!door && x0 < px1 && x0 + w > px0 && y0 < py1 && y0 + h > py0) { blocked = true; reason = 'ты стоишь на этом месте — отойди'; }
+  else if (blocked) { let bk = '', bn = 0; for (const [k, n] of why) if (n > bn) { bn = n; bk = k; } reason = `${bk} (${Math.max(1, Math.round(((hard || firm) * 100) / (w * h)))}% места)`; }
+  return { cells, blocked, x0, y0, w, h, reason, door };
 }
 let marginCache = { key: '', v: 1 };
 export function ghostMargin(kind: 'block' | 'beam', ax: number, ay: number) {
@@ -560,7 +615,7 @@ export function interact(): boolean {
   let buried = -1; // cm of digging still needed to the nearest crate that is close but under snow
   for (const c of crates) {
     if (c.opened) continue;
-    const dx = Math.max(c.x - (pl.x + 5), 0, (pl.x - 5) - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - PH) - (c.y + c.h));
+    const dx = Math.max(c.x - (pl.x + 5), 0, (pl.x - 5) - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - pl.h) - (c.y + c.h));
     if (dx <= CRATE_REACH && dy <= CRATE_REACH) {
       const sn = snowToLid(c);
       if (sn > 0) { const cm = Math.max(5, Math.round((sn * CELL * 100) / 5) * 5); if (buried < 0 || cm < buried) buried = cm; continue; }

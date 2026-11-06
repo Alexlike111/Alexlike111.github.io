@@ -11,9 +11,9 @@ export const HH = H / HS;
 
 export const enum M {
   AIR = 0, SNOW = 1, ICE = 2, WATER = 3, DIRT = 4, ROCK = 5, WOOD = 6, NEEDLE = 7,
-  ASH = 8, CRATE = 9, POLE = 10, PLANK = 11, BEDROCK = 12,
+  ASH = 8, CRATE = 9, POLE = 10, PLANK = 11, BEDROCK = 12, DOOR = 13,
 }
-export const MAT_NAMES = ['воздух', 'снег', 'лёд', 'вода', 'мёрзлая земля', 'камень', 'дерево', 'хвоя', 'зола', 'ящик', 'вешка', 'брус', 'скала'];
+export const MAT_NAMES = ['воздух', 'снег', 'лёд', 'вода', 'мёрзлая земля', 'камень', 'дерево', 'хвоя', 'зола', 'ящик', 'вешка', 'брус', 'скала', 'дверь'];
 
 // flags
 export const F_DIST = 1;   // disturbed snow: sinters fast
@@ -70,9 +70,9 @@ export function clear(x: number, y: number) { set(x, y, M.AIR); }
 export function rigidAt(i: number): boolean {
   const m = mat[i];
   if (m === M.SNOW) return bond[i] >= BOND_SOLID || dens[i] >= 420;
-  return m === M.ICE || m === M.DIRT || m === M.ROCK || m === M.WOOD || m === M.CRATE || m === M.POLE || m === M.PLANK || m === M.BEDROCK;
+  return m === M.ICE || m === M.DIRT || m === M.ROCK || m === M.WOOD || m === M.CRATE || m === M.POLE || m === M.PLANK || m === M.BEDROCK || m === M.DOOR;
 }
-/** What the player cannot walk through. */
+/** What the player cannot walk through (a DOOR is rigid for the structure but passable). */
 export function blocksPlayer(i: number): boolean {
   const m = mat[i];
   return m === M.SNOW || m === M.ICE || m === M.DIRT || m === M.ROCK || m === M.WOOD || m === M.CRATE || m === M.PLANK || m === M.BEDROCK || m === M.ASH;

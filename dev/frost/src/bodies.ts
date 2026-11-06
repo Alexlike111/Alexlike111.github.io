@@ -81,7 +81,7 @@ function cellKey(m: number, d: number): number { // fixture density, kg/m^2 (buc
   let v: number;
   switch (m) {
     case M.AIR: case M.NEEDLE: case M.WATER: return 0;
-    case M.WOOD: case M.PLANK: case M.POLE: v = 500 * 0.3; break;
+    case M.WOOD: case M.PLANK: case M.POLE: case M.DOOR: v = 500 * 0.3; break;
     case M.SNOW: v = Math.max(40, d) * 0.6; break;
     case M.ICE: v = 917 * 0.6; break;
     case M.CRATE: v = 300 * 0.3; break;

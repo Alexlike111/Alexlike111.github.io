@@ -1,5 +1,5 @@
 // Player controller (cells, y down) + body heat balance.
-import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, F_CAP, CELL } from './world';
+import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, F_CAP, F_TREE, CELL } from './world';
 import { tool, inv } from './tools';
 import { G } from './state';
 import { tempAt, windAt, shelterAt } from './heat';
@@ -13,8 +13,9 @@ export const pl = {
   snowshoes: false, alive: true, cause: '', work: 0, walkPhase: 0, stepAcc: 0,
   feelT: -20, airT: -20, wind: 0, shelter: 0, shiver: 0, fireRad: 0,
   breathT: 0, lastStepDens: 100,
+  h: 34,            // current body height in cells: PH standing, PH_CRAWL when crawling under a low roof
 };
-export const PW = 10, PH = 34;
+export const PW = 10, PH = 34, PH_CRAWL = 20, JUMP_V = 72; // jump apex ~ JUMP_V^2 / (2 * 196) = 13 cells
 // heat balance tunables
 const LOSS_K = 4.3;       // W/K of (33 - feel) heat loss through the clothes (x wet factor)
 const SHIVER_ON = 36.6;   // core temperature where shivering starts
@@ -63,7 +64,9 @@ function crumble(x0: number, x1: number, y0: number, y1: number, all: boolean): 
   }
   return n;
 }
-let stuckT = 0, pushT = 0, stuckMsgT = -99;
+let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkT = 0, trunkMsgT = -99;
+/** what blocks the lead column this step: 0 nothing, 1 snow, 2 tree trunk / stump, 3 placed timber / crate, 4 ground / rock / ice */
+let blockKind = 0;
 
 /** bearing density: snow under the foot compacts until it reaches this (boots vs snowshoes) */
 const bearing = () => (pl.snowshoes ? 190 : 360);
@@ -120,6 +123,23 @@ function wade(px: number, top: number, bottom: number): number {
   return n;
 }
 
+/** Rows of free headroom above the feet (capped at PH + 2) over columns [xa, xb]: the same cells that bump the head (granular snow and bough snow do not count). */
+function headroom(xa: number, xb: number, feetY: number): number {
+  const cap = PH + 2;
+  for (let k = 1; k <= cap; k++) {
+    const y = feetY - k;
+    if (y < 0) return cap;
+    for (let x = xa; x <= xb; x++) {
+      if (!inb(x, y)) return k - 1;
+      const i = idx(x, y);
+      if (body[i]) return k - 1;
+      if (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)) return k - 1;
+    }
+  }
+  return cap;
+}
+const FLOOR_Y = (y: number) => Math.round(y);
+
 export interface MoveIn { moveX: number; jump: boolean; run: boolean; working: boolean; dt: number; }
 export const events = { steps: [] as { dens: number; run: boolean; sink: number }[], landed: 0 };
 
@@ -128,26 +148,37 @@ export function stepPlayer(inp: MoveIn) {
   events.steps.length = 0; events.landed = 0;
   if (!pl.alive) { pl.vx *= 0.9; return; }
   const tired = pl.stamina < 0.05;
-  const run = inp.run && !tired && Math.abs(inp.moveX) > 0.1;
+  // crawling: under a ceiling lower than the full height (but >= 20 cells) the hero drops to a crawl (lookahead 3 cells each side); he stands up again as soon as there is room
+  if (pl.onGround || pl.h < PH) {
+    if (pl.onGround) {
+      const xc0 = Math.round(pl.x - PW / 2);
+      const room = headroom(xc0 + 1 - 3, xc0 + PW - 2 + 3, FLOOR_Y(pl.y));
+      if (pl.h >= PH && room < PH) pl.h = PH_CRAWL;
+      else if (pl.h < PH && room >= PH) pl.h = PH;
+    }
+  }
+  const crawl = pl.h < PH;
+  const run = inp.run && !tired && Math.abs(inp.moveX) > 0.1 && !crawl;
   const deep = pl.sink;
-  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1); // cells/s (4.25 m/s run, 2 m/s walk)
+  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1) * (crawl ? 0.5 : 1); // cells/s (4.25 m/s run, 2 m/s walk, 1 m/s crawling)
   const target = inp.moveX * speed;
   const acc = pl.onGround ? 14 : 4;
   pl.vx += (target - pl.vx) * Math.min(1, dt * acc);
   if (Math.abs(inp.moveX) > 0.1) pl.face = inp.moveX > 0 ? 1 : -1;
   // gravity
   pl.vy += 196 * dt;
-  if (inp.jump && pl.onGround && pl.stamina > 0.08) { pl.vy = -64 * (1 - deep * 0.5); pl.onGround = false; pl.stamina -= 0.06; }
+  if (inp.jump && pl.onGround && !crawl && pl.stamina > 0.08) { pl.vy = -JUMP_V * (1 - deep * 0.5); pl.onGround = false; pl.stamina -= 0.06; }
   // ---- horizontal move with step-up ----
   let nx = pl.x + pl.vx * dt;
   const dirx = Math.sign(nx - pl.x);
   const x00 = pl.x;
   let blockedSnow = false;
-  if (dirx === 0) pushT = 0;
+  blockKind = 0;
+  if (dirx === 0) { pushT = 0; trunkT = 0; }
   if (dirx !== 0) {
     const lead = Math.round(nx + dirx * PW / 2 - (dirx > 0 ? 1 : 0));
     let blockedAt = -1;
-    for (let y = Math.round(pl.y - PH); y < Math.round(pl.y); y++) {
+    for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y); y++) {
       const i = inb(lead, y) ? idx(lead, y) : -1;
       if (i < 0) { blockedAt = y; break; }
       if (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)) { blockedAt = y; break; }
@@ -157,12 +188,12 @@ export function stepPlayer(inp: MoveIn) {
       const stepH = Math.round(pl.y) - blockedAt;
       // can we step up?
       let free = stepH <= 7;
-      if (free) for (let y = Math.round(pl.y - PH - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y)) && !boughSnow(idx(lead, y))) { free = false; break; }
+      if (free) for (let y = Math.round(pl.y - pl.h - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y)) && !boughSnow(idx(lead, y))) { free = false; break; }
       if (free) { pl.y -= stepH; pushT = 0; }
       else {
         // a thin snow pillar (<= 2 cells wide) in the way gives way after 0.3 s of pushing
         let thin = true, any = false;
-        for (let y = Math.round(pl.y - PH); y < Math.round(pl.y) - 1; y++) {
+        for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y) - 1; y++) {
           if (!inb(lead, y)) continue;
           const i = idx(lead, y);
           if (!blocksPlayer(i) || isGranular(i) || boughSnow(i)) continue;
@@ -170,10 +201,23 @@ export function stepPlayer(inp: MoveIn) {
           if (mat[i] !== M.SNOW || runW(lead, y) > 2) { thin = false; break; }
         }
         blockedSnow = any && mat[idx(lead, blockedAt)] === M.SNOW;
+        // classify the obstacle (trunk wins: it has its own hint)
+        for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y); y++) {
+          if (!inb(lead, y)) continue;
+          const i = idx(lead, y), m = mat[i];
+          if (!blocksPlayer(i) || isGranular(i) || boughSnow(i)) continue;
+          const k = m === M.WOOD && (flags[i] & F_TREE) ? 2 : m === M.SNOW ? 1 : (m === M.PLANK || m === M.WOOD || m === M.CRATE) ? 3 : 4;
+          if (blockKind === 0 || k === 2 || (k === 3 && blockKind !== 2)) blockKind = k;
+        }
+        if (blockKind === 2 && Math.abs(inp.moveX) > 0.1) {
+          trunkT += dt;
+          if (trunkT > 0.25 && G.realTime - trunkMsgT > 4) { trunkMsgT = G.realTime; tool.msg = stepH <= 14 ? 'Ствол на пути — руби топором (3) или прыгай' : 'Ствол на пути — руби топором (3)'; }
+        }
         if (any && thin && Math.abs(inp.moveX) > 0.1) {
           pushT += dt;
-          if (pushT > 0.3) { pushT = 0; crumble(lead - dirx * 2, lead + dirx * 2, Math.round(pl.y - PH), Math.round(pl.y) - 2, false); }
+          if (pushT > 0.3) { pushT = 0; crumble(lead - dirx * 2, lead + dirx * 2, Math.round(pl.y - pl.h), Math.round(pl.y) - 2, false); }
         } else pushT = 0;
+        if (blockKind !== 2) trunkT = 0;
         // push rigid bodies
         const bi = inb(lead, blockedAt) ? idx(lead, blockedAt) : -1;
         if (bi >= 0 && body[bi]) { const rec = bodyAtIndex(bi); if (rec) impulseAt(rec, lead, blockedAt, dirx * 30 * dt * 60, 0); }
@@ -181,9 +225,10 @@ export function stepPlayer(inp: MoveIn) {
       }
     }
   }
+  if (blockKind === 0) trunkT = 0;
   pl.x = Math.max(PW, Math.min(W - PW, nx));
   // wading through powder that overlaps the body
-  const waded = wade(pl.x, Math.round(pl.y - PH), Math.round(pl.y) - 2);
+  const waded = wade(pl.x, Math.round(pl.y - pl.h), Math.round(pl.y) - 2);
   if (waded) { pl.vx *= Math.max(0.4, 1 - waded * 0.02); pl.snowOn = Math.min(1, pl.snowOn + waded * 0.0015); }
   // ---- vertical ----
   let ny = pl.y + pl.vy * dt;
@@ -213,18 +258,18 @@ export function stepPlayer(inp: MoveIn) {
       }
     }
   } else {
-    const yA = Math.round(pl.y - PH), yB = Math.round(ny - PH);
+    const yA = Math.round(pl.y - pl.h), yB = Math.round(ny - pl.h);
     for (let y = yA; y >= yB; y--) {
       let hit = false;
       for (let x = x0 + 1; x <= x1 - 1; x++) if (solid(x, y) && !isGranular(idx(x, y)) && !boughSnow(idx(x, y))) { hit = true; break; }
-      if (hit) { ny = y + 1 + PH; pl.vy = 0; break; }
+      if (hit) { ny = y + 1 + pl.h; pl.vy = 0; break; }
     }
   }
   pl.y = Math.max(PH + 2, Math.min(H - 8, ny));
   // snow on boughs that the body overlaps loses its grip and falls; rigid snow overlapping the body means he is buried
   let buried = 0;
   {
-    const yt = Math.round(pl.y - PH), yb = Math.round(pl.y) - 1;
+    const yt = Math.round(pl.y - pl.h), yb = Math.round(pl.y) - 1;
     for (let y = yt; y <= yb; y++) for (let x = x0; x <= x1; x++) {
       if (!inb(x, y)) continue;
       const i = idx(x, y);
@@ -237,19 +282,26 @@ export function stepPlayer(inp: MoveIn) {
   const pressing = Math.abs(inp.moveX) > 0.1;
   if ((pressing && Math.abs(pl.x - x00) < dt * 3) || buried > 3) stuckT += dt; else stuckT = Math.max(0, stuckT - dt * 2);
   if (stuckT > 1) {
-    const yt = Math.round(pl.y - PH), yb = Math.round(pl.y) - 1;
+    const yt = Math.round(pl.y - pl.h), yb = Math.round(pl.y) - 1;
     const n = crumble(x0 - 2, x1 + 2, yt - 2, yb, false) + (buried > 3 ? crumble(x0 - 3, x1 + 3, yt - 1, yb - 1, true) : 0); // buried: also the 3-cell ring touching the body, whatever its density
     if (buried > 3) pl.vy = Math.min(pl.vy, -30);
     stuckT = buried > 3 ? 0.4 : -1;
-    if ((n > 0 || buried > 3 || blockedSnow) && G.realTime - stuckMsgT > 4) { stuckMsgT = G.realTime; tool.msg = 'Застрял — копай вокруг себя'; }
+    if ((n > 0 || buried > 3 || blockedSnow || blockKind > 0) && G.realTime - stuckMsgT > 4) {
+      stuckMsgT = G.realTime;
+      tool.msg = buried > 3 ? 'Застрял в снегу — копай вверх лопатой (1) или вбок'
+        : blockKind === 2 ? 'Застрял: ствол — руби топором (3)'
+        : blockKind === 3 ? 'Застрял: впереди брус — руби топором (3) или обойди'
+        : blockKind === 4 ? 'Застрял: впереди камень или мёрзлая земля — лопатой не взять, копай снег выше или обойди'
+        : 'Застрял: впереди плотный снег — копай лопатой (1) вперёд на уровне груди, ЛКМ';
+    }
   }
   // depth in snow: fraction of body height surrounded by snow on both sides
   let snowCells = 0;
-  for (let y = Math.round(pl.y - PH); y < Math.round(pl.y); y += 2) {
+  for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y); y += 2) {
     const a = idx(Math.max(0, x0 - 1), y), b = idx(Math.min(W - 1, x1 + 1), y);
     if (mat[a] === M.SNOW || mat[b] === M.SNOW) snowCells++;
   }
-  pl.sink += ((snowCells / (PH / 2)) - pl.sink) * Math.min(1, dt * 4);
+  pl.sink += ((snowCells / (pl.h / 2)) - pl.sink) * Math.min(1, dt * 4);
   // footsteps
   if (pl.onGround && Math.abs(pl.vx) > 4) {
     pl.walkPhase += Math.abs(pl.vx) * dt * 0.09;
@@ -267,14 +319,14 @@ export function stepPlayer(inp: MoveIn) {
   if (run) pl.stamina -= dt * 0.07;
   else pl.stamina += dt * (inp.working ? 0.0 : 0.09) * (pl.core < 35 ? 0.5 : 1) * (pl.food > 0.02 ? 1 : 0.3) * (1 - 0.5 * pl.shiver);
   pl.stamina = Math.max(0, Math.min(1, pl.stamina));
-  G.player.x = pl.x; G.player.y = pl.y;
+  G.player.x = pl.x; G.player.y = pl.y; G.player.h = pl.h;
   pl.work = Math.max(0, pl.work - dt);
   if (inp.working) pl.work = 0.6;
   // breath vapour
   pl.breathT -= dt;
   if (pl.breathT <= 0) {
     pl.breathT = run ? 0.7 : 1.3 + Math.random() * 0.7;
-    const hx = pl.x + pl.face * 4, hy = pl.y - PH + 6;
+    const hx = pl.x + pl.face * 4, hy = pl.y - pl.h + 6;
     const nb = pl.airT < -15 ? 8 : 5;
     for (let k = 0; k < nb; k++) spawn(PK.BREATH, hx + Math.random() * 2, hy + Math.random() * 2, pl.face * (8 + Math.random() * 12), -3 + Math.random() * 4, 1.4 + Math.random() * 0.9, 1, 0, 0);
   }
@@ -291,7 +343,7 @@ export function windChill(t: number, vKmh: number) {
 export function stepBody(dtReal: number, moving: number, running: boolean) {
   if (!pl.alive) return;
   const dtG = dtReal * 60 * G.timeScale;
-  const tx = Math.round(pl.x), ty = Math.round(pl.y - PH * 0.6);
+  const tx = Math.round(pl.x), ty = Math.round(pl.y - pl.h * 0.6);
   pl.airT = tempAt(tx, ty);
   pl.wind = windAt(tx, ty - 6);
   pl.shelter = shelterAt(tx, ty);
@@ -345,5 +397,5 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
 export function die(cause: string) { if (!pl.alive) return; pl.alive = false; pl.cause = cause; }
 
 export function resetPlayer(x: number, y: number) {
-  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0 }); stuckT = 0; pushT = 0; hungerLvl = 2;
+  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH }); G.player.h = PH; stuckT = 0; pushT = 0; trunkT = 0; hungerLvl = 2;
 }

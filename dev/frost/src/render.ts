@@ -42,13 +42,13 @@ uniform vec2 uVis;
 uniform vec4 uLP[8]; uniform vec3 uLC[8];
 layout(location=0) out vec4 oCol;
 layout(location=1) out vec4 oAux;
-const vec3 ABS_S[13] = vec3[13](vec3(0.), vec3(.174,.122,.073), vec3(.05), vec3(.08), vec3(6.), vec3(6.), vec3(6.), vec3(.015), vec3(.6), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
-const vec3 ABS_L[13] = vec3[13](vec3(0.), vec3(.125,.165,.22), vec3(.06,.05,.04), vec3(.1), vec3(6.), vec3(6.), vec3(6.), vec3(.2), vec3(1.), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
+const vec3 ABS_S[14] = vec3[14](vec3(0.), vec3(.174,.122,.073), vec3(.05), vec3(.08), vec3(6.), vec3(6.), vec3(6.), vec3(.015), vec3(.6), vec3(6.), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
+const vec3 ABS_L[14] = vec3[14](vec3(0.), vec3(.125,.165,.22), vec3(.06,.05,.04), vec3(.1), vec3(6.), vec3(6.), vec3(6.), vec3(.2), vec3(1.), vec3(6.), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
 
 int mAt(ivec2 c){
   if(c.y<0) return 0;
   if(c.x<0||c.x>=WI||c.y>=HI) return 12;
-  return min(12, int(texelFetch(uWorld,c,0).r*255.+.5));
+  return min(13, int(texelFetch(uWorld,c,0).r*255.+.5));
 }
 
 // sky transmittance straight up (stp cells per sample); depth = distance to first air above.
@@ -67,7 +67,7 @@ vec3 skyMarch(ivec2 c, int stp, int jit, int mUp, out float depth){
     if(i>=lim) break;
     int dy = 2 + i*stp + jit;
     vec4 tv = texelFetch(uWorld, c+ivec2(0,-dy), 0);
-    int mm = (c.y-dy<0) ? 0 : (c.x<0||c.x>=WI) ? 12 : min(12, int(tv.r*255.+.5));
+    int mm = (c.y-dy<0) ? 0 : (c.x<0||c.x>=WI) ? 12 : min(13, int(tv.r*255.+.5));
     if(mm==0){ if(!found){ found=true; depth=float(dy); } }
     else {
       vec3 ab = ABS_S[mm];
@@ -267,6 +267,15 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     if(e<1.) b *= .62;
     return b;
   }
+  if(m==13){                                                              // plank door: light vertical boards in a dark frame with rails
+    int dl = mAt(c+ivec2(-1,0))!=13 ? 0 : mAt(c+ivec2(-2,0))!=13 ? 1 : mAt(c+ivec2(-3,0))!=13 ? 2 : 3;
+    bool fr = dl==0 || mAt(c+ivec2(1,0))!=13 || mAt(c+ivec2(0,-1))!=13 || mAt(c+ivec2(0,1))!=13;
+    vec3 b = vec3(.9,.72,.46)*(.9+.2*vn(vec2(cf.x*.6, cf.y*.05)));
+    if(dl==2 && mAt(c+ivec2(1,0))==13 && mAt(c+ivec2(2,0))!=13) b *= .72;   // groove between the two middle boards (4-wide door)
+    if(mod(cf.y,10.)<1. && !fr) b *= .8;                                      // faint plank joints
+    if(fr) b = vec3(.30,.19,.10)*(.9+.2*hh);
+    return b*(1.+g*.05);
+  }
   if(m==7){                                                               // three tones by position in the bough: light tips / top edge, mid, dark core / underside
     float t = bn/255.;
     vec3 cL = vec3(.26,.52,.34), cM = vec3(.12,.33,.215), cD = vec3(.05,.17,.125);
@@ -390,6 +399,7 @@ void main(){
     vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
     if(m==6) lit = max(lit, uAmb*.82 + pl);                               // bark and boughs under the crown never go black
     else if(m==7) lit = max(lit, uAmb*.62 + pl);
+    else if(m==11 || m==13) lit = max(lit, uAmb*.9 + pl) + vec3(.05,.034,.02)*(1.-uDay);   // placed timber stays readable at night (a touch warmer / brighter)
     else if(m==5 && (fl&64)!=0) lit = lit*1.2 + uAmb*.15;
     col = alb*lit;
     if(m==1 && hasN>.5 && depth<2.2){

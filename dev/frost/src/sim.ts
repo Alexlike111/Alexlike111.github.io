@@ -184,7 +184,7 @@ function stepSlow(dtReal: number) {
       const i = y * W + x;
       const m = mat[i];
       if (m === M.AIR || m === M.NEEDLE) { load = 0; found = 0; continue; }
-      if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; found = (m === M.PLANK || m === M.CRATE || m === M.POLE) && !body[i] ? 7 : 0; continue; }
+      if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; found = (m === M.PLANK || m === M.DOOR || m === M.CRATE || m === M.POLE) && !body[i] ? 7 : 0; continue; }
       const d = dens[i];
       load += d * CELL;
       const T = tempAt(x, y);
