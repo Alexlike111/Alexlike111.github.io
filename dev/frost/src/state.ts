@@ -1,11 +1,12 @@
 // Shared runtime state. Every module may read; only the owner noted writes.
 export interface Light { x: number; y: number; r: number; power: number; color: [number, number, number]; }
-export interface Fire { x: number; y: number; fuel: number; /* game minutes left */ power: number; /* W */ lit: boolean; id: number; }
+export interface Fire { x: number; y: number; fuel: number; /* game minutes left */ power: number; /* W */ lit: boolean; id: number; hearth?: boolean; /* on a stone hearth: sinks no more, burns 30% longer */ }
 
 export const G = {
   // clock (owner: main) — game minutes since day 1 00:00. 1 real s = 1 game min.
   time: 9 * 60,
-  timeScale: 1,     // >1 while waiting in shelter
+  timeScale: 1,     // >1 while waiting in shelter (x12) or asleep (x30)
+  sleeping: false,  // asleep in a sleeping bag (gear.ts sleepTick owns it)
   frame: 0,
   realTime: 0,      // seconds since boot
   // weather (owner: weather in main)
@@ -29,7 +30,7 @@ export const G = {
 };
 
 /** Weather overrides for the benchmark / debugging (NaN = follow the model). Applied at the end of weather() in main.ts. */
-export const FORCE = { storm: NaN, snowfall: NaN, wind: NaN };
+export const FORCE = { storm: NaN, snowfall: NaN, wind: NaN, ambientT: NaN };
 
 /** Number of game seconds per real second (time compression). */
 export const gameSecPerReal = () => 60 * G.timeScale;

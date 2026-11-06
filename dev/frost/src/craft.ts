@@ -114,7 +114,7 @@ export function placeWorkbench(pack: Pack, x: number, y: number): CraftResult {
 }
 
 /** Clears placed workbenches (new game, reset). */
-export function resetCraft(): void { benches.length = 0; }
+export function resetCraft(): void { benches.length = 0; potReset(); }
 
 // ---------------- crafting ----------------
 
@@ -194,8 +194,8 @@ export const POT_CAP_L = 2.5;
 export const CELL_L = 0.125;
 /** Snow density (kg/m3) used when the caller does not pass the cell's own dens. */
 export const SNOW_DENS = 300;
-/** Spec: a tile of ice counts as water x1.1. Physically ice gives about 0.92 of that volume: kept as the spec says, see notes. */
-export const ICE_TILE_K = 1.1;
+/** One cell of ice gives 0.92 of its volume in water (ice is less dense than water; leader decision 1). */
+export const ICE_TILE_K = 0.92;
 /** Share of the fire's power that reaches the kettle. */
 export const POT_EFF = 0.35;
 /** A lit fire within this many cells (2 m) heats a kettle. Its heat falls off linearly to half at the edge. */
@@ -338,6 +338,74 @@ export function kettlePour(k: KettleState, pack: Pack): KettleAct {
   return { state: emptyKettle(), ok: true, msg: `Чай готов: ${label('tea', portions)}` };
 }
 
+// ---------------- the one kettle on a fire (leader decision 5: module state here) ----------------
+
+/** The kettle: on = set on a fire at (x, y) in world cells; st = its contents. A kettle in the pack is not on a fire (on = false). */
+export const pot: { on: boolean; x: number; y: number; st: KettleState } = { on: false, x: 0, y: 0, st: emptyKettle() };
+
+export function potReset(): void { pot.on = false; pot.x = 0; pot.y = 0; pot.st = emptyKettle(); }
+
+/** Sets the kettle on the fire at (x, y). The caller checks that the kettle is in the pack and the spot is by a fire. */
+export function potPlace(pack: Pack, x: number, y: number): CraftResult {
+  if (!has(pack, 'kettle')) return fail('Котелка нет. Его можно найти в ящике');
+  if (pot.on) return fail('Котелок уже стоит на огне');
+  pot.on = true; pot.x = x; pot.y = y;
+  return ok('Котелок на огне: набивай снегом и льдом');
+}
+
+/** One game step of the kettle on its fire: heat from the lit fires nearby (kettleFireHeat), cooling toward airC off the fire. */
+export function potStep(fires: readonly Fire[], dtGameS: number, airC: number): void {
+  if (!pot.on) return;
+  // a brewed tea needs no more heat: the fire stops boiling it away (it cools toward the air instead, and waits to be poured)
+  const heat = kettlePhase(pot.st) === 'tea' ? 0 : kettleFireHeat(fires, pot.x, pot.y);
+  pot.st = kettleStep(pot.st, dtGameS, heat, airC);
+}
+
+/** Phase of the kettle for the HUD and the interactions. */
+export function potPhase(): KettlePhase { return pot.on ? kettlePhase(pot.st) : 'empty'; }
+
+/** Snow cells from a dig go into the kettle: returns how many cells it took (the rest is spoil). dens: their mean density. */
+export function potAddSnow(cells: number, dens: number): number {
+  if (!pot.on) return 0;
+  const f = kettleFill(pot.st, 'snow', cells, dens);
+  pot.st = f.state;
+  return f.added;
+}
+
+/** Ice pieces (10 cells each) into the kettle. Returns true when one piece went in. */
+export function potAddIce(pack: Pack): CraftResult {
+  if (!pot.on) return fail('Котелок стоит не на огне');
+  if (!has(pack, 'ice')) return fail('Льда нет');
+  const f = kettleFill(pot.st, 'ice', ICE_PIECE_CELLS);
+  if (f.added <= 0) return fail(f.msg);
+  take(pack, 'ice', 1);
+  pot.st = f.state;
+  return ok(f.msg);
+}
+
+/** Needles into the hot-enough water (one bunch). */
+export function potAddNeedles(pack: Pack): CraftResult {
+  if (!pot.on) return fail('Котелок стоит не на огне');
+  if (!has(pack, 'needles')) return fail('Хвои нет: срежь ветки ели топором или рукой');
+  const a = kettleNeedles(pot.st);
+  if (!a.ok) return fail(a.msg);
+  take(pack, 'needles', 1);
+  pot.st = a.state;
+  return ok(a.msg);
+}
+
+/** Pours the kettle into the pack (water or tea). Refused while it is empty, melting or brewing. */
+export function potPour(pack: Pack): CraftResult {
+  if (!pot.on) return fail('Котелок стоит не на огне');
+  const a = kettlePour(pot.st, pack);
+  if (!a.ok) return fail(a.msg);
+  pot.st = a.state;
+  return ok(a.msg);
+}
+
+/** Ice cells that make one piece of ice in the pack (fauna of the pick: ice tiles give pieces). */
+export const ICE_PIECE_CELLS = 10;
+
 // ---------------- drinks and food ----------------
 
 /** Effects returned to the caller (player.ts applies them). core and food are gauge deltas, thirst is a 0..1 delta. */
@@ -460,7 +528,7 @@ export interface LootEntry { id: ItemId; n: number }
 
 /**
  * Extra items per crate, by crate index: the index of the crate in world.ts (the order of the cx array / loots list).
- * Kettle in crate 1, sleeping bag in crate 4, cord in crate 2, lantern in crate 5, resin in crate 7.
+ * Kettle in crate 1, cord in crate 2, sleeping bag in crate 4, lantern in crate 5, resin in crate 7.
  */
 const CRATE_EXTRA: Readonly<Record<number, readonly LootEntry[]>> = {
   1: [{ id: 'kettle', n: 1 }],        // food, food
@@ -468,9 +536,13 @@ const CRATE_EXTRA: Readonly<Record<number, readonly LootEntry[]>> = {
   4: [{ id: 'sleepingBag', n: 1 }],   // food, crackers, crackers
   5: [{ id: 'lantern', n: 1 }],       // thermos, matches, food
   7: [{ id: 'resin', n: 2 }],         // matches, food, thermos
+  8: [{ id: 'pickaxe', n: 1 }],       // grotto cache: the ice pick
+  9: [{ id: 'pickaxe', n: 1 }],       // station parts crate: spare pick
+  10: [{ id: 'pickaxe', n: 1 }],      // wreck cargo: the snowmobile's pick
 };
 
-/** Extra items (copies) the crate with this index holds on top of its listed loot. Empty for other crates. */
+/** Extra items (copies) the crate with this index holds on top of its listed loot. Empty for other crates.
+ *  Crates 8, 9, 10 are the location crates stamped by locations.ts after the eight supply crates: grotto cache, station parts, wreck cargo. */
 export function lootTable(crateIndex: number): LootEntry[] {
   const e = CRATE_EXTRA[crateIndex];
   return e ? e.map((x) => ({ ...x })) : [];

@@ -566,6 +566,76 @@ export class Sound {
     this.tone({ f0: 48, f1: 32, dur: 0.22, peak: 0.24 }, 1.6);
   }
 
+  // ---------------------------------------------------------------- events (procedural, see events.ts cue names)
+
+  /** Dry snow crack, with a soft settling thud after it (the warning before an avalanche). */
+  snowCrack(): void {
+    if (!this.ok()) return;
+    const gv = rnd(0.85, 1.1);
+    this.burst({ dur: 0.09, attack: 0.002, peak: 0.4 * gv, filter: 'highpass', f0: 1800, f1: 600, q: 0.7 });
+    this.tone({ f0: 90, f1: 40, dur: 0.22, peak: 0.2 * gv, attack: 0.004 });
+    this.burst({ dur: 0.35, attack: 0.02, peak: 0.12 * gv, filter: 'lowpass', f0: 500, f1: 120, pink: true }, 0.03);
+  }
+
+  /** Distant wolf howl: a long swell up and down with vibrato. p = distance 0..1 (1 = far): far is quieter, duller and has a little wind on top. */
+  howl(p: number): void {
+    const c = this.ctx;
+    if (!c || !this.master || !this.ok() || !this.take()) return;
+    const far = clamp01(p), dur = 3.4 + rnd(0, 1.2), t = c.currentTime + 0.02;
+    const f0 = rnd(230, 265);
+    const osc = c.createOscillator(); osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(f0 * 0.8, t);
+    osc.frequency.linearRampToValueAtTime(f0 * 1.45, t + dur * 0.45);
+    osc.frequency.linearRampToValueAtTime(f0 * 1.12, t + dur);
+    const vib = c.createOscillator(); vib.frequency.value = rnd(5, 6.5);
+    const vg = c.createGain(); vg.gain.value = f0 * 0.022;
+    vib.connect(vg); vg.connect(osc.frequency);
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.6;
+    bp.frequency.setValueAtTime(700 - 380 * far, t);
+    const g = c.createGain();
+    this.env(g.gain, t, dur * 0.35, (0.2 - 0.14 * far) * rnd(0.9, 1.05), dur * 0.65);
+    osc.connect(bp); bp.connect(g); g.connect(this.master);
+    vib.start(t); osc.start(t); vib.stop(t + dur + 0.1); osc.stop(t + dur + 0.1);
+    this.done(osc, [osc, vib, vg, bp, g]);
+    this.burst({ dur: dur * 0.9, attack: 0.5, peak: 0.05 * (1 - far * 0.6), filter: 'bandpass', f0: 480, q: 0.7, pink: true, low: true });
+  }
+
+  /** Lake ice cracking: a sharp report, a falling ring and a low reverberation. */
+  iceCrack(): void {
+    if (!this.ok()) return;
+    this.burst({ dur: 0.06, attack: 0.001, peak: 0.5, filter: 'highpass', f0: 2600, f1: 1400, q: 0.9 });
+    this.tone({ f0: rnd(1300, 1500), f1: 700, dur: 0.18, peak: 0.1, attack: 0.001 }, 0.01);
+    this.burst({ dur: 0.25, attack: 0.002, peak: 0.22, filter: 'bandpass', f0: 1200, f1: 300, q: 1.2 }, 0.04);
+  }
+
+  /** Signal flare igniting: a long hiss with a rising whistle. */
+  flareHiss(): void {
+    if (!this.ok()) return;
+    this.burst({ dur: 2.4, attack: 0.3, peak: 0.14, filter: 'highpass', f0: 2500, f1: 4000, q: 0.5 });
+    this.burst({ dur: 2.0, attack: 0.5, peak: 0.09, filter: 'bandpass', f0: 1800, f1: 3000, pink: true });
+    this.tone({ f0: 300, f1: 900, dur: 1.0, peak: 0.04, attack: 0.4 });
+  }
+
+  /** Helicopter rotor coming in: low pink noise swelling and fading over 9 s, with the blade slap (about 9.5 Hz) riding on it. */
+  heliRotor(): void {
+    const c = this.ctx;
+    if (!c || !this.master || !this.ok() || !this.take()) return;
+    const dur = 9, t = c.currentTime + 0.05;
+    const src = c.createBufferSource(); src.buffer = this.pink; src.loop = true;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 0.6;
+    const g = c.createGain();
+    const shape = new Float32Array(64);
+    for (let i = 0; i < shape.length; i++) shape[i] = 0.3 * Math.pow(Math.sin((Math.PI * i) / (shape.length - 1)), 1.4);
+    g.gain.setValueCurveAtTime(shape, t, dur);
+    const lfo = c.createOscillator(); lfo.frequency.value = 9.5;
+    const depth = c.createGain(); depth.gain.value = 0.1;
+    lfo.connect(depth); depth.connect(g.gain);
+    src.connect(lp); lp.connect(g); g.connect(this.master);
+    src.start(t, Math.random() * 1.9); src.stop(t + dur + 0.05);
+    lfo.start(t); lfo.stop(t + dur + 0.05);
+    this.done(src, [src, lp, g, lfo, depth]);
+  }
+
   /** Warm bell-like arpeggio (C major) for surviving the night. */
   dawn(): void {
     if (!this.ok()) return;

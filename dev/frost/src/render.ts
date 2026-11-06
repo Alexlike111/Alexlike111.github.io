@@ -9,6 +9,8 @@ import { W, H, CH, CW, CHH, HW, HH, mat, dens, bond, flags, body, gpuDirty } fro
 import { P, PK } from './particles';
 import { T, WND } from './heat';
 import { pl } from './player';
+import { activeEffects } from './events';
+import type { Effects } from './events';
 import { prof, pnow, pend } from './prof';
 
 const VS = `#version 300 es
@@ -1182,7 +1184,9 @@ export class Renderer {
   // ---------- per-frame lighting parameters derived from G ----------
   private computeLight() {
     const c = G.cam, L = this.lt, amb = this.amb, dir = this.dir, top = this.top, hor = this.hor;
-    const day = clamp(G.daylight), sa = G.sunAngle, storm = clamp(G.storm), moon = clamp(G.moon);
+    const day = clamp(G.daylight), sa = G.sunAngle;
+    // a whiteout (events.ts) reads as a storm for the sky, fog and snow streaks: the same uniforms, pushed further
+    const storm = clamp(G.storm + 0.55 * activeEffects().whiteout), moon = clamp(G.moon);
     const dusk = Math.exp(-((sa / 0.1) ** 2)) * (1 - 0.8 * storm);
     const tod = ((G.time / 60) % 24 + 24) % 24;
     // ambient
@@ -1402,4 +1406,113 @@ export class Renderer {
     gl.bindVertexArray(null);
     if (prof.on) { pend('particleDraw', t); if (pr) { this.sync(false); pend('gpuPart', t); } }
   }
+}
+
+// ---------------- event effects (events.ts activeEffects) ----------------
+// Drawn by main's overlay pass in world cells (the same transform as the player). The view rectangle is in cells.
+
+/** Red flare: a glow where it burns, or pinned to the screen edge on its side when it is out of view. */
+function drawFlare(g: CanvasRenderingContext2D, f: NonNullable<Effects['flare']>, v: { x0: number; y0: number; x1: number; y1: number }): void {
+  const inView = f.x >= v.x0 && f.x <= v.x1 && f.y >= v.y0 && f.y <= v.y1;
+  const x = inView ? f.x : clamp(f.x, v.x0 + 30, v.x1 - 30), y = inView ? f.y : clamp(f.y, v.y0 + 30, v.y1 - 40);
+  const r = inView ? 140 : 90, a = f.bright;
+  const grd = g.createRadialGradient(x, y, 2, x, y, r);
+  grd.addColorStop(0, `rgba(255,70,40,${0.9 * a})`);
+  grd.addColorStop(0.25, `rgba(255,60,30,${0.42 * a})`);
+  grd.addColorStop(1, 'rgba(255,40,20,0)');
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = grd;
+  g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  if (inView) {                         // the flare itself: a small bright core and a trail of smoke
+    g.fillStyle = `rgba(255,220,200,${0.9 * a})`;
+    g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
+/** Parachute container: canopy above, lines, and the crate itself while it is still in the air (x, y = bottom row). */
+function drawDrop(g: CanvasRenderingContext2D, d: NonNullable<Effects['drop']>): void {
+  const cx = d.x + 8, cy = d.y - 11;                  // the crate's centre
+  const canopyY = cy - 26 + d.t * 6;
+  g.save();
+  g.fillStyle = 'rgba(232,236,240,0.92)';
+  g.beginPath();
+  g.arc(cx, canopyY, 15, Math.PI, 0);                 // the dome
+  g.closePath(); g.fill();
+  g.fillStyle = 'rgba(255,120,40,0.85)';              // every other gore is orange
+  for (let k = 0; k < 4; k += 2) {
+    g.beginPath();
+    g.moveTo(cx - 15 + k * 7.5, canopyY);
+    g.arc(cx, canopyY, 15, Math.PI + k * Math.PI / 4, Math.PI + (k + 1) * Math.PI / 4);
+    g.closePath(); g.fill();
+  }
+  g.strokeStyle = 'rgba(40,50,60,0.7)'; g.lineWidth = 0.6;
+  g.beginPath();
+  for (const dx of [-14, -5, 5, 14]) { g.moveTo(cx + dx, canopyY); g.lineTo(cx + dx * 0.3, cy - 6); }
+  g.stroke();
+  if (d.t < 1) {                                      // still falling: the crate hangs below
+    g.fillStyle = 'rgba(255,110,40,0.95)';
+    g.fillRect(cx - 8, cy - 5.5, 16, 11);
+    g.fillStyle = 'rgba(40,20,10,0.5)';
+    g.fillRect(cx - 8, cy - 1, 16, 1);
+  }
+  g.restore();
+}
+
+/** Helicopter: a dark fuselage with a tail boom and a blurred rotor; circling ones keep turning over the fire. */
+function drawHeli(g: CanvasRenderingContext2D, h: NonNullable<Effects['heli']>, t: number): void {
+  g.save();
+  g.translate(h.x, h.y);
+  g.fillStyle = 'rgba(28,36,46,0.92)';
+  g.beginPath(); g.ellipse(0, 0, 14, 6, 0, 0, Math.PI * 2); g.fill();          // cabin
+  g.fillRect(12, -2.2, 22, 3.6);                                                // boom
+  g.beginPath(); g.moveTo(31, -2); g.lineTo(36, -9); g.lineTo(34, -2); g.closePath(); g.fill();   // fin
+  g.fillStyle = 'rgba(160,200,230,0.55)';
+  g.beginPath(); g.ellipse(-4, -1, 6, 3.4, 0, 0, Math.PI * 2); g.fill();      // canopy glass
+  g.fillStyle = 'rgba(28,36,46,0.92)';
+  g.fillRect(-3, -9, 6, 3);                                                      // mast
+  // rotor: a flat blur that flickers as the blades pass
+  g.globalAlpha = 0.55 + 0.1 * Math.sin(t * 60);
+  g.fillStyle = 'rgba(25,30,38,0.7)';
+  g.fillRect(-42, -10.4, 84, 1.8);
+  g.globalAlpha = 1;
+  g.restore();
+}
+
+/** Wolf tracks: pairs of prints along the snow, pointing in their direction of travel. */
+function drawTracks(g: CanvasRenderingContext2D, tr: Effects['tracks']): void {
+  g.save();
+  for (const t of tr) {
+    if (t.alpha <= 0) continue;
+    g.fillStyle = `rgba(20,30,44,${0.5 * t.alpha})`;
+    // one print: a pad and a smaller toe, both on the snow surface (y is the surface row)
+    g.beginPath(); g.ellipse(t.x, t.y - 0.5, 2.2, 1.1, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(t.x + t.dir * 1.6, t.y - 0.9, 0.9, 0.6, 0, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
+/** World-space pass: flare, parachute, helicopter, wolf tracks. Call inside main's world transform (cells). */
+export function drawEventFx(g: CanvasRenderingContext2D, view: { x0: number; y0: number; x1: number; y1: number }, t: number): void {
+  const fx = activeEffects();
+  if (fx.tracks.length) drawTracks(g, fx.tracks);
+  if (fx.flare) drawFlare(g, fx.flare, view);
+  if (fx.drop) drawDrop(g, fx.drop);
+  if (fx.heli) drawHeli(g, fx.heli, t);
+}
+
+/** Screen pass (device pixels, identity transform): the whiteout veil, slightly stronger in the middle. */
+export function drawWhiteout(g: CanvasRenderingContext2D, w: number, h: number): void {
+  const k = activeEffects().whiteout;
+  if (k <= 0.01) return;
+  g.save();
+  g.fillStyle = `rgba(214,226,238,${0.55 * k})`;
+  g.fillRect(0, 0, w, h);
+  const grd = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.15, w / 2, h / 2, Math.max(w, h) * 0.7);
+  grd.addColorStop(0, 'rgba(240,246,252,0)');
+  grd.addColorStop(1, `rgba(240,246,252,${0.4 * k})`);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, w, h);
+  g.restore();
 }

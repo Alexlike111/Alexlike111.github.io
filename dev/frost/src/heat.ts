@@ -4,6 +4,7 @@
 import { W, H, HS, HW, HH, M, F_WET, mat, dens, bond, flags, idx, inb, set, groundY, noise1 } from './world';
 import { G } from './state';
 import { pnow, pend } from './prof';
+import { isWarm, isLakeWater } from './locations';
 
 export const T = new Float32Array(HW * HH);    // temperature per heat cell
 export const WND = new Float32Array(HW * HH);  // local horizontal wind, m/s (+ toward +x)
@@ -40,6 +41,12 @@ const MARGIN = 8;          // heat cells simulated beyond G.win
 const HEAT_DT = 0.05;
 const COMP_STRIDE = 8;     // composition: each heat row is re-read every 8 solver runs (~0.4 s; the surface and phase passes keep their own rhythm)
 const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_EVERY solver runs
+// warm spring (locations.ts isWarm): the pool is a heat source, so its water never freezes and the air just above warms
+const WARM_WATER_T = 4, WARM_AIR_T = 1;      // degC the pool water and the air over it are held near
+const WARM_WATER_K = 0.5, WARM_AIR_K = 0.2;  // 1/s relaxation toward those (per real second)
+// lake under its ice lid: the lid thickens slowly, and water stays under it (LAKE_KEEP cells) so the lake never freezes solid
+const LAKE_GROW = 0.04;    // share of the candidate cells that may freeze per check
+const LAKE_KEEP = 8;       // cells of liquid that always stay below the lid
 
 // ---------------- per-material tables ----------------
 const SK = new Float32Array(1024), SC = new Float32Array(1024);
@@ -74,6 +81,8 @@ const ex = new Uint8Array(HW * HH);                // 1 = exposed air: above the
 const grd = new Int16Array(HW);                    // ground row of each heat column: the highest surface within 3 heat columns (a pit does not lower it)
 const fireNear = new Uint8Array(HW * HH);          // 1 = within reach of an active fire (the pit it melts): meltwater there does not freeze
 const fireSeen = new Uint8Array(HW * HH);          // 1 = a fire has burned here: a pit refreezes as slush, not as an ice slab
+const warmH = new Uint8Array(HW * HH);             // 1 = over the warm spring (isWarm): never freezes, warmed by a source
+let warmList: number[] = [];                       // the same cells, as a list (the source pass visits only these)
 // conduction coefficients derived from the composition (refreshed with it, so the solver does no divisions per step)
 const ic = new Float32Array(HW * HH).fill(1);      // 1 / cap
 const air = new Uint8Array(HW * HH);               // 1 = air-like cell (cap <= 2)
@@ -148,6 +157,20 @@ export function initHeat() {
   nDirty = HW * HH; applyDirty();
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) T[hy * HW + hx] = profileT(hx, hy);
   WND.fill(0); vR.fill(0); sR.fill(0); meltAcc.fill(0); fireSeen.fill(0); prevValid = false;
+  warmH.fill(0); warmList = [];
+  for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) {
+    if (!isWarm(hx * HS + 2, hy * HS + 2)) continue;
+    const h = hy * HW + hx;
+    warmH[h] = 1; warmList.push(h);
+  }
+}
+
+/** Lake water is frozen only as the top row under the lid, slowly, and only while LAKE_KEEP cells of water stay below it. */
+function lakeMayFreeze(x: number, y: number): boolean {
+  if (nb(x, y - 1) !== M.ICE) return false;
+  if (Math.random() >= LAKE_GROW) return false;
+  for (let k = 1; k <= LAKE_KEEP; k++) if (nb(x, y + k) !== M.WATER) return false;
+  return true;
 }
 
 // ---------------- window ----------------
@@ -253,12 +276,13 @@ function phase(hx: number, hy: number, dtRow: number) {
       T[h] = Math.max(-1, t - (done * cost) / cap[h]);
       if (done === 0) T[h] = t * 0.995;                           // buried snow: no air to drain into, stays wet
     }
-  } else if (nWat[h] > 0 && t < FREEZE_T && !fireNear[h]) {          // no freezing while a fire burns beside it
+  } else if (nWat[h] > 0 && t < FREEZE_T && !fireNear[h] && !warmH[h]) {   // no freezing while a fire burns beside it, nor in the warm spring
     const n = Math.min(nWat[h], Math.round(nWat[h] * Math.min(1, FREEZE_RATE * dtRow) + Math.random() - 0.5));
     let done = 0;
     for (let q = 0; q < 16 && done < n; q++) {
       const i = base + (q >> 2) * W + (q & 3);
       if (mat[i] !== M.WATER) continue;
+      if (isLakeWater(hx * HS + (q & 3), hy * HS + (q >> 2)) && !lakeMayFreeze(hx * HS + (q & 3), hy * HS + (q >> 2))) continue;
       // ice keeps the water's mass; where a fire has burned the meltwater freezes into loose wet snow (slush the shovel digs)
       if (fireSeen[h]) set(hx * HS + (q & 3), hy * HS + (q >> 2), M.SNOW, dens[i], 0, F_WET);
       else set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, dens[i], 255, 0);
@@ -359,6 +383,14 @@ export function stepHeat(dt: number) {
     for (let hy = y0; hy <= y1; hy++) for (let h = hy * HW + x0, e = hy * HW + x1; h <= e; h++) T[h] = tn[h];
   }
   pend('hCond', pt);
+  // warm spring: the pool water is held near WARM_WATER_T and the air over it near WARM_AIR_T; solid cells are left to conduction
+  for (let k = 0; k < warmList.length; k++) {
+    const h = warmList[k], hy = (h / HW) | 0, hx = h - hy * HW;
+    if (hx < hx0 || hx > hx1 || hy < hy0 || hy > hy1) continue;
+    const water = nWat[h] > 0;
+    if (!water && nSol[h] >= 8) continue;
+    T[h] += ((water ? WARM_WATER_T : WARM_AIR_T) - T[h]) * Math.min(1, (water ? WARM_WATER_K : WARM_AIR_K) * dt);
+  }
   // boundary: open air at the window edge and the top rows is ambient
   for (let hx = hx0; hx <= hx1; hx++) for (let hy = hy0; hy <= hy0 + 1; hy++) { const h = hy * HW + hx; if (nSol[h] < 8) T[h] = amb; }
   for (let hy = hy0; hy <= hy1; hy++) { let h = hy * HW + hx0; if (nSol[h] < 8) T[h] = amb; h = hy * HW + hx1; if (nSol[h] < 8) T[h] = amb; }

@@ -9,7 +9,7 @@ import { plural } from './ru';
 /** Counted items. The first six already exist on tools.ts inv; the rest are the new fields of the spec and the recipe table. */
 export const COUNT_IDS = [
   'logs', 'branches', 'matches', 'food', 'crackers', 'thermos',                 // existing inv fields
-  'stones', 'meat', 'cooked', 'ice', 'water', 'tea', 'cord', 'pelt', 'resin',   // spec: new fields (ice: pieces picked with the pickaxe)
+  'stones', 'meat', 'cooked', 'ice', 'water', 'tea', 'cord', 'pelt', 'resin', 'needles', // spec: new fields (ice: pieces picked with the pickaxe)
   'torchFuel',                                                                  // spec: minutes left in the torch in hand
   'planks', 'torches', 'traps', 'hearths',                                      // needed by the recipe table
 ] as const;
@@ -23,7 +23,7 @@ export type ItemId = CountId | GearId;
 
 /** Count fields that inv does not have yet. Phase 2 adds them with freshFields() (snowshoes already exists on inv). */
 export const NEW_COUNT_IDS: readonly CountId[] = [
-  'stones', 'meat', 'cooked', 'ice', 'water', 'tea', 'cord', 'pelt', 'resin', 'torchFuel', 'planks', 'torches', 'traps', 'hearths',
+  'stones', 'meat', 'cooked', 'ice', 'water', 'tea', 'cord', 'pelt', 'resin', 'needles', 'torchFuel', 'planks', 'torches', 'traps', 'hearths',
 ];
 /** Gear fields that inv does not have yet (snowshoes already exists). */
 export const NEW_GEAR_IDS: readonly GearId[] = ['sled', 'sleepingBag', 'kettle', 'lantern', 'pickaxe'];
@@ -52,6 +52,7 @@ export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
   cord: { kind: 'count', forms: ['верёвка', 'верёвки', 'верёвок'] },
   pelt: { kind: 'count', forms: ['шкурка', 'шкурки', 'шкурок'] },
   resin: { kind: 'count', forms: ['ком смолы', 'кома смолы', 'комов смолы'] },
+  needles: { kind: 'count', forms: ['пучок хвои', 'пучка хвои', 'пучков хвои'] },
   torchFuel: { kind: 'count', forms: ['минута горения', 'минуты горения', 'минут горения'], unit: 'мин' },
   planks: { kind: 'count', forms: ['доска', 'доски', 'досок'] },
   torches: { kind: 'count', forms: ['факел', 'факела', 'факелов'] },

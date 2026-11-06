@@ -269,7 +269,20 @@ function clearSpot(x0: number): number {
   return x0;
 }
 
-function placeCrate(x: number, loot: string[]) {
+/** Supply container lowered by parachute: a 16 x 11 crate standing on the snow surface row `y` (its bottom row is y - 1),
+ *  with an orange marker pole beside it (the same marker as the buried caches). Called by events.ts through main. */
+export function placeSupplyCrate(x: number, y: number, loot: readonly string[]): void {
+  const w = 16, h = 11, top = y - h;
+  for (let yy = top; yy < y; yy++) for (let xx = x; xx < x + w; xx++) {
+    if (inb(xx, yy)) set(xx, yy, M.CRATE, 0, 0, 0);
+  }
+  for (let yy = top - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) {
+    if (inb(xx, yy) && mat[idx(xx, yy)] === M.AIR) set(xx, yy, M.POLE, 0, 0, ((yy >> 2) & 1) ? F_VERT : 0);
+  }
+  crates.push({ x, y: top, w, h, loot: loot.slice(), opened: false });
+}
+
+export function placeCrate(x: number, loot: string[]) {
   const g = groundY[x];
   const w = 16, h = 11;
   // supply cache: buried about 1.2 m under the snow surface (or on the ground if the snow is thinner)

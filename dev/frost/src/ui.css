@@ -941,6 +941,8 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .chip.badge { border-radius: 0.3em; }
   .chip.badge::after { width: 0.35em; height: 0.35em; }
   .chips:not(.open) .chip.zero { display: none; }
+  /* phase 2 items: on a phone only the vital chips show; the rest (sec, gear badges) waits behind the «…» button */
+  .chips:not(.open) .chip.sec, .chips:not(.open) .chip.badge { display: none; }
   .chip.zero { opacity: 0.45; }
   .chip.more { display: flex; pointer-events: auto; cursor: pointer; min-width: 30px; min-height: 26px; justify-content: center; font-weight: 700; color: var(--frost-2); touch-action: none; }
   .chips.open .chip.more { border-color: var(--ice); color: var(--ice); }
@@ -1172,4 +1174,56 @@ kbd.m { font-family: var(--font-ui); font-weight: 700; letter-spacing: 0.04em; }
   .bench-legend em { display: none; }
   .bench-scroll { min-height: 0; }
   .bench-ta { height: 5em; }
+}
+
+/* ---- phase 2: «Крафт» touch button (top of the outer arc) and the crafting panel (craftpanel.ts) ---- */
+.cb-craft { --d: var(--S); --x: 0px; --y: calc(var(--ry) * -1); }
+.craft { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; pointer-events: auto; }
+.craft.on { display: flex; }
+.craft[hidden] { display: none !important; }
+.craft-scrim { position: absolute; inset: 0; background: rgba(3, 7, 14, 0.55); }
+.craft-box {
+  position: relative; width: min(94vw, 34em); max-height: 88vh; overflow: auto; -webkit-overflow-scrolling: touch;
+  padding: 0.9em 1em 1em; border-radius: 14px; border: 1px solid var(--plate-line-hi); color: var(--frost-2);
+  background: linear-gradient(170deg, rgba(30, 48, 72, 0.96), rgba(7, 13, 23, 0.97)); box-shadow: 0 1em 3em rgba(0, 0, 0, 0.6);
+  font-family: var(--font-ui);
+}
+.craft-head { display: flex; align-items: center; gap: 0.6em; }
+.craft-head b { font-size: 1.1em; letter-spacing: 0.08em; color: var(--frost); }
+.craft-head i { font-style: normal; font-size: 0.8em; color: var(--frost-3); }
+.craft-x {
+  margin-left: auto; width: 2.2em; height: 2.2em; border-radius: 50%; border: 1px solid var(--plate-line-hi);
+  background: rgba(8, 14, 24, 0.6); color: var(--frost); font-size: 1.2em; line-height: 1; cursor: pointer;
+}
+.craft-hint { margin: 0.5em 0 0.7em; font-size: 0.82em; color: var(--frost-3); }
+.craft-list { display: grid; grid-template-columns: 1fr; gap: 0.4em; }
+.craft-row {
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'name need' 'ways ways' 'st st'; gap: 0.15em 0.6em;
+  text-align: left; padding: 0.55em 0.7em; border-radius: 10px; border: 1px solid rgba(143, 211, 255, 0.18);
+  background: rgba(8, 14, 24, 0.6); color: var(--frost-2); cursor: pointer; font: inherit;
+}
+.craft-row.ok { border-color: rgba(143, 211, 255, 0.55); }
+.craft-row.ok:hover { background: rgba(34, 60, 90, 0.7); }
+.craft-row.no { opacity: 0.72; }
+.cr-name { grid-area: name; font-weight: 700; color: var(--frost); }
+.cr-need { grid-area: need; font-size: 0.8em; color: var(--frost-3); text-align: right; }
+.cr-ways { grid-area: ways; font-size: 0.8em; color: var(--frost-3); }
+.cr-st { grid-area: st; font-size: 0.8em; color: var(--frost-3); }
+.craft-row.ok .cr-st { color: var(--ice); }
+.craft-row.no .cr-st { color: var(--ember); }
+.craft-bench { display: flex; align-items: center; gap: 0.7em; margin-top: 0.6em; flex-wrap: wrap; }
+.craft-bn {
+  padding: 0.5em 0.9em; border-radius: 99px; border: 1px solid var(--ice); background: rgba(47, 120, 184, 0.2);
+  color: var(--frost); font: inherit; font-size: 0.85em; cursor: pointer;
+}
+.craft-bn:disabled { opacity: 0.45; cursor: default; border-color: var(--plate-line-hi); }
+.craft-bst { font-size: 0.8em; color: var(--frost-3); }
+.craft-gh { margin: 0.9em 0 0.3em; font-size: 0.82em; letter-spacing: 0.1em; text-transform: uppercase; color: var(--frost-3); font-weight: 600; }
+.cg-row { display: flex; flex-wrap: wrap; gap: 0.2em 0.6em; align-items: baseline; padding: 0.35em 0; border-top: 1px solid rgba(143, 211, 255, 0.1); font-size: 0.85em; }
+.cg-row b { color: var(--frost-3); min-width: 6.5em; font-weight: 600; }
+.cg-row span { flex: 1 1 12em; color: var(--frost-2); }
+.cg-row:not(.own) { opacity: 0.5; }
+.cg-btn {
+  padding: 0.25em 0.8em; border-radius: 99px; border: 1px solid var(--ice); background: transparent; color: var(--ice);
+  font: inherit; font-size: 0.85em; cursor: pointer;
 }

@@ -162,6 +162,7 @@ interface Core {
   flareDone: boolean;
   drop: { x: number; y: number; t0: number; spot: SupplySpot } | null;
   rescue: { state: RescueState; t0: number; eta: number; fx: number; fy: number; side: 1 | -1; circleUntil: number };
+  forceWhite: number;               // real second until which a debug-forced whiteout holds (0 = off)
   fx: Effects;
 }
 
@@ -194,6 +195,7 @@ function makeCore(seed: number): Core {
     ice: { cracks: [], lastToastRt: -1e9, breakAt: -1, row: -1, lastBreakT: -1e9 }, iceCheckAt: 0,
     flare: null, flareDone: false, drop: null,
     rescue: { state: 'locked', t0: 0, eta: 0, fx: 0, fy: 0, side: 1, circleUntil: 0 },
+    forceWhite: 0,
     fx: { visibility: 1, whiteout: 0, flare: null, drop: null, heli: null, tracks: [] },
   };
 }
@@ -380,6 +382,15 @@ function flareRoll(s: Core, c: EventCtx): void {
 
 /** Snow spot 4-60 m from the hero, reachable by walking: neighbouring columns differ by at most CLIMB cells (1.5 m, a ledge the hero can climb). */
 function pickDropSpot(s: Core, hx: number): SupplySpot | null {
+  // reachable from the hero's column; on a ridge or a tower the walk is narrow, so the step limit widens until a spot turns up
+  for (const climb of [CLIMB, CLIMB * 2, 1e9]) {
+    const spot = pickDropSpotWithin(s, hx, climb);
+    if (spot) return spot;
+  }
+  return null;
+}
+
+function pickDropSpotWithin(s: Core, hx: number, climb: number): SupplySpot | null {
   const lo = Math.max(1, hx - 1200), hi = Math.min(W - 2, hx + 1200);
   const top = surfaceWindow(lo, hi);
   const reach = new Uint8Array(hi - lo + 1);
@@ -390,7 +401,7 @@ function pickDropSpot(s: Core, hx: number): SupplySpot | null {
     const k = q[h];
     for (const n of [k - 1, k + 1]) {
       if (n < 0 || n >= reach.length || reach[n]) continue;
-      if (Math.abs(top[n] - top[k]) > CLIMB) continue;
+      if (Math.abs(top[n] - top[k]) > climb) continue;
       reach[n] = 1;
       q.push(n);
     }
@@ -447,7 +458,7 @@ function updateWhiteout(s: Core, c: EventCtx, dt: number): void {
   }
   let burst = 0;
   if (s.rt < w.burstEnd) burst = w.peak * clamp(Math.min((s.rt - w.burstStart) / 6, (w.burstEnd - s.rt) / 10), 0, 1);
-  const target = clamp(smooth(0.25, 0.8, storm) * (0.45 + 0.55 * burst), 0, 0.9);
+  const target = s.rt < s.forceWhite ? 0.85 : clamp(smooth(0.25, 0.8, storm) * (0.45 + 0.55 * burst), 0, 0.9);
   w.level += (target - w.level) * Math.min(1, dt * 0.8);
   if (storm < 0.1) w.toasted = false;
   if (w.level > 0.75 && !w.toasted) {
@@ -673,6 +684,80 @@ function buildEffects(s: Core, c: EventCtx, visibility: number, whiteout: number
     tracks.push({ x: t.x, y: t.y, dir: t.dir, alpha });
   }
   return { visibility, whiteout, flare, drop, heli, tracks };
+}
+
+// ---------------------------------------------------------------- debug entry point
+
+/** Test hook (main's __frost.event): starts one event now, skipping its time and weather rules but not its warning.
+ *  Returns false when the event cannot happen here (for example an ice break away from the lake). */
+export function forceEvent(kind: string, c: EventCtx): boolean {
+  const s = core(), now = c.G.time, hx = Math.round(c.hero.x), hy = Math.round(c.hero.y);
+  switch (kind) {
+    case 'flare': {
+      const fx = clamp(hx + 900, 60, W - 60);
+      s.flare = { x: fx, y: Math.max(0, surfaceAt(fx) - 90), t0: s.rt };
+      s.flareDone = true;
+      c.cue?.('flareHiss', 1);
+      c.toast('На горизонте вспыхнула красная ракета.');
+      note(s, 'flare', now, 'Ночью на горизонте вспыхнула ракета');
+      return true;
+    }
+    case 'supplyDrop': {
+      if (s.drop) return false;
+      dropSupply(s, c);
+      return s.drop !== null;
+    }
+    case 'wolves': {
+      c.cue?.('wolfHowl', 0.4);
+      c.toast('Вдалеке воют волки. Держись огня.');
+      note(s, 'wolves', now, 'Ночью вдали выли волки');
+      const dir: 1 | -1 = s.rng() < 0.5 ? 1 : -1;
+      let x = Math.round(hx + dir * 700);
+      for (let k = 0; k < 12 && x > 20 && x < W - 20; k++) {
+        s.tracks.push({ x, y: surfaceAt(x), dir: (-dir) as 1 | -1, appear: now });
+        x -= dir * 8;
+      }
+      return true;
+    }
+    case 'whiteout': {
+      s.forceWhite = s.rt + 25;
+      return true;
+    }
+    case 'avalanche': {
+      const site = findSlide(s, hx);
+      if (!site) return false;
+      c.toast('Снег трещит по склону! Уходи вверх или в сторону.');
+      c.cue?.('snowCrack', 1);
+      s.realQ.push({ at: s.rt + AVALANCHE_WARN_S, run: (cc) => releaseSlab(core(), cc, site) });
+      return true;
+    }
+    case 'snowDump': {
+      if (s.dumpBusy) return false;
+      s.dumpBusy = true;
+      c.cue?.('treeCreak', 1);
+      c.toast('Ель скрипит под тяжестью снега. Сейчас сбросит! Отойди!');
+      s.realQ.push({ at: s.rt + DUMP_DELAY_S, run: (cc) => dropCaps(core(), cc, hx, hy) });
+      return true;
+    }
+    case 'iceCrack': {
+      const I = s.ice, r = iceRowUnder(hx, hy);
+      if (r < 0) return false;                       // not standing on the lake ice
+      I.row = r; I.breakAt = s.rt + ICE_BREAK_S;
+      c.toast('Лёд проваливается: назад, на снег!');
+      s.realQ.push({ at: I.breakAt, run: (cc) => breakIce(core(), cc) });
+      return true;
+    }
+    case 'rescue': {
+      const R = s.rescue, f = signalFire(c);
+      if (f) { startInbound(s, c, RESCUE_ETA_MIN, f); return true; }
+      R.state = 'inbound'; R.t0 = now; R.eta = now + RESCUE_ETA_MIN; R.fx = hx; R.fy = hy; R.side = 1;
+      c.cue?.('heliRotor', 1);
+      c.toast('Вертолёт на подлёте! (тест: костра нет)');
+      return true;
+    }
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------- per-frame entry points

@@ -1,5 +1,5 @@
 // Tools: shovel, snow saw, axe, beams, snow blocks, campfire; crates, eating.
-import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_BLOCK, F_TREE, F_VERT, BOND_SOLID, CELL, wake } from './world';
+import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx, inb, set, rigidAt, isGranular, crates, F_DIST, F_BLOCK, F_TREE, F_VERT, BOND_SOLID, CELL, wake, surfaceAt } from './world';
 import { G, Fire } from './state';
 import { plural } from './ru';
 import { pl } from './player';
@@ -7,6 +7,10 @@ import { spawn, PK } from './particles';
 import { markStruct, supportMargin, freshBeam } from './structure';
 import { makeBody, bodyAtIndex, removeBody, bodies } from './phys';
 import type { Sound } from './audio';
+import { has, add, take, count, label, isGear, nameOf } from './items';
+import { craft, drink, eatMeat, roast, placeWorkbench, lootTable, potPlace, potStep, potAddSnow, potAddIce, potAddNeedles, potPour, pot, resetCraft, benches, CUP_L, ICE_PIECE_CELLS, type RecipeId, type CraftResult } from './craft';
+import { placeSnare, removeSnare, checkSnareAt, checkSnare, snares } from './fauna';
+import { resetGear, carryCap, lightSpare, plantTorch, torchHeat, toggleShoes } from './gear';
 
 export const TOOLS = [
   { id: 'shovel', name: 'Лопата', key: '1' },
@@ -15,9 +19,22 @@ export const TOOLS = [
   { id: 'beam', name: 'Бревно', key: '4' },
   { id: 'block', name: 'Блок', key: '5' },
   { id: 'fire', name: 'Костёр', key: '6' },
+  { id: 'pickaxe', name: 'Кирка', key: '7' },
+  { id: 'torch', name: 'Факел', key: '8' },
+  { id: 'trap', name: 'Силок', key: '9' },
 ] as const;
 
-export const inv = { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false };
+/** The pack: counted items and gear flags (items.ts). Written out field by field so the types stay exact (no optional fields). */
+function startPack() {
+  return {
+    logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [] as number[], saw: true, snowshoes: false,
+    stones: 0, meat: 0, cooked: 0, ice: 0, water: 0, tea: 0, cord: 0, pelt: 0, resin: 0, needles: 0,
+    torchFuel: 0, planks: 0, torches: 0, traps: 0, hearths: 0,
+    sled: false, sleepingBag: false, kettle: false, lantern: false, pickaxe: false,
+  };
+}
+export const inv = startPack();
+
 // msgSec: how long the next tool message stays on the hint card (seconds)
 export const tool = { bfs: 0, outs: 0, ins: 0, digs: 0, dugN: 0, dugD: 0, thrownN: 0, thrownD: 0, digDir: 1, cur: 0, cool: 0, rot: 0, sawT: 0, sawNeed: 1, msg: '' as string, msgSec: 2.5, built: new Set<string>() };
 export const REACH = 40; // cells (2 m)
@@ -32,7 +49,8 @@ export function bindSound(s: Sound) { sfx = s; }
 let fireId = 1;
 
 export function resetTools() {
-  Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
+  Object.assign(inv, startPack());
+  resetCraft(); resetGear();
   Object.assign(tool, { digDir: 1, cur: 0, cool: 0, rot: 0, digs: 0, sawT: 0, sawNeed: 1, msg: '', msgSec: 2.5 });
   tool.built.clear();
   G.fires.length = 0; laid.length = 0; bag.length = 0; flushIn = 0; DIG.key = ''; DIG.p = 0; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
@@ -100,7 +118,7 @@ function scanTile(tx: number, ty: number): DigTile {
   t.time = t.snow ? sec / t.snow : 0;
   return t;
 }
-const diggable = (t: DigTile) => t.snow > 0 && t.hard === 0 && t.body === 0;
+const diggable = (t: DigTile) => t.snow > 0 && t.body === 0; // a tile that only partly holds a crate, timber, ice or ground: its snow cells are taken, the rest stays
 /** why a tile is grey (not dug): the material in it, or that there is no snow */
 function whyNot(t: DigTile): string {
   if (t.body) return 'упавшее бревно: топором';
@@ -186,6 +204,7 @@ export function aimTarget(ax: number, ay: number, moveX = 0): DigTarget {
 /** a finished dig: its snow cells leave the world into the spoil bag (thrown clear by tickSpoil), dust bursts, the stamina cost by hardness */
 function finishDig(tiles: DigTile[]) {
   let n = 0, dd = 0, x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  const ds: number[] = [];
   for (const u of tiles) {
     const bx = u.tx * TILE, by = u.ty * TILE;
     x0 = Math.min(x0, bx); y0 = Math.min(y0, by); x1 = Math.max(x1, bx + TILE); y1 = Math.max(y1, by + TILE);
@@ -194,10 +213,11 @@ function finishDig(tiles: DigTile[]) {
       if (!inb(x, y)) continue;
       const i = idx(x, y);
       if ((mat[i] !== M.SNOW && mat[i] !== M.ASH) || body[i]) continue;
-      bag.push(dens[i]); n++; dd += dens[i];
+      ds.push(dens[i]); n++; dd += dens[i];
       set(x, y, M.AIR);
     }
   }
+  routeSnow(ds);
   if (!n) return;
   tool.digs++; tool.dugN += n; tool.dugD += dd;
   for (let k = 0, nb = 4 + Math.min(10, n >> 2); k < nb; k++) {
@@ -431,7 +451,8 @@ let sawX0 = -99, sawY0 = -99; // block corner of the cut in progress
 export function sawProgress(): number { return tool.sawNeed > 0 ? Math.min(1, tool.sawT / tool.sawNeed) : 0; }
 function saw(ax: number, ay: number, dt: number) {
   if (!inv.saw) { say('Пилы нет. Поищи ящики под оранжевыми вешками'); return; }
-  if (inv.blocks.length >= BLOCK_CAP) { say(`Больше ${BLOCK_CAP} ${plural(BLOCK_CAP, 'блока', 'блоков', 'блоков')} не унести. Сложи их`); return; }
+  const cap = carryCap(inv, 'blocks');
+  if (inv.blocks.length >= cap) { say(`Больше ${cap} ${plural(cap, 'блока', 'блоков', 'блоков')} не унести${cap > BLOCK_CAP ? '' : '. Санки поднимут предел до 24'}. Сложи их`); return; }
   const { x0, y0, w, h } = blockRect(ax, ay);
   const pr = sawProbe(ax, ay);
   if (!pr.solid) { say('Пилой режут сплошной снег. Здесь пустота или не снег'); tool.sawT = 0; return; }
@@ -723,6 +744,8 @@ function chop(ax: number, ay: number) {
         if (rec.hits >= need) {
           const logs = Math.max(1, Math.round(wood / 80));
           const br = Math.round(ndl / 140) + (rec.kind === 'tree' ? 2 : 0);
+          const room = carryCap(inv, 'logs') - inv.logs;
+          if (room < logs) { say(`Не унести: ${logs} ${plural(logs, 'бревно', 'бревна', 'брёвен')}, в руках места на ${Math.max(0, room)}. Сложи брёвна брусом или возьми санки`); sfx?.uiDeny(); return; }
           inv.logs += logs; inv.branches += br;
           removeBody(rec, false);
           say(`+${logs} ${plural(logs, 'бревно', 'бревна', 'брёвен')}${br ? `, +${br} ${plural(br, 'хворост', 'хвороста', 'хвороста')}` : ''}`);
@@ -740,7 +763,7 @@ function chop(ax: number, ay: number) {
     // cut a few branches for kindling
     let n = 0;
     for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { if (!inb(cx + dx, cy + dy)) continue; const i = idx(cx + dx, cy + dy); if (mat[i] === M.NEEDLE) { set(cx + dx, cy + dy, M.AIR); n++; } }
-    if (n > 8) { inv.branches += 1; say('+1 хворост'); }
+    if (n > 8) { inv.branches += 1; inv.needles += 1; say('+1 хворост, +1 пучок хвои (для чая)'); }
     sfx?.chop(false); tool.cool = 0.35; pl.stamina -= 0.015; return;
   }
   if (m0 !== M.WOOD || !(flags[i0] & F_TREE)) {
@@ -825,9 +848,11 @@ export function placeFire(ax: number, ay: number) {
   // one fire per clearing: a new one next to a burning fire is refused, feed the old one instead (feedFire via interact: E / «Взять»)
   if (G.fires.some((f) => Math.hypot(f.x - x, f.y - y) < 12)) { say('Рядом уже горит костёр — подбрось дров: E / «Взять»'); sfx?.uiDeny(); return; }
   inv.matches--; inv.logs--; inv.branches -= 2;
-  G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++ });
+  const hearth = inv.hearths > 0;   // a stone hearth (очаг из камней) takes the fire: no sinking, 30 % longer burn
+  if (hearth) inv.hearths--;
+  G.fires.push({ x, y, fuel: 150, power: 0, lit: true, id: fireId++, hearth });
   sfx?.ignite();
-  say('Костёр горит. Подкидывай брёвна: «Взять» рядом с огнём');
+  say(hearth ? 'Костёр на очаге из камней. Подкидывай брёвна: «Взять» рядом с огнём' : 'Костёр горит. Подкидывай брёвна: «Взять» рядом с огнём');
   tool.built.add('fire');
 }
 export function feedFire(f: Fire): boolean {
@@ -866,14 +891,14 @@ export function stepFires(dt: number) {
   for (let k = G.fires.length - 1; k >= 0; k--) {
     const f = G.fires[k];
     if (f.lit) {
-      f.fuel -= gm;
+      f.fuel -= gm / (f.hearth ? 1.3 : 1);
       f.power = 4200 * Math.min(1, f.fuel / 30) * (0.85 + Math.random() * 0.3);
       if (f.fuel <= 0) { f.lit = false; f.power = 0; }
     }
     // sink: fire rests on whatever is below; melting snow under it lets it drop
     let support = false;
     for (let dx = -3; dx <= 3; dx++) { const i = idx(f.x + dx, f.y); if (inb(f.x + dx, f.y) && (mat[i] !== M.AIR && mat[i] !== M.WATER)) support = true; }
-    if (!support && f.y < H - 4) f.y++;
+    if (!support && f.y < H - 4 && !f.hearth) f.y++;
     // water at the fire base sizzles and can drown it
     let water = 0;
     for (let dy = -2; dy <= 0; dy++) for (let dx = -4; dx <= 4; dx++) { if (inb(f.x + dx, f.y + dy) && mat[idx(f.x + dx, f.y + dy)] === M.WATER) water++; }
@@ -910,6 +935,7 @@ export function stepFires(dt: number) {
       G.fires.splice(k, 1);
     }
   }
+  potStep(G.fires, gm * 60, G.ambientT);   // the kettle on its fire: melting, warming, brewing (game seconds)
 }
 
 // ---------------- interact / eat ----------------
@@ -934,12 +960,33 @@ function snowToLid(c: { x: number; y: number; w: number }): number {
   }
   return best;
 }
+/** Brush the last snow off a crate lid (rows just above it, crate width + 1): each cell is tossed aside as a clump of the same density. */
+function clearLid(c: { x: number; y: number; w: number }) {
+  const side = pl.x < c.x + c.w / 2 ? -1 : 1;
+  for (let y = c.y - 1; y >= c.y - 4; y--) for (let x = c.x - 1; x <= c.x + c.w; x++) {
+    if (!inb(x, y)) continue;
+    const i = idx(x, y);
+    if (mat[i] !== M.SNOW || body[i]) continue;
+    const d = dens[i];
+    set(x, y, M.AIR);
+    spawn(PK.CLUMP, x, y - 1, side * (20 + Math.random() * 20), -30 - Math.random() * 20, CLUMP_LIFE, 1, Math.max(60, Math.min(500, d)), 0);
+  }
+}
 export function interact(): boolean {
   // fire nearby?
   // (if feeding is not possible, fall through to crates / loose logs; feedFire leaves its reason in tool.msg)
   tool.msg = '';
+  // the kettle on the fire at hand: pour the water or the tea out once it is ready (refused while it melts or brews: then the fire is fed)
+  if (pot.on && Math.hypot(pot.x - pl.x, pot.y - pl.y) <= 80) { const r = potPour(inv); if (r.ok) { say(r.msg); sfx?.pickup(); return true; } }
   const nf = nearestFire();
   if (nf && nf.d <= FEED_R && feedFire(nf.f)) return true;
+  // a snare at hand: a hare inside gives raw meat and a pelt; an empty one is left alone
+  const sn = checkSnareAt(pl.x, pl.y, 30);
+  if (sn >= 0) {
+    const r = checkSnare(sn);
+    if (r) { add(inv, 'meat', r.meat); add(inv, 'pelt', r.pelt); say('Заяц в силке: сырое мясо и шкурка'); sfx?.pickup(); return true; }
+    if (snares[sn].state === 0) say('Силок пуст. ПКМ с силком в руке — снять его');
+  }
   const nearMiss = !!nf && nf.d <= FIRE_NEAR_R;   // a fire within 4 m but beyond the 2 m feed radius: say how close to come
   // crate nearby (player body box within 6 cells of the crate box AND an air path to the lid)?
   let buried = -1; // cm of digging still needed to the nearest crate that is close but under snow
@@ -948,7 +995,8 @@ export function interact(): boolean {
     const dx = Math.max(c.x - (pl.x + 5), 0, (pl.x - 5) - (c.x + c.w)), dy = Math.max(c.y - pl.y, 0, (pl.y - pl.h) - (c.y + c.h));
     if (dx <= CRATE_REACH && dy <= CRATE_REACH) {
       const sn = snowToLid(c);
-      if (sn > 0) { const cm = Math.max(5, Math.round((sn * CELL * 100) / 5) * 5); if (buried < 0 || cm < buried) buried = cm; continue; }
+      if (sn > 3) { const cm = Math.max(5, Math.round((sn * CELL * 100) / 5) * 5); if (buried < 0 || cm < buried) buried = cm; continue; }
+      if (sn > 0) clearLid(c); // the last few cm of snow on the lid: brushed off by hand (mass kept: tossed aside as clumps)
     }
     if (!(dx <= CRATE_REACH && dy <= CRATE_REACH)) {
       if (dx < 20 && dy < 70 && pl.y < c.y) { // above the crate with snow between
@@ -960,14 +1008,8 @@ export function interact(): boolean {
     {
       c.opened = true; sfx?.crateOpen();
       const got: string[] = [];
-      for (const l of c.loot) {
-        if (l === 'food') { inv.food++; got.push('консервы'); }
-        else if (l === 'crackers') { inv.crackers++; got.push('сухари'); }
-        else if (l === 'matches') { inv.matches += 4; got.push('спички ×4'); }
-        else if (l === 'thermos') { inv.thermos++; got.push('термос с чаем'); }
-        else if (l === 'saw') { inv.saw = true; inv.matches += 2; got.push('спички ×2'); }
-        else if (l === 'snowshoes') { inv.snowshoes = true; pl.snowshoes = true; got.push('снегоступы (надеты)'); }
-      }
+      for (const l of c.loot) gainLoot(l, got);
+      for (const e of lootTable(crates.indexOf(c))) { add(inv, e.id, e.n); got.push(label(e.id, e.n)); }
       // crate becomes an open empty box: remove its lid cells
       for (let x = c.x; x < c.x + c.w; x++) { const i = idx(x, c.y); if (mat[i] === M.CRATE) set(x, c.y, M.AIR); }
       say('В ящике: ' + got.join(', '));
@@ -981,20 +1023,224 @@ export function interact(): boolean {
     const p = rec.b.getPosition();
     if (Math.hypot(p.x * 20 - pl.x, p.y * 20 - (pl.y - 10)) < 26) {
       let wood = 0; for (let k = 0; k < rec.lm.length; k++) if (rec.lm[k] === M.WOOD || rec.lm[k] === M.PLANK) wood++;
-      if (wood > 10) { inv.logs += Math.max(1, Math.round(wood / 80)); removeBody(rec, false); sfx?.pickup(); say('Подобрал брёвна'); return true; }
+      if (wood > 10) {
+        const lg = Math.max(1, Math.round(wood / 80)), room = carryCap(inv, 'logs') - inv.logs;
+        if (room < lg) { say(`Не унести ${lg} ${plural(lg, 'бревно', 'бревна', 'брёвен')}: в руках место на ${Math.max(0, room)}. Сложи брёвна брусом или возьми санки`); sfx?.uiDeny(); return false; }
+        inv.logs += lg; removeBody(rec, false); sfx?.pickup(); say('Подобрал брёвна'); return true;
+      }
     }
   }
   if (!tool.msg) say(nearMiss ? 'Подойди ближе к костру (до 2 м)' : 'E: открыть ящик, подбросить в костёр, подобрать брёвна — рядом ничего нет');
   return false;
 }
+/** One piece of loot from a crate (string ids from world.ts / events.ts, or gear / lore ids). */
+function gainLoot(l: string, got: string[]): void {
+  if (l === 'food') { inv.food++; got.push('консервы'); }
+  else if (l === 'crackers') { inv.crackers++; got.push('сухари'); }
+  else if (l === 'matches') { inv.matches += 4; got.push('спички ×4'); }
+  else if (l === 'thermos') { inv.thermos++; got.push('термос с чаем'); }
+  else if (l === 'saw') { inv.saw = true; inv.matches += 2; got.push('спички ×2'); }
+  else if (l === 'snowshoes') { inv.snowshoes = true; got.push('снегоступы (надеты)'); }
+  else if (isGear(l)) { add(inv, l); got.push(nameOf(l)); }
+}
+
+/** E / «Съесть»: a thermos when cold, a cup when thirsty (tea first), then food: cooked meat, tins, crackers, raw meat last. */
 export function eat(): boolean {
   if (inv.thermos > 0 && pl.core < 36.5) { inv.thermos--; pl.core = Math.min(37, pl.core + 1.2); pl.food = Math.min(1, pl.food + 0.05); sfx?.eat(); say('Горячий чай: +1.2 °C'); return true; }
+  if (pl.thirst > 0.3) {
+    const d = inv.tea > 0 ? drink(inv, 'tea') : drink(inv, 'water', true);
+    if (d.ok) { pl.core = Math.min(37, pl.core + d.core); pl.food = Math.min(1, pl.food + d.food); pl.thirst = Math.max(0, pl.thirst - d.thirst); sfx?.eat(); say(d.msg); return true; }
+  }
   if (pl.food > 0.92) { say('Пока не голоден'); return false; }
+  if (inv.cooked > 0) { const r = eatMeat(inv, true); pl.food = Math.min(1, pl.food + r.food); sfx?.eat(); say(r.msg); return true; }
   if (inv.food > 0) { inv.food--; pl.food = Math.min(1, pl.food + 450 / 2000); sfx?.eat(); say('Консервы: +450 ккал'); return true; }
   if (inv.crackers > 0) { inv.crackers--; pl.food = Math.min(1, pl.food + 250 / 2000); sfx?.eat(); say('Сухари: +250 ккал'); return true; }
+  if (inv.meat > 0) {
+    const r = eatMeat(inv, false); pl.food = Math.min(1, pl.food + r.food); sfx?.eat();
+    if (Math.random() < r.risk) { pl.core = Math.max(0, pl.core - 0.5); say('Сырое мясо: живот схватило, тело остыло'); }
+    else say(r.msg);
+    return true;
+  }
   if (inv.thermos > 0) { inv.thermos--; pl.core = Math.min(37, pl.core + 1.2); sfx?.eat(); return true; }
   say('Еды нет. Ищи ящики под оранжевыми вешками'); sfx?.uiDeny(); return false;
 }
+
+// ---------------- pickaxe (кирка): ice, frozen ground and rock, tile by tile like the shovel ----------------
+const PICK_S: Record<number, number> = { [M.ICE]: 0.035, [M.DIRT]: 0.03, [M.ROCK]: 0.07 };   // seconds per cell
+const PICKABLE = (m: number) => m === M.ICE || m === M.DIRT || m === M.ROCK;
+function scanPickTile(tx: number, ty: number): DigTile {
+  const t: DigTile = { tx, ty, snow: 0, hard: 0, body: 0, hardMat: -1, time: 0 };
+  let sec = 0;
+  for (let y = ty * TILE; y < ty * TILE + TILE; y++) for (let x = tx * TILE; x < tx * TILE + TILE; x++) {
+    if (!inb(x, y)) continue;
+    const i = idx(x, y);
+    if (body[i]) { t.body++; continue; }
+    const m = mat[i];
+    if (m === M.SNOW || m === M.ASH) { t.snow++; sec += 0.02; }
+    else if (PICKABLE(m)) { t.hard++; sec += PICK_S[m]; if (t.hardMat < 0) t.hardMat = m; }
+  }
+  t.time = sec;
+  return t;
+}
+/** The pick's target at the aim: the tile of the first solid cell on the line from the shoulder (the shovel's rule). ok when the tile
+ *  holds ice, frozen ground or rock in reach; the snow in that tile goes with it. */
+export function pickAim(ax: number, ay: number): DigTarget {
+  const i = firstSolid(ax, ay);
+  const tx = i >= 0 ? Math.floor((i % W) / TILE) : Math.floor(ax / TILE);
+  const ty = i >= 0 ? Math.floor(((i / W) | 0) / TILE) : Math.floor(ay / TILE);
+  const t = scanPickTile(tx, ty);
+  const far = !inReachTile(tx, ty);
+  const ok = !far && t.hard > 0;
+  let reason = '';
+  if (far) reason = 'дальше 2 м';
+  else if (!ok) reason = i >= 0 && body[i] ? 'упавшее бревно: топором' : i >= 0 && mat[i] !== M.SNOW && mat[i] !== M.ASH && mat[i] !== M.WATER ? whyNot(t) : t.snow ? 'здесь только снег: лопатой' : 'кирка берёт лёд, мёрзлую землю и камень';
+  return { tx, ty, target: t, ok, far, reason, tiles: [t], time: t.time, key: `${tx},${ty}`, snapped: false };
+}
+/** pick held: progress on the aimed tile; a finished tile is cleared at once (the same DIG state as the shovel, so the overlay cracks show) */
+function pickDig(ax: number, ay: number, dt: number) {
+  const t = pickAim(ax, ay);
+  if (!t.ok) {
+    DIG.key = ''; DIG.p = 0;
+    if (G.realTime - lastNothingT > 2.5) { lastNothingT = G.realTime; say(t.far ? 'Дальше 2 м не достать — подойди' : t.reason); if (!t.far) sfx?.uiDeny(); }
+    return;
+  }
+  if (pl.stamina < 0.03) { say('Нет сил. Передохни'); DIG.key = ''; DIG.p = 0; return; }
+  if (t.key !== DIG.key) { DIG.key = t.key; DIG.p = 0; }
+  DIG.tiles = t.tiles;
+  DIG.p += dt / Math.max(0.05, t.time);
+  if (Math.random() < dt * 12) spawn(PK.DUST, t.target.tx * TILE + Math.random() * TILE, t.target.ty * TILE + Math.random() * TILE, (Math.random() - 0.5) * 40, -(10 + Math.random() * 40), 0.45 + Math.random() * 0.4, 1 + Math.random() * 0.6, 0, 0);
+  if (DIG.p >= 1) { finishPick(t.target); DIG.key = ''; DIG.p = 0; }
+}
+/** A finished pick tile: ice cells give pieces (10 cells each), rock gives stones (8 cells each), frozen ground gives nothing; the snow goes to the kettle or the spoil. */
+function finishPick(tl: DigTile) {
+  let ice = 0, rock = 0;
+  const ds: number[] = [];
+  const bx = tl.tx * TILE, by = tl.ty * TILE;
+  for (let y = by; y < by + TILE; y++) for (let x = bx; x < bx + TILE; x++) {
+    if (!inb(x, y)) continue;
+    const i = idx(x, y);
+    if (body[i]) continue;
+    const m = mat[i];
+    if (m === M.SNOW || m === M.ASH) { ds.push(dens[i]); set(x, y, M.AIR); }
+    else if (m === M.ICE) { ice++; set(x, y, M.AIR); }
+    else if (m === M.ROCK) { rock++; set(x, y, M.AIR); }
+    else if (m === M.DIRT) set(x, y, M.AIR);
+  }
+  pl.stamina -= 0.02 + 0.03 * tl.time;
+  routeSnow(ds);
+  const got: string[] = [];
+  if (ice) { const k = Math.max(1, Math.round(ice / ICE_PIECE_CELLS)); add(inv, 'ice', k); got.push(label('ice', k)); }
+  if (rock) { const k = Math.max(1, Math.round(rock / 8)); add(inv, 'stones', k); got.push(label('stones', k)); }
+  if (got.length) say('Кирка: ' + got.join(', ')); else if (!ds.length) return;
+  tool.digs++; tool.cool = 0.15;
+  sfx?.dig(Math.min(1, tl.time / PICK_S[M.ROCK] / 25));
+  for (let k = 0; k < 6; k++) spawn(PK.DUST, bx + Math.random() * TILE, by + Math.random() * TILE, (Math.random() - 0.5) * 60, -(20 + Math.random() * 40), 0.5 + Math.random() * 0.5, 1.2, 0, 0);
+  markStruct(bx - 6, by - 6, bx + TILE + 6, by + TILE + 6);
+}
+/** Snow just dug: into the kettle when it stands on a fire within 4 m (it melts there), the rest into the spoil bag, thrown clear as before. */
+function routeSnow(ds: number[]) {
+  if (!ds.length) return;
+  let took = 0;
+  if (pot.on && Math.hypot(pot.x - pl.x, pot.y - pl.y) <= 80) {
+    let s = 0; for (const d of ds) s += d;
+    took = potAddSnow(ds.length, s / ds.length);
+  }
+  for (let k = took; k < ds.length; k++) bag.push(ds[k]);
+  if (took > 0) say(`В котелок: ${took} клеток снега. Держи над огнём`);
+}
+
+// ---------------- traps (силок) and torches (факел) ----------------
+/** LMB with the snare: sets one on the snow under the aim (a trap is used up). */
+function placeTrap(ax: number, ay: number) {
+  if (count(inv, 'traps') < 1) { say(NO_TOOL.trap); sfx?.uiDeny(); return; }
+  if (placeSnare(ax, ay) < 0) { say('Силок ставится на снег, без препятствий рядом'); sfx?.uiDeny(); return; }
+  take(inv, 'traps', 1);
+  say('Силок поставлен. Загляни позже: E у силка');
+  sfx?.place(false); tool.cool = 0.4;
+}
+/** RMB with the snare: takes an empty snare back (a caught hare is collected with E first). */
+function liftTrap(ax: number, ay: number) {
+  const sn = checkSnareAt(ax, ay, 14);
+  if (sn < 0) { say('Наведи прицел на силок и нажми ПКМ — снять'); return; }
+  if (snares[sn].state === 1) { say('В силке добыча: сначала E'); return; }
+  if (removeSnare(sn)) { add(inv, 'traps', 1); say('Силок снят'); sfx?.pickup(); }
+}
+/** LMB with the torch: lights a spare one from the pack; lit, it is planted in the snow under the aim (it keeps burning there). */
+function torchUse(ax: number, ay: number) {
+  if (count(inv, 'torchFuel') <= 0) {
+    const r = lightSpare(inv); say(r.msg);
+    if (r.ok) sfx?.ignite(); else sfx?.uiDeny();
+    return;
+  }
+  const x = Math.round(ax), y = surfaceAt(x);
+  if (!inb(x, y) || mat[idx(x, y)] !== M.SNOW || !inReach(x, y)) { say('Факел втыкают в снег в пределах 2 м'); sfx?.uiDeny(); return; }
+  const r = plantTorch(inv, x, y); say(r.msg);
+  if (r.ok) sfx?.place(false); else sfx?.uiDeny();
+}
+
+// ---------------- the fire and the kettle: RMB with the aim on a lit fire ----------------
+/** RMB with the aim on a lit fire within reach: meat roasts (craft roast), the kettle goes onto it, ice and needles go into the kettle.
+ *  Returns false when nothing applies, and the normal use of the tool goes on. */
+function putOnFire(ax: number, ay: number): boolean {
+  let best: Fire | null = null, bd = 16;
+  for (const f of G.fires) { if (!f.lit) continue; const d = Math.hypot(f.x - ax, f.y - 4 - ay); if (d < bd) { bd = d; best = f; } }
+  if (!best || !inReach(best.x, best.y - 4)) return false;
+  if (count(inv, 'meat') > 0) { const r = roast(inv, true); say(r.msg); if (r.ok) sfx?.place(false); return true; }
+  if (!pot.on) {
+    if (!has(inv, 'kettle')) return false;
+    const r = potPlace(inv, best.x, best.y); say(r.msg); sfx?.place(false);
+    return true;
+  }
+  if (Math.hypot(pot.x - best.x, pot.y - best.y) > 30) return false;
+  // ice first, then needles; a full or boiling kettle says why (the message is the answer, so the press still counts)
+  let r: CraftResult | null = null;
+  if (count(inv, 'ice') > 0) { r = potAddIce(inv); if (r.ok) { say(r.msg); return true; } }
+  if (count(inv, 'needles') > 0) { const n = potAddNeedles(inv); if (n.ok) { say(n.msg); return true; } r = n; }
+  if (r) { say(r.msg); return true; }
+  return false;
+}
+
+// ---------------- tools in hand: owned or not, the HUD, and the crafting entry points ----------------
+const NO_TOOL: Record<string, string> = {
+  pickaxe: 'Кирки нет. Её можно найти в ящиках: обломки снегохода, грот, метеостанция',
+  torch: 'Факелов нет. Сделай факел: ветка + смола (или верёвка) — меню «Крафт» (C)',
+  trap: 'Силков нет. Сделай силок: верёвка + ветка — меню «Крафт» (C)',
+};
+/** A tool in the belt is usable when the hero owns it: the saw by its flag, the pick by its gear flag, the torch by a torch (lit or spare), the snare by a trap or one set out. */
+export function toolOwned(id: string): boolean {
+  switch (id) {
+    case 'saw': return inv.saw;
+    case 'pickaxe': return has(inv, 'pickaxe');
+    case 'torch': return count(inv, 'torches') > 0 || count(inv, 'torchFuel') > 0;
+    case 'trap': return count(inv, 'traps') > 0 || snares.length > 0;
+    default: return true;
+  }
+}
+/** The tool list for the HUD (tags, wheel): enabled = owned; count = what the tool holds (logs, blocks, matches, spare torches, traps). */
+export function toolsHud(): { id: string; name: string; key: string; count?: number; enabled: boolean }[] {
+  return TOOLS.map((t) => ({
+    id: t.id, name: t.name, key: t.key, enabled: toolOwned(t.id),
+    count: t.id === 'beam' ? inv.logs : t.id === 'block' ? inv.blocks.length : t.id === 'fire' ? Math.min(inv.matches, inv.logs, Math.floor(inv.branches / 2))
+      : t.id === 'torch' ? inv.torches : t.id === 'trap' ? inv.traps : undefined,
+  }));
+}
+/** Heat the lit torch in hand gives the hero this frame (W, player.ts). */
+export function torchHeatNow(): number { return torchHeat(inv, TOOLS[tool.cur].id); }
+/** The hero's position for the crafting panel and the workbench. */
+export function heroAt(): { x: number; y: number } { return { x: pl.x, y: pl.y }; }
+/** Crafting from the «Крафт» panel, at the hero's position (a workbench in reach where a recipe needs one). */
+export function craftAt(id: RecipeId): CraftResult { return craft(inv, id, { x: pl.x, y: pl.y }); }
+/** Puts a workbench down two body-lengths ahead of the hero, on the surface (2 logs). */
+export function benchAt(): CraftResult {
+  const x = Math.round(pl.x + pl.face * 14);
+  return placeWorkbench(inv, x, surfaceAt(x));
+}
+/** Toggles the snowshoes worn (the panel). */
+export function toggleShoesWorn(): boolean { return toggleShoes(inv); }
+/** Carry caps now (the sled raises them): logs and blocks. */
+export function carryCapOf(): { logs: number; blocks: number } { return { logs: carryCap(inv, 'logs'), blocks: carryCap(inv, 'blocks') }; }
+/** Workbenches in the world (for the panel count). */
+export function benchCount(): number { return benches.length; }
 
 // ---------------- dispatch ----------------
 let fireLatch = false;   // set by a fire click, released by idleTool (button up)
@@ -1003,11 +1249,15 @@ export function usePrimary(ax: number, ay: number, dt: number, moveX = 0) {
   tool.cool -= dt;
   const [x, y] = reachPoint(ax, ay);
   const id = TOOLS[tool.cur].id;
+  if (id !== 'saw' && !toolOwned(id)) { say(NO_TOOL[id] ?? 'Нет этого инструмента'); tool.cool = 0.3; return; }
   if (id === 'saw') { if (tool.cool <= 0) saw(x, y, dt); return; }
   if (id === 'shovel') { shovelDig(ax, ay, dt, moveX); return; }
+  if (id === 'pickaxe') { pickDig(ax, ay, dt); return; }
   if (tool.cool > 0) return;
   if (pl.stamina < 0.03) { say('Нет сил. Передохни'); tool.cool = 0.5; return; }
   if (id === 'axe') chop(x, y);
+  else if (id === 'torch') { if (placeLatch) return; placeLatch = true; torchUse(ax, ay); }
+  else if (id === 'trap') { if (placeLatch) return; placeLatch = true; placeTrap(x, y); }
   else if (id === 'beam') { if (placeLatch) return; placeLatch = true; place('beam', x, y); }
   else if (id === 'block') { if (placeLatch) return; placeLatch = true; place('block', x, y); }
   else if (id === 'fire') { if (fireLatch) return; fireLatch = true; placeFire(x, y); tool.cool = 0.6; } // one fire per press
@@ -1015,7 +1265,11 @@ export function usePrimary(ax: number, ay: number, dt: number, moveX = 0) {
 export function useSecondary(ax: number, ay: number) {
   const [x, y] = reachPoint(ax, ay);
   const id = TOOLS[tool.cur].id;
+  if (putOnFire(ax, ay)) return;
   if (id === 'shovel') { shovelTamp(ax, ay); }
+  else if (id === 'trap') liftTrap(ax, ay);
+  else if (id === 'torch') say('ЛКМ: зажечь факел, ЛКМ на снегу — воткнуть его');
+  else if (id === 'pickaxe') say('Кирка: ЛКМ держи на льду, мёрзлой земле или камне');
   else if (id === 'saw' || id === 'block') place('block', x, y);
   else if (id === 'beam' || id === 'axe') place('beam', x, y);
   else if (id === 'fire') placeFire(x, y);

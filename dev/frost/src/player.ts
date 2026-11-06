@@ -1,7 +1,8 @@
 // Player controller (cells, y down) + body heat balance.
 import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, F_CAP, F_TREE, CELL } from './world';
-import { tool, inv } from './tools';
+import { tool, inv, torchHeatNow } from './tools';
 import { G } from './state';
+import { sleepRates } from './craft';
 import { tempAt, windAt, shelterAt } from './heat';
 import { spawn, PK } from './particles';
 import { bodyAtIndex, impulseAt } from './phys';
@@ -11,6 +12,8 @@ export const pl = {
   sink: 0,          // 0..1 how deep in snow (fraction of height)
   core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0,
   snowshoes: false, alive: true, cause: '', work: 0, walkPhase: 0, stepAcc: 0,
+  sledDrag: 1,      // 0.85 while the sled is moving behind him (gear.ts stepGear)
+  thirst: 0,        // 0 quenched .. 1 parched: rises slowly; a cup of tea or water takes 0.15 off (craft.ts drink)
   feelT: -20, airT: -20, wind: 0, shelter: 0, shiver: 0, fireRad: 0,
   breathT: 0, lastStepDens: 100,
   h: 34,            // current body height in cells: PH standing, PH_CRAWL when crawling under a low roof
@@ -70,8 +73,10 @@ let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkSince = -1, trunkMsgT = -99, hi
 /** what blocks the lead column this step: 0 nothing, 1 snow, 2 tree trunk / stump, 3 placed timber / crate, 4 ground / rock / ice */
 let blockKind = 0;
 
-/** bearing density: snow under the foot compacts until it reaches this (boots vs snowshoes) */
-const bearing = () => (pl.snowshoes ? 190 : 360);
+/** bearing density: snow under the foot compacts until it reaches this (boots vs snowshoes: 120 = a third of the pressure, leader decision 2) */
+const bearing = () => (pl.snowshoes ? 120 : 360);
+/** Thirst rises from 0 to 1 in this many game seconds (30 game hours); below 0.5 it costs nothing. */
+const THIRST_FULL_S = 108000;
 
 /** Compact the snow column under the feet; returns true if the cell under is now supporting. */
 function compactUnder(fx: number, fy: number): boolean {
@@ -187,7 +192,7 @@ export function stepPlayer(inp: MoveIn) {
   const crawl = pl.h < PH;
   const run = inp.run && !tired && Math.abs(inp.moveX) > 0.1 && !crawl;
   const deep = pl.sink;
-  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1) * (crawl ? 0.5 : 1); // cells/s (4.25 m/s run, 2 m/s walk)
+  let speed = (run ? 85 : 40) * (1 - deep * 0.45) * (pl.core < 33 ? 0.7 : 1) * (crawl ? 0.5 : 1) * pl.sledDrag; // cells/s (4.25 m/s run, 2 m/s walk); a sled in tow costs a little
   const target = inp.moveX * speed;
   const acc = pl.onGround ? 14 : 4;
   pl.vx += (target - pl.vx) * Math.min(1, dt * acc);
@@ -361,7 +366,7 @@ export function stepPlayer(inp: MoveIn) {
   } else pl.walkPhase *= 0.9;
   // stamina
   if (run) pl.stamina -= dt * 0.07;
-  else pl.stamina += dt * (inp.working ? 0.0 : 0.09) * (pl.core < 35 ? 0.5 : 1) * (pl.food > 0.02 ? 1 : 0.3) * (1 - 0.5 * pl.shiver);
+  else pl.stamina += dt * (inp.working ? 0.0 : 0.09) * (pl.core < 35 ? 0.5 : 1) * (pl.food > 0.02 ? 1 : 0.3) * (1 - 0.5 * pl.shiver) * (G.sleeping ? 4 : 1) * (pl.thirst > 0.5 ? 0.5 : 1);
   pl.stamina = Math.max(0, Math.min(1, pl.stamina));
   G.player.x = pl.x; G.player.y = pl.y; G.player.h = pl.h;
   pl.work = Math.max(0, pl.work - dt);
@@ -407,6 +412,7 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
     }
     rad += (f.power / 5000) * 850 * vis / (1 + d2 / 0.6);   // 850: the flame is an extended source plus hot coals and reflected heat (~200 W at 1 m, ~85 W at 2 m): warms within ~2 m, dries within ~2.5 m
   }
+  rad += torchHeatNow();                       // a lit torch in hand: a small local heat source (150 W)
   pl.fireRad = rad;
   // metabolism (W)
   let met = 90;
@@ -418,7 +424,8 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   // losses: wet clothes conduct more heat (x1.5 at half wet, x2 soaked); a hungry body loses a little more (ramps in below a 30 % gauge)
   const hungry = Math.min(1, Math.max(0, (0.3 - pl.food) / 0.3));
   const insul = (1 + pl.wet * WET_K) * (1 + HUNGER_LOSS * hungry);
-  const loss = (33 - pl.feelT) * LOSS_K * insul - rad;
+  // asleep in a sleeping bag the heat loss is 0.4 of the normal one (craft.ts sleepRates)
+  const loss = (33 - pl.feelT) * LOSS_K * insul * (G.sleeping ? sleepRates(inv.sleepingBag).heatLoss : 1) - rad;
   const net = met - loss;
   pl.core += (net * dtG) / 243000;
   pl.core = Math.min(37.4, pl.core);
@@ -430,6 +437,7 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   const hl = pl.food < 0.05 ? 0 : pl.food < 0.2 ? 1 : 2;
   if (hl < hungerLvl) { hungerLvl = hl; tool.msg = (hl === 0 ? 'Голод почти убил тебя' : 'Голод: осталось 20% сытости') + (inv.food + inv.crackers > 0 ? '. Q: съесть' : '. Еды нет — ищи ящики под оранжевыми вешками'); }
   else if (hl > hungerLvl && pl.food > 0.3) hungerLvl = hl;
+  pl.thirst = Math.min(1, pl.thirst + dtG / THIRST_FULL_S);
   // snow on clothes melts when warm → wetness; dries near fire
   // by a fire in freezing air the melt is slow and most of it steams off in the heat (only a third soaks in); drying below always beats it, so standing at a fire never leaves you colder
   const nearFire = rad > 60 && pl.airT <= -1;
@@ -444,5 +452,5 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
 export function die(cause: string) { if (!pl.alive) return; pl.alive = false; pl.cause = cause; }
 
 export function resetPlayer(x: number, y: number) {
-  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH }); G.player.h = PH; stuckT = 0; pushT = 0; trunkSince = -1; hungerLvl = 2;
+  Object.assign(pl, { x, y, vx: 0, vy: 0, core: 37, food: 0.85, stamina: 1, wet: 0, snowOn: 0, snowshoes: false, alive: true, cause: '', sink: 0, h: PH, thirst: 0, sledDrag: 1 }); G.player.h = PH; stuckT = 0; pushT = 0; trunkSince = -1; hungerLvl = 2;
 }

@@ -4,7 +4,9 @@
 // The lake reuses the ice-filled hollow that generate() carves (LAKE_A..LAKE_B): its lower part becomes WATER under a 20-40 cm ice lid.
 // Sites are placed on the ground generate() made: each stamp levels its own pad (fill or carve up to one floor row) and updates
 // groundY there, so heat / events keep reading the right ground line. The start area (START_X +- 150) is never touched.
-import { W, H, M, mat, flags, treeId, beamId, groundY, crates, trees, putCell, nextBeamId, F_VERT, F_TREE, F_BOULDER, idx } from './world';
+import { W, H, M, mat, flags, treeId, beamId, groundY, crates, trees, putCell, nextBeamId, placeCrate, START_X, F_VERT, F_TREE, F_BOULDER, idx } from './world';
+import type { Crate } from './world';
+import type { DiaryPage, RadioPartId } from './lore';
 
 export type LocationKind = 'station' | 'lake' | 'grotto' | 'wreck' | 'tower' | 'spring';
 export interface Pt { x: number; y: number }
@@ -17,6 +19,15 @@ export interface WarmSpring { x0: number; x1: number; y0: number; y1: number }
 export const locations: Location[] = [];
 /** Warm spring pools (water cells), for the heat module. */
 export const warmSprings: WarmSpring[] = [];
+/** A hidden stash: a buried crate with diary pages and radio parts that are not ordinary loot (lore.ts ids; main grants them when opened). */
+export interface Stash { crate: Crate; where: LocKey; pages: DiaryPage['id'][]; radio: RadioPartId[] }
+export type LocKey = 'station' | 'lake' | 'grotto' | 'wreck' | 'spring' | 'tower';
+/** Stashes of the current world (filled by placeLocations; the crate objects are the ones in `crates`). */
+export const stashes: Stash[] = [];
+/** Carved marks: a point the hero must stand within 1.5 m of to read the carving `id` (lore.ts CARVINGS). */
+export interface CarvingSpot { id: string; x: number; y: number }
+export const carvingSpots: CarvingSpot[] = [];
+let lakeTop = -1;                     // row where the lake water starts (under the ice lid), -1 before stampLake
 
 // fixed sites (cells). Start 560: the start area stays clear; the nearest site is the warm spring, 380 cells west.
 const SPRING_X = 178, SPRING_HW = 20;    // pool centre, half-width
@@ -113,6 +124,28 @@ function crate(x: number, y: number, loot: string[]): Pt {
   crates.push({ x, y, w: 16, h: 11, loot: loot.slice(), opened: false });
   return { x: x + 8, y: y + 5 };
 }
+/** The crate object that crate() pushed last. */
+const lastCrate = (): Crate => crates[crates.length - 1];
+/** Tree nearest to column x (alive, at least minH tall), or null. */
+function nearestTree(x: number, minH = 0): { x: number; base: number } | null {
+  let best: { x: number; base: number } | null = null, bd = 1e9;
+  for (const t of trees) {
+    if (!t.alive || t.height < minH) continue;
+    const d = Math.abs(t.x - x);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best && bd <= 400 ? best : null;
+}
+/** Carving on a trunk 1.25 m above its base; falls back to a point on open ground when no tree is near. */
+function treeSpot(id: string, x: number, minH = 0): void {
+  const t = nearestTree(x, minH);
+  if (t) carvingSpots.push({ id, x: t.x, y: t.base - 25 });
+  else carvingSpots.push({ id, x, y: groundY[Math.max(0, Math.min(W - 1, x))] - 25 });
+}
+/** True for a cell of the frozen lake's water (below the ice lid): heat must not freeze it all the way down. */
+export function isLakeWater(x: number, y: number): boolean {
+  return lakeTop >= 0 && x > LAKE_A && x < LAKE_B && y >= lakeTop;
+}
 /** A thick straight stroke of cells (walls, wings, fin). */
 function lineStamp(x0: number, y0: number, x1: number, y1: number, th: number, m: M): void {
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
@@ -126,6 +159,7 @@ function lineStamp(x0: number, y0: number, x1: number, y1: number, th: number, m
 /** Frozen lake: keep the ice lid (20-40 cm, 4-8 cells) that generate() laid, turn the ice below it into water. */
 function stampLake(): void {
   const lakeLevel = Math.min(groundY[LAKE_A], groundY[LAKE_B]) + 4; // same level as generate()
+  lakeTop = lakeLevel;
   for (let x = LAKE_A + 1; x < LAKE_B; x++) {
     const g = groundY[x];
     if (g <= lakeLevel) continue;                                   // rim: no ice, no water
@@ -156,6 +190,7 @@ function stampSpring(r: () => number): void {
     for (let x = xc - 2; x <= xc + 2; x++) for (let y = F - h; y < F; y++) put(x, y, M.ROCK, 0, 0, F_BOULDER);
   }
   warmSprings.push({ x0: C - HW, x1: C + HW, y0: WL, y1: WL + 9 });
+  carvingSpots.push({ id: 'tree_spring', x: C + HW + 4, y: F - 3 });   // the east rim boulder
   locations.push({
     id: 'spring', name: 'Тёплый источник', x0: C - HW - 6, x1: C + HW + 6, y: WL, kind: 'spring',
     poi: { spring: { x: C, y: WL, r: HW } },
@@ -211,6 +246,7 @@ function stampGrotto(r: () => number): void {
   for (let x = FX + 3; x <= FX + 9; x++) put(x, F - 2, M.ASH, 0, 0, 0);
   // hidden cache: a crate buried 15 cm under the cave floor (frozen ground, needs a pick)
   const cache = crate(GX + 30, F + 3, ['matches', 'food', 'saw']);
+  stashes.push({ crate: lastCrate(), where: 'grotto', pages: [3], radio: ['radio_resonator'] });
   locations.push({ id: 'grotto', name: 'Скальный грот', x0: GX - 14, x1: GX1, y: F - 45, kind: 'grotto', poi: { cache } });
 }
 
@@ -242,6 +278,8 @@ function stampStation(r: () => number): void {
   for (let x = HX + 15; x <= HX + 20; x++) for (let y = F - 21; y < F - 16; y++) put(x, y, M.WOOD, 0, 0, 0);
   // parts crate on the floor (the radio spares; loot ids are wired later)
   const parts = crate(HX + 30, F - 11, ['matches', 'thermos', ...displaced]);
+  stashes.push({ crate: lastCrate(), where: 'station', pages: [1, 7], radio: [] });
+  carvingSpots.push({ id: 'crate_match', x: parts.x, y: parts.y });
   // snow over the roof and the sides (the pit and the posts are cut out afterwards)
   for (let x = PAD0; x <= PAD1; x++) {
     if (x >= PIT0 && x <= PIT1) continue;
@@ -297,6 +335,8 @@ function stampWreck(r: () => number): void {
   for (let x = X0 - 6; x < X0; x++) for (let y = F - 11; y < F; y++) put(x, y, M.ROCK, 0, 0, 0); // engine block
   for (let x = X0 - 14; x <= X0 - 2; x++) put(x, TOP + 3, M.POLE, 0, 0, 0);           // propeller, orange
   const cargo = crate(X0 + L + 6, F - 11, ['food', 'thermos']);
+  stashes.push({ crate: lastCrate(), where: 'wreck', pages: [4], radio: ['radio_battery'] });
+  carvingSpots.push({ id: 'crate_pick', x: cargo.x, y: cargo.y });
   locations.push({ id: 'wreck', name: 'Обломки самолёта', x0: X0 - 14, x1: X0 + L + 22, y: TOP, kind: 'wreck', poi: { cache: cargo } });
 }
 
@@ -316,6 +356,9 @@ export function findLocation(x: number): Location | null {
 export function placeLocations(seed: number): Location[] {
   locations.length = 0;
   warmSprings.length = 0;
+  stashes.length = 0;
+  carvingSpots.length = 0;
+  lakeTop = -1;
   displaced = [];
   const r = rng(seed);
   // trees and supply crates standing in a pad go first (seeded forest and clearSpot shifts differ per boot); a grotto's cave keeps the big spruce east of the cliff
@@ -328,6 +371,29 @@ export function placeLocations(seed: number): Location[] {
   stampGrotto(r);
   stampStation(r);
   stampWreck(r);
+  placeStashes();
   locations.sort((a, b) => a.x0 - b.x0);
   return locations;
+}
+
+/** Stashes that have no stamp of their own (lake, spring, tower) and the carvings on trees. Crates are appended after the six sites,
+ *  so the loot indices of the generate() crates and the three site caches keep their order. */
+function placeStashes(): void {
+  // lake: a buried cache with an orange pole, on the snow of the west shore (no ice under it)
+  placeCrate(LAKE_A - 34, ['matches']);
+  stashes.push({ crate: lastCrate(), where: 'lake', pages: [2], radio: [] });
+  // spring: a buried cache 60 cells (3 m) west of the pool, on the snow (the pad itself is bare)
+  placeCrate(SPRING_X - SPRING_HW - 40, ['food']);
+  stashes.push({ crate: lastCrate(), where: 'spring', pages: [5], radio: [] });
+  // tower: the radio cable in a crate on the platform, at its west end (the east end stays free to stand on)
+  const X = TOWER_X, TOP = locations.find((l) => l.id === 'tower')?.y ?? 0;
+  const cable = crate(X - 12, TOP - 11, ['thermos']);
+  stashes.push({ crate: lastCrate(), where: 'tower', pages: [6], radio: ['radio_cable'] });
+  carvingSpots.push({ id: 'crate_antenna', x: cable.x, y: cable.y });
+  carvingSpots.push({ id: 'tree_flag', x: X + 8, y: TOP - 4 });                 // on the platform rail
+  // carvings on real trees: the young spruces beside the start (easy to find), and a tall one in the forest
+  treeSpot('tree_stones', START_X - 134);
+  treeSpot('tree_snow', START_X + 58);
+  treeSpot('tree_fall', 1000, 150);
+  treeSpot('tree_lake', LAKE_A - 40);
 }

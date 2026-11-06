@@ -37,6 +37,8 @@ export class Input {
   onModeChange: ((mobile: boolean) => void) | null = null;
   /** hold Q (PC) opens the radial tool wheel: 'open' after a short hold, 'close' on release (pick), 'cancel' on blur. A quick tap of Q still eats. */
   onWheelKey: ((phase: 'open' | 'close' | 'cancel') => void) | null = null;
+  /** PC: C opens / closes the crafting panel (called on the key press itself, so a throttled HUD cannot miss it) */
+  onCraft: (() => void) | null = null;
   /** PC: Ctrl toggles the smart cursor (the shovel target snaps to snow in reach); called with the new state */
   smartCursor = false;
   onSmart: ((on: boolean) => void) | null = null;
@@ -203,7 +205,7 @@ export class Input {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const c = e.code;
     const overlay = document.documentElement.dataset.overlay === '1';
-    const gameKey = /^(Key[ADWEQFTRX]|Arrow(Left|Right|Up|Down)|Space|Shift(Left|Right)|Digit[1-6]|Escape|Tab)$/.test(c);
+    const gameKey = /^(Key[ADWEQFTRXC]|Arrow(Left|Right|Up|Down)|Space|Shift(Left|Right)|Digit[1-9]|Escape|Tab)$/.test(c);
     if (!gameKey) return;
     // with an overlay open Space/Enter must still activate the focused button
     if (!(overlay && (c === 'Space' || c === 'Tab'))) e.preventDefault();
@@ -218,6 +220,7 @@ export class Input {
         case 'KeyF': s.firePressed = true; break;
         case 'KeyR': s.rotatePressed = true; s.rotateBack = e.shiftKey; break;
         case 'KeyX': s.xrayPressed = true; break;
+        case 'KeyC': this.onCraft?.(); break;
         case 'Escape': s.pausePressed = true; break;
         default:
           if (c.startsWith('Digit')) { const n = parseInt(c.slice(5), 10) - 1; s.toolSelect = n; this.currentTool = n; }

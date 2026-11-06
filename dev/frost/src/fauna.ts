@@ -2,7 +2,7 @@
 // Units: world cells (CELL = 0.05 m, so 20 cells per metre), y grows downward. An animal's (x, y) is its feet on the snow:
 // y is the top edge of the surface cell it stands on, z is its height above that (hops, flight).
 // Integration hooks: see items_spec.md, section «Интеграция fauna phase 2».
-import { W, H, M, mat, dens, bond, flags, idx, set, surfaceAt, trees, START_X, F_BLOCK, F_CAP, BOND_SOLID } from './world';
+import { W, H, M, mat, dens, bond, flags, body, idx, set, wake, surfaceAt, trees, START_X, F_BLOCK, F_CAP, BOND_SOLID } from './world';
 import { G } from './state';
 
 export interface FaunaHero { x: number; y: number; }   // hero feet (player.ts pl.x / pl.y); the body centre is 17 cells above
@@ -19,7 +19,7 @@ export interface Animal {
 }
 
 export const K_HARE = 0, K_BIRD = 1;
-const ST_WANDER = 0, ST_FREEZE = 1, ST_FLEE = 2, ST_FLY = 3, ST_GOHIDE = 4, ST_HIDE = 5, ST_DEAD = 6;
+const ST_WANDER = 0, ST_FREEZE = 1, ST_FLEE = 2, ST_FLY = 3, ST_GOHIDE = 4, ST_HIDE = 5, ST_DEAD = 6, ST_HOP = 7;
 
 const POOL = 20;                       // hard cap on animals
 const FLOCKS_MAX = 4;                  // 4 flocks x 3 birds + 6 hares = 18 at most
@@ -28,7 +28,9 @@ const SNARE_R = 10;                    // 0.5 m: a path this close to a snare is
 const CATCH_P = 0.35;                  // per crossing, per game hour
 const HARE_WALK = 14, HARE_FLEE = 95;  // cells/s (0.7 m/s walking, ~4.7 m/s hopping away)
 const BIRD_WALK = 8, BIRD_RUN = 45;    // cells/s (0.4 m/s, ~2.2 m/s running)
-const PACK_D = 30, PACK_B = 10, PACK_DMAX = 380; // footprint: dens +30, bond +10 on existing snow only
+const PACK_D = 30, PACK_B = 10, PACK_DMAX = 380; // footprint: 30 kg/m3 of the surface cell moves down, bond +10 below (leader decision 6)
+const PACK_KEEP = 30;                  // a surface cell left with less than this is emptied: its whole mass goes down
+const HOP_MIN = 2, HOP_MAX = 12, HOP_ARC = 10, HOP_T = 0.35;   // hop over a trunk: landing 0.1-0.6 m ahead, arc 0.5 m, 0.35 s
 const HERO_MID = 17;
 
 // ---------- random (own stream, does not disturb world.rnd()) ----------
@@ -84,14 +86,23 @@ function obstacle(col: number, sy: number): boolean {
   return false;
 }
 
-/** Footprint: lightly compact one existing snow surface cell. Only dens/bond change (no snow is created or removed); rigid or placed snow is left alone. */
+/** Footprint on the surface cell (x, y): its mass moves down into the cell beneath (mass conserving, leader decision 6).
+ *  The top cell loses PACK_D kg/m3; a cell left under PACK_KEEP is emptied and its last mass goes down too. The cell below gains the same
+ *  mass and a little bond. Nothing is made from air, and rigid or placed snow is left alone. Refused if the cell below cannot take it. */
 function pack(x: number, y: number) {
-  if (x < 0 || x >= W || y < 0 || y >= H) return;
-  const i = idx(x, y);
-  if (mat[i] !== M.SNOW || (flags[i] & (F_BLOCK | F_CAP))) return;
-  const d = dens[i], b = bond[i];
-  if (b >= BOND_SOLID || d >= 420 || d >= PACK_DMAX) return;
-  set(x, y, M.SNOW, Math.min(PACK_DMAX, d + PACK_D), Math.min(BOND_SOLID - 1, b + PACK_B), flags[i]);
+  if (x < 0 || x >= W || y < 0 || y + 1 >= H) return;
+  const i = idx(x, y), j = i + W;
+  if (mat[i] !== M.SNOW || body[i] || (flags[i] & (F_BLOCK | F_CAP))) return;
+  if (mat[j] !== M.SNOW || body[j] || (flags[j] & (F_BLOCK | F_CAP))) return;
+  const d = dens[i];
+  let t = Math.min(PACK_D, d);
+  if (d - t < PACK_KEEP) t = d;
+  if (dens[j] + t > PACK_DMAX) return;
+  dens[j] += t;
+  bond[j] = Math.min(BOND_SOLID - 1, bond[j] + PACK_B);
+  wake(x, y + 1);
+  if (t >= d) set(x, y, M.AIR);            // the surface cell is emptied: the print sinks by one cell
+  else { dens[i] = d - t; wake(x, y); }
 }
 
 function printTrack(a: Animal) {
@@ -196,6 +207,28 @@ function startFly(a: Animal, dir: number) {
   a.t = 0; a.dur = rr(1.6, 2.4); a.arcH = rr(30, 50); a.state = ST_FLY; a.z = 0;
 }
 
+/** A fleeing hare blocked by a trunk, log or crate hops over it when free ground lies 0.1-0.6 m beyond (leader decision 7). False when none. */
+function hopOver(a: Animal): boolean {
+  const c0 = Math.round(a.x);
+  for (let k = HOP_MIN; k <= HOP_MAX; k++) {
+    const c = c0 + a.face * k;
+    const sy = groundRow(c);
+    if (sy < 0 || obstacle(c, sy) || Math.abs(sy - a.sy) > 4) continue;
+    a.x0 = a.x; a.y0 = a.y; a.lx = c; a.ly = sy; a.frozenT = 0; a.state = ST_HOP;
+    return true;
+  }
+  return false;
+}
+
+function hopStep(a: Animal, dt: number) {
+  a.frozenT += dt;
+  const p = Math.min(1, a.frozenT / HOP_T);
+  a.x = a.x0 + (a.lx - a.x0) * p;
+  a.y = a.y0 + (a.ly - a.y0) * p;
+  a.z = HOP_ARC * Math.sin(Math.PI * p);
+  if (p >= 1) { a.x = a.lx; a.sy = a.ly; a.y = a.ly; a.z = 0; a.state = ST_FLEE; a.stepAcc = 0; }
+}
+
 function fleeStep(a: Animal, dt: number) {
   a.t += dt;
   if (a.kind === K_HARE) {
@@ -203,7 +236,9 @@ function fleeStep(a: Animal, dt: number) {
     if (p >= 1) { a.state = ST_WANDER; a.pause = rr(3, 7); a.z = 0; a.y = a.sy; return; }
     a.phase += dt * 2.8;                                         // hops per second
     a.z = 4 * Math.abs(Math.sin(Math.PI * a.phase));             // 20 cm hop arc
-    if (!move(a, a.face * HARE_FLEE * (1 - 0.6 * p) * dt, 4)) a.t = a.dur;   // blocked: stop
+    if (!move(a, a.face * HARE_FLEE * (1 - 0.6 * p) * dt, 4)) {  // blocked by a trunk: hop over it, or turn back and wander off
+      if (!hopOver(a)) { a.face = -a.face; a.state = ST_WANDER; a.pause = rr(0.5, 1.5); a.tx = a.x + a.face * rr(6, 20); a.z = 0; a.y = a.sy; }
+    }
   } else if (a.t < a.dur) {
     a.z = 0;
     if (!move(a, a.face * BIRD_RUN * dt, 2)) a.t = a.dur;        // blocked: take off where it stands
@@ -227,6 +262,7 @@ function flyStep(a: Animal, dt: number) {
 // ---------- the AI ----------
 function think(a: Animal, dt: number, hero: FaunaHero) {
   if (a.state === ST_FLY) { flyStep(a, dt); return; }
+  if (a.state === ST_HOP) { hopStep(a, dt); return; }
   if (a.state === ST_FLEE) { fleeStep(a, dt); return; }
   // distance from the hero's body centre to the animal (cells)
   const ddx = a.x - hero.x, ddy = (a.y - (a.kind === K_HARE ? 3 : 2)) - (hero.y - HERO_MID);
@@ -389,7 +425,7 @@ export function stepFauna(dt: number, gameDt: number, hero: FaunaHero) {
     if (a.recheck <= 0) {                                        // snowfall or drift may have raised / buried the ground under it
       a.recheck = 0.5;
       const r = groundRow(Math.round(a.x));
-      if (r >= 0 && a.state !== ST_FLY) { a.sy = r; a.y = r; }
+      if (r >= 0 && a.state !== ST_FLY && a.state !== ST_HOP) { a.sy = r; a.y = r; }
     }
     think(a, h, hero);
     if (a.kind === K_HARE && a.alive && (a.x !== a.px || a.y !== a.py)) crossSnares(a, i);

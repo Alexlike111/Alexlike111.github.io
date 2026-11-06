@@ -1,5 +1,6 @@
-import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crates, CELL, body, flags, treeId, F_TREE, isGranular } from './world';
-import { G, FORCE } from './state';
+import { W, H, M, mat, dens, bond, idx, inb, set, generate, START_X, surfaceAt, crates, CELL, body, flags, treeId, F_TREE, isGranular, placeSupplyCrate } from './world';
+import type { Crate } from './world';
+import { G, FORCE, type Fire } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt, surf } from './heat';
 import { stepSim, pendingTotal } from './sim';
@@ -7,7 +8,7 @@ import { initBodies, stepBodies, allBodies, initPhysics, spawnStressTest } from 
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
-import { TOOLS, BEAM_MODES, BEAM_MODE_NAMES, aimTarget, DIG, TILE, setSmart, spoilInFlight, type DigTarget, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud, beamModesLine } from './tools';
+import { toolsHud, pickAim, craftAt, benchAt, TOOLS, BEAM_MODES, BEAM_MODE_NAMES, aimTarget, DIG, TILE, setSmart, spoilInFlight, type DigTarget, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach, sawCheck, sawProbe, sawProgress, beamShape, shoulder, REACH, simulateClump, planSpoil, CLUMP_G, CLUMP_LIFE, isTrunkOf, trunkRow, toolHud, beamModesLine } from './tools';
 import { plural } from './ru';
 import { Renderer } from './render';
 import { Input } from './input';
@@ -15,6 +16,14 @@ import { UI, HudData, Enclosure } from './ui';
 import { Sound } from './audio';
 import { prof, pnow, pend } from './prof';
 import { createBench, makeReport } from './bench';
+import { initEvents, stepEvents, forceEvent, callRescue, rescueState, eventLog, visibilityFactor, type EventCtx, type CueName } from './events';
+import { emptyJournal, journalWithPage, journalWithPlace, journalWithEvent, journalWithCarving, journalWithRadioPart, radioPartCount, diaryPage, DIARY_PAGE_COUNT, DISCOVERABLE, LOCATION_NAMES, RADIO_PARTS, CARVINGS, type Journal, type RadioPartId, type LocId } from './lore';
+import { locations, stashes, carvingSpots, type Stash } from './locations';
+import { mountJournal, setJournalData, openJournal, journalOpen, closeJournal } from './journal';
+import { initFauna, stepFauna, drawFauna, animals, snares } from './fauna';
+import { stepGear, sleepTick, gearLights, drawGearBack, drawGearFront, gear } from './gear';
+import { SLEEP_TIMESCALE, pot } from './craft';
+import { drawEventFx, drawWhiteout } from './render';
 
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
@@ -74,6 +83,7 @@ function weather(dt: number) {
   const noise = Math.sin(t * 0.013) * 1.5 + Math.sin(t * 0.0041 + 1) * 2;
   const night = 1 - Math.min(1, sun / 0.35);
   G.ambientT = -23 - 13 * night - (day - 1) * 1.5 + noise - G.storm * 6;
+  if (FORCE.ambientT === FORCE.ambientT) G.ambientT = FORCE.ambientT;   // test override (__frost.ambient)
   const gust = Math.sin(G.realTime * 0.7) * 0.6 + Math.sin(G.realTime * 2.3) * 0.3;
   G.wind = (3.5 + 3 * night * 0.3 + G.storm * 13 + gust * (1 + G.storm * 3)) * (1 + 0.2 * Math.sin(t * 0.002));
   G.snowfall = 0.012 + 0.02 * (0.5 + 0.5 * Math.sin(t * 0.003)) + G.storm * 0.09;
@@ -97,13 +107,231 @@ function updateCamera(dt: number, snap = false) {
   G.win.y0 = Math.max(1, Math.floor(G.cam.y - vh / 2 - my)); G.win.y1 = Math.min(H - 2, Math.ceil(G.cam.y + vh / 2 + my));
 }
 
+// ---------------- events, lore, discovery and the radio (events.ts, lore.ts, locations.ts, journal.ts) ----------------
+let journal: Journal = emptyJournal();
+let logSeen = 0;                                  // event log entries already copied into the journal
+let jdirty = true, lastRescue = '';               // the overlay needs new data
+const stashTaken = new Set<Stash>();              // stash crates whose lore was granted
+const placeEntered = new Set<string>();           // locations whose first-entry line was shown
+let towerSeenAt = -1e9;                           // real second of the last lookout reveal
+
+const ENTER_TEXT: Record<string, string> = {
+  spring: 'Тёплый ключ. Вода здесь не замерзает, но в неё не ложись.',
+  lake: 'Замёрзшее озеро. Лёд толстый у берега, у полыньи трещит.',
+  tower: 'Вышка на холме. Поднимись на площадку: отсюда видно далеко.',
+  grotto: 'Грот в южном обрыве. Внутри почти нет ветра.',
+  station: 'Метеопост «Студёный». Рация на столе у стены, печка рядом.',
+  wreck: 'Обломки самолёта «Кукушка». Ящики под снегом у хвоста и крыла.',
+};
+const RADIO_SHORT: Record<string, string> = { radio_battery: 'аккумулятор', radio_resonator: 'резонатор', radio_cable: 'кабель' };
+const RESCUE_TEXT: Record<string, string> = {
+  locked: 'рация молчит, нужны три детали', ready: 'три детали собраны, почини рацию на метеопосту',
+  calling: 'вызов принят, нужен сигнальный костёр на открытом месте', inbound: 'вертолёт на подлёте, держи костёр',
+  circling: 'вертолёт кружит, дыма нет', done: 'спасён',
+};
+
+function playEventCue(name: CueName, p: number): void {
+  switch (name) {
+    case 'snowCrack': sound.snowCrack(); break;
+    case 'avalancheRoar': sound.collapse(0.9); break;
+    case 'treeCreak': sound.treeCreak(); break;
+    case 'snowThud': sound.thump(30); break;
+    case 'wolfHowl': sound.howl(p); break;
+    case 'iceCrack': sound.iceCrack(); break;
+    case 'iceBreak': sound.thump(300); break;
+    case 'flareHiss': sound.flareHiss(); break;
+    case 'parachuteLand': sound.thump(60); break;
+    case 'heliRotor': sound.heliRotor(); break;
+  }
+}
+
+/** The hook set events.ts reads through ctx. The hero is the live `pl`, the clock the live `G`. */
+const evCtx: EventCtx = {
+  hero: pl, G,
+  toast: (m) => ui.toast(m),
+  cue: playEventCue,
+  radioParts: () => radioPartCount(journal),
+  onSnowOnHead: (n) => { pl.snowOn = Math.min(1, pl.snowOn + n / 60); },
+  onSupplyLanded: (spot) => placeSupplyCrate(spot.x, spot.y, spot.loot),
+  onRescue: () => {
+    if (ended || !pl.alive) return;
+    ended = true;
+    closeJournal();
+    sound.dawn();
+    ui.showEnd(true, 'Рация передала координаты. Вертолёт сел у сигнального костра, и пилот помог тебе подняться в кабину.',
+      { days: Math.floor(G.time / 1440) + 1, hours: Math.round((G.time - 540) / 60), built: [...tool.built] }, () => { ui.hide(); newGame(); },
+      { title: 'Спасён!', kicker: 'Вертолёт' });
+  },
+};
+
+/** Journal data for the overlay: copies new events in, pushes changes only. */
+function syncJournal(): void {
+  const log = eventLog();
+  if (logSeen > log.length) logSeen = 0;          // the log was trimmed
+  for (let k = logSeen; k < log.length; k++) { journal = journalWithEvent(journal, log[k].kind); jdirty = true; }
+  logSeen = log.length;
+  const rs = rescueState();
+  if (rs !== lastRescue) { lastRescue = rs; jdirty = true; }
+  if (jdirty) { jdirty = false; setJournalData({ journal, events: log, rescue: RESCUE_TEXT[rs] ?? rs }); }
+}
+
+/** Event step on the game clock (once per game frame), then the lore and discovery watches. */
+function stepWorldEvents(realDt: number): void {
+  stepEvents(realDt, realDt * G.timeScale, evCtx);
+  grantStashes();
+  discoverPlaces();
+  towerReveal();
+  syncJournal();
+}
+
+/** Lore caches: a stash crate that has just been opened gives its diary pages and radio parts to the journal. */
+function grantStashes(): void {
+  for (const st of stashes) {
+    if (!st.crate.opened || stashTaken.has(st)) continue;
+    stashTaken.add(st);
+    for (const id of st.pages) {
+      const before = journal.pages.length;
+      journal = journalWithPage(journal, id);
+      if (journal.pages.length > before) {
+        jdirty = true;
+        ui.toast(`Дневник: «${diaryPage(id)?.title ?? id}» (страница ${id} из ${DIARY_PAGE_COUNT})`, 'good');
+      }
+    }
+    for (const id of st.radio) {
+      const before = journal.radio.length;
+      journal = journalWithRadioPart(journal, id);
+      if (journal.radio.length > before) {
+        jdirty = true;
+        ui.toast(`Деталь для рации: ${RADIO_PARTS.find((p) => p.id === id)?.name ?? id}`, 'good');
+      }
+    }
+  }
+}
+
+/** A place is discovered within ~8 m (160 cells) of its span; the first step inside a span gives its line once. */
+function discoverPlaces(): void {
+  for (const loc of locations) {
+    const id = loc.id;
+    if (!(DISCOVERABLE as readonly string[]).includes(id)) continue;
+    const key = id as LocId;
+    const dx = Math.max(0, loc.x0 - pl.x, pl.x - loc.x1);
+    if (dx <= 160 && !journal.places.includes(key)) { journal = journalWithPlace(journal, key); jdirty = true; }
+    if (pl.x >= loc.x0 && pl.x <= loc.x1 && !placeEntered.has(id)) {
+      placeEntered.add(id);
+      ui.toast(ENTER_TEXT[id] ?? LOCATION_NAMES[key]);
+    }
+  }
+}
+
+/** Lookout platform: a short reveal of the places not found yet, with the direction and the distance from the tower. */
+function towerReveal(): void {
+  const tw = locations.find((l) => l.id === 'tower');
+  if (!tw || !pl.alive || Math.abs(pl.x - (tw.x0 + tw.x1) / 2) > 12 || Math.abs(pl.y - tw.y) > 4) return;
+  if (G.realTime - towerSeenAt < 60) return;
+  towerSeenAt = G.realTime;
+  const rest = locations
+    .filter((l) => (DISCOVERABLE as readonly string[]).includes(l.id) && !journal.places.includes(l.id as LocId))
+    .map((l) => ({ id: l.id as LocId, d: Math.abs((l.x0 + l.x1) / 2 - pl.x) }))
+    .sort((a, b) => a.d - b.d);
+  if (!rest.length) { ui.toast('С вышки видно всё, что стоило найти. Остальное — в ящиках.'); return; }
+  const items = rest.slice(0, 3).map((r) => {
+    const loc = locations.find((l) => l.id === r.id)!;
+    const side = (loc.x0 + loc.x1) / 2 < pl.x ? 'к западу' : 'к востоку';
+    return `${LOCATION_NAMES[r.id]} — ${side}, ~${Math.round(r.d * 0.05 / 10) * 10} м`;
+  });
+  ui.toast(`С вышки: ${items.join('; ')}`);
+}
+
+/** A closed crate within reach of the hero's body (interact() opens it first, so the radio yields to it). */
+const closedCrateInReach = (): boolean => crates.some((c) => !c.opened
+  && Math.max(c.x - (pl.x + 5), 0, pl.x - 5 - (c.x + c.w)) <= 8 && Math.max(c.y - pl.y, 0, pl.y - pl.h - (c.y + c.h)) <= 8);
+const nearRadioAt = (): boolean => {
+  const r = locations.find((l) => l.id === 'station')?.poi.radio;
+  return !!r && pl.alive && Math.hypot(r.x - pl.x, r.y - (pl.y - 12)) <= 60 && !closedCrateInReach();
+};
+/** Hint at the radio set, shown only near it. */
+function radioHint(): string | null {
+  if (!nearRadioAt()) return null;
+  if (radioPartCount(journal) < 3) {
+    const miss = RADIO_PARTS.filter((p) => !journal.radio.includes(p.id)).map((p) => RADIO_SHORT[p.id] ?? p.name).join(', ');
+    return `Рация молчит. Не хватает: ${miss}`;
+  }
+  const rs = rescueState();
+  if (rs === 'locked' || rs === 'ready') return 'E: Починить рацию и вызвать вертолёт';
+  if (rs === 'done') return null;
+  return 'Вызов передан. Держи сигнальный костёр на открытом месте';
+}
+/** E at the radio. With all three parts it is repaired and the call goes out (events.ts reports the outcome). */
+function useRadio(): boolean {
+  if (!nearRadioAt()) return false;
+  if (radioPartCount(journal) < 3) { ui.toast(radioHint() ?? 'Рация молчит'); sound.uiDeny(); return true; }
+  if (callRescue(evCtx) === 'pending') ui.toast('Вызов уже передан. Держи сигнальный костёр на открытом месте.');
+  return true;
+}
+
+/** E at a carved mark within 1.5 m. A closed crate in that spot is left to interact() (it opens the crate). */
+function readCarving(): boolean {
+  if (!pl.alive || closedCrateInReach()) return false;
+  for (const sp of carvingSpots) {
+    if (Math.hypot(sp.x - pl.x, sp.y - (pl.y - 12)) > 30) continue;
+    const c = CARVINGS.find((k) => k.id === sp.id);
+    if (!c) continue;
+    if (c.kind === 'crate') {
+      const st = stashes.find((s) => s.where === c.where);
+      if (st && !st.crate.opened) continue;
+    }
+    journal = journalWithCarving(journal, c.id);
+    jdirty = true;
+    ui.toast(`Надпись: «${c.text}»`);
+    sound.uiClick();
+    return true;
+  }
+  return false;
+}
+
+/** The station stove works as a hearth: a fire lit within 3 m of it burns 30% longer (only its fuel use changes). */
+function stovePre(): Map<Fire, number> {
+  const pre = new Map<Fire, number>();
+  const st = locations.find((l) => l.id === 'station')?.poi.stove;
+  if (!st) return pre;
+  for (const f of G.fires) if (f.lit && Math.hypot(f.x - st.x, f.y - st.y) <= 60) pre.set(f, f.fuel);
+  return pre;
+}
+function stovePost(pre: Map<Fire, number>): void {
+  for (const [f, before] of pre) if (f.lit && f.fuel < before) f.fuel += (before - f.fuel) * (1 - 1 / 1.3);
+}
+
+/** Debug: a shaft from the surface down to a crate's lid (everything but crates and poles goes), as a long dig would make (for the tests). */
+function uncoverCrate(c: Crate | undefined): boolean {
+  if (!c) return false;
+  for (let y = c.y - 120; y < c.y; y++) for (let x = c.x - 2; x < c.x + c.w + 2; x++) {
+    if (!inb(x, y)) continue;
+    const m = mat[idx(x, y)];
+    if (m !== M.AIR && m !== M.CRATE && m !== M.POLE) set(x, y, M.AIR);
+  }
+  return true;
+}
+
+/** New game: a fresh schedule (same seed as the world), an empty journal. */
+function resetLore(seed: number): void {
+  initEvents(seed);
+  journal = emptyJournal(); logSeen = 0; jdirty = true; lastRescue = '';
+  stashTaken.clear(); placeEntered.clear(); towerSeenAt = -1e9;
+  closeJournal();
+  syncJournal();
+}
+
+mountJournal({ canOpen: () => running && !paused && !ended && pl.alive, onChange: () => {} });
+
 // ---------------- game lifecycle ----------------
 let shake = 0, stats = { built: [] as string[] };
 let hintT = 0, hintText: string | null = null, tutorial = 0, tut1At = -1; // tut1At: when step 1 («Снег с лопаты сам летит…») began
 let tipCrawlUntil = -1, tipCrawlDone = false, tipDoorUntil = -1, tipDoorDone = false;
 function newGame(seed = 20261106 + Math.floor(Math.random() * 1000)) {
   generate(seed);
+  initFauna(seed);   // hares, ptarmigan, snares: the same seed gives the same animals
   initHeat(); initBodies(); resetTools();
+  resetLore(seed);
   G.time = 9 * 60; G.timeScale = 1;
   const sx = START_X; const sy = surfaceAt(sx);
   resetPlayer(sx, sy - 1);
@@ -226,6 +454,8 @@ function hint(): string | null {
   // one-shot tip: door mode after the first placed beam
   if (!tipDoorDone && tool.built.has('wood')) { tipDoorDone = true; tipDoorUntil = G.realTime + 7; }
   if (G.realTime < tipDoorUntil) return mob ? 'Дверь: на кнопке поворота выбери режим «дверь» — проходима, но держит ветер и тепло' : 'Дверь: нажми R, пока не будет режим «дверь» — проходима, но держит ветер и тепло';
+  const radioLine = radioHint();
+  if (radioLine) return radioLine;
   const shelter = shelterTip();
   if (shelter) return shelter;
   if (tutorial === 0) return mob ? 'Стик слева: идти. Коснись снега справа и держи: копать лопатой' : 'A/D идти, Shift бежать. Зажми ЛКМ на снегу: копать лопатой';
@@ -916,7 +1146,14 @@ function drawOverlay(aim: [number, number] | null, moveX = 0) {
   ctx.imageSmoothingEnabled = false;
   drawFireBase();
   drawContactShadow();
+  drawFauna(ctx, (x, y) => renderer.worldToScreen(x, y), G.cam.zoom * dpr, 1 - G.daylight);   // animals and snares, before the hero
+  {
+    const vw = cssW / G.cam.zoom, vh = cssH / G.cam.zoom;
+    drawEventFx(ctx, { x0: G.cam.x - vw / 2, y0: G.cam.y - vh / 2, x1: G.cam.x + vw / 2, y1: G.cam.y + vh / 2 }, G.realTime);
+  }
+  drawGearBack({ ctx, hero: pl, pack: inv, held: TOOLS[tool.cur].id, night: 1 - G.daylight });  // sled, bench, kettle, planted torches
   drawPlayer(aim, 0, 0);
+  drawGearFront({ ctx, hero: pl, pack: inv, held: TOOLS[tool.cur].id, night: 1 - G.daylight }); // snowshoes, tool in hand
   // warm firelight on the parka: source-atop only tints what is already drawn (sprite, shadow, logs), stronger on the side facing the fire
   for (const f of G.fires) {
     if (!f.lit) continue;
@@ -937,6 +1174,7 @@ function drawOverlay(aim: [number, number] | null, moveX = 0) {
     if (!near) ovReach(aim, px);
     if (id === 'block' || id === 'beam') ovGhost(id === 'beam', ax, ay, px);
     else if (id === 'saw') ovSaw(ax, ay, px);
+    else if (id === 'pickaxe') ovDig(pickAim(aim[0], aim[1]), px);
     else if (id === 'shovel') {
       const t = aimTarget(aim[0], aim[1], moveX);   // the tile a dig takes now (the same target usePrimary digs)
       ovDig(t, px);
@@ -960,6 +1198,8 @@ function drawOverlay(aim: [number, number] | null, moveX = 0) {
     ctx.fillStyle = 'rgba(255,110,40,0.95)';
     ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 7 * Math.sign(G.wind || 1), sy + 2 + wv * 0.3); ctx.lineTo(sx, sy + 4); ctx.fill();
   }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  drawWhiteout(ctx, fx.width, fx.height);   // whiteout veil (events.ts), screen space
 }
 
 
@@ -1115,7 +1355,7 @@ function frameBody(now: number) {
   const s = bench.active ? bench.input : input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
-  if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); adaptWork(performance.now() - tw); return; }   // title / pause: still feeds the work estimate that adaptQuality uses
+  if (!running || paused || portraitPause || journalOpen()) { input.endFrame(); renderer.render(dt); drawOverlay(null); adaptWork(performance.now() - tw); return; }   // title / pause: still feeds the work estimate that adaptQuality uses
   if (ended) { // after win/death: world keeps living in the background but ignores game input
     G.realTime += realDt; G.frame++; updateCamera(realDt); stepHeat(realDt); stepSim(dt, realDt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
   }
@@ -1126,8 +1366,15 @@ function frameBody(now: number) {
   const waitSpot = pl.shelter >= 0.5 || G.fires.some((f) => f.lit && Math.hypot(f.x - pl.x, f.y - pl.y) < 40);
   const canWait = pl.alive && calm && waitSpot;
   if (waitToggle && pl.alive && calm && !waitSpot && G.realTime - waitMsgT > 3) { waitMsgT = G.realTime; tool.msg = 'Ждать можно только в укрытии или у костра'; }
-  G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, realDt * 3);
+  // sleep: from «Ждать» with a sleeping bag, in a shelter or by a fire (x30); it ends on movement, cold, or dawn (gear.ts sleepTick)
+  const sleepEv = sleepTick(inv, { want: waitToggle && canWait, moving: Math.abs(s.moveX) > 0.1 || s.jump || s.primary,
+    nearFire: G.fires.some((f) => f.lit && Math.hypot(f.x - pl.x, f.y - pl.y) < 40), shelter: pl.shelter, airT: pl.airT, core: pl.core, shiver: pl.shiver });
+  if (sleepEv === 'woke') { G.timeScale = 1; tool.msg = gear.wakeWhy; tool.msgSec = 4; }
+  else if (sleepEv === 'sleep' && G.timeScale < 2) { tool.msg = 'Спишь в спальнике. Любое движение разбудит'; tool.msgSec = 4; }
+  if (G.sleeping) G.timeScale += (SLEEP_TIMESCALE - G.timeScale) * Math.min(1, realDt * 3);
+  else G.timeScale += ((waitToggle && canWait ? 12 : 1) - G.timeScale) * Math.min(1, realDt * 3);
   G.time += realDt * G.timeScale;
+  stepWorldEvents(realDt);
   let pt = pnow();
   const { day, warn } = weather(realDt);
   pend('weatherMain', pt);
@@ -1151,7 +1398,10 @@ function frameBody(now: number) {
     else if (!s.primary) idleTool(realDt); // button still held but aim lost for a frame: keep the one-per-press latches
     if (s.secondaryPressed && aimWorld) { useSecondary(aimWorld[0], aimWorld[1]); if (tutorial === 1) tutorial = 2; }
     if (tutorial === 1 && tut1At >= 0 && G.realTime - tut1At > 8) tutorial = 2;   // the one-time tip shows ~8 s; the tamp (RMB) also moves on
-    if (s.interactPressed) { if (!interact()) sound.uiDeny(); }
+    if (s.interactPressed) {
+      const feedable = G.fires.some((f) => Math.hypot(f.x - pl.x, f.y - pl.y) <= 40);
+      if (!useRadio() && (feedable || !readCarving()) && !interact()) sound.uiDeny();
+    }
     if (s.eatPressed) eat();
     if (s.firePressed && aimWorld) placeFire(aimWorld[0], aimWorld[1]);
   }
@@ -1159,7 +1409,7 @@ function frameBody(now: number) {
   stepBody(realDt, Math.abs(s.moveX), s.run); // survival runs on wall-clock time
   updateCamera(realDt);
   pend('survival', pt);
-  pt = pnow(); stepFires(realDt); pend('fires', pt);
+  pt = pnow(); const stovePreMap = stovePre(); stepFires(realDt); stovePost(stovePreMap); pend('fires', pt);
   pt = pnow();
   stepHeat(realDt); pend('heat', pt);
   const nSub = realDt > 0.05 ? 2 : 1;
@@ -1178,12 +1428,15 @@ function frameBody(now: number) {
     if (sr.collapsed > 30) { sound.collapse(Math.min(1, sr.collapsed / 400)); shake = Math.min(3, shake + 0.8); }
     pend('structure', pt);
   }
+  stepFauna(dt, realDt * G.timeScale, pl);                                      // animals and snares: once per game frame
+  stepGear(realDt, realDt * G.timeScale, pl, inv, TOOLS[tool.cur].id);          // sled, torches, snowshoes flag, sleeping bag fuel
   shake *= Math.pow(0.02, realDt);
   // falling slab / log hitting the player
   // (bodies stamped over the player's head push the player down via collision; heavy impact = injury → cold)
   // lights
   G.lights.length = 0;
   for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 11, r: 240 * (1 + 0.08 * (0.6 * Math.sin(G.realTime * 7.3 + f.id * 1.9) + 0.4 * Math.sin(G.realTime * 13.1 + f.id * 3.3))), power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
+  gearLights(inv, TOOLS[tool.cur].id, pl, G.lights);                            // hand torch, lantern, planted torches
   // audio ambient
   let fireNear = 0; for (const f of G.fires) if (f.lit) fireNear = Math.max(fireNear, 1 - Math.hypot(f.x - pl.x, f.y - pl.y) / 200);
   pt = pnow();
@@ -1202,8 +1455,7 @@ function frameBody(now: number) {
     airT: pl.airT, feelT: pl.feelT, wind: pl.wind, shelter: pl.shelter,
     day, clock: clockStr(), night: G.daylight < 0.2, warning: warn,
     tool: tool.cur,
-    tools: TOOLS.map((t) => ({ id: t.id, name: t.name, key: t.key, enabled: t.id === 'saw' ? inv.saw : true,
-      count: t.id === 'beam' ? inv.logs : t.id === 'block' ? inv.blocks.length : t.id === 'fire' ? Math.min(inv.matches, inv.logs, Math.floor(inv.branches / 2)) : undefined })),
+    tools: toolsHud(),
     inv: { logs: inv.logs, branches: inv.branches, matches: inv.matches, food: inv.food + inv.crackers, blocks: inv.blocks.length, snowshoes: inv.snowshoes, thermos: inv.thermos },
     hint: hint(), waiting: G.timeScale > 2,
     ...toolHud(),
@@ -1222,6 +1474,7 @@ function frameBody(now: number) {
 }
 
 ui.onSound = (on) => { sound.init(); sound.setMuted(!on); };
+ui.onJournal = () => { openJournal(); };
 sound.setVolume(ui.volume);
 ui.onVolume = (v) => { sound.setVolume(v); };
 
@@ -1293,5 +1546,25 @@ boot();
   spoil: () => spoilInFlight(), pendingSnow: () => pendingTotal(), P, FORCE,
   aimDig: (x: number, y: number, mv = 0) => { const t = aimTarget(x, y, mv); return { tx: t.tx, ty: t.ty, ok: t.ok, far: t.far, reason: t.reason, snapped: t.snapped, n: t.tiles.length, time: +t.time.toFixed(3), key: t.key }; },
   digState: () => ({ key: DIG.key, p: DIG.p }),
+  /** phase 2 items: crafting, the kettle, gear state, animals and snares */
+  items: { craftAt, benchAt, pot, gear, snares, animals, pl },
+  crates: () => crates.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h, opened: c.opened, loot: c.loot.slice() })),
+  // events, lore, discovery and the radio (tests)
+  event: (name: string) => forceEvent(name, evCtx),
+  radioPart: (id: RadioPartId) => { journal = journalWithRadioPart(journal, id); jdirty = true; syncJournal(); return radioPartCount(journal); },
+  journal: () => journal,
+  journalOpen: () => journalOpen(),
+  openJournal: () => openJournal(),
+  stashes: () => stashes.map((st, i) => ({ i, where: st.where, x: st.crate.x, y: st.crate.y, opened: st.crate.opened, pages: st.pages.slice(), radio: st.radio.slice() })),
+  uncover: (i: number) => uncoverCrate(stashes[i]?.crate),
+  locations: () => locations.map((l) => ({ id: l.id, x0: l.x0, x1: l.x1, y: l.y, poi: l.poi })),
+  carvings: () => carvingSpots.slice(),
+  readCarving: () => readCarving(),
+  useRadio: () => useRadio(),
+  rescue: () => rescueState(),
+  events: () => eventLog().map((e) => ({ kind: e.kind, t: e.t, text: e.text })),
+  visibility: () => visibilityFactor(),
+  ambient: (t: number) => { FORCE.ambientT = t; },
+  fires: () => G.fires.map((f) => ({ x: f.x, y: f.y, fuel: f.fuel, lit: f.lit })),
 };
 void PW; void dens; void bond;

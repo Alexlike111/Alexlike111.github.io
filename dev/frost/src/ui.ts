@@ -2,6 +2,9 @@ import './ui.css';
 import type { Input } from './input';
 import { Wheel, type WheelItem } from './wheel';
 import { plural } from './ru';
+import { CraftPanel } from './craftpanel';
+import { inv } from './tools';
+import { count, fmtNum, type CountId } from './items';
 
 export interface HudData {
   core: number; food: number; stamina: number; wet: number;   // core °C; others 0..1
@@ -54,6 +57,7 @@ const ICONS: Record<string, string> = {
   rotate: '<path d="M19.200 8.300A8 8 0 1 0 20 14"/><path d="M19.600 3.200v5.300h-5.300"/>',
   xray: '<path d="M2.500 12S6 6 12 6s9.500 6 9.500 6-3.500 6-9.500 6-9.500-6-9.500-6z"/><circle cx="12" cy="12" r="2.800"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
+  book: '<g stroke-width="1.75"><path d="M4.5 4.8Q8 3.6 12 5.6Q16 3.6 19.5 4.8V19.2Q16 18 12 20Q8 18 4.5 19.2Z" fill="currentColor" fill-opacity=".14"/><path d="M12 5.6V20"/><path d="M7.4 9h2.8M7.4 12.2h2.8M13.8 9h2.8M13.8 12.2h2.8" stroke-width="1.2" opacity=".7"/></g>',
   full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   unfull: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
   sound: '<path d="M4 9.500h3.200L12 5.500v13l-4.800-4H4z"/><path d="M15.500 9a4.200 4.200 0 0 1 0 6M18 6.500a7.600 7.600 0 0 1 0 11"/>',
@@ -74,13 +78,39 @@ const ICONS: Record<string, string> = {
   timer: '<circle cx="12" cy="13.600" r="7.200"/><path d="M12 13.600V9.400M12 13.600l3 1.800M9.600 3.200h4.800M12 3.200v3.200M18.300 6.600l1.300-1.300"/>',
   copy: '<rect x="8.500" y="8.500" width="11.500" height="12" rx="1.600"/><path d="M15.500 8.500V5.200a1.600 1.600 0 0 0-1.600-1.600H5.700a1.600 1.600 0 0 0-1.600 1.600v9.700a1.600 1.600 0 0 0 1.600 1.600h2.800"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.800"/>',
+  craft: '<path d="M13.6 6.4l4 4-8.2 8.2-4-4z"/><path d="M4.6 19.4l3.2-3.2M15.6 3.6l4.8 4.8"/>',
+  pickaxe: '<path d="M3.8 20.2L14.2 9.8"/><path d="M4.6 6.4c3.1-2.7 9.3-2.6 14.4.2-3.2 1.2-5.2 1.6-7.2 4.1-1.1-1.3-3.2-2.7-7.2-4.3z" fill="currentColor" fill-opacity=".2"/>',
+  torch: '<path d="M12 2.8c2 2.6 3.7 4.5 3.7 7.2a3.7 3.7 0 0 1-7.4 0c0-1.8.9-3.1 1.9-4.1.2 1.4.8 2.3 1.7 2.9-.1-1.9.1-3.9.1-6z" fill="currentColor" fill-opacity=".3"/><path d="M10.2 12.8L11.6 21.2h.8l1.4-8.4"/>',
+  trap: '<ellipse cx="12" cy="8.6" rx="6.4" ry="2.6"/><path d="M12 11.2V21.2M9.2 21.2h5.6"/><path d="M5.6 8.6c.4 2.4 3.2 4.2 6.4 4.2s6-1.8 6.4-4.2" opacity=".55"/>',
+  stones: '<ellipse cx="8.6" cy="15.4" rx="5" ry="3.4" fill="currentColor" fill-opacity=".2"/><ellipse cx="16.4" cy="11.6" rx="3.8" ry="2.8" fill="currentColor" fill-opacity=".14"/>',
+  meat: '<path d="M7.4 16.8c-2.8-1.8-2.6-5.6.3-7.2 2.6-1.4 5.6-.4 7.4-2.4 1.7-1.9 4.6-1.5 5.2.9.4 1.6-.9 2.8-2.4 3.4-1 1.5-2.1 4.5-5.6 4.7-2.1.1-3.5.3-4.9.6z" fill="currentColor" fill-opacity=".22"/>',
+  cooked: '<path d="M4 14.6c0-2.8 3.6-4.6 8-4.6s8 1.8 8 4.6-3.6 4.2-8 4.2-8-1.4-8-4.2z" fill="currentColor" fill-opacity=".3"/><path d="M8.6 7.6c-.8-1.2.8-2 0-3.4M12.6 7.2c-.8-1.2.8-2 0-3.4M16.6 7.6c-.8-1.2.8-2 0-3.4" opacity=".6"/>',
+  ice: '<path d="M12 2.8l4.8 4.2-1.9 5.8 2.1 8.4-5-3.2-5 3.2 2.1-8.4-1.9-5.8z" fill="currentColor" fill-opacity=".18"/><path d="M9.4 9.2l2.6 1.4 2.6-1.4" opacity=".6"/>',
+  tea: '<path d="M4.6 9.6h12.4v4.6a5.2 5.2 0 0 1-5.2 5.2h-2a5.2 5.2 0 0 1-5.2-5.2z" fill="currentColor" fill-opacity=".18"/><path d="M17 11.2h1.8a2.2 2.2 0 0 1 0 4.4H17"/><path d="M8.6 3.6c0 1.6 1 1.6 1 3.2M12.2 3.6c0 1.6 1 1.6 1 3.2" opacity=".6"/>',
+  cord: '<ellipse cx="12" cy="12" rx="8" ry="4.6"/><ellipse cx="12" cy="12" rx="4.2" ry="2.2"/><path d="M4 12v3c0 2.5 3.6 4.6 8 4.6s8-2.1 8-4.6v-3" opacity=".5"/>',
+  pelt: '<path d="M7 4.6c3-1.4 7-1.4 10 0l2.6 5.6-3 2.6 1.2 7.2-4.4-2.2-3 1.6-3-1.6-4.4 2.2 1.2-7.2-3-2.6z" fill="currentColor" fill-opacity=".16"/>',
+  resin: '<path d="M12 5c4.2 4.4 6.2 7 6.2 9.6a6.2 6.2 0 0 1-12.4 0C5.8 12 7.8 9.4 12 5z" fill="currentColor" fill-opacity=".28"/><path d="M9.2 14.2q1.8-1.6 3.6 0" opacity=".6"/>',
+  needles: '<path d="M12 21V5"/><path d="M12 9l-4.2-3.6M12 9l4.2-3.6M12 13.6l-3.4-2.8M12 13.6l3.4-2.8M12 18l-2.6-2M12 18l2.6-2"/>',
+  planks: '<rect x="3.4" y="4.6" width="17.2" height="4.4" rx=".8" fill="currentColor" fill-opacity=".16"/><rect x="3.4" y="10.8" width="17.2" height="4.4" rx=".8" fill="currentColor" fill-opacity=".16"/><rect x="3.4" y="17" width="17.2" height="4.4" rx=".8" fill="currentColor" fill-opacity=".16"/>',
+  kettle: '<path d="M4.6 11.4h14.8v4.6a5.4 5.4 0 0 1-5.4 5.4h-4a5.4 5.4 0 0 1-5.4-5.4z" fill="currentColor" fill-opacity=".2"/><path d="M2.6 13.2h2M19.4 13.2h2"/><path d="M7.8 11.4a4.2 4.2 0 0 1 8.4 0"/>',
+  sled: '<path d="M3.2 15.2c3.2 1.2 14.4 1.2 17.6 0"/><path d="M5.4 11.2h13.2v3.2H5.4z" fill="currentColor" fill-opacity=".2"/><path d="M5.4 15.2l-.6 2M18.6 15.2l.6 2"/>',
+  bag: '<path d="M5.2 6.4c3.2-2.2 10.4-2.2 13.6 0v10.8c-3.2 2.2-10.4 2.2-13.6 0z" fill="currentColor" fill-opacity=".16"/><path d="M5.2 11.4h13.6" opacity=".6"/><path d="M12 8.8v9" opacity=".35"/>',
+  lantern: '<path d="M9 4.2h6l1 3.2H8z"/><rect x="7" y="7.4" width="10" height="10.6" rx="1.2" fill="currentColor" fill-opacity=".2"/><path d="M10 18v2.4h4V18"/><path d="M12 9.6v4" opacity=".7"/>',
 };
 
 /** caption forms for counted HUD chips: [one, few, many] */
 const CHIP_WORDS: Record<string, [string, string, string]> = {
   logs: ['бревно', 'бревна', 'брёвен'], matches: ['спичка', 'спички', 'спичек'], blocks: ['блок', 'блока', 'блоков'],
   branches: ['хворост', 'хвороста', 'хвороста'], thermos: ['термос', 'термоса', 'термосов'],
+  // phase 2 items: nouns that do not change with the count are written the same in all three forms
+  stones: ['камень', 'камня', 'камней'], meat: ['мясо', 'мяса', 'мяса'], cooked: ['жаренное', 'жаренных', 'жаренных'],
+  ice: ['лёд', 'льда', 'льда'], water: ['вода', 'воды', 'воды'], tea: ['чай', 'чая', 'чая'], cord: ['верёвка', 'верёвки', 'верёвок'],
+  pelt: ['шкурка', 'шкурки', 'шкурок'], resin: ['смола', 'смолы', 'смолы'], needles: ['хвоя', 'хвои', 'хвои'],
+  planks: ['доска', 'доски', 'досок'], torches: ['факел', 'факела', 'факелов'], traps: ['силок', 'силка', 'силков'],
+  torchFuel: ['горит', 'горит', 'горит'],
 };
+/** Gear chips (no count): the caption only. */
+const GEAR_CHIP: Record<string, string> = { sled: 'санки', sleepingBag: 'спальник', kettle: 'котелок', lantern: 'фонарь', pickaxe: 'кирка' };
 export function ico(name: string, cls = ''): string {
   return `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ''}</svg>`;
 }
@@ -157,7 +187,7 @@ function dialSVG(): string {
 interface Gauge { root: HTMLElement; val: HTMLElement; num: HTMLElement }
 type Cached<T extends HTMLElement = HTMLElement> = T & { _t?: string };
 
-const TOOL_ICON: Record<string, string> = { shovel: 'shovel', saw: 'saw', axe: 'axe', beam: 'beam', block: 'block', fire: 'fire' };
+const TOOL_ICON: Record<string, string> = { shovel: 'shovel', saw: 'saw', axe: 'axe', beam: 'beam', block: 'block', fire: 'fire', pickaxe: 'pickaxe', torch: 'torch', trap: 'trap' };
 /** the icon a tool shows now: the beam in «дверь» mode shows a planked door */
 function toolIconName(id: string, beamMode = ''): string { return id === 'beam' && beamMode.startsWith('дверь') ? 'door' : (TOOL_ICON[id] ?? 'block'); }
 
@@ -209,6 +239,7 @@ const XR_TOAST = ['Рентген выкл.', 'Рентген 1/3 · плотн�
 
 const TOOL_SUB: Record<string, string> = {
   shovel: 'копать плитки, ПКМ — утрамбовать', saw: 'пилить снежные блоки', axe: 'рубить деревья', beam: 'строить из брёвен', block: 'ставить блоки', fire: 'разжечь костёр',
+  pickaxe: 'лёд, мёрзлая земля, камень', torch: 'ЛКМ — зажечь, ЛКМ на снегу — воткнуть', trap: 'ЛКМ на снег — поставить, ПКМ — снять',
 };
 
 export class UI {
@@ -219,6 +250,8 @@ export class UI {
   private hungerToast = false;
   /** pause-screen physics lab: drop 40 test bodies */
   onStress: () => void = () => {};
+  /** «Журнал» button (touch; PC uses J in journal.ts) */
+  onJournal: () => void = () => {};
   /** «Тест производительности» (title card / pause menu); the argument says where it was pressed */
   onBench: (fromPause: boolean) => void = () => {};
 
@@ -292,6 +325,8 @@ export class UI {
   private cbXrayN!: HTMLElement;
   private cbPut!: HTMLElement;
   private cbJump!: HTMLElement;
+  private cbCraft!: HTMLElement;
+  private craftPanel!: CraftPanel;
 
   // joystick
   private stick!: HTMLElement;
@@ -317,6 +352,9 @@ export class UI {
     this.buildTopRight();
     this.buildBottom();
     this.buildTouch();
+    // «Крафт»: the panel is a sibling of the HUD (touch button and the C key both toggle it)
+    this.craftPanel = new CraftPanel(root, (m) => this.toast(m, 'good'));
+    this.input.onCraft = () => this.craftPanel.toggle();
 
     this.toasts.setAttribute('aria-live', 'polite');
 
@@ -415,6 +453,13 @@ export class UI {
       ['logs', 'beam', 'брёвна', 'pri'], ['branches', 'branches', 'хворост', 'pri'], ['matches', 'matches', 'спички', 'pri'],
       ['food', 'food', 'еда', 'pri'], ['blocks', 'block', 'блоки', 'sec grp'], ['thermos', 'thermos', 'термос', 'sec'],
       ['snowshoes', 'snowshoes', 'снегоступы', 'badge'],
+      // phase 2: non-zero only (setChip hides the rest). Counted items first, then gear badges.
+      ['stones', 'stones', 'камни', 'sec'], ['meat', 'meat', 'мясо', 'sec'], ['cooked', 'cooked', 'жаренное', 'pri'], ['ice', 'ice', 'лёд', 'sec'],
+      ['water', 'water', 'вода', 'sec'], ['tea', 'tea', 'чай', 'pri'], ['cord', 'cord', 'верёвка', 'sec'], ['pelt', 'pelt', 'шкурка', 'sec'],
+      ['resin', 'resin', 'смола', 'sec'], ['needles', 'needles', 'хвоя', 'sec'], ['planks', 'planks', 'доски', 'sec'],
+      ['torches', 'torch', 'факелы', 'sec'], ['traps', 'trap', 'силки', 'sec'], ['torchFuel', 'torch', 'горит', 'pri'],
+      ['sled', 'sled', 'санки', 'badge'], ['sleepingBag', 'bag', 'спальник', 'badge'], ['kettle', 'kettle', 'котелок', 'badge'],
+      ['lantern', 'lantern', 'фонарь', 'badge'], ['pickaxe', 'pickaxe', 'кирка', 'badge'],
     ];
     for (const [k, icon, lab, tier] of defs) {
       const root = el('div', `chip c-${k} ${tier}`);
@@ -473,6 +518,13 @@ export class UI {
     pause.setAttribute('aria-label', 'Пауза');
     this.bindPress(pause, () => this.input.press('pause'));
     row.appendChild(this.fsButton('round-btn fs-btn'));
+    const journal = el('button', 'round-btn journal-btn', ico('book'));
+    journal.type = 'button';
+    journal.tabIndex = -1;
+    journal.setAttribute('aria-label', 'Журнал');
+    journal.title = 'Журнал (J)';
+    this.bindPress(journal, () => this.onJournal());
+    row.appendChild(journal);
     row.appendChild(pause);
     box.appendChild(row);
 
@@ -614,8 +666,10 @@ export class UI {
     this.cbXrayN = this.cbXray.querySelector('.cb-badge') as HTMLElement;
     this.cbPut = mk('cb-put', 'Положить, бросить', `${icon('put')}${cap('Положить')}`);
     this.cbJump = mk('cb-jump', 'Прыжок', icon('jump'));
+    this.cbCraft = mk('cb-craft', 'Крафт (C)', `${icon('craft')}${cap('Крафт')}`);
+    this.bindPress(this.cbCraft, () => this.craftPanel.toggle());
     this.cbTool.setAttribute('aria-haspopup', 'menu');
-    cl.append(this.cbTool, this.cbTake, this.cbEat, this.cbWait, this.cbRot, this.cbXray, this.cbPut, this.cbJump);
+    cl.append(this.cbTool, this.cbTake, this.cbEat, this.cbWait, this.cbRot, this.cbXray, this.cbPut, this.cbJump, this.cbCraft);
     this.bindPress(this.cbTake, () => this.input.press('interact'));
     this.bindPress(this.cbEat, () => this.input.press('eat'));
     this.bindPress(this.cbWait, () => this.input.toggleWait());
@@ -687,6 +741,7 @@ export class UI {
     if (id === 'saw') return this.sawLive(h) ? `Пилю… ${Math.round(h.sawP * 100)}%` : '';
     if (id === 'beam') return h.beamMode;
     if (id === 'fire') return h.fire ? fireText(h.fire) : '';
+    if (id === 'torch') { const tf = count(inv, 'torchFuel'); return tf > 0 ? `горит ${Math.round(tf)} мин` : ''; }
     return '';
   }
   /** a cut in progress is shown only while the saw is in hand: a half-finished cut elsewhere waits quietly (it drains slowly) */
@@ -811,6 +866,7 @@ export class UI {
     this.setChip('food', inv.food); this.setChip('blocks', inv.blocks);
     this.setChip('snowshoes', inv.snowshoes ? 1 : 0, '', inv.snowshoes);
     this.setChip('thermos', inv.thermos, undefined, inv.thermos > 0);
+    this.newChips();
     this.m('lowmatch', inv.matches, () => this.chips.matches.root.classList.toggle('warn', inv.matches <= 1));
     this.m('starving', h.food < 0.2, () => {
       this.gauges.food.root.classList.toggle('starving', h.food < 0.2);
@@ -865,6 +921,7 @@ export class UI {
     });
     this.paintTouch(h, hungry);
     if (this.toolWheel?.open) this.toolWheel.setItems(this.toolItems());
+    this.craftPanel.refresh();
 
     // ---- hint
     const hint = h.hint ?? '';
@@ -951,11 +1008,24 @@ export class UI {
     }
   }
 
+  /** Phase 2 pack items (tools.ts inv): counts and gear badges. Only the non-zero ones show. */
+  private newChips(): void {
+    const water = inv.water;
+    for (const k of ['stones', 'meat', 'cooked', 'ice', 'water', 'tea', 'cord', 'pelt', 'resin', 'needles', 'planks', 'torches', 'traps'] as const) {
+      const n = count(inv, k as CountId);
+      this.setChip(k, n, k === 'water' ? `${fmtNum(water)} л` : k === 'ice' || k === 'meat' || k === 'cooked' || k === 'tea' || k === 'resin' || k === 'needles' ? String(Math.round(n)) : undefined, n > 0);
+    }
+    const tf = count(inv, 'torchFuel');
+    this.setChip('torchFuel', tf, `${Math.round(tf)} мин`, tf > 0);
+    for (const g of ['sled', 'sleepingBag', 'kettle', 'lantern', 'pickaxe'] as const) this.setChip(g, inv[g] ? 1 : 0, '', !!inv[g]);
+  }
+
   private setChip(k: string, n: number, label?: string, visible = true): void {
     const c = this.chips[k]; if (!c) return;
     this.txt(c.n, label ?? String(n));
     const w = CHIP_WORDS[k];   // the caption agrees with the count: 1 бревно, 2 бревна, 5 брёвен
     if (w) { const word = plural(n, w[0], w[1], w[2]); this.txt(c.l, word); this.m('chipw' + k, word, () => { c.root.title = word; }); }
+    else if (GEAR_CHIP[k]) { this.txt(c.l, GEAR_CHIP[k]); }
     this.m('chip' + k, (n > 0 ? 1 : 0) + (visible ? 2 : 0), () => {
       c.root.classList.toggle('zero', n <= 0);
       c.root.classList.toggle('hidden', !visible);
@@ -1209,7 +1279,7 @@ export class UI {
     window.setTimeout(() => resume.focus({ preventScroll: true }), 60);
   }
 
-  showEnd(win: boolean, cause: string, stats: { days: number; hours: number; built: string[] }, onRestart: () => void): void {
+  showEnd(win: boolean, cause: string, stats: { days: number; hours: number; built: string[] }, onRestart: () => void, opts: { title?: string; kicker?: string } = {}): void {
     const ov = el('div', `overlay end ${win ? 'win' : 'lose'}`);
     const card = el('div', 'card');
     const names = [...new Set(stats.built.map((b) => BUILT_NAME[b] ?? b))];
@@ -1221,8 +1291,8 @@ export class UI {
       `<div class="ro"><span class="ro-cap">${cap}</span><b class="ro-val mono">${two(val)}</b><i class="ro-ticks"></i><span class="ro-unit">${unit}</span></div>`;
     card.innerHTML = `
       <div class="end-medal">${ico(win ? 'sun' : 'moon')}</div>
-      <div class="kicker"><i></i><span>${win ? 'Рассвет' : 'Конец записей'}</span><i></i></div>
-      <h2 class="card-title">${win ? 'Ты пережил три ночи' : 'Мгла победила'}</h2>
+      <div class="kicker"><i></i><span>${opts.kicker ?? (win ? 'Рассвет' : 'Конец записей')}</span><i></i></div>
+      <h2 class="card-title">${opts.title ?? (win ? 'Ты пережил три ночи' : 'Мгла победила')}</h2>
       <div class="note"><span class="note-tag">${win ? 'Запись' : 'Причина'}</span><p class="cause"></p><i class="note-ul"></i></div>
       <div class="stats">
         ${ro('Дни', stats.days, plural(stats.days, 'день', 'дня', 'дней'))}
