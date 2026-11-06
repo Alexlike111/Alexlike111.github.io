@@ -218,7 +218,7 @@ function stepCluster(c: Cluster, dt: number) {
     iy++;
   }
   if (stopped) { c.y = iy; const sp = c.vy; c.vy = 0; land(c, sp); return; }
-  c.y = steps > 0 ? ny : ny; // free fall
+  c.y = ny; // free fall
   // horizontal drift (kept tiny; initial vx from makeCluster)
   if (Math.abs(c.vx) > 0.01) {
     const nx = c.x + c.vx * dt;
@@ -324,7 +324,7 @@ function stepTree(t: Tree, dt: number) {
     if (wx < 0 || wx >= W || wy < 0 || wy >= H) continue;
     if (WALK[mat[wy * W + wx]] && na > 0.12) { hit = true; hitS = s; break; }
   }
-  if (na >= Math.PI / 2) { na = Math.PI / 2; hit = hit || true; if (!hitS) hitS = t.len; }
+  if (na >= Math.PI / 2) { na = Math.PI / 2; hit = true; if (!hitS) hitS = t.len; }
   t.omega = w * t.dir;
   t.ang = na * t.dir;
   // shake snow off the crown while it swings

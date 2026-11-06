@@ -179,8 +179,8 @@ Dark navy panels (#0b1220 / #121c2b, 1 px #24364c borders, 6 px radius), ice blu
 - 60 fps target; quality ladder: auto-lower sim window, light margin, particle counts, glow when fps < 50 for 3 s (G.quality).
 - `window.__sc` dev/test API (main.ts): `{ G, start(), step(frames), teleport(x,y), give(id,n), setTime(min), setWeather(o), act(kind, x, y, seconds), place(id,tx,ty), craft(recipeIndexOrResult), kill(), stats(), fps(), shot? }` — keep it working; tests depend on it.
 - `tests/sim.test.ts` (tsx, headless): mass conservation, pile angle, water levelling, freezing/melting, fire → ember → ash, steam → snow in cold, support: snow-block arch holds / flat span fails, cluster lands, explosion, performance timing.
-- `tests/e2e.mjs` (Playwright Chromium, `require('playwright')` works globally): boots the built `dist/index.html` (or vite preview), fails on console errors, runs scripted scenarios through `__sc`, saves screenshots to `shots/` (desktop 1600×900 and phone 844×390 touch), measures fps with CPU throttling ×4.
-- Critique & ratings rounds after integration: UI critic, game-design critic, player-rater (rubric 1–10), perf tester. Fix until no critical issues remain.
+- `tests/e2e.mjs` (Playwright Chromium, `require('playwright')` works globally): boots the built `dist/index.html` (or vite preview), fails on console errors, runs scripted scenarios through `__sc`, saves screenshots to `shots/` (desktop 1600×900 and phone 844×390 touch). **No FPS/performance measurement in the cloud browser** (headless, no GPU) — the owner measures FPS on a real phone via the self-test; agents just write efficient code.
+- Critique & ratings rounds after integration: UI critic, game-design critic, player-rater (rubric 1–10). No perf tester (FPS is checked by the owner on a phone). Fix until no critical issues remain.
 
 ## 9. Agent rules
 - Own only the files assigned to you; you may add small helper exports to contract files if strictly needed (note it). Do not rewrite other agents' modules — leave a `// TODO(owner):` note and mention it in your report.
