@@ -6,7 +6,7 @@
 // divided by that depth; compression arch: thin snow/ice shells whose top surface curves down on both sides
 // (concave-down, radius < ~2.4 m) carry thrust laterally at ARCH_F of the flat-beam cost.
 import {
-  W, H, M, F_DIST, F_TREE, BOND_SOLID, mat, dens, bond, flags, body, set, wake,
+  W, H, M, F_DIST, F_TREE, BOND_SOLID, mat, dens, bond, flags, body, beamId, set, wake,
 } from './world';
 import { G } from './state';
 import { makeBody } from './phys';
@@ -29,6 +29,7 @@ const MIN_ISLAND = 12, MAX_ISLAND = 5000;
 const QUEUE_PERIOD = 0.12, SWEEP_PERIOD = 2.5;
 const SWEEP_W = 360, SWEEP_H = 220;
 const MAX_SOLVES_PER_STEP = 2;
+const BEAM_GRACE = 8;      // s: a freshly placed beam is held up (anchor) so a structure can be built in any order
 
 const MAXN = (MAXD + 2) * (MAXD + 2);
 const INF = 0x7fffffff;
@@ -38,11 +39,13 @@ const lm = new Uint8Array(MAXN);    // material
 const lb = new Uint8Array(MAXN);    // bond
 const ld = new Uint16Array(MAXN);   // dens
 const lf = new Uint8Array(MAXN);    // flags
+const lfr = new Uint8Array(MAXN);   // 1 = cell of a beam still inside its placement grace period
 const cls = new Uint8Array(MAXN);   // 0 none, 1 structural, 2 granular carrier, 3 anchor
 const run = new Uint8Array(MAXN);   // contiguous structural run length in column (capped RUNCAP)
 const rtop = new Uint16Array(MAXN); // local row of the top of the cell's vertical structural (class 1) run
 const arch = new Uint8Array(MAXN);  // 1 = the shell around this cell is curved concave-down (compression arch)
 const load = new Uint16Array(MAXN); // kg/m2 resting on top
+const bear = new Uint8Array(MAXN);  // 1 = snow cell in an unbroken column under a placed timber/crate (a foundation: bears by compression)
 const cu = new Uint16Array(MAXN);   // cost to be supported from below
 const cdg = new Uint16Array(MAXN);  // from diagonal-below
 const chz = new Uint16Array(MAXN);  // from the side
@@ -67,12 +70,14 @@ function loadRect(x0: number, y0: number, x1: number, y1: number): boolean {
   rx0 = x0; ry0 = y0; pw = rw + 2; ph = rh + 2;
   OFF[0] = -pw - 1; OFF[1] = -pw; OFF[2] = -pw + 1; OFF[3] = -1; OFF[4] = 1; OFF[5] = pw - 1; OFF[6] = pw; OFF[7] = pw + 1;
   const n = pw * ph;
-  lm.fill(0, 0, n); lb.fill(0, 0, n); ld.fill(0, 0, n); lf.fill(0, 0, n);
+  lm.fill(0, 0, n); lb.fill(0, 0, n); ld.fill(0, 0, n); lf.fill(0, 0, n); lfr.fill(0, 0, n);
+  const anyFresh = fresh.size > 0;
   for (let y = 0; y < rh; y++) {
     let wi = (y0 + y) * W + x0, l = (y + 1) * pw + 1;
     for (let x = 0; x < rw; x++, wi++, l++) {
       if (body[wi] !== 0) continue; // rigid bodies are not part of the static structure
       lm[l] = mat[wi]; lb[l] = bond[wi]; ld[l] = dens[wi]; lf[l] = flags[wi];
+      if (anyFresh && mat[wi] === M.PLANK && fresh.has(beamId[wi])) lfr[l] = 1;
     }
   }
   return true;
@@ -93,7 +98,7 @@ function prep() {
         case M.ICE: case M.WOOD: case M.CRATE: case M.POLE: case M.PLANK: c = 1; break;
         case M.DIRT: case M.ROCK: case M.BEDROCK: c = 3; break;
       }
-      if (c === 1 && (border || x === 1 || x === rw || (m === M.WOOD && (lf[l] & F_TREE)))) c = 3;
+      if (c === 1 && (border || x === 1 || x === rw || lfr[l] === 1 || (m === M.WOOD && (lf[l] & F_TREE)))) c = 3;
       cls[l] = c;
     }
   }
@@ -103,6 +108,7 @@ function prep() {
     // run = depth of the cell's own material (snow on a beam is load, not depth)
     run[l] = cls[l] === 1 ? Math.min(RUNCAP, (cls[a] === 1 && grp8(lm[a]) === grp8(lm[l]) ? run[a] : 0) + 1) : 0;
     rtop[l] = cls[l] === 1 ? (cls[a] === 1 ? rtop[a] : y) : 0;
+    bear[l] = (cls[l] === 1 || cls[l] === 2) && lm[l] === M.SNOW && (bear[a] === 1 || lm[a] === M.PLANK || lm[a] === M.CRATE || lm[a] === M.POLE) ? 1 : 0;
     if (lm[a] !== 0) {
       const ma = lm[a];
       const mass = (ma === M.SNOW || ma === M.ASH) ? ld[a] * CELLM : 0;
@@ -132,7 +138,7 @@ function prep() {
     switch (lm[l]) {
       case M.SNOW: {
         let s = (lb[l] / 255) * (ld[l] / 350); s = s < 0.15 ? 0.15 : s > 1.3 ? 1.3 : s;
-        u = 4 / s; dg = 10 / s; h = SNOW_H / s; g = 150 / s; lref = LREF_SNOW; break;
+        u = bear[l] ? 3 : 4 / s; dg = 10 / s; h = SNOW_H / s; g = 150 / s; lref = LREF_SNOW; break; // foundation snow under a post carries it in compression
       }
       case M.ICE: u = 2; dg = 5; h = 12; g = 40; break;
       case M.CRATE: u = 3; dg = 6; h = 10; g = 30; break;
@@ -278,7 +284,16 @@ function solveRect(x0: number, y0: number, x1: number, y1: number): { collapsed:
 
 // ---------------- queue ----------------
 const pend: number[] = []; // flat x0,y0,x1,y1 (already expanded + clamped)
-let qT = 0, sT = 0;
+let qT = 0, sT = 0, clock = 0;
+const fresh = new Map<number, number>();            // beamId -> clock at which its grace ends
+const freshRects: number[] = [];                    // flat t,x0,y0,x1,y1 (re-check when the grace ends)
+
+/** A beam was just placed: judge it as part of the final structure — it is held up for BEAM_GRACE seconds, then checked for real. */
+export function freshBeam(bid: number, x0: number, y0: number, x1: number, y1: number): void {
+  if (!bid) return;
+  fresh.set(bid, clock + BEAM_GRACE);
+  freshRects.push(clock + BEAM_GRACE + 0.02, x0, y0, x1, y1);
+}
 
 export function markStruct(x0: number, y0: number, x1: number, y1: number): void {
   if (x0 > x1) { const t = x0; x0 = x1; x1 = t; }
@@ -308,7 +323,15 @@ function mergePending(force = false) {
 }
 
 export function stepStructure(dt: number): { collapsed: number; bodies: number } {
-  qT += dt; sT += dt;
+  qT += dt; sT += dt; clock += dt;
+  if (freshRects.length && freshRects[0] <= clock) {
+    for (let i = 0; i < freshRects.length;) {
+      if (freshRects[i] > clock) { i += 5; continue; }
+      markStruct(freshRects[i + 1] - 4, freshRects[i + 2] - 4, freshRects[i + 3] + 4, freshRects[i + 4] + 4);
+      freshRects.splice(i, 5);
+    }
+    for (const [id, t] of fresh) if (t <= clock) fresh.delete(id);
+  }
   let collapsed = 0, bodies = 0;
   if (pend.length && qT >= QUEUE_PERIOD) {
     qT = 0;

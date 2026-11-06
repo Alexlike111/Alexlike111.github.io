@@ -3,7 +3,7 @@ import { W, H, M, mat, dens, bond, flags, body, treeId, beamId, nextBeamId, idx,
 import { G, Fire } from './state';
 import { pl, PH } from './player';
 import { spawn, PK } from './particles';
-import { markStruct, supportMargin } from './structure';
+import { markStruct, supportMargin, freshBeam } from './structure';
 import { makeBody, bodyAtIndex, removeBody, bodies } from './phys';
 import type { Sound } from './audio';
 
@@ -68,11 +68,34 @@ function dig(ax: number, ay: number) {
   for (let k = 0; k < 5; k++) spawn(PK.DUST, ax, ay, (Math.random() - 0.5) * 40, -Math.random() * 30, 0.8, 1, 0, 0);
   markStruct(ax - 8, ay - 8, ax + 8, ay + 8);
 }
+/** Direction (not normalised) with the longest clear throw from the shoulder: 8 rays in the upper half-plane, behind the player preferred. */
+function openDirection(sx: number, sy: number): [number, number] {
+  const SP = 130, RANGE = 40;
+  let best = -1, bx = -pl.face * 30, by = -20;
+  for (let k = 0; k < 8; k++) {
+    const a = ((k < 4 ? 15 + k * 20 : 105 + (k - 4) * 20) * Math.PI) / 180; // 15..75 deg to the right, 105..165 deg to the left
+    const ux = Math.cos(a), uy = -Math.sin(a);
+    let len = 0;
+    for (; len < RANGE; len++) {
+      const s = len + 1, t = s / SP;
+      const x = Math.round(sx + ux * s), y = Math.round(sy + uy * s - 25 * t + 98 * t * t); // straight line bent by the toss's gravity
+      if (!inb(x, y)) { len = RANGE; break; }
+      const i = idx(x, y);
+      if (mat[i] !== M.AIR && mat[i] !== M.NEEDLE) break;
+      if (body[i]) break;
+    }
+    const behind = (ux > 0 ? 1 : -1) === -pl.face;
+    const elev = (Math.asin(-uy) * 180) / Math.PI;
+    const score = len + (behind ? 6 : 0) - Math.abs(elev - 35) / 20 - (elev > 70 ? 4 : 0); // prefer a ~35 deg toss; steep ones rain back on the player
+    if (score > best) { best = score; bx = ux * 30; by = uy * 30; }
+  }
+  return [bx, by];
+}
 export function throwLoad(ax: number, ay: number, auto: boolean) {
   if (tool.load < 1) return;
   const [sx, sy] = shoulder();
   let dx = ax - sx, dy = ay - sy;
-  if (auto) { dx = -pl.face * 30; dy = -20; } // toss behind
+  if (auto) [dx, dy] = openDirection(sx, sy); // toss where the air is most open (out of the tunnel, not back into the wall)
   const L = Math.max(1, Math.hypot(dx, dy));
   const sp = 95 + Math.min(60, L * 1.2);
   const n = Math.round(tool.load);
@@ -145,6 +168,21 @@ export function ghostMargin(kind: 'block' | 'beam', ax: number, ay: number) {
   return { ...g, margin: marginCache.v };
 }
 
+/** Foundation: whatever is placed on loose snow tamps the 6 cells beneath it so posts neither crumble nor sink. */
+const TAMP_DEPTH = 6, TAMP_DENS = 300, TAMP_BOND = 120;
+function tamp(x0: number, yb: number, w: number) {
+  for (let x = x0; x < x0 + w; x++) {
+    for (let y = yb; y < yb + TAMP_DEPTH; y++) {
+      if (!inb(x, y)) break;
+      const i = idx(x, y);
+      if (mat[i] !== M.SNOW || body[i]) break; // only the unbroken snow directly under the object
+      if (dens[i] < TAMP_DENS) dens[i] = TAMP_DENS;
+      if (bond[i] < TAMP_BOND) bond[i] = TAMP_BOND;
+      wake(x, y);
+    }
+  }
+}
+
 function place(kind: 'block' | 'beam', ax: number, ay: number) {
   if (kind === 'block' && inv.blocks.length === 0) { say('Нет снежных блоков. Вырежи пилой из плотного наста'); sfx?.uiDeny(); return; }
   if (kind === 'beam' && inv.logs < 1) { say('Нет брёвен. Свали ель топором'); sfx?.uiDeny(); return; }
@@ -163,6 +201,8 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
     else { set(c.x, c.y, M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
   if (kind === 'beam') inv.logs--;
+  tamp(g.x0, g.y0 + g.h, g.w);
+  if (kind === 'beam') freshBeam(bid, g.x0, g.y0, g.x0 + g.w, g.y0 + g.h);
   sfx?.place(kind === 'beam');
   tool.cool = 0.25;
   pl.stamina -= 0.03;
@@ -359,9 +399,18 @@ export function stepFires(dt: number) {
     }
     if (f.lit) {
       const q = G.quality ? 1 : 0.5;
-      if (Math.random() < dt * 30 * q) spawn(PK.FLAME, f.x + (Math.random() - 0.5) * 8, f.y - 2, (Math.random() - 0.5) * 10, -20 - Math.random() * 25, 0.5 + Math.random() * 0.4, 1, 0, 0);
-      if (Math.random() < dt * 4 * q) spawn(PK.SPARK, f.x + (Math.random() - 0.5) * 6, f.y - 6, (Math.random() - 0.5) * 30, -40 - Math.random() * 40, 1.2, 1, 0, 0);
-      if (Math.random() < dt * 5 * q) spawn(PK.SMOKE, f.x, f.y - 12, (Math.random() - 0.5) * 6, -12, 5, 1, 0, 0);
+      const pw = Math.min(1, f.fuel / 30);          // flames shrink as the fuel runs out
+      const burst = (rate: number) => { const n = rate * dt * q; return Math.floor(n) + (Math.random() < n - Math.floor(n) ? 1 : 0); };
+      // tongues of flame: many, large, rising from a wide base
+      for (let n = burst(60 * (0.5 + 0.5 * pw)); n > 0; n--) {
+        const u = (Math.random() - 0.5) * 2;
+        spawn(PK.FLAME, f.x + u * 5, f.y - 1 - Math.random() * 3, u * -6 + (Math.random() - 0.5) * 8, -26 - Math.random() * 34, 0.5 + Math.random() * 0.5, (1.3 + Math.random() * 0.8) * (0.6 + 0.4 * pw), 0, 0);
+      }
+      // glowing embers bed at the base (SPARK particles: bright orange, barely moving) and the odd flying spark
+      for (let n = burst(14); n > 0; n--) spawn(PK.SPARK, f.x + (Math.random() - 0.5) * 12, f.y - 0.5 - Math.random() * 2, (Math.random() - 0.5) * 6, -4 - Math.random() * 8, 0.35 + Math.random() * 0.45, 2.2 + Math.random() * 1.2, 0, 0);
+      for (let n = burst(6); n > 0; n--) spawn(PK.SPARK, f.x + (Math.random() - 0.5) * 8, f.y - 8, (Math.random() - 0.5) * 36, -45 - Math.random() * 50, 1.0 + Math.random() * 0.9, 1, 0, 0);
+      // smoke column
+      for (let n = burst(9); n > 0; n--) spawn(PK.SMOKE, f.x + (Math.random() - 0.5) * 6, f.y - 14 - Math.random() * 6, (Math.random() - 0.5) * 8, -14 - Math.random() * 6, 4 + Math.random() * 3, 1 + Math.random() * 0.8, 0, 0);
     }
     if (!f.lit && f.fuel <= 0 && f.power === 0) { // burned out: leave ash
       for (let dx = -3; dx <= 3; dx++) if (inb(f.x + dx, f.y - 1) && mat[idx(f.x + dx, f.y - 1)] === M.AIR) set(f.x + dx, f.y - 1, M.ASH, 300, 0, 0);

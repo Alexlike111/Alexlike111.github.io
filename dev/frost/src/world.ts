@@ -179,27 +179,45 @@ export function generate(s = 20261106) {
     ['saw', 'food', 'matches'], ['food', 'food'], ['snowshoes', 'food'], ['matches', 'thermos'],
     ['food', 'crackers', 'crackers'], ['thermos', 'matches', 'food'], ['food', 'crackers'], ['matches', 'food', 'thermos'],
   ];
-  const cx = [680, 980, 1300, 420, 1900, 2120, 230, 1620];
-  for (let k = 0; k < cx.length; k++) placeCrate(cx[k], loots[k]);
+  const cx = [680, 980, 1300, 420, 1900, 2120, 230, 1420]; // none under the lake (x 1480..1800)
+  for (let k = 0; k < cx.length; k++) placeCrate(clearSpot(cx[k]), loots[k]);
   for (let i = 0; i < awake.length; i++) { awake[i] = 0; gpuDirty[i] = 1; }
 }
 
 function surfaceAt(x: number) { for (let y = 0; y < H; y++) if (mat[idx(x, y)] !== M.AIR && mat[idx(x, y)] !== M.NEEDLE) return y; return H; }
 export { surfaceAt };
 
+/** Snow/ground surface row at x: top of the unbroken SNOW/DIRT/ROCK/ICE column resting on the ground (trees, boughs and crates ignored). */
+function groundSurface(x: number): number {
+  let y = Math.min(H - 1, groundY[x]);
+  while (y > 0) { const m = mat[idx(x, y - 1)]; if (m === M.SNOW || m === M.DIRT || m === M.ROCK || m === M.ICE) y--; else break; }
+  return y;
+}
+
+/** nearest x (searching outward) whose crate footprint has no tree above it and does not touch the lake */
+function clearSpot(x0: number): number {
+  for (let d = 0; d <= 200; d += 4) for (const x of d === 0 ? [x0] : [x0 + d, x0 - d]) {
+    if (x < 60 || x > W - 80 || (x > 1460 && x < 1820)) continue;
+    let bad = false;
+    for (let xx = x - 10; xx < x + 26 && !bad; xx++) for (let y = 0; y < H; y++) { const m = mat[idx(xx, y)]; if (m === M.WOOD || m === M.NEEDLE || m === M.ROCK && y < groundY[xx] - 2) { bad = true; break; } if (m === M.DIRT) break; }
+    if (!bad) return x;
+  }
+  return x0;
+}
+
 function placeCrate(x: number, loot: string[]) {
   const g = groundY[x];
   const w = 16, h = 11;
   // supply cache: buried about 1.2 m under the snow surface (or on the ground if the snow is thinner)
   let s0 = H;
-  for (let xx = x; xx < x + w; xx++) s0 = Math.min(s0, surfaceAt(xx));
+  for (let xx = x; xx < x + w; xx++) s0 = Math.min(s0, groundSurface(xx));
+  const poleS = Math.min(groundSurface(x + 2), groundSurface(x + 3));
   const bottom = Math.min(g, s0 + 24 + h);
   const top = bottom - h;
   for (let yy = top; yy < bottom; yy++) for (let xx = x; xx < x + w; xx++) { const i = idx(xx, yy); mat[i] = M.CRATE; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
   crates.push({ x, y: top, w, h, loot: loot.slice(), opened: false });
-  // marker pole sticks out of the snow ~1.2 m above the surface
-  const s = surfaceAt(x + 2);
-  for (let yy = s - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; treeId[i] = 0; }
+  // marker pole sticks out of the snow ~1.2 m (24 cells) above the surface
+  for (let yy = poleS - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; treeId[i] = 0; }
 }
 
 export function plantTree(x: number, h: number) {

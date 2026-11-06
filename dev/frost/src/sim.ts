@@ -169,12 +169,12 @@ function stepSlow(dtReal: number) {
   const ya = Math.max(1, y0), yb = Math.min(H - 2, y1);
   for (let x = xa + slowRow; x <= xb; x += SLOW_SLICES) {
     // scan column from top: running overburden load (kg/m²)
-    let load = 0;
+    let load = 0, found = 0; // found: rows of tamped foundation left under a placed beam/crate/post (those cells do not flow away)
     for (let y = ya; y <= yb; y++) {
       const i = y * W + x;
       const m = mat[i];
-      if (m === M.AIR || m === M.NEEDLE) { load = 0; continue; }
-      if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; continue; }
+      if (m === M.AIR || m === M.NEEDLE) { load = 0; found = 0; continue; }
+      if (m !== M.SNOW || body[i]) { if (m === M.WATER) load += 50; else load += 20; found = (m === M.PLANK || m === M.CRATE || m === M.POLE) && !body[i] ? 7 : 0; continue; }
       const d = dens[i];
       load += d * CELL;
       const T = tempAt(x, y);
@@ -197,7 +197,8 @@ function stepSlow(dtReal: number) {
       }
       // --- compaction: transfer mass from this cell into the one below if below is under-dense ---
       const j = i + W;
-      if (mat[j] === M.SNOW && !body[j]) {
+      if (found > 0) found--;
+      else if (mat[j] === M.SNOW && !body[j]) {
         const target = Math.min(560, 140 + 135 * Math.log10(1 + load / 4)); // kg/m³ for given overburden
         const dj = dens[j];
         if (dj < target) {

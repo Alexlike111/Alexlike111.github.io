@@ -449,12 +449,13 @@ let aimWorld: [number, number] | null = null;
 let waitToggle = false;
 function frame(now: number) {
   requestAnimationFrame(frame);
-  let dt = Math.min(0.05, (now - last) / 1000); last = now;
+  let dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; if (fps < 40 && G.quality === 1) { lowFpsT++; if (lowFpsT > 3) { G.quality = 0; resize(); } } else lowFpsT = 0; }
   const s = input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
-  if (!running || paused) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
+  const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
+  if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
   if (ended) { // after win/death: world keeps living in the background but ignores game input
     G.realTime += dt; G.frame++; updateCamera(dt); stepHeat(dt); stepSim(dt); stepBodies(dt); input.endFrame(); renderer.render(dt); drawOverlay(null); return;
   }
