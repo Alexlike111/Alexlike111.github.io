@@ -1,554 +1,349 @@
-// World generator (SPEC §4). Deterministic by seed. Layout left -> right:
-// hunter's hut · frozen lake · forest · WEATHER STATION (start) · hills · hot spring · watchtower hill · avalanche ridge · plane wreck.
-// Underground: snowpack -> frozen dirt -> stone -> granite, ice caves, ore bands, sealed methane/oil pockets, warm grotto, lava, crystal geodes.
-import { W, H, TW, TH, mat, aux, flags, shade, bg, awake, clearWorld, setSeed, rand, randInt, noise1, fbm1, fbm2, F_TREE } from '../engine/grid';
+// World generator (DESIGN §1) — the High-Arctic coast. Deterministic by seed. Layout left -> right (2048 × 768 cells, sea level row 300):
+//   cliff wall · CAPE with the abandoned coal mine · tundra with lichen and the old CAIRN · STATION «Мыс Безмолвия» ·
+//   gravel BEACH (driftwood, whale skeleton, shore ice, tide crack) · FAST ICE (seal holes, iceberg with an ice cave) ·
+//   PACK ICE (floes, cracks, ridges, leads, the ghost ship «Заря») · open sea edge.  No trees anywhere.
+// This file shapes the terrain: surface profile, snowpack with density layering (aux encodes density: ρ ≈ 60 + aux × 1.6 kg/m³),
+// rock, sea, ice field. locations.ts then stamps the built places and fills worldInfo.
+import { W, H, TW, TH, mat, aux, flags, shade, bg, awake, clearWorld, setSeed, rand, randInt, noise1, fbm1, fbm2 } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { G } from './state';
-import { LOC, stampLocations, resetLocations, WorldInfo } from './locations';
+import { LOC, SEA, stampLocations, resetLocations, worldInfo, Terrain, put, box, pileBlocks, snowBank, topSolid } from './locations';
 
+export { worldInfo, LOC };
 const M = MAT;
-const COAL = M.COAL, AIR = M.AIR, SNOW = M.SNOW, PACKED = M.PACKED, ICE = M.ICE, WATER = M.WATER, DIRT = M.DIRT, STONE = M.STONE, HARD = M.HARDROCK, BED = M.BEDROCK;
+const AIR = M.AIR, SNOW = M.SNOW, PACKED = M.PACKED, ICE = M.ICE, WATER = M.WATER, DIRT = M.DIRT, STONE = M.STONE, HARD = M.HARDROCK, BED = M.BEDROCK, GRAVEL = M.GRAVEL;
 
-// ---- shared terrain data (also handed to locations) ----
-const surf = new Int16Array(W);        // top of the natural surface (snow / ice top)
-const rockTop = new Int16Array(W);     // first DIRT row
+// ---- terrain arrays (also handed to locations) ----
+const surf = new Int16Array(W);        // natural surface: first solid row (snow / ice top; SEA over open water)
+const ground = new Int16Array(W);      // top of rock / permafrost / gravel / seabed under the snow
 const stoneTop = new Int16Array(W);    // first STONE row
 const deepTop = new Int16Array(W);     // first HARDROCK row
+const seabed = new Int16Array(W);      // sea floor (x >= SHORE), 0 on land
+const iceTop = new Int16Array(W);      // ice sheet top (0 = none)
+const iceBot = new Int16Array(W);      // first row under the ice sheet
 const snowDepth = new Int16Array(W);
+const T: Terrain = { surf, ground, stoneTop, deepTop, seabed, iceTop, iceBot };
 
+const SHORE = 1076;                    // first sea column
+const SEA_X1 = 2042;                   // first column of the east world edge wall
 const ss = (a: number, b: number, x: number) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-let SO = 0;   // seed offset for noise
+let SO = 0;                            // seed offset for noise
+const lichenSpots: { cx: number; w: number }[] = [];   // lichen patches on the windswept tundra (thin snow there)
 
-function flat(h: number, x: number, c: number, hf: number, hb: number, target: number) {
-  const w = 1 - ss(hf, hf + hb, Math.abs(x - c));
-  return h + (target - h) * w;
-}
-const RIDGE_PTS: [number, number][] = [[1470, 264], [1510, 250], [1550, 222], [1590, 194], [1630, 172], [1660, 166], [1690, 182], [1725, 214], [1765, 244], [1800, 258], [1830, 262]];
-function ridgeH(x: number) {
-  let i = 0; while (i < RIDGE_PTS.length - 2 && x > RIDGE_PTS[i + 1][0]) i++;
-  const a = RIDGE_PTS[i], b = RIDGE_PTS[i + 1], t = clamp((x - a[0]) / (b[0] - a[0]), 0, 1), s = 0.5 - 0.5 * Math.cos(Math.PI * t);
+// ---- land profile: snow-surface control points (x, y) ----
+const CP: [number, number][] = [
+  [0, 112], [26, 118], [48, 134], [60, 148], [90, 166], [130, 178], [170, 186], [210, 196], [250, 206], [290, 214], [317, 218],
+  [323, 264], [372, 264], [400, 255], [430, 243], [445, 238], [470, 245], [500, 256], [530, 266], [556, 272],
+  [880, 272], [900, 273], [930, 279], [970, 286], [1010, 291], [1050, 296], [1076, 299],
+];
+function profile(x: number) {
+  let i = 0; while (i < CP.length - 2 && x > CP[i + 1][0]) i++;
+  const a = CP[i], b = CP[i + 1], t = clamp((x - a[0]) / Math.max(1, b[0] - a[0]), 0, 1);
+  // the quarry cut near the portal is steep; everything else is eased
+  const s = (a[0] === 317) ? t : 0.5 - 0.5 * Math.cos(Math.PI * t);
   return a[1] + (b[1] - a[1]) * s;
 }
-
-function baseHeight(x: number) {
-  const X = x + SO;
-  let h = 268 + (fbm1(X / 380 + 3.1, 3) - 0.5) * 38 + (fbm1(X / 62 + 11.3, 3) - 0.5) * 9;
-  h = flat(h, x, LOC.hut.x, 34, 60, 268);
-  h = flat(h, x, LOC.station.x, 118, 90, 272);
-  h -= 54 * Math.exp(-(((x - LOC.tower.x) / 46) ** 2));
-  h = flat(h, x, LOC.tower.x, 34, 50, LOC.tower.y);
-  const wr = ss(1450, 1495, x) * (1 - ss(1800, 1840, x));
-  if (wr > 0) h += (ridgeH(x) + (fbm1(X / 18 + 5, 2) - 0.5) * 5 - h) * wr;
-  h = flat(h, x, LOC.wreck.x, 60, 55, 262);
-  h = flat(h, x, (LOC.lake.l + LOC.lake.r) / 2, (LOC.lake.r - LOC.lake.l) / 2 - 2, 60, LOC.lake.y);
-  const d = (x - LOC.spring.x) / 50; if (Math.abs(d) < 1) h += 26 * (0.5 + 0.5 * Math.cos(Math.PI * d));
-  if (x > 1990) h -= 24 * ss(1990, 2040, x);     // hill at the east edge
-  return h;
+function noiseAmp(x: number) {
+  if (x < 60) return 1.5;
+  if (x < 317) return 4;
+  if (x < 372) return 0.8;
+  if (x < 556) return 3.4;
+  if (x < 880) return 0;                     // station plateau is dead flat (tile aligned)
+  return 1.4;
+}
+const SB: [number, number][] = [[1076, 300], [1100, 316], [1150, 332], [1250, 350], [1350, 364], [1450, 380], [1600, 402], [1750, 420], [1900, 442], [1950, 458], [2042, 500]];
+function seabedAt(x: number) {
+  let i = 0; while (i < SB.length - 2 && x > SB[i + 1][0]) i++;
+  const a = SB[i], b = SB[i + 1], t = clamp((x - a[0]) / (b[0] - a[0]), 0, 1);
+  return Math.round(a[1] + (b[1] - a[1]) * t + (fbm1((x + SO) / 40 + 5, 3) - 0.5) * 7);
 }
 
-function carveDisc(cx: number, cy: number, r: number, minY = 0, fill = AIR) {
-  const r2 = r * r, y0 = Math.max(minY, Math.floor(cy - r)), y1 = Math.min(H - 7, Math.ceil(cy + r)), x0 = Math.max(6, Math.floor(cx - r)), x1 = Math.min(W - 7, Math.ceil(cx + r));
-  for (let y = y0; y <= y1; y++) {
-    const dy = y - cy; const row = y * W;
-    for (let x = x0; x <= x1; x++) {
-      const dx = x - cx; if (dx * dx + dy * dy > r2) continue;
-      const i = row + x, m = mat[i];
-      if (m === BED || m === M.FIXTURE) continue;
-      mat[i] = fill; aux[i] = 0; flags[i] = 0;
+// snow density layering: aux -> ρ ≈ 60 + aux × 1.6.  loose crown 5..45, settled 80..130 (crumbles when cut), wind slab 150..205 (ideal), hard crust 215..250
+const snowAux = (slab: number, depthFrac: number, n: number) => {
+  const base = 78 + 40 * depthFrac + n * 14;                  // settled snow (ρ ≈ 190..260)
+  return clamp(Math.round(base + slab * (62 + 30 * n)), 70, 250);
+};
+function fillSnow(x: number, yTop: number, yBot: number, loose: number, slab: number) {
+  const n = yBot - yTop; if (n <= 0) return;
+  for (let k = 0; k < n; k++) {
+    const y = yTop + k, i = y * W + x;
+    if (k < loose) { mat[i] = SNOW; aux[i] = 4 + ((rand() * 36) | 0) + k * 3; flags[i] = 0; }
+    else {
+      const f = (k - loose) / Math.max(1, n - loose);
+      const crust = k < loose + 2 ? 1 : 0;                      // wind crust right under the loose crown
+      mat[i] = PACKED; flags[i] = 0;
+      aux[i] = clamp(snowAux(slab, f, noise1((x + y * 7) * 0.2 + SO)) + crust * (slab > 0.5 ? 38 : 14) + ((rand() * 8) | 0), 70, 252);
     }
   }
-}
-function carveEllipse(cx: number, cy: number, rx: number, ry: number, noiseAmt: number, seed: number, fill = AIR, minY = 0) {
-  const y0 = Math.max(minY, Math.floor(cy - ry * 1.3)), y1 = Math.min(H - 7, Math.ceil(cy + ry * 1.3)), x0 = Math.max(6, Math.floor(cx - rx * 1.3)), x1 = Math.min(W - 7, Math.ceil(cx + rx * 1.3));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const dx = (x - cx) / rx, dy = (y - cy) / ry;
-      // flatter floor: squash the lower half a little
-      const d = dx * dx + (dy > 0 ? dy * dy * 1.35 : dy * dy);
-      const n = (fbm2(x / 9 + seed, y / 9 + seed * 0.7, 3) - 0.5) * noiseAmt;
-      if (d + n > 1) continue;
-      const i = y * W + x, m = mat[i]; if (m === BED || m === M.FIXTURE) continue;
-      mat[i] = fill; aux[i] = 0; flags[i] = 0;
-    }
-  }
-}
-
-const wrapA = (a: number) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; };
-interface CavePt { x: number; y: number; r: number }
-const cavePts: CavePt[] = [];
-const chambers: { x: number; y: number; rx: number; ry: number; zone: number }[] = [];
-
-function worm(x: number, y: number, ang: number, len: number, r0: number, ymin: number, ymax: number, minY = 0) {
-  const off = rand() * 1000;
-  for (let s = 0; s < len; s++) {
-    x += Math.cos(ang) * 1.7; y += Math.sin(ang) * 1.7;
-    ang += (noise1(s * 0.035 + off) - 0.5) * 0.46 + (noise1(s * 0.011 + off * 2) - 0.5) * 0.1;
-    // keep inside the depth band: steer back firmly and never leave it by more than a few cells
-    if (y < ymin) { ang += wrapA(Math.PI / 2 - ang) * 0.18; if (y < ymin - 6) y = ymin - 6; }
-    else if (y > ymax) { ang += wrapA(-Math.PI / 2 - ang) * 0.18; if (y > ymax + 6) y = ymax + 6; }
-    // keep mostly horizontal
-    const hs = Math.sin(ang); if (Math.abs(hs) > 0.78) ang *= 0.97;
-    if (x < 30 || x > W - 30) ang = Math.PI - ang;
-    const r = r0 * (0.72 + 0.5 * noise1(s * 0.06 + off * 3)) * (noise1(s * 0.02 + off * 5) < 0.12 ? 0.62 : 1);
-    carveDisc(x, y, r, minY);
-    if ((s & 7) === 0) cavePts.push({ x, y, r });
-  }
-}
-
-function blob(x: number, y: number, m: number, steps: number, replace: number[], rad = 1) {
-  for (let s = 0; s < steps; s++) {
-    for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
-      if (dx * dx + dy * dy > rad * rad + 0.5 || rand() < 0.25) continue;
-      const xx = x + dx, yy = y + dy; if (xx < 6 || xx >= W - 6 || yy < 0 || yy >= H - 7) continue;
-      const i = yy * W + xx; if (replace.includes(mat[i])) { mat[i] = m; aux[i] = 0; }
-    }
-    x += randInt(-1, 1) * 2; y += randInt(-1, 1) * 2;
-  }
-}
-function airNear(cx: number, cy: number, r: number) {
-  for (let y = Math.max(0, cy - r); y <= Math.min(H - 1, cy + r); y++) for (let x = Math.max(0, cx - r); x <= Math.min(W - 1, cx + r); x++) { const m = mat[y * W + x]; if (m === AIR || m === WATER || m === M.LAVA || m === M.METHANE) return true; }
-  return false;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 export function generateWorld(seed: number): { spawnX: number; spawnY: number } {
   G.seed = seed;
   clearWorld(); setSeed(seed * 7919 + 13); resetLocations();
-  G.fixtures.length = 0;
+  G.fixtures.length = 0; G.drops.length = 0;
   SO = (seed % 997) * 13.37;
-  cavePts.length = 0; chambers.length = 0;
+  surf.fill(0); ground.fill(0); stoneTop.fill(0); deepTop.fill(0); seabed.fill(0); iceTop.fill(0); iceBot.fill(0); snowDepth.fill(0);
+  lichenSpots.length = 0;
+  for (let x = 384; x < 548; x += 9) { if (fbm1((x + SO) / 31 + 40, 3) < 0.5 || lichenSpots.some(l => Math.abs(l.cx - x) < 18)) continue; lichenSpots.push({ cx: x, w: 9 + ((x * 7) % 8) }); }
 
-  // ---- 1. surface profile ----
-  const hs = new Float32Array(W);
-  for (let x = 0; x < W; x++) hs[x] = baseHeight(x);
-  for (let x = 1; x < W; x++) hs[x] = clamp(hs[x], hs[x - 1] - 1, hs[x - 1] + 1);
-  for (let x = W - 2; x >= 0; x--) hs[x] = clamp(hs[x], hs[x + 1] - 1, hs[x + 1] + 1);
-  for (let x = 0; x < W; x++) surf[x] = Math.round(hs[x]);
-  // station plateau and hut pad stay exactly tile aligned
-  for (let x = LOC.station.x - 100; x <= LOC.station.x + 100; x++) surf[x] = LOC.station.y;
-  for (let x = LOC.hut.x - 34; x <= LOC.hut.x + 34; x++) surf[x] = LOC.hut.y;
-
-  // ---- 2. columns: snow / dirt / stone / granite ----
-  for (let x = 0; x < W; x++) {
-    const X = x + SO, s = surf[x];
-    // lee drifts: more snow where higher ground lies upwind (west)
-    let up = 1e9; for (let k = 12; k <= 60; k += 12) up = Math.min(up, surf[Math.max(0, x - k)]);
-    const lee = clamp(s - up, 0, 40);      // >0 when the terrain upwind (west) is higher
-    let depth = 11 + 12 * fbm1(X / 140 + 7, 3) + (lee / 40) * 14;
-    const ridge = ss(1470, 1520, x) * (1 - ss(1790, 1830, x));
-    depth += ridge * (16 + 12 * fbm1(X / 40 + 2, 2));
-    const stN = ss(LOC.station.x - 100, LOC.station.x - 60, x) * (1 - ss(LOC.station.x + 60, LOC.station.x + 100, x));
-    depth = depth * (1 - stN * 0.15) + stN * 12;
-    depth = clamp(Math.round(depth), 8, 40);
-    snowDepth[x] = depth;
-    rockTop[x] = s + depth;
-    const dirtT = Math.round(10 + 20 * fbm1(X / 95 + 21, 3));
-    stoneTop[x] = rockTop[x] + dirtT;
-    deepTop[x] = Math.round(560 + (fbm1(X / 130 + 40, 3) - 0.5) * 44);
-    const loose = Math.round(clamp(3 + 5 * fbm1(X / 33 + 9, 2) - ridge * 3.2, 2, 9));
-    for (let y = s; y < H - 6; y++) {
-      const i = y * W + x;
-      if (y < s + loose) { mat[i] = SNOW; aux[i] = (rand() * 60) | 0; }
-      else if (y < rockTop[x]) { mat[i] = PACKED; aux[i] = 255; }
-      else if (y < stoneTop[x]) mat[i] = DIRT;
-      else if (y < deepTop[x]) mat[i] = STONE;
-      else mat[i] = HARD;
-    }
-  }
-  // dirt/stone and stone/granite interleave a little
-  for (let k = 0; k < 900; k++) {
-    const x = randInt(8, W - 9), y0 = stoneTop[x] + randInt(-6, 24);
-    blob(x, y0, STONE, randInt(6, 14), [DIRT], 2);
-    blob(x, deepTop[x] + randInt(-14, 20), rand() < 0.5 ? STONE : HARD, randInt(8, 20), [STONE, HARD], 3);
-  }
-
-  // ---- 3. lake ----
-  buildLake();
-  // ---- 4. hot spring hollow ----
-  buildSpring();
-
-  // ---- 5. caves ----
-  buildCaves();
-
-  // ---- 6. ores, gravel, gas, oil ----
-  buildOres();
-  // ---- 7. grotto, lava, geodes ----
-  buildGrotto();
-  const deep = buildDeep();
-  // sealed gas / oil pockets go in last so nothing can breach them
-  const pockets = buildPockets();
-
-  // ---- 8. trees ----
-  buildTrees();
-
-  // ---- 9. bedrock, background tiles ----
-  for (let y = H - 6; y < H; y++) mat.fill(BED, y * W, y * W + W);
-  for (let y = 0; y < H; y++) { const r = y * W; for (let x = 0; x < 6; x++) { mat[r + x] = BED; mat[r + W - 1 - x] = BED; } }
+  buildLand();
+  buildSea();
+  edgesAndBedrock();
   buildBackgrounds();
-
-  // ---- 10. sites & fixtures (house, hut, tower, wreck, chests ...) ----
-  const info: WorldInfo = { surf, rockTop, stoneTop, deepTop, chambers, cavePts, pockets, deep };
-  stampLocations(info, { carveDisc, carveEllipse });
-
-  // ---- 11. cell variation (deterministic) & final bookkeeping ----
-  for (let i = 0; i < shade.length; i++) shade[i] = (rand() * 256) | 0;
-  awake.fill(0);
+  rockFeatures();
+  stampLocations(T);
+  cutSealHoles();
+  sastrugi();
+  finalize();
 
   const sx = LOC.spawn.x;
-  let sy = 0; while (sy < H - 1 && mat[sy * W + sx] === AIR) sy++;
+  let sy = 0; while (sy < H - 1 && (mat[sy * W + sx] === AIR || mat[sy * W + sx] === M.FIXTURE)) sy++;
   return { spawnX: sx, spawnY: sy };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-function buildLake() {
-  const { l, r, y: ly } = LOC.lake, mid = (l + r) / 2, half = (r - l) / 2;
-  for (let x = l - 8; x <= r + 8; x++) {
-    const u = (x - mid) / half;
-    const edge = ss(0.78, 1.04, Math.abs(u));
-    const depth = Math.round(3 + 25 * Math.pow(Math.max(0, 1 - u * u), 0.9) * (0.9 + 0.2 * fbm1(x / 30 + SO, 2)));
-    const thin = 1 - ss(0.1, 0.5, Math.abs(u));                   // 1 in the middle (thin ice), 0 near the shore
-    const iceT = Math.round(7 - 4 * thin * (1 - edge * 0));
-    const bed = ly + depth, dirtT = 6 + ((x * 7) & 3);
-    if (x < l || x > r) continue;
-    const snowT = Math.round(clamp(4 * edge + (fbm1(x / 25 + SO, 2) - 0.45) * 5, 0, 4) * (1 - thin * 0.9) * ss(0, 16, Math.min(x - l, r - x)));
-    const inLake = x >= l && x <= r;
-    for (let y = ly - 6; y < H - 6; y++) {
+function buildLand() {
+  const hs = new Float32Array(SHORE + 24);
+  for (let x = 0; x < hs.length; x++) hs[x] = profile(x) + (fbm1((x + SO) / 17 + 3.3, 3) - 0.5) * 2 * noiseAmp(x) + (fbm1((x + SO) / 63 + 8.1, 2) - 0.5) * noiseAmp(x) * 2.2;
+  // smooth steps except at the quarry cut (x 316..324)
+  for (let x = 1; x < hs.length; x++) if (x < 315 || x > 326) hs[x] = clamp(hs[x], hs[x - 1] - 1.4, hs[x - 1] + 1.4);
+  for (let x = hs.length - 2; x >= 0; x--) if (x < 315 || x > 326) hs[x] = clamp(hs[x], hs[x + 1] - 1.4, hs[x + 1] + 1.4);
+  for (let x = 556; x <= 880; x++) hs[x] = LOC.station.y;
+  // snow depth: wind-driven (deep in the lee of slopes), smoothed so the snow/ground boundary is not jagged
+  const depF = new Float32Array(SHORE);
+  for (let x = 0; x < SHORE; x++) {
+    const X = x + SO, s = Math.round(hs[x]);
+    const slopeE = (hs[Math.min(hs.length - 1, x + 10)] - hs[Math.max(0, x - 10)]) / 20;      // > 0 when the ground falls away to the east = lee of westerly wind
+    let dep: number;
+    if (x < 90) dep = 1 + 2 * fbm1(X / 20, 2);                                              // scoured windward cliff
+    else if (x < 317) dep = 2 + clamp(slopeE, 0, 0.7) * 34 + 5 * fbm1(X / 50 + 1, 3);
+    else if (x < 340) dep = 1;
+    else if (x < 556) dep = 5 + 11 * ss(0.35, 0.8, fbm1(X / 45 + 4, 3)) + clamp(slopeE, 0, 0.7) * 14;
+    else if (x < 890) dep = 15 + 5 * fbm1(X / 70 + 9, 2);
+    else dep = Math.max(0, 5 * (fbm1(X / 26 + 2, 3) - 0.38)) * (1 - ss(1010, 1076, x));       // beach: gravel with snow patches
+    if (x > 410 && x < 480) dep *= 0.35 + 0.65 * ss(0, 30, Math.abs(x - 445));              // crest scour on the cairn hill
+    for (const l of lichenSpots) { const d = Math.abs(x - l.cx) / (l.w * 0.9 + 6); if (d < 1) dep *= 1 - 0.9 * (1 - d * d); }     // the wind keeps lichen patches nearly bare
+    depF[x] = clamp(dep, 0, 26);
+    surf[x] = s;
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const c = depF.slice();
+    for (let x = 0; x < SHORE; x++) { if (x > 314 && x < 328) continue; let a = 0, n = 0; for (let k = -6; k <= 6; k++) { const xx = x + k; if (xx < 0 || xx >= SHORE || (xx > 314 && xx < 328)) continue; a += c[xx]; n++; } depF[x] = a / n; }
+  }
+  for (let x = 0; x < SHORE; x++) {
+    const X = x + SO, s = surf[x];
+    const slopeE = (hs[Math.min(hs.length - 1, x + 10)] - hs[Math.max(0, x - 10)]) / 20;
+    const dep = Math.round(depF[x] + (x > 90 && x < 556 ? 1.2 * (fbm1(X / 6 + 2, 2) - 0.5) : 0));
+    snowDepth[x] = dep;
+    surf[x] = s; ground[x] = s + dep;
+    const cape = x < 372;
+    const dirtT = cape ? 1 + ((noise1(X * 0.3) * 3) | 0) : x >= 900 ? 0 : Math.round(10 + 10 * fbm1(X / 80 + 21, 3));
+    const gravelT = x >= 900 ? Math.round(6 + 6 * fbm1(X / 40 + 5, 2)) : 0;
+    stoneTop[x] = ground[x] + dirtT + gravelT;
+    deepTop[x] = Math.round(560 + (fbm1(X / 130 + 40, 3) - 0.5) * 44);
+    // slab = wind-packed in the lee (east-facing slopes), fresh on the windward side
+    const slab = clamp(0.25 + slopeE * 2.2 + (fbm1(X / 33 + 17, 2) - 0.5) * 0.9, 0, 1);
+    const loose = Math.round(clamp(2 + 4 * fbm1(X / 29 + 9, 2) - slab * 2.4, 1, 6));
+    fillSnow(x, s, s + dep, Math.min(loose, dep), slab);
+    for (let y = s + dep; y < H - 6; y++) {
       const i = y * W + x;
-      if (!inLake) continue;
-      if (y < ly - snowT) { mat[i] = AIR; aux[i] = 0; }
-      else if (y < ly) { mat[i] = SNOW; aux[i] = (rand() * 40) | 0; }
-      else if (y < ly + iceT) { mat[i] = ICE; aux[i] = 0; }
-      else if (y < bed) { mat[i] = WATER; aux[i] = 0; }
-      else if (y < bed + dirtT) { mat[i] = (y > bed + 2 && rand() < 0.3) ? M.GRAVEL : DIRT; aux[i] = 0; }
-      else if (mat[i] === AIR || mat[i] === SNOW || mat[i] === PACKED) mat[i] = DIRT;
-    }
-    if (inLake) { surf[x] = ly - snowT; rockTop[x] = ly; stoneTop[x] = ly; }
-  }
-}
-
-function buildSpring() {
-  const cx = LOC.spring.x, R = LOC.spring.r, pr = Math.round(R * 0.55);
-  const yw = Math.min(surf[cx - pr], surf[cx + pr]);           // pool water level = the lower rim of the pool
-  LOC.spring.y = yw;
-  for (let x = cx - R; x <= cx + R; x++) {
-    const d = (x - cx) / R, top = surf[x];
-    // bare ground in the hollow: remove snow, expose dirt
-    for (let y = top; y < rockTop[x]; y++) { const i = y * W + x; if (mat[i] === SNOW || mat[i] === PACKED) { mat[i] = DIRT; aux[i] = 0; } }
-    if (Math.abs(d) < 0.92) { rockTop[x] = Math.min(rockTop[x], top); if (rand() < 0.08) mat[top * W + x] = M.GRAVEL; }
-    if (Math.abs(x - cx) <= pr) {
-      const pd = (x - cx) / pr, bedY = yw + 1 + Math.round(9 * (1 - pd * pd));
-      for (let y = yw; y < bedY; y++) { const i = y * W + x; mat[i] = WATER; aux[i] = 0; flags[i] = 0; }
-      for (let y = bedY; y < bedY + 2; y++) { const i = y * W + x; if (mat[i] === AIR || mat[i] === SNOW || mat[i] === PACKED) { mat[i] = DIRT; aux[i] = 0; } }
+      if (y < s + dep + gravelT) { mat[i] = GRAVEL; aux[i] = 0; }
+      else if (y < stoneTop[x]) { mat[i] = DIRT; aux[i] = 0; }
+      else if (y < deepTop[x]) mat[i] = STONE;
+      else mat[i] = HARD;
     }
   }
-}
-
-function buildCaves() {
-  const SURF_LIM = 322;
-  // entrances from the surface (wide enough to walk in: r ~ 11)
-  const ent = ENTRANCES;
-  for (const ex of ent) {
-    const dirn = rand() < 0.5 ? 1 : -1;
-    let x = ex, y = surf[ex] - 4, a = dirn > 0 ? 0.8 : Math.PI - 0.8;
-    const off = rand() * 100;
-    for (let s = 0; s < 220 && y < 362; s++) {
-      x += Math.cos(a) * 1.8; y += Math.sin(a) * 1.8; a += (noise1(s * 0.07 + off) - 0.5) * 0.14;
-      // keep the tunnel descending (45..65 degrees) so it never skims along the surface
-      const steep = s < 26;           // plunge below the snowpack first, then ease off to a walkable slope
-      const lo = steep ? 0.72 : 0.3, hi = steep ? 0.9 : 0.55;
-      if (dirn > 0) a = clamp(a, lo, hi); else a = clamp(a, Math.PI - hi, Math.PI - lo);
-      carveDisc(x, y, 13 - Math.min(2, s * 0.01), 0);
-      if ((s & 7) === 0) cavePts.push({ x, y, r: 10 });
-    }
-    worm(x, y, dirn > 0 ? 0.2 : Math.PI - 0.2, 320, 12, 332, 430);
-  }
-  // upper (ice) network
-  for (let k = 0; k < 11; k++) worm(randInt(120, W - 120), randInt(340, 420), rand() * Math.PI * 2, randInt(260, 520), 9.5 + rand() * 5, 332, 440);
-  // mid network
-  for (let k = 0; k < 15; k++) worm(randInt(120, W - 120), randInt(450, 560), rand() * Math.PI * 2, randInt(260, 560), 8.5 + rand() * 5.5, 446, 575);
-  // deep network
-  for (let k = 0; k < 11; k++) worm(randInt(120, W - 120), randInt(590, 730), rand() * Math.PI * 2, randInt(240, 520), 8 + rand() * 5.5, 584, 738);
-  // connecting shafts
-  for (let k = 0; k < 9; k++) { const x = randInt(150, W - 150); worm(x, randInt(345, 560), Math.PI / 2 + (rand() - 0.5) * 0.7, randInt(70, 110), 6.5 + rand() * 2.5, 334, 740); }
-  // chambers
-  const zones: [number, number, number, number][] = [[3, 335, 435, 9], [1, 450, 570, 11], [2, 590, 725, 8]];
-  for (const [zone, y0, y1, n] of zones) {
-    for (let k = 0; k < n; k++) {
-      const cx = randInt(80, W - 80), cy = randInt(y0 + 14, y1 - 14), rx = randInt(22, 44), ry = randInt(11, 19);
-      carveEllipse(cx, cy, rx, ry, 0.5, k * 3.3 + zone, AIR, 0);
-      chambers.push({ x: cx, y: cy, rx, ry, zone });
-    }
-  }
-  // ice lining + icicles in the upper zone
-  const y0 = SURF_LIM - 4, y1 = 446, h = y1 - y0, dist = new Uint8Array(W * h).fill(255);
-  for (let y = 0; y < h; y++) for (let x = 0; x < W; x++) { const m = mat[(y + y0) * W + x]; if (m === AIR || m === WATER) dist[y * W + x] = 0; }
-  for (let y = 0; y < h; y++) for (let x = 1; x < W - 1; x++) {
-    const i = y * W + x; let d = dist[i];
-    if (x > 0 && dist[i - 1] + 1 < d) d = dist[i - 1] + 1;
-    if (y > 0) { if (dist[i - W] + 1 < d) d = dist[i - W] + 1; if (dist[i - W - 1] + 1 < d) d = dist[i - W - 1] + 1; if (dist[i - W + 1] + 1 < d) d = dist[i - W + 1] + 1; }
-    dist[i] = d;
-  }
-  for (let y = h - 1; y >= 0; y--) for (let x = W - 2; x > 0; x--) {
-    const i = y * W + x; let d = dist[i];
-    if (dist[i + 1] + 1 < d) d = dist[i + 1] + 1;
-    if (y < h - 1) { if (dist[i + W] + 1 < d) d = dist[i + W] + 1; if (dist[i + W - 1] + 1 < d) d = dist[i + W - 1] + 1; if (dist[i + W + 1] + 1 < d) d = dist[i + W + 1] + 1; }
-    dist[i] = d;
-  }
-  for (let y = 0; y < h; y++) for (let x = 6; x < W - 6; x++) {
-    const d = dist[y * W + x]; if (d === 0 || d > 4) continue;
-    const i = (y + y0) * W + x, m = mat[i];
-    if (m !== STONE && m !== DIRT && m !== PACKED) continue;
-    const yy = y + y0, fade = 1 - ss(400, 446, yy);   // lining fades out with depth
-    const t = (0.8 + 3.2 * fbm2(x / 14 + SO, yy / 14, 3)) * fade;
-    if (d <= t) { mat[i] = ICE; aux[i] = 0; }
-  }
-  // icicles: from ice ceilings downward
-  for (let x = 8; x < W - 8; x++) {
-    for (let y = y0; y < y1 - 2; y++) {
-      const i = y * W + x;
-      if (mat[i] === ICE && mat[i + W] === AIR && rand() < 0.09) {
-        const len = randInt(2, 11);
-        for (let k = 1; k <= len; k++) {
-          if (mat[(y + k) * W + x] !== AIR) break;
-          mat[(y + k) * W + x] = ICE;
-          if (k < len * 0.45 && mat[(y + k) * W + x + 1] === AIR && rand() < 0.7) mat[(y + k) * W + x + 1] = ICE;
-        }
-      }
-    }
-  }
-}
-
-function buildOres() {
-  const rep = [STONE];
-  const stoneY = (x: number) => stoneTop[x];
-  // coal: common and shallow
-  for (let k = 0; k < 190; k++) { const x = randInt(10, W - 10), y = Math.round(stoneY(x) + 4 + Math.pow(rand(), 1.7) * (540 - stoneY(x))); blob(x, y, M.COAL, randInt(6, 18), rep, 2); }
-  // copper: mid
-  for (let k = 0; k < 85; k++) { const x = randInt(10, W - 10), y = randInt(380, 560); blob(x, y, M.COPPER, randInt(6, 16), rep, 2); }
-  // iron: mid-deep, also in granite
-  for (let k = 0; k < 70; k++) { const x = randInt(10, W - 10), y = randInt(470, 690); blob(x, y, M.IRON, randInt(6, 15), [STONE, HARD], 2); }
-  // gravel pockets
-  for (let k = 0; k < 45; k++) { const x = randInt(10, W - 10), y = randInt(Math.max(320, stoneY(x) + 6), 600); const g = randInt(5, 12); if (!airNear(x, y, 6)) blob(x, y, M.GRAVEL, g, [STONE, DIRT], 2); }
-  // the first coal sits close to the start: reachable by the first digging
-  for (let k = 0; k < 6; k++) { const x = LOC.station.x + randInt(-170, 170), y = stoneY(x) + randInt(3, 16); blob(x, y, M.COAL, randInt(8, 14), [STONE, DIRT], 2); }
-  // rock outcrops poking through the snow on the ridge (irregular, snow-capped)
-  for (let k = 0; k < 8; k++) {
-    const x = randInt(1510, 1790), s = surf[x];
-    const rx = randInt(7, 13), ry = randInt(8, 16), seed = rand() * 50;
-    for (let y = s - ry - 2; y <= s + 8; y++) for (let xx = x - rx - 2; xx <= x + rx + 2; xx++) {
-      const dx = (xx - x) / rx, dy = (y - s + ry * 0.1) / ry;
-      const n = (fbm2(xx / 4 + seed, y / 4, 3) - 0.5) * 1.6;
-      if (dx * dx + dy * dy + n > 1 || y < 0) continue;
-      const i = y * W + xx; if (mat[i] === AIR || mat[i] === SNOW || mat[i] === PACKED) { mat[i] = rand() < 0.03 ? COAL : STONE; aux[i] = 0; }
-    }
-    // snow cap
-    for (let xx = x - rx - 2; xx <= x + rx + 2; xx++) {
-      let y = s - ry - 6; while (y < s + 8 && mat[y * W + xx] === AIR) y++;
-      if (mat[y * W + xx] === STONE && mat[(y - 1) * W + xx] === AIR) { mat[(y - 1) * W + xx] = SNOW; aux[(y - 1) * W + xx] = 40; if (rand() < 0.6) { mat[(y - 2) * W + xx] = SNOW; aux[(y - 2) * W + xx] = 20; } }
-    }
-  }
-}
-
-function buildPockets() {
-  const out: { kind: 'methane' | 'oil'; x: number; y: number; r: number }[] = [];
-  const place = (kind: 'methane' | 'oil', n: number, y0: number, y1: number) => {
-    let placed = 0;
-    for (let attempt = 0; attempt < 400 && placed < n; attempt++) {
-      const x = randInt(60, W - 60), y = randInt(y0, y1), r = randInt(4, 7);
-      if (airNear(x, y, r + 3)) continue;
-      // prefer to sit a short dig away from an existing cave
-      let near = false; for (let k = 0; k < cavePts.length; k += 3) { const c = cavePts[k]; if (Math.abs(c.x - x) < 36 && Math.abs(c.y - y) < 30) { near = true; break; } }
-      if (!near && attempt < 300) continue;
-      carveEllipse(x, y, r * 1.4, r, 0.35, attempt, kind === 'methane' ? M.METHANE : M.OIL);
-      out.push({ kind, x, y, r }); placed++;
-    }
-  };
-  place('methane', 7, 380, 560);
-  place('oil', 5, 440, 650);
-  return out;
-}
-
-function buildGrotto() {
-  const g = LOC.grotto;
-  carveEllipse(g.x, g.y, g.rx, g.ry, 0.35, 77, AIR);
-  // flat floor + warm pool
-  const floor = g.y + g.ry - 3;
-  for (let x = g.x - g.rx; x <= g.x + g.rx; x++) {
-    for (let y = floor; y < floor + 2; y++) { const i = y * W + x; if (mat[i] === AIR) mat[i] = DIRT; }
-  }
-  for (let x = g.x - 14; x <= g.x + 14; x++) {
-    const d = (x - g.x) / 14, depth = Math.round(5 * (1 - d * d));
-    for (let y = floor; y < floor + depth + 1; y++) { const i = y * W + x; mat[i] = y < floor + depth ? WATER : DIRT; }
-    for (let y = floor - 3; y < floor; y++) { const i = y * W + x; if (mat[i] !== AIR && y >= floor - 2) mat[i] = AIR; }
-  }
-  // tunnel from the grotto to the ice network and up toward the hot spring
-  let x = g.x - g.rx + 4, y = g.y, a = Math.PI + 0.25;
-  const off = rand() * 100;
-  for (let s = 0; s < 170; s++) { x += Math.cos(a) * 1.7; y += Math.sin(a) * 1.7; a += (noise1(s * 0.06 + off) - 0.5) * 0.3 - 0.003; if (y < 352) a += 0.05; carveDisc(x, y, 9, 0); if ((s & 7) === 0) cavePts.push({ x, y, r: 9 }); }
-  for (let k = 0; k < 40; k++) { const px = g.x + randInt(-12, 12), py = floor - 1 - randInt(0, 9); if (mat[py * W + px] === AIR) { mat[py * W + px] = M.STEAM; aux[py * W + px] = randInt(150, 400); } }
-  // a few pale rocks around the pool
-  for (let k = 0; k < 14; k++) { const px = g.x + randInt(-g.rx + 6, g.rx - 6); let py = g.y - g.ry; while (py < floor && mat[py * W + px] === AIR) py++; if (mat[(py - 1) * W + px] === AIR && Math.abs(px - g.x) > 15) { mat[(py - 1) * W + px] = STONE; if (rand() < 0.5) mat[(py - 1) * W + px + 1] = STONE; } }
-}
-
-function buildDeep() {
-  const lavas: { x: number; y: number; rx: number; ry: number }[] = [];
-  const geodes: { x: number; y: number; rx: number; ry: number }[] = [];
-  // basalt veins
-  for (let k = 0; k < 70; k++) blob(randInt(10, W - 10), randInt(600, 740), M.BASALT, randInt(8, 22), [HARD, STONE], 2);
-  // lava chambers
-  const lavaX = [330, 760, 1130, 1500, 1860, 1310];
-  lavaX.forEach((lx, n) => {
-    const cx = lx + randInt(-60, 60), cy = randInt(660, 722), rx = randInt(26, 42), ry = randInt(11, 17);
-    carveEllipse(cx, cy, rx, ry, 0.4, n * 5 + 1, AIR);
-    // access tunnel from the ceiling corner (carved before the lava goes in)
-    const side = n & 1 ? -1 : 1;
-    worm(cx + side * rx * 0.7, cy - ry * 0.95, side > 0 ? -0.35 : Math.PI + 0.35, 150, 8, 590, 700);
-    const level = cy - 1;
-    for (let y = level; y < cy + ry + 2; y++) for (let x = cx - rx - 1; x <= cx + rx + 1; x++) {
-      if (y > H - 14) continue;
-      const dx = (x - cx) / rx, dy = (y - cy) / ry;
-      if (dx * dx + (dy > 0 ? dy * dy * 1.35 : dy * dy) > 1.02) continue;
-      const i = y * W + x; if (mat[i] === AIR) { mat[i] = M.LAVA; aux[i] = 0; }
-    }
-    // cooled basalt crust around the lava
-    for (let y = cy - ry - 3; y < cy + ry + 6; y++) for (let x = cx - rx - 4; x <= cx + rx + 4; x++) {
-      if (y < 0 || y >= H - 6) continue;
-      const i = y * W + x; const m = mat[i];
-      if ((m === HARD || m === STONE) && rand() < 0.7) {
-        let near = false;
-        for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2; dx++) if (mat[(y + dy) * W + x + dx] === M.LAVA) { near = true; break; }
-        if (near) mat[i] = M.BASALT;
-      }
-    }
-    lavas.push({ x: cx, y: cy, rx, ry });
-  });
-  // crystal geodes (deepest goal). Geode 0 sits next to a lava chamber and is connected to it.
-  const gp: [number, number][] = [[lavas[3].x + 78, 668], [1710, 700], [520, 690]];
-  gp.forEach(([gx, gy], n) => {
-    const rx = randInt(26, 34), ry = randInt(13, 17);
-    carveEllipse(gx, gy, rx, ry, 0.15, 200 + n, M.CRYSTAL);        // crystal shell (solid)
-    carveEllipse(gx, gy + 1, rx - 4, ry - 3.4, 0.15, 210 + n, AIR); // hollow interior
-    // spikes from floor and ceiling
-    for (let x = gx - rx + 6; x <= gx + rx - 6; x++) {
-      for (let dir = -1; dir <= 1; dir += 2) {
-        if (rand() > 0.16) continue;
-        let y = gy + dir * (ry - 3); while (Math.abs(y - gy) > 0 && mat[y * W + x] === AIR && Math.abs(y - gy) < ry) y += dir;
-        y -= dir;
-        const len = randInt(2, 8);
-        for (let k = 0; k < len; k++) { const yy = y - dir * k; if (mat[yy * W + x] === AIR) mat[yy * W + x] = M.CRYSTAL; if (k < len / 2 && mat[yy * W + x + 1] === AIR) mat[yy * W + x + 1] = M.CRYSTAL; }
-      }
-    }
-    // granite shell outside the crystal is already the surrounding rock; add an access tunnel for geode 0
-    if (n === 0) {
-      const lv = lavas[3];
-      let x = gx - rx, y = gy + 2;
-      const tx = lv.x + lv.rx, ty = lv.y - 6;
-      const steps = 80;
-      for (let s = 0; s <= steps; s++) { const t = s / steps; carveDisc(x + (tx - x) * t, y + (ty - y) * t + Math.sin(t * 3) * 3, 7.5, 0); }
-    }
-    geodes.push({ x: gx, y: gy, rx, ry });
-  });
-  return { lavas, geodes };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-function inSiteExclusion(x: number) {
-  const L = LOC;
-  if (x > L.lake.l - 10 && x < L.lake.r + 10) return true;
-  if (Math.abs(x - L.station.x) < 88) return true;
-  if (Math.abs(x - L.hut.x) < 38) return true;
-  if (Math.abs(x - L.spring.x) < L.spring.r + 10) return true;
-  if (x > L.tower.x - 58 && x < L.tower.x + 52) return true;
-  if (x > 1510 && x < 1795) return true;
-  if (Math.abs(x - L.wreck.x) < 72) return true;
-  if (x < 24 || x > W - 24) return true;
-  return false;
-}
-
-const ENTRANCES = [410, 842, 1178, 1478, 1966];
-function buildTrees() {
-  let x = 30;
-  while (x < W - 30) {
-    // forests grow in patches (noise), thinning out toward the fringes
-    const dens = clamp(fbm1((x + SO) / 140 + 3) * 3.0 - 0.7, 0, 1);
-    x += Math.round(11 + (1 - dens) * 34 + rand() * 11);
-    if (x >= W - 30 || inSiteExclusion(x) || ENTRANCES.some(e => Math.abs(e - x) < 26)) continue;
-    if (rand() > 0.22 + dens * 0.78) continue;
-    const slope = Math.abs(surf[x + 5] - surf[x - 5]);
-    if (slope > 8) continue;
-    if (mat[surf[x] * W + x] === ICE || mat[surf[x] * W + x] === WATER) continue;
-    const Ht = Math.round(64 + Math.pow(rand(), 0.85) * 76);
-    spruce(x, surf[x], rockTop[x], Ht);
+interface FloeDef { x0: number; x1: number; thick: number }
+function buildSea() {
+  const info = worldInfo.iceField;
+  // sea floor and rock below it
+  for (let x = SHORE; x < SEA_X1; x++) {
+    const sb = Math.max(SEA + 1, seabedAt(x)); seabed[x] = sb; ground[x] = sb;
+    stoneTop[x] = sb + 10; deepTop[x] = Math.round(560 + (fbm1((x + SO) / 130 + 40, 3) - 0.5) * 44);
+    for (let y = sb; y < H - 6; y++) {
+      const i = y * W + x;
+      if (y < sb + 4) { mat[i] = GRAVEL; aux[i] = 0; } else if (y < sb + 10) { mat[i] = DIRT; aux[i] = 0; } else if (y < deepTop[x]) mat[i] = STONE; else mat[i] = HARD;
+    }
+    for (let y = SEA; y < sb; y++) { mat[y * W + x] = WATER; aux[y * W + x] = 0; }
   }
-}
+  // boulders on the sea floor
+  for (let k = 0; k < 60; k++) { const x = randInt(SHORE + 10, SEA_X1 - 10), r = randInt(2, 5); for (let dy = -r; dy <= 0; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy * 1.6 <= r * r) put(x + dx, seabed[x] + dy, STONE); }
 
-function setT(x: number, y: number, m: number) {
-  if (x < 6 || x >= W - 6 || y < 0 || y >= H) return;
-  const i = y * W + x, c = mat[i];
-  if (c !== AIR && !(c === M.WOOD && m === M.NEEDLES && (flags[i] & F_TREE))) return;
-  mat[i] = m; aux[i] = 0; flags[i] = F_TREE;
-}
-function spruce(xc: number, base: number, rock: number, Ht: number) {
-  for (let k = -3; k <= 3; k += 3) { const m = mat[(rock + 2) * W + xc + k]; if (m === AIR || m === WATER || m === M.LAVA) return; }   // never over a cave mouth
-  const top = base - Ht;
-  const thick = Ht > 100 ? 1 : 0;
-  for (let y = rock; y >= top + 16; y--) {
-    const k = (rock - y) / (rock - top);
-    const wdt = (k < 0.16 ? 5 : k < 0.45 ? 4 : k < 0.78 ? 3 : 2) - (thick ? 0 : 1) + (Ht > 120 ? 1 : 0);
-    const x0 = xc - (wdt >> 1);
-    for (let dx = 0; dx < wdt; dx++) {
-      const xx = x0 + dx, y2 = y, i = y2 * W + xx;
-      const c = mat[i]; if (c === AIR || c === SNOW || c === PACKED) { mat[i] = M.WOOD; aux[i] = 0; flags[i] = F_TREE; }
+  // ---- fast ice: grounded near the shore, floating beyond the tide crack ----
+  const FAST1 = 1450;
+  for (let x = SHORE; x < FAST1; x++) {
+    const thick = 16 + Math.round(2.5 * fbm1((x + SO) / 30 + 2, 2) * 2);
+    iceTop[x] = 298; iceBot[x] = Math.min(298 + thick, seabed[x]);
+    box(x, iceTop[x], x + 1, iceBot[x], ICE, 0, 0);
+  }
+  // flaw lead between the fast ice and the pack: new ice
+  for (let x = FAST1; x < 1470; x++) { iceTop[x] = SEA; iceBot[x] = SEA + 3; box(x, SEA, x + 1, SEA + 3, ICE, 0, 0); }
+  worldInfo.iceField.leads.push({ x0: FAST1, x1: 1469, thin: true });
+  info.cracks.push(1459);
+
+  // ---- pack ice: floes separated by cracks, ridges and leads ----
+  const j = () => randInt(-2, 2);
+  const floes: FloeDef[] = [
+    { x0: 1470, x1: 1511, thick: 14 }, { x0: 1515, x1: 1555 + j(), thick: 20 }, { x0: 1557, x1: 1596, thick: 11 }, { x0: 1615, x1: 1650, thick: 17 },
+    { x0: 1661, x1: 1806, thick: 34 }, { x0: 1810, x1: 1853, thick: 30 }, { x0: 1855, x1: 1895, thick: 22 }, { x0: 1904, x1: 1948, thick: 13 },
+  ];
+  for (const f of floes) {
+    info.floes.push({ x0: f.x0, x1: f.x1, thick: f.thick });
+    const fb = clamp(Math.round(f.thick * 0.09) + 1, 2, 4);
+    for (let x = f.x0; x <= f.x1; x++) {
+      let thick = f.thick;
+      if (f.thick >= 30) thick += Math.round(18 * Math.exp(-(((x - LOC.ship.x) / 70) ** 2)));      // the floe around the ship is a deep keel
+      const top = SEA - fb;
+      // chamfered, broken edges
+      const ed = Math.min(x - f.x0, f.x1 - x);
+      const bevel = ed < 3 ? 3 - ed : 0;
+      iceTop[x] = top + bevel; iceBot[x] = Math.min(seabed[x] - 1, top + thick);
+      box(x, iceTop[x], x + 1, iceBot[x], ICE, 0, 0);
     }
   }
-  const crownBottom = base - Math.floor(Ht * 0.2);
-  const step = 8 + (Ht > 100 ? 2 : 0);
-  const nT = Math.max(3, Math.floor((crownBottom - top - 6) / step));
-  const maxHW = 5 + Ht * 0.115;
-  for (let k = 0; k < nT; k++) {
-    const yb = crownBottom - k * step, tierH = step + 4;
-    const hwMax = 1.5 + (maxHW - 1.5) * Math.pow(1 - k / (nT + 0.5), 0.95);
-    for (let r = 0; r < tierH; r++) {
-      const y = yb - tierH + 1 + r, t = r / (tierH - 1);
-      const hw = 0.8 + (hwMax - 0.8) * Math.pow(t, 0.8) + (rand() - 0.5) * 0.9;
-      const w = Math.round(hw);
-      for (let dx = -w; dx <= w; dx++) {
-        if (Math.abs(dx) >= w - 1 && rand() < 0.16) continue;
-        setT(xc + dx, y, M.NEEDLES);
-      }
-      if (r >= tierH - 3) {  // drooping boughs at the tier edge
-        for (const sgn of [-1, 1]) { const dr = rand() < 0.65 ? randInt(1, 3) : 0; for (let q = 1; q <= dr; q++) setT(xc + sgn * (w - (q > 1 ? 1 : 0)), y + q, M.NEEDLES); }
-      }
+  const thinLead = (x0: number, x1: number) => { worldInfo.iceField.leads.push({ x0, x1, thin: true }); for (let x = x0; x <= x1; x++) { const e = Math.min(x - x0, x1 - x), th = 3 + (e > 1 ? 1 : 0); iceTop[x] = SEA; iceBot[x] = SEA + th; box(x, SEA, x + 1, SEA + th, ICE, 0, 0); } };
+  thinLead(1651, 1660); thinLead(1597, 1614);
+  info.leads.push({ x0: 1896, x1: 1903, thin: false });
+  info.cracks.push(1513, 1556, 1605, 1655, 1808, 1854, 1900);
+  info.hiddenCracks.push(1808);
+  // the wide lead is covered by a skin of new ice that is only 2 cells thick in the middle (it will break under a heavy load)
+  for (let x = 1603; x <= 1608; x++) { box(x, SEA + 2, x + 1, SEA + 4, AIR); box(x, SEA + 2, x + 1, SEA + 4, WATER); }
+  // open sea edge: brash ice chunks
+  for (let k = 0; k < 9; k++) { const x = randInt(1956, 2030), w = randInt(5, 14); box(x, SEA - 2, x + w, SEA + randInt(4, 9), ICE); }
+  info.fastX0 = SHORE; info.fastX1 = FAST1; info.packX0 = FAST1; info.packX1 = 1950; info.seaEdgeX = 1950;
+
+  // pressure ridges: where floes are pressed together, and a line along the flaw lead
+  for (const rx of [1556, 1854, 1480]) {
+    const hgt = pileBlocks(rx - 26, rx + 26, rx === 1556 ? 16 : 12, 70, ICE, 4, 12, 3, 6, { x0: rx - 10, x1: rx + 10, cap: 6 });
+    info.ridges.push({ x: rx, w: 52, h: Math.max(...Array.from(hgt)) });
+  }
+  // snow cover, drifts in the lee of obstacles, bare glare ice where the wind scours
+  const lee = (x: number) => { let b = 0; for (const r of [[1236, 16], [1296, 16], [1412, 16], [1372, 50], [1556, 28], [1854, 28], [1752, 100]]) { const d = x - r[0]; if (d > r[1] * 0.3 && d < r[1] * 3) b = Math.max(b, 1 - (d - r[1] * 0.3) / (r[1] * 2.7)); } return b; };
+  for (let x = SHORE; x < 1950; x++) {
+    const top = topSolid(x, 200);
+    if (top >= SEA + 1 || mat[top * W + x] !== ICE) { surf[x] = top; continue; }                  // open water / thin ice: no snow
+    const X = x + SO, l = lee(x);
+    const sast = Math.sin(x * 0.55 + fbm1(X / 7, 2) * 5) * 0.8 + Math.sin(x * 0.19) * 0.7;      // sastrugi
+    let dep = 8 + 9 * fbm1(X / 38 + 6, 3) + 12 * l + sast;
+    const scour = ss(0.62, 0.74, fbm1(X / 55 + 31, 3));                                        // glare ice patches
+    dep *= 1 - scour * 0.96;
+    if (x < SHORE + 14) dep *= 0.5;
+    dep = Math.round(clamp(dep, 0, 26));
+    const slab = clamp(0.2 + 0.9 * l + (fbm1(X / 41 + 13, 2) - 0.4) * 1.3, 0, 1);
+    const loose = Math.round(clamp(2 + 3 * fbm1(X / 23 + 4, 2) - slab * 2, 0, 5));
+    fillSnow(x, top - dep, top, Math.min(loose, dep), slab);
+    snowDepth[x] = dep; surf[x] = top - dep;
+  }
+  // hidden crack: snow bridge over the gap
+  for (let x = 1807; x <= 1809; x++) { const yy = iceTop[1804]; for (let y = yy - 5; y <= yy; y++) put(x, y, y < yy - 1 ? SNOW : PACKED, 40); iceTop[x] = SEA; iceBot[x] = SEA; surf[x] = yy - 5; }
+  // open leads and cracks: surf = water level
+  for (let x = 1597; x <= 1614; x++) surf[x] = SEA;
+  for (let x = 1949; x < SEA_X1; x++) { surf[x] = mat[(SEA - 2) * W + x] === ICE ? SEA - 2 : SEA; }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+function edgesAndBedrock() {
+  for (let y = H - 6; y < H; y++) mat.fill(BED, y * W, y * W + W);
+  for (let y = 0; y < H; y++) { const r = y * W; for (let x = 0; x < 6; x++) { mat[r + x] = BED; aux[r + x] = 0; } }
+  // east edge: a bedrock wall rising 24 cells above the sea
+  for (let y = SEA - 24; y < H; y++) { const r = y * W; for (let x = SEA_X1; x < W; x++) { mat[r + x] = BED; aux[r + x] = 0; } }
+  for (let y = 0; y < SEA - 24; y++) { const r = y * W; for (let x = SEA_X1; x < W; x++) { mat[r + x] = AIR; aux[r + x] = 0; } }
+  for (let x = SEA_X1 - 8; x < SEA_X1; x++) { surf[x] = SEA; }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// permafrost ice wedges, outcrops of rock on the cape, lichen patches on the tundra, the whole cliff wall texture
+function rockFeatures() {
+  // ice wedges in the permafrost of the tundra and the plateau: thin V-shaped veins going down from the top of the ground
+  for (let k = 0; k < 34; k++) {
+    const x = randInt(380, 1060), y = ground[x] + randInt(0, 3), w = randInt(2, 4), dep = randInt(8, 18);
+    for (let dy = 0; dy < dep; dy++) {
+      const hw = Math.max(0.5, (1 - dy / dep) * w / 2 + 0.4 * noise1(x + dy * 0.9)), c = x + Math.round(Math.sin(dy * 0.4 + x) * 1.2);
+      for (let dx = -Math.ceil(hw); dx <= Math.ceil(hw); dx++) { if (Math.abs(dx) > hw) continue; const i = (y + dy) * W + c + dx; if (mat[i] === DIRT) { mat[i] = ICE; aux[i] = 0; } }
     }
   }
-  // spire
-  for (let y = top; y < top + 18; y++) { const w = y < top + 3 ? 0 : y < top + 9 ? 1 : 2; for (let dx = -w; dx <= w; dx++) setT(xc + dx, y, M.NEEDLES); }
-  // snow on the boughs
-  const hw = Math.ceil(maxHW) + 4;
-  for (let y = top - 1; y < crownBottom + 4; y++) for (let x = xc - hw; x <= xc + hw; x++) {
-    if (x < 6 || x >= W - 6 || y < 1) continue;
-    const i = y * W + x;
-    if (mat[i] === M.NEEDLES && mat[i - W] === AIR && rand() < 0.62) { mat[i - W] = SNOW; aux[i - W] = 100 + ((rand() * 90) | 0); flags[i - W] = 0; }
+  // boulders and tundra rocks
+  for (let k = 0; k < 120; k++) {
+    const x = randInt(100, 1000); if (x > 556 && x < 880) continue; if (x > 300 && x < 345) continue; const r = randInt(2, 5);
+    for (let dy = -r; dy <= 0; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy * 1.5 <= r * r + 1) { const i = (surf[x] + dy + 1) * W + x + dx; if (mat[i] === AIR || mat[i] === SNOW) { mat[i] = STONE; aux[i] = 0; } }
+  }
+  // lichen patches: windswept ground where the snow is thin, a mat of ягель on top of the ground
+  for (const { cx, w } of lichenSpots) {
+    for (let x = cx - (w >> 1); x <= cx + (w >> 1); x++) {
+      const e = Math.abs(x - cx) / (w / 2), g = ground[x];
+      for (let y = surf[x]; y < g; y++) { const i = y * W + x; if (mat[i] === SNOW || mat[i] === PACKED) { mat[i] = AIR; aux[i] = 0; } }
+      const hh = e > 0.8 ? 1 : 2;
+      for (let k = 1; k <= hh; k++) put(x, g - k, M.LICHEN);
+      if (rand() < 0.35 && e < 0.8) put(x, g - 3, M.LICHEN);
+    }
+    worldInfo.lichen.push({ x: cx - (w >> 1), w });
+  }
+  void fbm2; void snowBank;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+/** Wind-sculpted ripples on top of the flat snow (the plateau is flat only where buildings stand). */
+function sastrugi() {
+  const h0 = LOC.house.L * 4 - 56, h1 = LOC.house.R * 4 + 120, s0 = LOC.shed.L * 4 - 70, s1 = LOC.shed.R * 4 + 80;
+  for (let x = 380; x < SHORE; x++) {
+    if ((x > h0 && x < h1) || (x > s0 && x < s1) || (x > 880 && x < 1070)) continue;
+    const top = topSolid(x, 150);
+    const m = mat[top * W + x];
+    if (m !== SNOW && m !== PACKED) continue;
+    const n = fbm1((x + SO) / 9 + 2, 2) * 1.6 + Math.sin(x * 0.37 + fbm1((x + SO) / 14, 2) * 4) * 0.5;
+    const hh = Math.max(0, Math.round(n - 0.55));
+    for (let k = 1; k <= hh; k++) if (mat[(top - k) * W + x] === AIR) put(x, top - k, SNOW, 10 + ((rand() * 30) | 0));
   }
 }
 
+function cutSealHoles() {
+  const xs: [number, 'fast' | 'pack'][] = [[1112, 'fast'], [1148, 'fast'], [1188, 'fast'], [1264, 'fast'], [1316, 'fast'], [1436, 'fast'], [1488, 'pack'], [1520, 'pack'], [1572, 'pack'], [1628, 'pack'], [1872, 'pack'], [1920, 'pack']];
+  for (const [x, floe] of xs) {
+    const top = topSolid(x + 1, 220);
+    // shaft 4 wide through snow and ice down to the water
+    for (let dx = 0; dx < 4; dx++) for (let y = top - 10; y < iceBot[x] + 1; y++) { const i = y * W + x + dx; if (y < SEA) { mat[i] = AIR; aux[i] = 0; flags[i] = 0; } else if (mat[i] === ICE || mat[i] === SNOW || mat[i] === PACKED) { mat[i] = WATER; aux[i] = 0; flags[i] = 0; } }
+    // rim of snow around the hole
+    for (let dx = -5; dx < 9; dx++) {
+      if (dx >= 0 && dx < 4) continue;
+      const xx = x + dx, hh = Math.max(0, 3 - Math.floor(Math.min(Math.abs(dx + 1), Math.abs(dx - 4)) / 2)), t = topSolid(xx, 220);
+      for (let k = 1; k <= hh; k++) if (mat[(t - k) * W + xx] === AIR) put(xx, t - k, k === hh ? SNOW : PACKED, k === hh ? 20 : 180);
+    }
+    worldInfo.sealHoles.push({ x, y: top, w: 4, floe });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 function buildBackgrounds() {
-  // bg per tile: sky above the original surface; below, by material depth
+  // bg per tile: sky above the surface; snow = 3; permafrost 1; stone 2; deep rock 4; sea water 6; ice sheet 3
   for (let ty = 0; ty < TH; ty++) {
     const cy = ty * 4 + 2;
     for (let tx = 0; tx < TW; tx++) {
       const x = Math.min(W - 1, tx * 4 + 2);
       let b = 0;
-      if (cy >= surf[x]) {
-        if (cy < rockTop[x]) b = 3;
-        else if (cy < stoneTop[x]) b = 1;
-        else if (cy < deepTop[x]) b = 2;
-        else b = 4;
-      }
+      if (x < SHORE) {
+        if (cy >= surf[x]) b = cy < ground[x] ? 3 : cy < stoneTop[x] ? 1 : cy < deepTop[x] ? 2 : 4;
+      } else if (x < SEA_X1) {
+        if (cy >= SEA - 4) {
+          if (cy < seabed[x]) b = (iceTop[x] && cy >= iceTop[x] - 2 && cy < iceBot[x] + 1) ? 3 : cy >= SEA ? 6 : 0;
+          else b = cy < stoneTop[x] ? 1 : cy < deepTop[x] ? 2 : 4;
+        }
+        if (cy < SEA - 4 && iceTop[x] && cy >= surf[x]) b = 3;
+      } else if (cy >= SEA - 24) b = 2;
       bg[ty * TW + tx] = b;
     }
   }
 }
-export { surf as surfaceTop, rockTop, stoneTop, deepTop };
+
+function finalize() {
+  for (let i = 0; i < shade.length; i++) shade[i] = (rand() * 256) | 0;
+  awake.fill(0);
+}
+
+export { surf as surfaceTop, ground as rockTop, stoneTop, deepTop };
 export function surfaceAt(x: number) { return surf[Math.max(0, Math.min(W - 1, x | 0))]; }
+export const terrain = T;

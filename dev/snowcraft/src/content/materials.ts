@@ -72,13 +72,14 @@ export const MATS: MatDef[] = [
   S({ key: 'WHALEBONE', name: 'китовая кость', phase: P_SOLID, color: [214, 206, 186], vary: 0.06, tex: 'grain', hard: 1.0, tool: 'axe', drop: 'bone', span: 48, k: 0.2, cap: 8, snd: 'wood' }),
   S({ key: 'SOAPSTONE', name: 'мыльный камень', phase: P_SOLID, color: [104, 112, 108], tex: 'speckle', speck: [150, 170, 156], hard: 0.9, tool: 'pick', tier: 1, drop: 'soapstone', span: 40, anchor: true, k: 0.5, cap: 12, snd: 'stone' }),
   S({ key: 'LICHEN', name: 'ягель', phase: P_SOLID, color: [150, 156, 112], vary: 0.2, tex: 'noise', hard: 0.1, tool: 'any', drop: 'lichen', dropN: 0.5, flam: 0.3, burnTo: 'ASH', burnLife: 30, k: 0.05, cap: 3, light: 0.4, wind: 0.3, walk: false, snd: 'soft' }),
+  S({ key: 'CANVAS', name: 'парусина', phase: P_SOLID, color: [200, 192, 170], vary: 0.07, tex: 'noise', hard: 0.25, tool: 'any', drop: 'canvas', span: 24, flam: 0.08, burnTo: 'ASH', burnLife: 70, k: 0.05, cap: 3, light: 0.5, wind: 0.6, snd: 'soft' }),
 ];
 
 /** Material ids by key, e.g. MAT.SNOW. */
 export const MAT = Object.fromEntries(MATS.map((m, i) => [m.key, i])) as Record<
   'AIR' | 'SNOW' | 'PACKED' | 'SNOWBLOCK' | 'ICE' | 'WATER' | 'DIRT' | 'GRAVEL' | 'STONE' | 'HARDROCK' | 'BEDROCK' | 'WOOD' | 'NEEDLES' | 'LOG' | 'PLANK' | 'BRICK' |
   'COAL' | 'COPPER' | 'IRON' | 'CRYSTAL' | 'ASH' | 'FIRE' | 'EMBER' | 'SMOKE' | 'STEAM' | 'METHANE' | 'LAVA' | 'BASALT' | 'OIL' | 'METAL' | 'FIXTURE' | 'GLASS' |
-  'WHALEBONE' | 'SOAPSTONE' | 'LICHEN', number>;
+  'WHALEBONE' | 'SOAPSTONE' | 'LICHEN' | 'CANVAS', number>;
 export const NMAT = MATS.length;
 const id = (k?: string) => (k ? (MAT as Record<string, number>)[k] ?? 0 : 0);
 

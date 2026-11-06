@@ -6,13 +6,16 @@
 import { G } from '../game/state';
 import { W, H, TW, TH, mat } from './grid';
 import { LIGHT, GLOW_R, GLOW_G, GLOW_B, GLOW_RAD } from '../content/materials';
+import { skyState } from './sky';
 
 const STEP_AIR_SKY = 0.09;     // sky energy lost per tile when spreading through open air
 const K_IN_SKY = 0.09;         // entering a solid tile costs STEP + opacity * K (gentle: surfaces glow, depth fades over ~30 cells)
-const K_LEAVE_SKY = 0.5;       // leaving a solid tile into open air costs opacity * K (closed rooms stay dim; windows let light in)
+const K_LEAVE_SKY = 1.1;       // leaving a solid tile into open air costs opacity * K (closed rooms stay dim; windows let light in)
 const STEP_PT = 0.1;           // point light: energy lost per air tile  (source energy = rad * STEP_PT)
-const K_IN_PT = 0.25;
-const K_LEAVE_PT = 0.5;
+const K_IN_PT = 0.09;          // point light entering a translucent snow/ice tile (walls of an igloo glow instead of swallowing the light)
+const K_IN_DENSE = 0.5;        // extra cost for opaque tiles (wood, stone, metal): opacity above 0.7 ramps up to this
+const K_LEAVE_PT = 0.42;
+const SCATTER = 2.0;          // subsurface glow gain of lit snow / ice walls (iconic amber igloo)
 const DIAG = 1.4142;
 const AIR_T = 0.3;             // tile opacity below this counts as open air
 const SOLID_AMBIENT = 0.1;    // faint floor so strata/ores read in unlit rock
@@ -24,8 +27,13 @@ export let glowR = new Float32Array(0), glowG = new Float32Array(0), glowB = new
 export let lightRGBA = new Uint8ClampedArray(0);   // lt.w × lt.h RGBA of the light multiplier (for the GPU upsample)
 export let glowRGBA = new Uint8ClampedArray(0);
 export const skyTint = { r: 1, g: 1, b: 1, e: 1 }; // current sky light colour/energy (for debugging & sprites)
+/** 1 = open-air tile under a roof (inside an igloo / room / porch): the renderer paints a wall behind it instead of the sky. */
+export let indoor = new Uint8Array(0);
+const OPEN_T = 0.1;                 // tile opacity below this is open (air, glass, thin gas)
+const ROOF_CELLS = 12;              // a tile with at least this many solid cells (of 16) counts as a roof
 
 let cap = 0;
+let roofT = new Uint8Array(0);
 let opac = new Float32Array(0), cinSky = new Float32Array(0), lvSky = new Float32Array(0), cinPt = new Float32Array(0), lvPt = new Float32Array(0), airF = new Float32Array(0), skyE = new Float32Array(0);
 let pR = new Float32Array(0), pG = new Float32Array(0), pB = new Float32Array(0);
 
@@ -34,6 +42,7 @@ function ensure(n: number) {
   cap = n + 256;
   opac = new Float32Array(cap); cinSky = new Float32Array(cap); lvSky = new Float32Array(cap); cinPt = new Float32Array(cap); lvPt = new Float32Array(cap); airF = new Float32Array(cap); skyE = new Float32Array(cap);
   pR = new Float32Array(cap); pG = new Float32Array(cap); pB = new Float32Array(cap);
+  indoor = new Uint8Array(cap); roofT = new Uint8Array(cap);
   lightR = new Float32Array(cap); lightG = new Float32Array(cap); lightB = new Float32Array(cap);
   glowR = new Float32Array(cap); glowG = new Float32Array(cap); glowB = new Float32Array(cap);
   lightRGBA = new Uint8ClampedArray(cap * 4); glowRGBA = new Uint8ClampedArray(cap * 4);
@@ -108,23 +117,22 @@ function sweep3(R: Float32Array, Gc: Float32Array, B: Float32Array, cin: Float32
   }
 }
 
-// ---- sky colour/energy from the clock ---------------------------------------------------------------------------------
-const bell = (h: number, c: number, w: number) => { const d = (h - c) / w; return Math.exp(-d * d); };
+// ---- sky colour/energy: twilight band (cool -> pink-orange with the day number), moon (silver), aurora (green), stars ----
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 function updateSky() {
-  const hour = ((G.time % 1440) + 1440) % 1440 / 60;
-  const day = Math.max(0, Math.min(1, G.daylight));
-  const warm = Math.min(1, bell(hour, 7.6, 0.8) + bell(hour, 18.4, 0.8)) * Math.min(1, 0.35 + day);
-  const aur = G.aurora * (1 - day);
-  const moon = G.moon;
-  const night = 1 - day;
-  // energy
-  let e = day * 1.0 + night * (0.09 + 0.13 * moon + 0.05 * aur);
-  e *= 1 - 0.4 * G.storm;
-  // tint: night is deep blue, aurora adds green, twilight is orange
-  let r = day + night * 0.42, g = day + night * 0.64, b = day + night * 1.0;
-  r += -0.1 * aur; g += 0.3 * aur; b += 0.12 * aur;
-  r += (1.0 - r) * warm * 0.9; g += (0.66 - g) * warm; b += (0.46 - b) * warm;
-  skyTint.r = r; skyTint.g = g; skyTint.b = b; skyTint.e = e;
+  const sk = skyState;
+  const L = sk.light, w = sk.warm, night = sk.night, storm = sk.storm;
+  const eT = 0.04 + 0.9 * Math.pow(L, 1.35);
+  const tr = lerp(0.5, 1.0, w), tg = lerp(0.72, 0.7, w), tb = lerp(1.0, 0.55, w);
+  const moonE = sk.moon * 0.46 * (1 - 0.55 * L), aurE = sk.aurora * night * 0.14 * (1 - storm), starE = 0.04 * night;
+  let r = eT * tr + moonE * 0.8 + aurE * 0.22 + starE * 0.4;
+  let g = eT * tg + moonE * 0.9 + aurE * 1.0 + starE * 0.58;
+  let b = eT * tb + moonE * 1.0 + aurE * 0.5 + starE * 1.0;
+  const k = 1 - 0.4 * storm;                       // storm: less light, greyer
+  r *= k; g *= k; b *= k;
+  if (storm > 0) { const m = (r + g + b) / 3; r = lerp(r, m * 1.05, storm * 0.45); g = lerp(g, m * 1.05, storm * 0.45); b = lerp(b, m * 1.08, storm * 0.3); }
+  const e = Math.max(r, g, b, 1e-4);
+  skyTint.r = r / e; skyTint.g = g / e; skyTint.b = b / e; skyTint.e = e;
 }
 
 // tone curve per channel: shadows pick up blue
@@ -138,9 +146,9 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
   updateSky();
   const q = G.quality;
   const M = q === 0 ? 6 : q === 1 ? 8 : 11;
-  const tx0 = Math.max(0, (vx0 >> 2) - M), ty0 = Math.max(0, (vy0 >> 2) - M);
-  const tx1 = Math.min(TW, (vx0 >> 2) + Math.ceil(vw / 4) + 1 + M), ty1 = Math.min(TH, (vy0 >> 2) + Math.ceil(vh / 4) + 1 + M);
-  const w = Math.max(1, tx1 - tx0), h = Math.max(1, ty1 - ty0), n = w * h;
+  // constant region size (shifted, not clipped, at the world edges) so the GPU canvases are never recreated while panning
+  const w = Math.min(TW, Math.ceil(vw / 4) + 3 + 2 * M), h = Math.min(TH, Math.ceil(vh / 4) + 3 + 2 * M), n = w * h;
+  const tx0 = Math.max(0, Math.min(TW - w, (vx0 >> 2) - M)), ty0 = Math.max(0, Math.min(TH - h, (vy0 >> 2) - M));
   // low/mid quality: the light map only needs refreshing at 30 Hz while the covered region is unchanged
   if (q <= 1 && (G.frame & 1) === 1 && lt.w === w && lt.h === h && lt.tx0 === tx0 && lt.ty0 === ty0 && cap >= n) return;
   ensure(n);
@@ -154,23 +162,23 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
     const cy0 = (ty0 + ty) * 4;
     for (let tx = 0; tx < w; tx++) {
       const cx0 = (tx0 + tx) * 4, i = ty * w + tx;
-      let o = 0, gr = 0, gg = 0, gb = 0;
+      let o = 0, gr = 0, gg = 0, gb = 0, sc = 0;
       for (let dy = 0; dy < 4; dy++) {
         let ci = (cy0 + dy) * W + cx0;
         for (let dx = 0; dx < 4; dx++, ci++) {
           const m = mat[ci];
-          o += LIGHT[m];
+          const lm = LIGHT[m]; o += lm; if (lm > 0.3) sc++;
           const rad = GLOW_RAD[m];
           if (rad > 0) { gr += GLOW_R[m] * rad; gg += GLOW_G[m] * rad; gb += GLOW_B[m] * rad; }
         }
       }
       o *= 0.0625;
-      opac[i] = o;
+      opac[i] = o; roofT[i] = sc >= ROOF_CELLS ? 1 : 0;
       const isAir = o < AIR_T;
       airF[i] = isAir ? 1 : 0;
       cinSky[i] = isAir ? STEP_AIR_SKY : 0.05 + o * K_IN_SKY;
       lvSky[i] = o * K_LEAVE_SKY;
-      cinPt[i] = isAir ? STEP_PT : STEP_PT + o * K_IN_PT;
+      cinPt[i] = isAir ? STEP_PT : STEP_PT + o * K_IN_PT + Math.max(0, o - 0.7) * (K_IN_DENSE / 0.3);
       lvPt[i] = o * K_LEAVE_PT;
       if (gr + gg + gb > 0) {
         const f = STEP_PT * 0.0625 * 2.4 * (0.85 + 0.15 * hash3(tx0 + tx, ty0 + ty, (time * 9) | 0)) * flick;
@@ -201,6 +209,7 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
     const g = 12;
     const bx0 = Math.max(0, sMinX - g), by0 = Math.max(0, sMinY - g), bx1 = Math.min(w - 1, sMaxX + g), by1 = Math.min(h - 1, sMaxY + g);
     sweep3(pR, pG, pB, cinPt, lvPt, w, bx0, by0, bx1, by1, q === 0 ? 1 : 2);
+    for (let i = by0 * w; i < (by1 + 1) * w; i++) if (airF[i] === 0 && opac[i] < 0.8) { pR[i] *= SCATTER; pG[i] *= SCATTER * 1.18; pB[i] *= SCATTER * 1.35; }
   }
 
   // 3. sky seeds: walk each column from the world top; light enters through transparent tiles
@@ -208,16 +217,19 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
   if (skyOn) {
     for (let tx = 0; tx < w; tx++) {
       const wx = (tx0 + tx) * 4 + 2;
-      let E = 1, prev = 0;
+      let E = 1, prev = 0, roofed = false;
       // above the region: coarse (single sample per tile)
-      for (let ty = 0; ty < ty0 && E > 0.01; ty++) {
+      for (let ty = 0; ty < ty0 && (E > 0.01 || !roofed); ty++) {
         const o = LIGHT[mat[(ty * 4 + 2) * W + wx]];
+        if (o > 0.3) roofed = true;
         if (o < AIR_T) { if (prev >= AIR_T) E -= prev * K_LEAVE_SKY; } else E -= 0.05 + o * K_IN_SKY;
         prev = o;
       }
       if (E < 0) E = 0;
       for (let ty = 0; ty < h; ty++) {
         const i = ty * w + tx, o = opac[i];
+        if (roofT[i]) roofed = true;
+        indoor[i] = roofed && o < OPEN_T ? 1 : 0;
         if (E > 0.001) {
           if (o < AIR_T) { if (prev >= AIR_T) E -= prev * K_LEAVE_SKY; } else E -= 0.05 + o * K_IN_SKY;
           if (E < 0) E = 0;
@@ -227,13 +239,13 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
       }
     }
     sweep1(skyE, cinSky, lvSky, w, h, q === 0 ? 1 : 2);
-  } else skyE.fill(0, 0, n);
+  } else { skyE.fill(0, 0, n); indoor.fill(0, 0, n); }
 
   // 4. compose + tone map
   const se = skyTint.e, sr = skyTint.r * se, sg = skyTint.g * se, sb = skyTint.b * se;
   const bloom = q === 0 ? 0 : 0.3;
-  const AMBIENT = 0.028 + 0.05 * Math.max(0, Math.min(1, G.daylight));
-  const solidAmb = SOLID_AMBIENT * (0.5 + 0.5 * Math.max(0, Math.min(1, G.daylight)));
+  const AMBIENT = 0.026 + 0.045 * skyState.light;
+  const solidAmb = SOLID_AMBIENT * (0.5 + 0.5 * skyState.light);
   for (let i = 0; i < n; i++) {
     const s = skyE[i];
     const er = Math.max(0, s * sr + pR[i]), eg = Math.max(0, s * sg + pG[i]), eb = Math.max(0, s * sb + pB[i]);

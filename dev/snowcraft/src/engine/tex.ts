@@ -57,11 +57,25 @@ function gen(d: MatDef, seed: number): Uint32Array {
           if (st > 0.82) l += 0.38; else if (st < 0.22) l -= 0.3;
           if (h2(x, y, seed + 9) > 0.96) l += 0.5;
           r = cr * l * 0.92; g = cg * l * 1.05; b = cb * l * 0.95;
+        } else if (d.key === 'LICHEN') {
+          // crustose lichen: mottled pale grey-green, dark pits, a few orange-yellow rosettes
+          const n = fbm(x, y, 8, seed), pit = h2(x >> 1, y >> 1, seed + 5);
+          let l = 0.72 + n * 0.6;
+          r = cr * l; g = cg * l; b = cb * l * 0.9;
+          if (pit > 0.9) { r = 214 * (0.8 + fine * 0.3); g = 172 * (0.8 + fine * 0.3); b = 70; } else if (pit < 0.1) { r *= 0.55; g *= 0.55; b *= 0.5; }
+          if (fine > 0.97) { r *= 1.25; g *= 1.25; b *= 1.2; }
+        } else if (d.key === 'CANVAS') {
+          // woven cloth: thread grid, stains, frost specks
+          const th = ((x >> 1) + (y >> 1)) & 1, n = fbm(x, y, 8, seed);
+          let l = 0.86 + th * 0.1 + (n - 0.5) * 0.35 + (fine - 0.5) * 0.06;
+          if ((y & 7) === 0 || (x & 15) === 0) l *= 0.9;
+          if (n > 0.66) { r = cr * l * 0.86; g = cg * l * 0.82; b = cb * l * 0.74; } else { r = cr * l; g = cg * l; b = cb * l * 1.02; }
+          if (fine > 0.985) { r = 240; g = 244; b = 250; }
         } else if (d.key === 'DIRT') {
           const n = fbm(x, y, 8, seed), clod = vn(x, y, 16, 16, seed + 2);
           let l = 0.82 + n * 0.34 + (clod - 0.5) * 0.22;
           if (fine > 0.93) l *= 1.28; else if (fine < 0.06) l *= 0.62;
-          r = cr * l * 1.04; g = cg * l; b = cb * l * 0.92;
+          r = cr * l * 0.97; g = cg * l * 0.98; b = cb * l * 1.04;
         } else {
           const l = 1 + (fbm(x, y, 8, seed) - 0.5) * v * 3 + (fine - 0.5) * v;
           r *= l; g *= l; b *= l;
@@ -77,6 +91,16 @@ function gen(d: MatDef, seed: number): Uint32Array {
         break;
       }
       case 'grain': {
+        if (d.key === 'WHALEBONE') {
+          // bone: pale cream, long vertical fibres, small pores, weathered stains
+          const f1 = vn(x, y, 40, 3, seed), f2 = vn(x, y, 14, 8, seed + 4), pore = h2(x, y >> 1, seed + 7);
+          let l = 0.8 + f1 * 0.26 + f2 * 0.16;
+          if (pore > 0.975) l *= 0.62;
+          if (h2(x >> 1, 0, seed + 3) > 0.9) l *= 0.82;
+          r = cr * l; g = cg * l * 0.99; b = cb * l * 0.94;
+          const stain = vn(x, y, 5, 5, seed + 12); if (stain > 0.72) { r *= 0.9; g *= 0.86; b *= 0.74; }
+          break;
+        }
         // vertical wood grain with bark fissures
         const s1 = vn(x, y, 32, 3, seed), s2 = vn(x, y, 16, 6, seed + 4);
         let l = 0.7 + s1 * 0.38 + s2 * 0.22;
@@ -118,6 +142,17 @@ function gen(d: MatDef, seed: number): Uint32Array {
         break;
       }
       case 'crystal': {
+        if (d.key === 'ICE') {
+          // sea ice: horizontal growth layers, trapped bubbles, hairline cracks, faint green-blue depth
+          const lay = vn(x, y, 3, 14, seed), lay2 = vn(x, y, 7, 22, seed + 3), bub = h2(x >> 1, y >> 1, seed + 9);
+          let l = 0.82 + lay * 0.2 + lay2 * 0.1 + (fine - 0.5) * 0.05;
+          const crack = Math.abs(vn(x + y * 0.7, y, 5, 7, seed + 5) - 0.5);
+          if (crack < 0.011) l *= 0.72;
+          r = cr * l * 0.9; g = cg * l * 1.0; b = cb * l * 1.02;
+          if (bub > 0.985) { r = r * 0.7 + 60; g = g * 0.7 + 62; b = b * 0.7 + 62; }
+          if (lay > 0.78) { r *= 0.94; g *= 1.02; b *= 0.98; }
+          break;
+        }
         voronoi(x, y, 6, seed);
         const [d1, gap, id] = vor;
         let l = 0.86 + id * 0.26;
@@ -213,6 +248,20 @@ function genBg(kind: number): Uint32Array {
       let l = 0.7 + n * 0.5 + (fine - 0.5) * 0.12;
       if (fine > 0.96) l *= 1.3;
       r = 50 * l; g = 46 * l; b = 62 * l;
+    } else if (kind === 6) { // sea water behind the ice / under the surface: deep cold teal with faint caustics
+      const cau = Math.abs(vn(x + (y >> 1), y, 6, 6, 71) - 0.5) + Math.abs(vn(x, y, 9, 9, 72) - 0.5);
+      let l = 0.8 + n * 0.3 + (cau < 0.06 ? 0.25 : 0);
+      r = 6 * l; g = 20 * l; b = 34 * l;
+    } else if (kind === 7) { // dark timber lining (mine props, ship interior): horizontal tarred planks
+      const ph = 7, row = Math.floor(y / ph), ly = y % ph;
+      let l = 0.8 + (h2(row, 0, 81) - 0.5) * 0.22 + (vn(x, y, 3, 28, 82) - 0.5) * 0.14 + (fine - 0.5) * 0.05;
+      if (ly === 0) l *= 0.55; else if (ly === 1) l *= 1.1;
+      if (ly === 3 && (x % 24) === 5) l *= 0.5;
+      r = 74 * l; g = 52 * l; b = 38 * l;
+    } else if (kind === 8) { // rock rich in coal: near-black with glossy seams
+      let l = 0.7 + n * 0.5 + (fine - 0.5) * 0.12;
+      const seam = Math.abs(vn(x + (y >> 2), y, 9, 3, 91) - 0.5); if (seam < 0.05) l *= 1.5;
+      r = 30 * l; g = 31 * l; b = 38 * l;
     } else { // 5: wooden interior wall, vertical boards
       const bw = 8, col = Math.floor(x / bw), lx = x % bw;
       let l = 0.92 + (h2(col, 0, 61) - 0.5) * 0.2 + (vn(x, y, 32, 3, 62) - 0.5) * 0.14;
@@ -230,5 +279,5 @@ export function initTextures() {
   if (done) return; done = true;
   for (let i = 0; i < MATS.length; i++) TEX.push(gen(MATS[i], 100 + i * 17));
   BGTEX.push(new Uint32Array(4096));
-  for (let k = 1; k <= 5; k++) BGTEX.push(genBg(k));
+  for (let k = 1; k <= 8; k++) BGTEX.push(genBg(k));
 }

@@ -6,8 +6,8 @@ import { G, View, DrawFn } from '../game/state';
 import { W, H, TW, mat, shade, bg, aux } from './grid';
 import { MATS, PHASE, P_SOLID, P_POWDER, P_LIQUID, P_GAS, P_FIRE, P_EMPTY, MAT } from '../content/materials';
 import { initTextures, TEX, BGTEX } from './tex';
-import { drawSky } from './sky';
-import { computeLight, lt, lightR, lightG, lightB, lightRGBA, glowRGBA } from './light';
+import { drawSky, updateSkyState, horizonRGB, skyState } from './sky';
+import { computeLight, lt, lightR, lightG, lightB, lightRGBA, glowRGBA, skyTint, indoor } from './light';
 import { clampCamera } from './camera';
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -138,7 +138,7 @@ function drawTerrain(v: View, t: number) {
   const tt = (t * 2.4) | 0, ti = (t * 6) | 0, wob = (t * 7) | 0;
   const edges = q > 0, sparkle = q > 0;
   const xs = Math.max(0, 2 - x0), xe = Math.min(w, W - 2 - x0);
-  const dayLevel = G.daylight;
+  const dayLevel = skyState.light;
   for (let cy = 0; cy < h; cy++) {
     const wy = y0 + cy, o0 = cy * w;
     if (wy < 2 || wy >= H - 2) { t32.fill(wy >= 0 && wy < H ? 0xff0a0a10 : 0xff000000, o0, o0 + w); continue; }
@@ -165,13 +165,15 @@ function drawTerrain(v: View, t: number) {
       if (k0 < 0) k0 = 0; else if (k0 > lw + 1) k0 = lw + 1; if (k1 < 0) k1 = 0; else if (k1 > lw + 1) k1 = lw + 1;
       const a = WS[ox], b = WNB[ox];
       let lr = (rowR[k0] * a + rowR[k1] * b) | 0, lg = (rowG[k0] * a + rowG[k1] * b) | 0, lb = (rowB[k0] * a + rowB[k1] * b) | 0;
-      const bgid = bg[bgBase + (wx >> 2)];
+      let bgid = bg[bgBase + (wx >> 2)];
+      if (bgid === 0 && (mode === 0 || mode === 5) && indoor[tyc * lw + (tx < 0 ? 0 : tx >= lw ? lw - 1 : tx)]) bgid = 3;     // enclosed air (igloo, room): a wall behind it, not the sky
       const tix = tyIdx | (wx & 63);
 
       if (mode === 1) {
         // ---- solid / powder ----
         let mul = VARMUL[(m << 8) | shade[i]];
         let tcx = TEXM[m][tix];
+        if (m === MAT_PACKED || m === MAT_SNOW) mul += (aux[i] - 130) >> 3;     // density layering shows as faint strata (denser = a touch darker)
         if (edges) {
           if (OPEN[mat[i - W]]) {
             mul += TOPB[m];
@@ -229,11 +231,17 @@ function drawTerrain(v: View, t: number) {
           if (MODE[up] !== 1) { surf = 1; } else surf = 0;
         } else if (mat[i - W - W] !== m && MODE[mat[i - W - W]] !== 1) surf = 2;
         let r = tcx & 255, g = (tcx >> 8) & 255, bl = (tcx >> 16) & 255;
+        if (m === MAT_WATER) {
+          // dark cold sea: darker and more teal with depth below the waterline
+          const dk = wy > 300 ? (wy > 370 ? 1 : (wy - 300) / 70) : 0;
+          const f = 0.62 - 0.34 * dk;
+          r = r * (f * 0.8); g = g * (f * 1.0); bl = bl * (f * 1.1);
+        }
         if (surf === 1) {
           const sh = Math.sin(wx * 0.33 + t * 2.3) + Math.sin(wx * 0.11 - t * 1.2) + Math.sin(wx * 0.9 + t * 3.1) * 0.5;
-          const k = sh > 1.25 ? 0.75 : 0.4 + 0.12 * sh;
-          r += (205 - r) * k; g += (234 - g) * k; bl += (255 - bl) * k; mul = 270;
-        } else if (surf === 2) { r += (150 - r) * 0.18; g += (190 - g) * 0.18; bl += (240 - bl) * 0.18; }
+          const k = sh > 1.25 ? 0.72 : 0.22 + 0.1 * sh;
+          r += (WSR - r) * k; g += (WSG - g) * k; bl += (WSB - bl) * k; mul = 270;
+        } else if (surf === 2) { r += (WSR * 0.6 - r) * 0.14; g += (WSG * 0.7 - g) * 0.14; bl += (WSB * 0.8 - bl) * 0.14; }
         const mr = (mul * lr) >> 8, mg = (mul * lg) >> 8, mb = (mul * lb) >> 8;
         r = (r * mr) >> 8; g = (g * mg) >> 8; bl = (bl * mb) >> 8;
         if (hasBg) { r = (r * 205 + br * 51) >> 8; g = (g * 205 + bgc * 51) >> 8; bl = (bl * 205 + bb * 51) >> 8; }
@@ -292,29 +300,69 @@ function drawTerrain(v: View, t: number) {
   }
   tctx.putImageData(timg, 0, 0);
 }
-const MAT_ICE = MAT.ICE, MAT_CRYSTAL = MAT.CRYSTAL, MAT_FIRE = MAT.FIRE, MAT_LAVA = MAT.LAVA;
+const MAT_ICE = MAT.ICE, MAT_CRYSTAL = MAT.CRYSTAL, MAT_FIRE = MAT.FIRE, MAT_LAVA = MAT.LAVA, MAT_WATER = MAT.WATER, MAT_PACKED = MAT.PACKED, MAT_SNOW = MAT.SNOW;
+let WSR = 205, WSG = 234, WSB = 255;     // colour of the water-surface glints (follows the horizon glow / moon), set per frame
 
 // ---------------------------------------------------------------------------------------------------------------------
 // weather & vignette
+// ground blizzard: streaks hug the snow surfaces and stream with the wind (intensity from wind speed, storm and visibility),
+// falling snow in three parallax layers, whiteout fog tinted by the sky light.
+const surfCache = new Int16Array((W >> 2) + 2);
+let surfRows = new Int16Array(0);
+function findSurface(wx: number): number {
+  const tc = wx >> 2;
+  let y = surfCache[tc];
+  if (y > 2 && y < H - 2 && mat[y * W + wx] !== 0 && MODE[mat[(y - 1) * W + wx]] !== 1 && MODE[mat[y * W + wx]] === 1) return y;
+  y = 60; while (y < H - 2 && MODE[mat[y * W + wx]] !== 1) y++;
+  surfCache[tc] = y; return y;
+}
 function drawWeather(c: CanvasRenderingContext2D, v: View, t: number) {
   const vis = Math.max(0, Math.min(1, G.visibility)), storm = Math.min(1, G.storm);
-  const fog = (1 - vis) * 0.78 + storm * 0.1;
+  const light = Math.min(1, skyTint.e * 1.5);
+  const fog = (1 - vis) * 0.8 + storm * 0.1;
   if (fog > 0.01) {
-    const day = Math.max(0.2, G.daylight);
-    const r = (196 * day + 20) | 0, g = (208 * day + 26) | 0, b = (226 * day + 36) | 0;
-    c.fillStyle = `rgba(${r},${g},${b},${Math.min(0.88, fog)})`;
+    const hz = horizonRGB, k = 0.35 + 0.65 * skyState.light;
+    const r = (hz[0] * 0.55 + 150 * light * k + 16) | 0, g = (hz[1] * 0.55 + 160 * light * k + 20) | 0, b = (hz[2] * 0.55 + 176 * light * k + 30) | 0;
+    c.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${Math.min(0.9, fog)})`;
     c.fillRect(0, 0, v.w, v.h);
   }
-  const bl = storm * 0.9 + (1 - vis) * 0.4;
-  if (bl > 0.05) {
-    const n = Math.min(260, (bl * 220) | 0), dir = G.wind >= 0 ? 1 : -1, sp = 140 + Math.abs(G.wind) * 30;
-    const day = Math.max(0.35, G.daylight);
-    c.fillStyle = `rgba(${(235 * day + 20) | 0},${(242 * day + 20) | 0},255,${0.16 + 0.22 * bl})`;
+  const wind = Math.abs(G.wind);
+  const drift = Math.min(1, Math.max(0, (wind - 4.5) / 14)) + storm * 0.6 + (1 - vis) * 0.4;
+  const dir = G.wind >= 0 ? 1 : -1;
+  const lum = 0.35 + 0.65 * light;
+  if (drift > 0.04 && G.quality > 0) {
+    // surface rows per tile column of the view
+    const nt = (v.w >> 2) + 2;
+    if (surfRows.length < nt) surfRows = new Int16Array(nt);
+    const tx0 = v.x0 >> 2;
+    for (let k = 0; k < nt; k++) { const wx = Math.max(2, Math.min(W - 3, (tx0 + k) * 4 + 2)); surfRows[k] = findSurface(wx) - v.y0; }
+    const n = Math.min(300, (drift * 150 * (v.w / 400)) | 0), sp = 30 + wind * 11 + storm * 60;
+    c.fillStyle = `rgba(${(214 * lum + 20) | 0},${(226 * lum + 24) | 0},${(244 * lum + 30) | 0},${0.2 + 0.26 * Math.min(1, drift)})`;
     for (let i = 0; i < n; i++) {
-      const hx = hashf(i * 7.13), hy = hashf(i * 3.71 + 9), l = 8 + hashf(i * 1.9) * 22;
-      const x = (((hx * v.w * 1.3 + dir * t * sp * (0.6 + hashf(i * 5.3))) % (v.w + 40)) + v.w + 40) % (v.w + 40) - 20;
-      const y = hy * v.h + Math.sin(t * 0.7 + i) * 2;
+      const hx = hashf(i * 7.13), hy = hashf(i * 3.71 + 9), sp2 = 0.55 + hashf(i * 5.3) * 0.9, l = 3 + hashf(i * 1.9) * (10 + 22 * drift);
+      const span = v.w + 80;
+      const x = ((((hx * span + dir * t * sp * sp2) % span) + span) % span) - 40;
+      const k = ((x + 40) >> 2) - 10; const sr = surfRows[Math.max(0, Math.min(nt - 1, ((x | 0) >> 2) + 1))];
+      void k;
+      // height above the snow: low streaks are the common case, a few lift higher in a storm
+      const up = hy * hy * hy * (3 + 26 * Math.min(1.2, drift)) + Math.sin(t * 1.3 + i * 1.7) * 0.7;
+      const y = sr - 1 - up;
+      if (y < -2 || y > v.h) continue;
       c.fillRect(dir > 0 ? x : x - l, y | 0, l | 0, 1);
+    }
+  }
+  // falling snow
+  const sf = G.snowfall;
+  if (sf > 0.05 && G.quality > 0) {
+    const n = Math.min(240, (sf * 150 * (v.w / 400) + storm * 90) | 0), wdrift = G.wind * 1.2;
+    for (let i = 0; i < n; i++) {
+      const lay = i % 3, spd = 9 + lay * 9 + sf * 8, a = 0.22 + lay * 0.14;
+      const hx = hashf(i * 2.17 + 1), hy = hashf(i * 6.31 + 5);
+      const span = v.w + 60;
+      const x = ((((hx * span + wdrift * t * (0.5 + lay * 0.4)) % span) + span) % span) - 30;
+      const y = (((hy * (v.h + 20) + t * spd * (0.6 + hashf(i * 1.3) * 0.6)) % (v.h + 20)) + v.h + 20) % (v.h + 20) - 10;
+      c.fillStyle = `rgba(${(226 * lum + 20) | 0},${(236 * lum + 24) | 0},255,${a * Math.min(1, light + 0.35)})`;
+      if (storm > 0.4 && lay === 2) c.fillRect(x | 0, y | 0, 3, 1); else c.fillRect(x | 0, y | 0, 1, lay === 2 ? 2 : 1);
     }
   }
 }
@@ -349,6 +397,8 @@ export function render(dt: number) {
 
   // light
   const t1 = performance.now();
+  updateSkyState();
+  { const hz = horizonRGB, mo = skyState.moon; WSR = Math.min(255, 54 + hz[0] * 1.5 + mo * 90); WSG = Math.min(255, 70 + hz[1] * 1.5 + mo * 100); WSB = Math.min(255, 100 + hz[2] * 1.2 + mo * 110); }
   computeLight(v, t);
   const t2 = performance.now();
 

@@ -1,45 +1,81 @@
-// Sky: time-of-day gradient, stars, sun/moon, aurora curtains, 3 parallax mountain layers + distant spruce forest.
-// Drawn first on the low-res world canvas (crisp 1-px columns/rows); terrain is composited on top.
+// Polar-night sky (DESIGN §2 "Visual identity"). Driven by G.sunElev / G.noonElev / G.moon / G.moonPhase / G.aurora / G.storm:
+//  * the sun never rises until day 12: the only daylight is a twilight band on the southern horizon that widens and warms with
+//    the day number (day 1: thin steel-blue glow, day 10-11: pink-orange, day 12 noon: the rim of the sun),
+//  * stars, a moon with phases, aurora curtains on clear nights,
+//  * parallax: far arctic mountains, glacier cliffs and icebergs on the sea horizon (NO forests), a distant dark sea plane.
+// Drawn first on the low-res world canvas (crisp 1-px columns/rows); the terrain is composited on top.
 import { G } from '../game/state';
 
 type RGB = [number, number, number];
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const mix = (a: RGB, b: RGB, t: number): RGB => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
-const css = (c: RGB, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
-const bell = (h: number, c: number, w: number) => { const d = (h - c) / w; return Math.exp(-d * d); };
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+const ss = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const rgb = (c: RGB) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+const rgba = (c: RGB, a: number) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 function hash(n: number) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
 
-// hour, zenith colour, horizon colour
-const KEYS: [number, RGB, RGB][] = [
-  [0, [6, 9, 24], [12, 22, 46]],
-  [6.2, [6, 9, 24], [12, 22, 46]],
-  [7.0, [28, 36, 86], [112, 78, 116]],
-  [7.7, [66, 96, 170], [255, 158, 112]],
-  [8.8, [66, 132, 210], [186, 224, 248]],
-  [12, [52, 118, 206], [170, 216, 246]],
-  [17.2, [60, 122, 208], [196, 220, 242]],
-  [18.2, [58, 66, 148], [255, 138, 92]],
-  [19.1, [26, 28, 72], [124, 60, 102]],
-  [20.2, [7, 10, 28], [14, 26, 54]],
-  [24, [6, 9, 24], [12, 22, 46]],
-];
-const skyTop: RGB = [0, 0, 0], skyHor: RGB = [0, 0, 0];
-function skyColors(hour: number) {
-  let i = 0; while (i < KEYS.length - 2 && hour >= KEYS[i + 1][0]) i++;
-  const a = KEYS[i], b = KEYS[i + 1], t0 = Math.max(0, Math.min(1, (hour - a[0]) / (b[0] - a[0]))), t = t0 * t0 * (3 - 2 * t0);
-  for (let k = 0; k < 3; k++) { skyTop[k] = lerp(a[1][k], b[1][k], t); skyHor[k] = lerp(a[2][k], b[2][k], t); }
+/** World row of the far sea horizon. Parallax layers stand on it; the dark sea plane lies below it up to the near water (row 300). */
+export const HORIZON_Y = 294;
+const SKYH = 175;                // cells above the horizon where the gradient reaches the zenith colour
+
+/** Per-frame derived sky state (render.ts calls updateSkyState() once per frame; light.ts reads it). */
+export const skyState = {
+  elev: -12, light: 0 /* 0..1 twilight level */, warm: 0 /* 0 steel-blue .. 1 pink-orange */, night: 1,
+  moon: 0 /* moonlight 0..1 incl. altitude */, moonAlt: -1, moonX: 0.5, illum: 0, aurora: 0, storm: 0, sunX: 0.5, sunUp: 0,
+  starFade: 1,
+};
+/** Colour of the horizon glow right now (water / far silhouettes tint themselves with it). */
+export const horizonRGB: RGB = [9, 17, 40];
+export const zenithRGB: RGB = [4, 7, 20];
+
+const NIGHT_Z: RGB = [4, 7, 20], NIGHT_H: RGB = [9, 17, 40];
+// twilight colours at full strength: zenith / mid-sky / horizon, for warm = 0 and warm = 1
+const TW_Z: [RGB, RGB] = [[24, 48, 108], [60, 70, 138]];
+const TW_M: [RGB, RGB] = [[46, 86, 150], [160, 98, 148]];
+const TW_H: [RGB, RGB] = [[92, 146, 196], [255, 154, 100]];
+
+export function updateSkyState() {
+  const s = skyState;
+  const e = G.sunElev;
+  s.elev = e;
+  s.light = ss(-12.5, 0.8, e);
+  s.warm = ss(-8.6, -1.1, e);
+  s.night = 1 - s.light;
+  s.storm = clamp(G.storm, 0, 1);
+  const hour = ((G.time % 1440) + 1440) % 1440 / 60;
+  const p = G.moonPhase;
+  s.illum = (1 - Math.cos(2 * Math.PI * p)) / 2;
+  const phi = 2 * Math.PI * (hour / 24 - p) - Math.PI;                // 0 = moon in the south (transit), ± = east/west
+  const ph = Math.atan2(Math.sin(phi), Math.cos(phi));
+  s.moonAlt = Math.cos(ph);
+  s.moonX = 0.5 + 0.46 * clamp(ph / 2.1, -1, 1);
+  s.moon = G.moon;
+  s.aurora = clamp(G.aurora, 0, 1);
+  s.sunX = 0.5 + clamp((hour - 12) * 0.05, -0.4, 0.4);
+  s.sunUp = ss(-2.4, -0.2, e);
+  s.starFade = (1 - ss(0.15, 0.7, s.light)) * (1 - s.storm * 0.92);
+  // horizon / zenith colours for everything that wants to match the sky
+  const w = s.warm, L = Math.pow(s.light, 0.8);
+  const hT = mix(TW_H[0], TW_H[1], w), zT = mix(TW_Z[0], TW_Z[1], w);
+  const gray: RGB = [86 + 40 * s.light, 98 + 44 * s.light, 116 + 46 * s.light];
+  let hc = mix(NIGHT_H, hT, L), zc = mix(NIGHT_Z, zT, L);
+  hc = mix(hc, gray, s.storm * 0.8); zc = mix(zc, gray, s.storm * 0.75);
+  horizonRGB[0] = hc[0]; horizonRGB[1] = hc[1]; horizonRGB[2] = hc[2];
+  zenithRGB[0] = zc[0]; zenithRGB[1] = zc[1]; zenithRGB[2] = zc[2];
 }
 
-// ---- static procedural data ----
+// ---------------------------------------------------------------------------------------------------------------------
+// static procedural data
 const NS = 2048;
-const mtn: Float32Array[] = [];      // 3 layers of heights 0..1
-const forest = new Float32Array(NS);
-const stars = { x: new Float32Array(420), y: new Float32Array(420), b: new Float32Array(420), ph: new Float32Array(420) };
-interface Cloud { x: number; y: number; w: number; spans: number[]; speed: number }   // spans: [row, x0, x1] triples relative to (x,y)
-const clouds: Cloud[] = [];
+const mtn: Float32Array[] = [];                 // 2 mountain layers, heights 0..1
+const cliffH = new Float32Array(NS);            // glacier cliffs: flat tops with steps
+const cliffS = new Uint8Array(NS);              // 0 plain, 1 crevasse, 2 ice-layer stripe
+interface Berg { x: number; w: number; h: number; peak: number; flat: number; shade: number }
+const bergs: Berg[] = [];
+const stars = { x: new Float32Array(520), y: new Float32Array(520), b: new Float32Array(520), ph: new Float32Array(520) };
 let inited = false;
 function ridged(x: number, f: number, seed: number) {
-  // sum of ridged triangle waves with hashed lattice
   let s = 0, a = 1, n = 0;
   for (let o = 0; o < 4; o++) {
     const u = x * f * (1 << o) / NS * 64, i = Math.floor(u), t = u - i;
@@ -50,52 +86,42 @@ function ridged(x: number, f: number, seed: number) {
 }
 function initSky() {
   if (inited) return; inited = true;
-  const cfg = [{ f: 0.16, seed: 11, p: 1.6 }, { f: 0.28, seed: 47, p: 1.9 }, { f: 0.45, seed: 91, p: 1.5 }];
+  const cfg = [{ f: 0.26, seed: 11, p: 1.7 }, { f: 0.44, seed: 47, p: 1.5 }];
   for (const c of cfg) {
     const a = new Float32Array(NS);
     for (let x = 0; x < NS; x++) a[x] = Math.pow(ridged(x, c.f, c.seed), c.p);
-    for (let pass = 0; pass < 3; pass++) { const b = a.slice(); for (let x = 0; x < NS; x++) a[x] = (b[(x + NS - 2) % NS] + b[(x + NS - 1) % NS] + b[x] * 2 + b[(x + 1) % NS] + b[(x + 2) % NS]) / 6; }
+    for (let pass = 0; pass < 2; pass++) { const b = a.slice(); for (let x = 0; x < NS; x++) a[x] = (b[(x + NS - 1) % NS] + b[x] * 2 + b[(x + 1) % NS]) / 4; }
     mtn.push(a);
   }
-  // distant spruce silhouettes: overlapping tiered triangles
-  for (let t = 0; t < 360; t++) {
-    const cx = hash(t * 3.1) * NS, hw = 3 + hash(t * 5.7) * 4.5, hh = 12 + hash(t * 9.3) * 18;
-    for (let dx = -Math.ceil(hw); dx <= Math.ceil(hw); dx++) {
-      const k = 1 - Math.abs(dx) / hw; if (k <= 0) continue;
-      const tier = 0.86 + 0.14 * ((Math.floor((1 - k) * 7) & 1));
-      const hgt = hh * k * tier + 2;
-      const xi = (((Math.floor(cx) + dx) % NS) + NS) % NS;
-      if (hgt > forest[xi]) forest[xi] = hgt;
+  // glacier fronts: long low ice cliffs with ramps, a few vertical faces and crevasses
+  {
+    const node: number[] = []; for (let i = 0; i <= NS / 26 + 2; i++) node.push(2 + 20 * Math.pow(hash(i * 3.17 + 1), 1.4));
+    for (let x = 0; x < NS; x++) {
+      const u = x / 26, i = Math.floor(u), f = u - i, sm = f * f * (3 - 2 * f);
+      let h = node[i] * (1 - sm) + node[i + 1] * sm;
+      h = Math.round(h / 2) * 2;                                // terraced, like layered ice
+      cliffH[x] = h;
+      cliffS[x] = hash(x * 0.61 + 7) < 0.035 ? 1 : 0;           // crevasse
     }
   }
-  for (let c = 0; c < 14; c++) {
-    const w = 34 + hash(c * 4.1) * 50, h = 5 + Math.floor(hash(c * 6.7) * 5), spans: number[] = [];
-    const lumps = 2 + Math.floor(hash(c * 2.3) * 3);
-    for (let r = 0; r < h; r++) {
-      // union of a few ellipses stacked along x gives a cumulus-like flat-bottomed puff
-      let x0 = 1e9, x1 = -1e9;
-      for (let k = 0; k < lumps; k++) {
-        const ex = (k / Math.max(1, lumps - 1) - 0.5) * w * 0.7, er = w * (0.2 + 0.13 * hash(c * 9 + k)), ey = h * (0.55 + 0.35 * hash(c * 5 + k * 3));
-        const dy = (r + 0.5) / ey - 0.92; const q = 1 - dy * dy; if (q <= 0) continue;
-        const hw = er * Math.sqrt(q); x0 = Math.min(x0, ex - hw); x1 = Math.max(x1, ex + hw);
-      }
-      if (x1 > x0) spans.push(r, Math.round(x0), Math.round(x1));
-    }
-    clouds.push({ x: hash(c * 3.9) * 760, y: 14 + hash(c * 8.3) * 88, w, spans, speed: 0.6 + hash(c * 1.7) * 1.2 });
+  for (let i = 0; i < 22; i++) {
+    const w = 14 + hash(i * 3.1) * 34, h = 7 + hash(i * 5.3) * 22;
+    bergs.push({ x: (i + hash(i * 7.7) * 0.8) * (NS / 22), w, h, peak: hash(i * 9.1), flat: hash(i * 1.3) < 0.45 ? 1 : 0, shade: hash(i * 2.9) });
   }
-  for (let i = 0; i < 420; i++) {
-    stars.x[i] = hash(i * 1.37) * NS; stars.y[i] = hash(i * 7.71) * 215;
+  for (let i = 0; i < 520; i++) {
+    stars.x[i] = hash(i * 1.37) * NS; stars.y[i] = hash(i * 7.71);
     const b = hash(i * 3.3); stars.b[i] = b * b; stars.ph[i] = hash(i * 9.1) * 6.28;
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
 // aurora buffer (half resolution, additive)
 let aurC: HTMLCanvasElement | null = null, aurCtx: CanvasRenderingContext2D | null = null, aurImg: ImageData | null = null, aur32: Uint32Array | null = null;
 let aurW = 0, aurH = 0;
 const colBase = new Float32Array(1024), colRay = new Float32Array(1024), colBase2 = new Float32Array(1024), colRay2 = new Float32Array(1024);
 
 function drawAurora(ctx: CanvasRenderingContext2D, w: number, horizonY: number, x0: number, t: number, strength: number) {
-  const aw = Math.min(1023, (w + 1) >> 1), ah = Math.max(8, (horizonY >> 1));
+  const aw = Math.min(1023, (w + 1) >> 1), ah = clamp(horizonY >> 1, 8, 140);
   if (!aurC || aurW !== aw || aurH !== ah) {
     aurC = document.createElement('canvas'); aurC.width = aurW = aw; aurC.height = aurH = ah;
     aurCtx = aurC.getContext('2d')!; aurImg = aurCtx.createImageData(aw, ah); aur32 = new Uint32Array(aurImg.data.buffer);
@@ -111,6 +137,7 @@ function drawAurora(ctx: CanvasRenderingContext2D, w: number, horizonY: number, 
     const r2 = 0.5 + 0.5 * Math.sin(u * 0.13 + Math.sin(u * 0.05 - t * 0.6) * 3 - t * 0.5 + 1.7);
     colRay2[ax] = 0.1 + 0.9 * r2 * r2 * (0.5 + 0.5 * Math.sin(u * 0.016 - t * 0.2));
   }
+  const magenta = Math.max(0, strength - 0.55) * 1.6;
   for (let c = 0; c < 2; c++) {
     const base = c ? colBase2 : colBase, ray = c ? colRay2 : colRay, hgt = ah * (c ? 0.42 : 0.55), amp = c ? 0.5 : 0.85;
     for (let ax = 0; ax < aw; ax++) {
@@ -122,8 +149,8 @@ function drawAurora(ctx: CanvasRenderingContext2D, w: number, horizonY: number, 
         if (d < 0) v = Math.exp(d * 0.9); else { v = 1 - d / hgt; v = v * v * (0.55 + 0.45 * v); }
         v *= rr * strength; if (v < 0.01) continue;
         const k = Math.min(1, d / hgt), k2 = Math.max(0, k);
-        // green at the base -> teal -> violet at the top
-        const R = lerp(0.25, 0.62, k2 * k2), Gc = lerp(1.0, 0.3, k2 * k2 * 0.9), B = lerp(0.52, 1.0, Math.sqrt(k2));
+        // green at the base (magenta fringe on strong nights) -> teal -> violet at the top
+        const R = lerp(0.25, 0.62, k2 * k2) + (d < 0 ? magenta * 0.7 * Math.min(1, -d / 3) : 0), Gc = lerp(1.0, 0.3, k2 * k2 * 0.9) * (d < 0 ? 1 - magenta * 0.45 * Math.min(1, -d / 3) : 1), B = lerp(0.52, 1.0, Math.sqrt(k2)) + (d < 0 ? magenta * 0.5 : 0);
         const i = ay * aw + ax, o = px[i];
         let r8 = (o & 255) + R * v * 150, g8 = ((o >> 8) & 255) + Gc * v * 190, b8 = ((o >> 16) & 255) + B * v * 140;
         if (r8 > 255) r8 = 255; if (g8 > 255) g8 = 255; if (b8 > 255) b8 = 255;
@@ -139,159 +166,187 @@ function drawAurora(ctx: CanvasRenderingContext2D, w: number, horizonY: number, 
   ctx.restore();
 }
 
-export interface SkyOut { horizonY: number }
-
-/** Draw the sky for the canvas whose top-left is world cell (x0,y0), size w×h. */
+// ---------------------------------------------------------------------------------------------------------------------
+const tmpC: RGB = [0, 0, 0];
+/** Draw the sky for the canvas whose top-left is world cell (x0,y0), size w×h. camX/camY = camera centre (cells). */
 export function drawSky(ctx: CanvasRenderingContext2D, w: number, h: number, x0: number, y0: number, camX: number, camY: number, t: number, q: number) {
   initSky();
-  const hour = ((G.time % 1440) + 1440) % 1440 / 60;
-  skyColors(hour);
-  const day = Math.max(0, Math.min(1, G.daylight));
-  const storm = Math.min(1, G.storm);
-  const warm = Math.min(1, bell(hour, 7.6, 0.8) + bell(hour, 18.4, 0.8));
-  // storm greys the sky
-  const gray: RGB = [96 + 40 * day, 108 + 44 * day, 124 + 46 * day];
-  const top = mix(skyTop, mix(gray, [skyTop[0], skyTop[1], skyTop[2]], 0.15 + 0.4 * (1 - day)), storm * 0.75);
-  const hor = mix(skyHor, mix(gray, [skyHor[0], skyHor[1], skyHor[2]], 0.15 + 0.4 * (1 - day)), storm * 0.8);
+  const st = skyState;
+  const L = st.light, Lm = Math.pow(L, 0.62), warm = st.warm, storm = st.storm, night = st.night;
+  const hY = HORIZON_Y - y0;                                  // canvas row of the horizon
+  const gray: RGB = [86 + 40 * L, 98 + 44 * L, 116 + 46 * L];
 
-  // world-fixed vertical gradient: zenith at world y=ZY, horizon at HY
-  const ZY = 40, HY = 290;
-  const rows = h;
+  // ---- gradient: the band of twilight light hugs the horizon and grows with the day number ----
+  const hT = mix(TW_H[0], TW_H[1], warm), mT = mix(TW_M[0], TW_M[1], warm), zT = mix(TW_Z[0], TW_Z[1], warm);
+  const bandK = 0.2 + 0.85 * L;
+  const rows = Math.min(h, Math.max(0, hY));
   for (let y = 0; y < rows; y++) {
-    const s = Math.max(0, Math.min(1, (y0 + y - ZY) / (HY - ZY)));
-    const k = s * s * (0.7 + 0.3 * s);           // concentrate the glow near the horizon
-    ctx.fillStyle = css(mix(top, hor, k));
+    const hh = hY - y;                                        // cells above the horizon
+    const s = clamp(hh / SKYH, 0, 1);
+    const sn = Math.pow(s, 0.62);
+    const nc = mix(NIGHT_H, NIGHT_Z, sn);
+    const se = clamp(s / bandK, 0, 1);
+    const tc = se < 0.3 ? mix(hT, mT, se / 0.3) : mix(mT, zT, Math.pow((se - 0.3) / 0.7, 0.8));
+    let c = mix(nc, tc, Lm);
+    if (storm > 0) c = mix(c, gray, storm * (0.55 + 0.25 * s));
+    ctx.fillStyle = rgb(c);
     ctx.fillRect(0, y, w, 1);
   }
-  const horizonY = Math.max(8, Math.min(h, HY - y0 - 20));   // canvas row of the visual horizon (for aurora / celestial arcs)
+  // warm glow patch around the southern point of the sun (wide ellipse); stronger when the sun is close to the horizon
+  if (L > 0.05 && storm < 0.9 && hY > 4) {
+    const gx = w * st.sunX, gw = w * (0.55 + 0.4 * L), gh = 24 + 70 * L;
+    const gcol = mix(hT, [255, 196, 130], warm * 0.6);
+    ctx.save(); ctx.translate(gx, hY); ctx.scale(gw / gh, 1);
+    const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, gh);
+    gr.addColorStop(0, rgba(gcol, 0.55 * Lm * (1 - storm))); gr.addColorStop(0.5, rgba(gcol, 0.18 * Lm * (1 - storm))); gr.addColorStop(1, rgba(gcol, 0));
+    ctx.fillStyle = gr; ctx.fillRect(-gh - 4, -gh, gh * 2 + 8, gh + 1); ctx.restore();
+  }
 
-  // stars
-  const night = 1 - day;
-  if (night > 0.02) {
-    const vis = night * (1 - storm * 0.9);
+  // ---- stars ----
+  const sf = st.starFade;
+  if (sf > 0.02) {
     ctx.fillStyle = '#fff';
-    for (let i = 0; i < 420; i++) {
-      const xx = (((stars.x[i] - camX * 0.04) % NS) + NS) % NS;
+    const span = Math.max(40, hY - 6);
+    for (let i = 0; i < 520; i++) {
+      const xx = (((stars.x[i] - camX * 0.05) % NS) + NS) % NS;
       if (xx >= w) continue;
-      const yy = (stars.y[i] / 215) * (horizonY - 6) - (camY - 270) * 0.05;
-      if (yy < 0 || yy >= horizonY - 6) continue;
+      const yy = (1 - stars.y[i]) * SKYH * 0.98;               // cells above the horizon
+      const cy = hY - yy;
+      if (cy < 0 || cy >= hY - 3) continue;
+      const near = 1 - ss(0, 0.28, yy / SKYH);                  // fade near the glowing horizon
       const tw = 0.7 + 0.3 * Math.sin(t * (1.2 + stars.b[i] * 2) + stars.ph[i]);
-      const a = vis * (0.25 + 0.75 * stars.b[i]) * tw * (1 - Math.max(0, yy / horizonY - 0.6) * 1.8);
-      if (a < 0.04) continue;
+      const a = sf * (0.2 + 0.8 * stars.b[i]) * tw * (1 - near * 0.85) * (1 - L * 0.9);
+      if (a < 0.05) continue;
       ctx.globalAlpha = Math.min(1, a);
-      ctx.fillRect(xx | 0, yy | 0, 1, 1);
-      if (stars.b[i] > 0.82 && a > 0.4) { ctx.globalAlpha = a * 0.4; ctx.fillRect((xx | 0) - 1, yy | 0, 3, 1); ctx.fillRect(xx | 0, (yy | 0) - 1, 1, 3); }
+      ctx.fillRect(xx | 0, cy | 0, 1, 1);
+      if (stars.b[i] > 0.8 && a > 0.4) { ctx.globalAlpha = a * 0.4; ctx.fillRect((xx | 0) - 1, cy | 0, 3, 1); ctx.fillRect(xx | 0, (cy | 0) - 1, 1, 3); }
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 1; void span;
   }
 
-  // aurora
-  if (G.aurora > 0.02 && night > 0.3 && q > 0) drawAurora(ctx, w, horizonY + 20, x0, t, G.aurora * Math.min(1, (night - 0.3) * 2) * (1 - storm * 0.8));
+  // ---- aurora (clear nights) ----
+  if (st.aurora > 0.02 && night > 0.3 && q > 0 && hY > 12) drawAurora(ctx, w, hY + 16, x0, t, st.aurora * Math.min(1, (night - 0.3) * 2) * (1 - storm * 0.85));
 
-  // sun & moon along a low arc
-  const sunP = (hour - 7.4) / 11.6;     // 0 at sunrise .. 1 at sunset
-  if (sunP > -0.06 && sunP < 1.06) {
-    const sx = w * (0.1 + 0.8 * Math.max(0, Math.min(1, sunP))), sy = horizonY - Math.sin(Math.PI * Math.max(0, Math.min(1, sunP))) * horizonY * 0.52 + 8;
-    const sa = (1 - storm) * Math.min(1, 0.5 + warm);
-    const halo = ctx.createRadialGradient(sx, sy, 2, sx, sy, 40 + 22 * warm);
-    halo.addColorStop(0, `rgba(255,${(226 - 50 * warm) | 0},${(160 - 70 * warm) | 0},${0.42 * sa})`); halo.addColorStop(1, 'rgba(255,200,140,0)');
-    ctx.fillStyle = halo; ctx.fillRect(sx - 70, sy - 70, 140, 140);
-    ctx.fillStyle = css(mix([255, 246, 214], [255, 190, 120], warm), sa);
-    disc(ctx, sx, sy, 5);
-  }
-  const moonH = hour < 7.4 ? hour + 24 : hour;
-  const moonP = (moonH - 18.6) / 12.6;
-  if (moonP > -0.05 && moonP < 1.05 && night > 0.1) {
-    const mp = Math.max(0, Math.min(1, moonP));
-    const mx = w * (0.14 + 0.72 * mp), my = horizonY - Math.sin(Math.PI * mp) * horizonY * 0.6 + 14;
-    const halo = ctx.createRadialGradient(mx, my, 3, mx, my, 34);
-    halo.addColorStop(0, `rgba(190,210,255,${0.2 * night})`); halo.addColorStop(1, 'rgba(160,190,255,0)');
+  // ---- moon with phases ----
+  if (st.moonAlt > -0.08 && storm < 0.95) {
+    const mx = w * st.moonX, my = hY - (st.moonAlt + 0.08) * 105 - 6;
+    const vis = (1 - storm * 0.8) * (1 - 0.7 * Lm);
+    const halo = ctx.createRadialGradient(mx, my, 3, mx, my, 38);
+    halo.addColorStop(0, `rgba(190,210,255,${0.26 * st.illum * vis})`); halo.addColorStop(1, 'rgba(160,190,255,0)');
     ctx.fillStyle = halo; ctx.fillRect(mx - 40, my - 40, 80, 80);
-    ctx.fillStyle = css([226, 232, 246], Math.min(1, night * 1.3) * (1 - storm * 0.7));
-    const ph = 1 - Math.max(0, Math.min(1, G.moon));
-    crescent(ctx, mx, my, 4.2, 7 * ph + 0.5, ph);
+    moonDisc(ctx, mx, my, 6, G.moonPhase, vis);
+  }
+  // ---- the sun: only its rim, and only on day 12 (a sliver of glow just before) ----
+  if (st.sunUp > 0.01 && storm < 0.9) {
+    const e = st.elev, sx = w * st.sunX, rim = clamp((e + 0.6) * 7, 0, 12);       // cells of disc above the horizon
+    const sy = hY - rim + 6;
+    const sa = (1 - storm);
+    const halo = ctx.createRadialGradient(sx, hY, 2, sx, hY, 46 + 26 * warm);
+    halo.addColorStop(0, `rgba(255,${(214 - 50 * warm) | 0},${(150 - 60 * warm) | 0},${0.5 * sa * st.sunUp})`); halo.addColorStop(1, 'rgba(255,170,120,0)');
+    ctx.fillStyle = halo; ctx.fillRect(sx - 90, hY - 90, 180, 90);
+    ctx.fillStyle = rgba(mix([255, 238, 190], [255, 176, 100], warm), sa * Math.min(1, st.sunUp * 1.5));
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, hY); ctx.clip();
+    disc(ctx, sx, sy, 6);
+    ctx.restore();
   }
 
-  // clouds (soft pixel cumulus drifting slowly); dim and bluish at night, warm at dusk/dawn
-  {
-    const vis = (1 - storm * 0.3) * (day * 0.95 + night * 0.28);
-    if (vis > 0.05) {
-      const top = mix([78, 96, 140], [255, 255, 255], day), body = mix([46, 60, 102], [226, 234, 246], day), under = mix([28, 38, 76], [150, 170, 204], day);
-      const tt = mix(top, [255, 206, 170], warm * 0.7), bb = mix(body, [236, 170, 150], warm * 0.6), uu = mix(under, [150, 110, 140], warm * 0.5);
-      const ctop = css(tt, vis), cbody = css(bb, vis), cunder = css(uu, vis);
-      for (const c of clouds) {
-        const span = 760;
-        let cx = ((c.x - camX * 0.12 + t * c.speed) % span + span) % span - 60;
-        if (cx > w + 60) continue;
-        const cy = c.y * (horizonY / 150) - (camY - 270) * 0.05;
-        const n = c.spans.length;
-        for (let k = 0; k < n; k += 3) {
-          const r = c.spans[k], x0 = Math.round(cx + c.spans[k + 1]), x1 = Math.round(cx + c.spans[k + 2]);
-          ctx.fillStyle = r < 2 ? ctop : r >= (n / 3) - 2 ? cunder : cbody;
-          ctx.fillRect(x0, Math.round(cy) + r, x1 - x0, 1);
-        }
-      }
-    }
-  }
-
-  // mountains (3 layers) + forest
-  const tone = (far: RGB, mid: RGB, near: RGB, k: number): RGB => (k === 0 ? far : k === 1 ? mid : near);
-  const dayTone: RGB[] = [[150, 178, 216], [118, 148, 192], [88, 114, 160]];
-  const nightTone: RGB[] = [[22, 34, 66], [16, 26, 52], [12, 19, 40]];
-  const capDay: RGB[] = [[240, 246, 255], [236, 243, 253], [226, 236, 250]];
-  const capNight: RGB[] = [[70, 90, 140], [56, 74, 120], [44, 60, 100]];
-  const pxk = [0.1, 0.22, 0.4], pyk = [0.28, 0.48, 0.72];
-  const baseY = [276, 282, 288], amp = [66, 46, 32];
-  for (let L = 0; L < 3; L++) {
-    let c = mix(nightTone[L], dayTone[L], day);
-    let cap = mix(capNight[L], capDay[L], day);
-    c = mix(c, hor, warm * 0.28 * (1 - L * 0.25)); cap = mix(cap, [255, 190, 150], warm * 0.35);
-    c = mix(c, gray, storm * 0.5); cap = mix(cap, gray, storm * 0.4);
-    const yShift = baseY[L] + (camY - 270) * (1 - pyk[L]) - y0;     // canvas row of the layer baseline
-    const m = mtn[L];
-    const u0 = Math.floor(x0 * pxk[L]) + 5000 * L;
-    const cs = css(c), cc = css(cap), cca = css(mix(cap, c, 0.45));
-    const shadeCol = `rgba(${(c[0] * 0.5) | 0},${(c[1] * 0.55) | 0},${Math.min(255, c[2] * 0.75) | 0},0.34)`;
-    const litCol = `rgba(255,255,255,0.09)`;
+  // ---- far mountains (arctic ranges: pale, jagged, snow capped) ----
+  const moonLit = st.moon * (1 - 0.6 * Lm);
+  const hz = horizonRGB;
+  const mtnDay: RGB[] = [mix([88, 112, 156], hz, 0.45), mix([66, 90, 134], hz, 0.3)];
+  const mtnNight: RGB[] = [[13, 22, 46], [10, 17, 36]];
+  const pxk = [0.05, 0.1], amp = [78, 46], base = [4, 2];
+  for (let Ly = 0; Ly < 2; Ly++) {
+    let c = mix(mtnNight[Ly], mtnDay[Ly], Math.pow(L, 0.85));
+    c = mix(c, [30 + 70 * moonLit, 44 + 80 * moonLit, 70 + 90 * moonLit], moonLit * 0.35);
+    c = mix(c, gray, storm * 0.55);
+    let cap = mix([46, 62, 104], mix([226, 236, 250], [255, 214, 196], warm * 0.6), Math.pow(L, 0.9));
+    cap = mix(cap, [150 + 80 * moonLit, 170 + 70 * moonLit, 210 + 40 * moonLit], moonLit * 0.4);
+    cap = mix(cap, gray, storm * 0.5);
+    const m = mtn[Ly], u0 = Math.floor((x0 + camX * 0) * pxk[Ly]) + 700 * Ly;
+    const cs = rgb(c), cc = rgb(cap), shadeCol = rgba(mix(c, [0, 4, 14], 0.45), 0.5), litCol = rgba(mix(cap, c, 0.4), 0.4);
+    const par = camX * pxk[Ly];
     for (let i = 0; i < w; i++) {
-      const u = (((u0 + i) % NS) + NS) % NS, un = (u + 3) % NS, up = (u + NS - 3) % NS;
-      const hgt = m[u] * amp[L];
-      const top = yShift - hgt;
-      if (top >= h) continue;
+      const u = ((Math.floor(par + i) % NS) + NS) % NS, un = (u + 3) % NS, up = (u + NS - 3) % NS;
+      const hgt = m[u] * amp[Ly] + 2 - base[Ly];
+      if (hgt < 1) continue;
+      const top = Math.floor(hY - hgt);
+      if (top >= hY) continue;
       const slope = m[un] - m[up];
-      const y1 = Math.max(0, Math.floor(top));
-      ctx.fillStyle = cs; ctx.fillRect(i, y1, 1, h - y1);
-      const face = Math.min(hgt * 0.8, 10 + hgt * 0.45) | 0;
-      if (slope > 0.01) { ctx.fillStyle = shadeCol; ctx.fillRect(i, y1, 1, face); }
-      else if (slope < -0.01) { ctx.fillStyle = litCol; ctx.fillRect(i, y1, 1, face); }
-      if (m[u] > 0.4) {
-        const capLen = Math.min(hgt * 0.5, (m[u] - 0.4) * amp[L] * 0.9 + 1);
-        ctx.fillStyle = slope > 0.01 ? cca : cc;
-        ctx.fillRect(i, y1, 1, Math.max(1, capLen | 0));
+      const y1 = Math.max(0, top), hh = Math.min(hY, hY + 2) - y1;
+      ctx.fillStyle = cs; ctx.fillRect(i, y1, 1, hh);
+      const face = Math.min(hgt * 0.8, 8 + hgt * 0.4) | 0;
+      if (slope > 0.012) { ctx.fillStyle = shadeCol; ctx.fillRect(i, y1, 1, face); } else if (slope < -0.012) { ctx.fillStyle = litCol; ctx.fillRect(i, y1, 1, face); }
+      if (m[u] > 0.38) { const capLen = Math.min(hgt * 0.55, (m[u] - 0.38) * amp[Ly] * 1.1 + 1); ctx.fillStyle = cc; ctx.fillRect(i, y1, 1, Math.max(1, capLen | 0)); }
+    }
+    void u0;
+  }
+  // ---- glacier cliffs (tabular ice with vertical faces) ----
+  {
+    let c = mix([14, 26, 52], mix([118, 160, 196], hz, 0.35), Math.pow(L, 0.85));
+    c = mix(c, [38 + 60 * moonLit, 60 + 70 * moonLit, 92 + 70 * moonLit], moonLit * 0.4); c = mix(c, gray, storm * 0.5);
+    const top = mix(c, [255, 255, 255], 0.25 + 0.3 * Lm), face = mix(c, [0, 8, 24], 0.3);
+    const cs = rgb(c), ct = rgb(top), cf = rgb(face), par = camX * 0.16;
+    for (let i = 0; i < w; i++) {
+      const u = ((Math.floor(par + i) % NS) + NS) % NS, hh = cliffH[u];
+      if (hh <= 0) continue;
+      const y1 = Math.floor(hY - hh);
+      ctx.fillStyle = cs; ctx.fillRect(i, y1, 1, Math.min(hY, hY + 2) - y1);
+      ctx.fillStyle = ct; ctx.fillRect(i, y1, 1, 1 + (hh > 14 ? 1 : 0));
+      if (cliffS[u]) { ctx.fillStyle = cf; ctx.fillRect(i, y1 + 1, 1, hh | 0); }
+      else if (((u >> 2) * 7 + (u >> 5)) % 5 === 0) { ctx.fillStyle = cf; ctx.fillRect(i, y1 + 4, 1, 1); if (hh > 12) ctx.fillRect(i, y1 + 9, 1, 1); }
+    }
+  }
+  // ---- the sea plane below the horizon (dark water reflecting the glow), up to the near water ----
+  if (hY < h) {
+    const rows2 = Math.min(h - hY, 40);
+    const near = mix([6, 15, 28], [10, 24, 40], L), farC = mix(near, mix(hz, [8, 16, 30], 0.45), 0.55 * Lm + 0.1);
+    for (let y = 0; y < rows2; y++) {
+      const k = Math.min(1, y / 14);
+      let c = mix(farC, near, k * 0.8);
+      if (storm > 0) c = mix(c, gray, storm * 0.5 * (1 - k * 0.4));
+      ctx.fillStyle = rgb(c); ctx.fillRect(0, hY + y, w, 1);
+    }
+    // glints on the far water near the glow
+    if (Lm > 0.1 || st.moon > 0.2) {
+      const gcol: RGB = st.moon > 0.2 && Lm < 0.4 ? [180, 200, 240] : mix(hz, [255, 230, 200], 0.4);
+      const gx = w * (Lm > 0.1 ? st.sunX : st.moonX), ga = (Lm > 0.1 ? Lm * 0.35 : st.moon * 0.4) * (1 - storm);
+      ctx.fillStyle = rgba(gcol, ga);
+      for (let y = 0; y < 18; y++) {
+        const half = 6 + y * 3.2, jit = Math.sin(t * 1.3 + y * 1.9) * 3;
+        const cnt = 1 + (y >> 2);
+        for (let k = 0; k < cnt; k++) { const dx = (hash(y * 13.1 + k * 7.3 + Math.floor(t * 0.5)) - 0.5) * 2 * half; ctx.fillRect((gx + dx + jit) | 0, hY + y + 1, 2 + (y >> 3), 1); }
       }
     }
-    // aerial perspective: fade the lower part of the layer toward the horizon colour
-    const hz = ctx.createLinearGradient(0, yShift - amp[L] * 0.5, 0, yShift + 2);
-    hz.addColorStop(0, css(hor, 0)); hz.addColorStop(1, css(hor, 0.42 - L * 0.08));
-    ctx.fillStyle = hz; ctx.fillRect(0, Math.max(0, yShift - amp[L] * 0.5), w, h);
+    // thin pale pack ice line right at the horizon (ice blink)
+    ctx.fillStyle = rgba(mix(hz, [225, 236, 250], 0.35 + 0.3 * Lm), 0.28 + 0.4 * Lm);
+    for (let i = 0; i < w; i += 3) { const u = ((Math.floor(camX * 0.12 + i) % NS) + NS) % NS; if (hash(u * 0.37) > 0.35) ctx.fillRect(i, hY, 3 + ((u * 5) & 3), 1); }
   }
-  // spruce forest silhouette (front-most background layer)
+  // ---- icebergs standing on the horizon ----
   {
-    const pf = 0.55, pyf = 0.85, by = 292 + (camY - 270) * (1 - pyf) - y0;
-    const fc = mix([12, 18, 36], [30, 54, 72], day), c = mix(fc, gray, storm * 0.4);
-    ctx.fillStyle = css(mix(c, hor, warm * 0.18));
-    const u0 = Math.floor(x0 * pf);
-    for (let i = 0; i < w; i++) {
-      const u = (((u0 + i) % NS) + NS) % NS, hh = forest[u];
-      if (hh <= 0) { ctx.fillRect(i, Math.floor(by - 3), 1, h); continue; }
-      const top = Math.floor(by - hh);
-      if (top < h) ctx.fillRect(i, Math.max(0, top), 1, h);
-    }
-    // snow dusting on the forest
-    ctx.fillStyle = css(mix([70, 90, 120], [210, 226, 244], day), 0.5);
-    for (let i = 0; i < w; i += 1) {
-      const u = (((u0 + i) % NS) + NS) % NS, hh = forest[u];
-      if (hh > 8 && ((u * 7) & 3) === 0) ctx.fillRect(i, Math.floor(by - hh), 1, 1);
+    const lit = mix([22, 40, 74], mix([200, 226, 244], hz, 0.3), Math.pow(L, 0.8));
+    const shd = mix([10, 20, 42], mix([88, 122, 170], hz, 0.3), Math.pow(L, 0.8));
+    const litC = mix(mix(lit, [90 + 120 * moonLit, 120 + 110 * moonLit, 170 + 70 * moonLit], moonLit * 0.4), gray, storm * 0.55);
+    const shdC = mix(shd, gray, storm * 0.5);
+    const cl = rgb(litC), cd = rgb(shdC), cw = rgb(mix(litC, [255, 255, 255], 0.35));
+    const par = camX * 0.26;
+    for (const b of bergs) {
+      let bx = ((b.x - par) % NS + NS) % NS; if (bx > NS - 60) bx -= NS;
+      if (bx + b.w < -4 || bx > w + 4) continue;
+      const peakAt = b.w * (0.25 + 0.5 * b.peak);
+      for (let i = 0; i < b.w; i++) {
+        const xx = Math.round(bx + i); if (xx < 0 || xx >= w) continue;
+        const u = i / b.w;
+        // faceted outline: rises with steps to the peak (or a flat table top), then falls steeply
+        let hh: number;
+        if (b.flat) hh = b.h * (0.55 + 0.45 * Math.min(1, Math.min(u, 1 - u) * 5)) + (hash(i * 0.7 + b.x) > 0.8 ? 2 : 0);
+        else { const t2 = i < peakAt ? i / peakAt : 1 - (i - peakAt) / (b.w - peakAt); hh = b.h * (0.25 + 0.75 * Math.pow(Math.max(0, t2), 0.8)) + Math.floor(hash(i * 0.6 + b.x) * 2); }
+        const y1 = Math.floor(hY - hh + 2);
+        const sunward = (i / b.w) < (0.3 + 0.4 * b.shade);
+        ctx.fillStyle = sunward ? cl : cd; ctx.fillRect(xx, y1, 1, Math.floor(hh));
+        if (sunward && hash(i * 1.9 + b.x) > 0.6) { ctx.fillStyle = cw; ctx.fillRect(xx, y1, 1, 1); }
+      }
+      // reflection stub
     }
   }
 }
@@ -304,18 +359,21 @@ function disc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) 
   }
 }
 
-/** Moon disc minus a shifted shadow disc (spans per row, no background colour needed). */
-function crescent(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, shift: number, phase: number) {
+/** Moon disc with its terminator (phase 0 new, 0.5 full; waxing is lit on the right). Dark side shows faint earthshine. */
+function moonDisc(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, phase: number, vis: number) {
   const ri = Math.ceil(r), X = Math.round(cx), Y = Math.round(cy);
+  const c = Math.cos(2 * Math.PI * phase), waxing = phase < 0.5;
+  ctx.fillStyle = `rgba(60,72,110,${0.45 * vis})`; disc(ctx, cx, cy, r);
+  ctx.fillStyle = `rgba(228,234,248,${Math.min(1, vis * 1.3)})`;
   for (let dy = -ri; dy <= ri; dy++) {
     const hw = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy) + 0.25));
-    if (phase < 0.06) { ctx.fillRect(X - hw, Y + dy, hw * 2 + 1, 1); continue; }
-    // shadow disc centred at +shift
-    const sh = Math.sqrt(Math.max(0, r * r - dy * dy));
-    const s0 = Math.round(shift - sh), s1 = Math.round(shift + sh);
-    // lit = [-hw, hw] minus [s0, s1]
-    if (s1 < -hw || s0 > hw) { ctx.fillRect(X - hw, Y + dy, hw * 2 + 1, 1); continue; }
-    if (s0 > -hw) ctx.fillRect(X - hw, Y + dy, s0 + hw, 1);
-    if (s1 < hw) ctx.fillRect(X + s1 + 1, Y + dy, hw - s1, 1);
+    const xt = Math.round(c * hw);
+    let a: number, b: number;
+    if (waxing) { a = xt; b = hw; } else { a = -hw; b = -xt; }
+    if (b >= a) ctx.fillRect(X + a, Y + dy, b - a + 1, 1);
   }
+  // maria
+  ctx.fillStyle = `rgba(150,160,190,${0.5 * vis})`;
+  const mar: [number, number, number][] = [[-2, -2, 2], [1, 1, 2], [2, -3, 1], [-1, 3, 1]];
+  for (const [mx, my, mr] of mar) { const lit = waxing ? mx > c * 4 - 1 : mx < -c * 4 + 1; if (lit && c < 0.9) ctx.fillRect(X + mx, Y + my, mr, mr); }
 }
