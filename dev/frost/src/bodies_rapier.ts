@@ -52,7 +52,7 @@ interface Collider { b: RAPIER.RigidBody | null; ver: number; sum: number; last:
 const colliders = new Map<number, Collider>();
 
 type TerrainMode = 'cuboid' | 'voxel';
-let terrainMode: TerrainMode = 'voxel';
+let terrainMode: TerrainMode = 'cuboid';
 let vox: RAPIER.Collider | null = null;      // voxel mode: the single world-sized terrain collider
 let voxBody: RAPIER.RigidBody | null = null;
 const colToId = new Map<number, number>();   // collider handle -> body id (contact events)
@@ -81,7 +81,7 @@ export function initBodies(): void {
   bodies.clear(); aux.clear(); colliders.clear(); hitMax.clear(); shatterQ.clear(); colToId.clear();
   vox = null; voxBody = null;
   const mode = (globalThis as { __FROST_TERRAIN?: string }).__FROST_TERRAIN;
-  terrainMode = mode === 'cuboid' ? 'cuboid' : 'voxel';
+  terrainMode = mode === 'voxel' ? 'voxel' : 'cuboid';
   nextId = 1; clock = 0; acc = 0;
   pw = new RAPIER.World({ x: 0, y: 9.8 });
   pw.timestep = FIXED;

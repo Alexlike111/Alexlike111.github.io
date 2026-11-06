@@ -6,7 +6,7 @@ import {
   W, H, M, F_DIST, F_TREE, BOND_SOLID, mat, dens, bond, flags, body, set, wake,
 } from './world';
 import { G } from './state';
-import { makeBody } from './bodies';
+import { makeBody } from './phys';
 
 // ---- tunables ----
 const BUDGET = 1000;

@@ -4,7 +4,7 @@ import { G, Fire } from './state';
 import { pl, PH } from './player';
 import { spawn, PK } from './particles';
 import { markStruct, supportMargin } from './structure';
-import { makeBody, bodyAtIndex, removeBody, bodies } from './bodies';
+import { makeBody, bodyAtIndex, removeBody, bodies } from './phys';
 import type { Sound } from './audio';
 
 export const TOOLS = [

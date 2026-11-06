@@ -3,7 +3,8 @@ import { G } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt } from './heat';
 import { stepSim } from './sim';
-import { initBodies, stepBodies, bodies } from './bodies';
+import { initBodies, stepBodies, allBodies, setEngine, engine, spawnStressTest } from './phys';
+const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
 import { TOOLS, tool, inv, usePrimary, useSecondary, idleTool, interact, eat, placeFire, stepFires, ghostMargin, reachPoint, resetTools, bindSound, inReach } from './tools';
@@ -91,6 +92,7 @@ function newGame() {
   G.time = 9 * 60; G.timeScale = 1;
   const sx = START_X; const sy = surfaceAt(sx);
   resetPlayer(sx, sy - 1);
+  renderer.invalidate();
   P.n = 0; ended = false; paused = false; tutorial = 0;
   updateCamera(0, true);
   // pre-warm weather / heat
@@ -274,14 +276,35 @@ function frame(now: number) {
 }
 
 ui.onSound = (on) => { sound.init(); sound.setMuted(!on); };
-newGame();
-requestAnimationFrame(frame);
-ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); });
+
+// ---------------- physics engine switch (compare planck vs Rapier) ----------------
+const physChip = document.createElement('div');
+physChip.id = 'physchip';
+physChip.innerHTML = '<button id="phys-engine" type="button"></button><button id="phys-stress" type="button">Тест: 40 тел</button><span id="phys-fps"></span>';
+document.getElementById('ui')!.appendChild(physChip);
+const engBtn = physChip.querySelector('#phys-engine') as HTMLButtonElement;
+const fpsSpan = physChip.querySelector('#phys-fps') as HTMLSpanElement;
+const labelEngine = () => { engBtn.textContent = 'Физика: ' + (engine === 'rapier' ? 'Rapier' : 'planck'); };
+async function toggleEngine() { await setEngine(engine === 'rapier' ? 'planck' : 'rapier'); labelEngine(); ui.toast('Движок физики: ' + (engine === 'rapier' ? 'Rapier 2D (wasm)' : 'planck.js'), 'info'); }
+engBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleEngine(); });
+physChip.querySelector('#phys-stress')!.addEventListener('click', (e) => { e.stopPropagation(); const n = spawnStressTest(40, pl.x, pl.y - 140); ui.toast(`Сброшено ${n} брёвен и пластов`, 'info'); });
+window.addEventListener('keydown', (e) => { if (e.code === 'KeyP') toggleEngine(); if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
+setInterval(() => { fpsSpan.textContent = `${Math.round(fps)} к/с · тел ${allBodies().size}`; }, 500);
+
+async function boot() {
+  try { await setEngine('rapier'); } catch (e) { console.warn('Rapier failed, using planck', e); }
+  labelEngine();
+  newGame();
+  requestAnimationFrame(frame);
+  ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); });
+}
+boot();
 
 // ---------------- debug / test API ----------------
 (window as unknown as Record<string, unknown>).__frost = {
   G, pl, inv, tool, bodies, mat, dens, bond, W, H, idx, inb, CELL,
   start: () => { running = true; ui.hide(); },
+  setEngine, engine: () => engine, stress: (n: number) => spawnStressTest(n, pl.x, pl.y - 140),
   teleport: (x: number) => { pl.x = x; pl.y = surfaceAt(x) - 1; pl.vy = 0; updateCamera(0, true); },
   give: (k: string, n: number) => { const o = inv as unknown as Record<string, unknown>; if (k === 'blocks') for (let i = 0; i < n; i++) inv.blocks.push(320); else if (typeof o[k] === 'number') o[k] = (o[k] as number) + n; else o[k] = true; },
   setTime: (min: number) => { G.time = min; },

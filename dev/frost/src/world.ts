@@ -133,7 +133,7 @@ export function generate(s = 20261106) {
     let top = groundY[x];
     for (let y = top - 1; y > 0; y--) { if (mat[idx(x, y)] === M.AIR) { top = y + 1; break; } }
     const slope = (groundY[Math.min(W - 1, x + 6)] - groundY[Math.max(0, x - 6)]) / 12; // >0: ground going down to the east (lee)
-    let depth = 0.9 + (fbm(x * 0.008 + 7, 4) - 0.5) * 0.8 + Math.max(0, slope) * 2.2;
+    let depth = 1.7 + (fbm(x * 0.008 + 7, 4) - 0.5) * 1.0 + Math.max(0, slope) * 2.2;
     depth += 1.6 * Math.exp(-(((x - 1250) / 90) ** 2)) + 1.4 * Math.exp(-(((x - 820) / 60) ** 2)) + 1.2 * Math.exp(-(((x - 2260) / 70) ** 2));
     if (x > lakeA && x < lakeB) depth *= 0.55;
     const cells = Math.max(6, Math.round(depth / CELL));

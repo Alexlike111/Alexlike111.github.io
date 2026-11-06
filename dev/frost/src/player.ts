@@ -3,7 +3,7 @@ import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, blocksPlayer, isG
 import { G } from './state';
 import { tempAt, windAt, shelterAt } from './heat';
 import { spawn, PK } from './particles';
-import { bodyAtIndex, impulseAt } from './bodies';
+import { bodyAtIndex, impulseAt } from './phys';
 
 export const pl = {
   x: 600, y: 380, vx: 0, vy: 0, face: 1, onGround: false,
