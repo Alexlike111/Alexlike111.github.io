@@ -909,7 +909,10 @@ export class UI {
       </div>
       <div class="built-wrap"><span class="cap">Построено</span>${built}</div>
       <div class="card-actions"></div>`;
-    const text = cause.trim() || (win ? 'Солнце встало над плато. Огонь и укрытие выдержали.' : 'Холод оказался сильнее.');
+    // empty or placeholder cause ('тест') falls back to a proper line
+    const raw = cause.trim();
+    const junk = !raw || /^тест$/i.test(raw);
+    const text = junk ? (win ? 'Солнце встало над плато. Огонь и укрытие выдержали.' : 'Мороз оказался сильнее.') : raw;
     (card.querySelector('.cause') as HTMLElement).textContent = text.charAt(0).toUpperCase() + text.slice(1);
     card.querySelectorAll('.built li').forEach((li, i) => { li.textContent = names[i]; });
     const again = this.btn('Ещё раз', 'btn-primary', () => { onRestart(); });
