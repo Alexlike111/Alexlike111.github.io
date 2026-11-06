@@ -64,7 +64,7 @@ function crumble(x0: number, x1: number, y0: number, y1: number, all: boolean): 
   }
   return n;
 }
-let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkSince = -1, trunkMsgT = -99, highMsgT = -99;
+let stuckT = 0, pushT = 0, stuckMsgT = -99, trunkSince = -1, trunkMsgT = -99, highSince = -1, highMsgT = -99;
 /** what blocks the lead column this step: 0 nothing, 1 snow, 2 tree trunk / stump, 3 placed timber / crate, 4 ground / rock / ice */
 let blockKind = 0;
 
@@ -224,19 +224,23 @@ export function stepPlayer(inp: MoveIn) {
       if (blocksPlayer(i) && !isGranular(i) && !boughSnow(i)) { blockedAt = y; break; }
       if (body[i]) { blockedAt = y; break; }
     }
+    if (blockedAt < 0) highSince = -1;
     if (blockedAt >= 0) {
       const stepH = Math.round(pl.y) - blockedAt;
       // can we step up?
       let free = stepH <= 7;
       if (free) for (let y = Math.round(pl.y - pl.h - stepH); y < blockedAt; y++) if (solid(lead, y) && !isGranular(idx(lead, y)) && !boughSnow(idx(lead, y))) { free = false; break; }
-      if (free) { pl.y -= stepH; pushT = 0; }
+      if (free) { pl.y -= stepH; pushT = 0; highSince = -1; }
       else if (inp.jump && !crawl && stepH <= 34 && pl.stamina > 0.02 && canClimb(lead, Math.round(pl.y))) {
         // scramble: jump held against a wall up to ~1.7 m high with room on top -> pull himself up it
-        pl.vy = Math.min(pl.vy, -42); pl.stamina -= dt * 0.06; pushT = 0; stuckT = 0;
+        pl.vy = Math.min(pl.vy, -42); pl.stamina -= dt * 0.06; pushT = 0; stuckT = 0; highSince = -1;
       }
       else {
         // jump held against a wall he cannot scramble up (taller than the limit): say so, and what to do
-        if (inp.jump && !crawl && wallTooTall(lead, Math.round(pl.y)) && G.realTime - highMsgT > 5) { highMsgT = G.realTime; tool.msg = 'Слишком высоко — вырежь ступеньку лопатой в стене'; }
+        // (only once he has pressed on for ~0.6 s: a jump that carries him up the wall is not a stall)
+        if (inp.jump && !crawl && wallTooTall(lead, Math.round(pl.y))) { if (highSince < 0) highSince = G.realTime; }
+        else highSince = -1;
+        if (highSince >= 0 && G.realTime - highSince > 0.6 && G.realTime - highMsgT > 5) { highMsgT = G.realTime; tool.msg = 'Слишком высоко — вырежь ступеньку лопатой в стене'; }
         // a thin snow pillar (<= 2 cells wide) in the way gives way after 0.3 s of pushing
         let thin = true, any = false;
         for (let y = Math.round(pl.y - pl.h); y < Math.round(pl.y) - 1; y++) {

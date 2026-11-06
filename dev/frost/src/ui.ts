@@ -196,8 +196,7 @@ export class UI {
   /** persisted master volume 0..1 (localStorage, try/catch) */
   volume = ((): number => { try { const v = parseFloat(localStorage.getItem('frost.vol') ?? ''); return isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.8; } catch { return 0.8; } })();
   private hungerToast = false;
-  /** pause-screen physics comparison: switch engine / drop 40 test bodies */
-  onEngine: () => void = () => {};
+  /** pause-screen physics lab: drop 40 test bodies */
   onStress: () => void = () => {};
   /** «Тест производительности» (title card / pause menu); the argument says where it was pressed */
   onBench: (fromPause: boolean) => void = () => {};
@@ -210,7 +209,7 @@ export class UI {
   private soundOn = true;
   private overlay: HTMLElement | null = null;
   private physInfo = '';
-  private physEls: { info: HTMLElement; engine: HTMLElement } | null = null;
+  private physEls: { info: HTMLElement } | null = null;
   private xrayEl!: HTMLElement;
   private xrayMode = 0;
   private beatEl: HTMLElement | null = null;
@@ -486,8 +485,6 @@ export class UI {
   private paintPhys(): void {
     const p = this.physEls; if (!p) return;
     p.info.textContent = this.physInfo || '—';
-    const eng = this.physInfo.split(' · ')[0].trim();
-    p.engine.textContent = eng || 'Движок';
   }
 
   private buildBottom(): void {
@@ -1068,16 +1065,15 @@ export class UI {
 
     // physics comparison: kept on purpose, presented as a deliberate "laboratory" drawer (closed by default)
     const lab = el('section', 'lab');
-    lab.setAttribute('aria-label', 'Лаборатория (сравнение физики)');
-    const toggle = el('button', 'lab-toggle', `<i class="lab-line"></i>${ico('flask', 'lab-ico')}<span>Лаборатория (сравнение физики)</span>${ico('chev', 'lab-chev')}<i class="lab-line"></i>`);
+    lab.setAttribute('aria-label', 'Лаборатория (физика тел)');
+    const toggle = el('button', 'lab-toggle', `<i class="lab-line"></i>${ico('flask', 'lab-ico')}<span>Лаборатория (физика тел)</span>${ico('chev', 'lab-chev')}<i class="lab-line"></i>`);
     toggle.type = 'button';
     toggle.setAttribute('aria-expanded', 'false');
     const phys = el('div', 'plate phys');
     phys.hidden = true;
     phys.innerHTML = `
-      <div class="phys-head"><span class="cap">Сравнение физики · Rapier и planck</span><i class="phys-led"></i></div>
+      <div class="phys-head"><span class="cap">Физика тел · Rapier 2D</span><i class="phys-led"></i></div>
       <div class="phys-row">
-        <button type="button" class="pbtn pb-engine"><span class="pb-lab">Движок</span><span class="pb-val"></span>${ico('swap')}<kbd>P</kbd></button>
         <button type="button" class="pbtn pb-stress"><span class="pb-lab">Нагрузка</span><span class="pb-val">Сбросить 40 тел</span>${ico('put')}<kbd>K</kbd></button>
       </div>
       <p class="phys-info mono" aria-live="off"></p>
@@ -1089,9 +1085,6 @@ export class UI {
       toggle.setAttribute('aria-expanded', String(open));
       toggle.blur();
     });
-    const eb = phys.querySelector('.pb-engine') as HTMLButtonElement;
-    const engLabel = eb.querySelector('.pb-val') as HTMLElement;
-    eb.addEventListener('click', () => { eb.classList.add('busy'); window.setTimeout(() => eb.classList.remove('busy'), 800); this.onEngine(); eb.blur(); });
     (phys.querySelector('.pb-stress') as HTMLButtonElement).addEventListener('click', (e) => { this.onStress(); (e.currentTarget as HTMLElement).blur(); });
     lab.append(toggle, phys);
     card.appendChild(lab);
@@ -1114,7 +1107,7 @@ export class UI {
 
     ov.appendChild(card);
     this.setOverlay(ov, 'pause');
-    this.physEls = { info: phys.querySelector('.phys-info') as HTMLElement, engine: engLabel };
+    this.physEls = { info: phys.querySelector('.phys-info') as HTMLElement };
     this.paintPhys();
     window.setTimeout(() => resume.focus({ preventScroll: true }), 60);
   }

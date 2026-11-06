@@ -1,5 +1,5 @@
 // Rigid bodies (Rapier2D) living inside the cell grid: trees, snow slabs, beams, debris.
-// Drop-in alternative to bodies.ts (planck) with the same exported API. Bodies are rasterised
+// Rigid-body backend (Rapier 2D, wasm). Bodies are rasterised
 // ("stamped") into the grid every step; terrain is exposed to Rapier either as lazily built
 // static cuboid colliders per world chunk ('cuboid', the default) or as ONE world-sized voxel collider that is
 // patched incrementally with setVoxel ('voxel'). Switch with globalThis.__FROST_TERRAIN = 'voxel' (before initBodies()).
@@ -13,7 +13,7 @@ import { spawn, PK } from './particles';
 import { pnow, pend as pprof } from './prof';
 
 export type BodyKind = 'tree' | 'slab' | 'beam' | 'debris';
-/** Thin planck-like wrapper around a Rapier rigid body. Pose is cached after every physics step. */
+/** Thin wrapper around a Rapier rigid body. Pose is cached after every physics step. */
 export class PhysBody {
   rb: RAPIER.RigidBody; cols: RAPIER.Collider[] = [];
   private px = 0; private py = 0; private ang = 0;

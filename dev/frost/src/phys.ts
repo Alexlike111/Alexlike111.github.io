@@ -1,47 +1,29 @@
-// Runtime switch between the planck (bodies.ts) and Rapier (bodies_rapier.ts) rigid-body backends.
-// Same API as bodies.ts. Each backend keeps its own module state (own world, own `bodies` Map).
-import * as PL from './bodies';
+// Rigid bodies: Rapier 2D (wasm) backend, re-exported under one module name.
+// (planck.js was removed after the in-game benchmark: same scenario, 5x slower on phones.)
 import * as RP from './bodies_rapier';
 import { M, W, CELL, mat, body as bodyGrid, set as setCell, idx, inb } from './world';
 
-export type BodyKind = PL.BodyKind;
-/** Common view of both backends' records (`b` is a planck Body or the Rapier wrapper). */
-export type BodyRec = Omit<PL.BodyRec, 'b'> & {
-  b: { getPosition(): { x: number; y: number }; getAngle(): number; getLinearVelocity(): { x: number; y: number } };
-};
-type Impl = typeof PL | typeof RP;
+export type BodyKind = RP.BodyKind;
+export type BodyRec = RP.BodyRec;
 
-export let engine: 'planck' | 'rapier' = 'planck';
-let impl: Impl = PL;
-/** Live binding to the active backend's body Map (re-assigned by setEngine). Prefer allBodies(). */
-export let bodies: Map<number, BodyRec> = PL.bodies as unknown as Map<number, BodyRec>;
-export const allBodies = (): Map<number, BodyRec> => bodies;
+export const engine = 'rapier' as const;
+export const bodies = RP.bodies;
+export const allBodies = (): Map<number, BodyRec> => RP.bodies;
+/** Load the wasm module and create the world (call once at boot, before initBodies). */
+export const initPhysics = RP.initPhysics;
 
-export async function setEngine(e: 'planck' | 'rapier'): Promise<void> {
-  if (e === engine) return;
-  if (e === 'rapier') await RP.initPhysics();
-  // hand the old backend's bodies back to the grid as plain cells (structure.ts re-bodies unsupported islands)
-  for (const r of [...impl.bodies.values()]) (impl as typeof PL).removeBody(r as PL.BodyRec, true);
-  (impl as typeof PL | typeof RP).disposeBodies(); // free the old world (Rapier: wasm world, colliders, event queue)
-  engine = e; impl = e === 'rapier' ? RP : PL;
-  bodies = impl.bodies as unknown as Map<number, BodyRec>;
-  impl.initBodies();
-}
-
-export function initBodies(): void { impl.initBodies(); }
-export function stepBodies(dt: number) { return impl.stepBodies(dt); }
-export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null {
-  return impl.makeBody(cells, kind, vx, vy, av) as unknown as BodyRec | null;
-}
-export function bodyAtIndex(i: number): BodyRec | null { return impl.bodyAtIndex(i) as unknown as BodyRec | null; }
-export function removeBody(rec: BodyRec, rasterizeCells: boolean): void { (impl as typeof PL).removeBody(rec as unknown as PL.BodyRec, rasterizeCells); }
-export function refreshBody(rec: BodyRec): void { (impl as typeof PL).refreshBody(rec as unknown as PL.BodyRec); }
-export function impulseAt(rec: BodyRec, x: number, y: number, ix: number, iy: number): void { (impl as typeof PL).impulseAt(rec as unknown as PL.BodyRec, x, y, ix, iy); }
+export function initBodies(): void { RP.initBodies(); }
+export function stepBodies(dt: number) { return RP.stepBodies(dt); }
+export function makeBody(cells: number[], kind: BodyKind, vx = 0, vy = 0, av = 0): BodyRec | null { return RP.makeBody(cells, kind, vx, vy, av); }
+export function bodyAtIndex(i: number): BodyRec | null { return RP.bodyAtIndex(i); }
+export function removeBody(rec: BodyRec, rasterizeCells: boolean): void { RP.removeBody(rec, rasterizeCells); }
+export function refreshBody(rec: BodyRec): void { RP.refreshBody(rec); }
+export function impulseAt(rec: BodyRec, x: number, y: number, ix: number, iy: number): void { RP.impulseAt(rec, x, y, ix, iy); }
 
 /**
  * Drop `n` mixed logs (2-6 m) and snow slabs (0.5-1.5 m) from above grid position (x, y) (cells).
  * Bodies are laid out in free air, highest first; returns how many were actually created
- * (bodies.ts/bodies_rapier.ts cap live bodies at MAX_BODIES = 60, extra spawns evict older slabs).
+ * (bodies_rapier.ts caps live bodies at MAX_BODIES = 60, extra spawns evict older slabs).
  */
 export function spawnStressTest(n: number, x: number, y: number): number {
   let made = 0, seed = 12345;

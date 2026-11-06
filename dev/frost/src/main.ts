@@ -3,7 +3,7 @@ import { G, FORCE } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt } from './heat';
 import { stepSim } from './sim';
-import { initBodies, stepBodies, allBodies, setEngine, engine, spawnStressTest } from './phys';
+import { initBodies, stepBodies, allBodies, initPhysics, spawnStressTest } from './phys';
 const bodies = { values: () => allBodies().values(), get size() { return allBodies().size; } };
 import { stepStructure } from './structure';
 import { pl, stepPlayer, stepBody, resetPlayer, events, PH, PW, die } from './player';
@@ -27,8 +27,8 @@ try { renderer = new Renderer(glCanvas); }
 catch (e) { const p = document.createElement('p'); p.style.cssText = 'color:#e8f0f6;background:#0c1420;font:16px system-ui;padding:24px;margin:0;min-height:100%'; p.textContent = 'Игра не смогла запустить графику: ' + ((e as Error).message || e) + '. Нужен браузер с WebGL2 (Chrome, Edge, Safari 15+, Firefox).'; document.body.replaceChildren(p); throw e; }
 
 G.mobile = input.mobile || matchMedia('(pointer: coarse)').matches;
-// start low on phones and on software / old GPUs; the adaptive controller below walks dynamic resolution and quality from there
-G.quality = G.mobile || /swiftshader|llvmpipe|softpipe|software|mali-4|mali-t[0-7]|adreno \(tm\) [2-4]\d\d|powervr (sgx|ge8)/.test(renderer.gpu) ? 0 : 1;
+// start low on phones and on software / old GPUs; the adaptive controller below walks quality up (touch: the QLADDER steps) or dynamic resolution down (desktop)
+G.quality =G.mobile || /swiftshader|llvmpipe|softpipe|software|mali-4|mali-t[0-7]|adreno \(tm\) [2-4]\d\d|powervr (sgx|ge8)/.test(renderer.gpu) ? 0 : 1;
 
 let running = false, paused = false, ended = false;
 let cssW = 0, cssH = 0, dpr = 1;
@@ -547,9 +547,9 @@ function drawOverlay(aim: [number, number] | null) {
 // ---------------- adaptive quality ----------------
 // Frame-time EMA drives (1) dynamic resolution of the screen pass (nearest upscale, UI stays crisp), (2) auto drop to quality 0.
 // The GPU headroom is invisible while vsync-locked, so resolution is raised again by probing: try a step up after a hold-off, undo and back off if it hurts.
-const AD = { avg: 16.7, work: 6, n: 0, t: 0, good: 0, probing: false, probeT: 0, backoff: 3, cool: 0, deep: 0, promoted: false, noPromote: false };
+const AD = { avg: 16.7, work: 6, last: 6, n: 0, t: 0, good: 0, probing: false, probeT: 0, backoff: 3, cool: 0, deep: 0, promoted: false, noPromote: false };
 const AD_BUDGET = 16.7;
-function adaptWork(ms: number) { AD.work += (Math.min(ms, 100) - AD.work) * 0.1; }   // CPU+submit time of a frame: the only headroom visible under vsync
+function adaptWork(ms: number) { AD.last = Math.min(ms, 100); AD.work += (AD.last - AD.work) * 0.1; }   // CPU+submit time of a frame: the only headroom visible under vsync
 function adaptQuality(ms: number) {
   if ((window as unknown as { __noAdapt?: boolean }).__noAdapt) return;
   if (ms > 1000 || paused) { AD.n = 0; return; }                          // tab switch / pause: not representative (the title screen renders the world too, so it adapts)
@@ -579,6 +579,98 @@ function adaptQuality(ms: number) {
   }
 }
 
+// ---------------- touch: quality ladder ----------------
+// Phones start at quality 0 and climb this ladder while there is sustained headroom. Frame times are vsync-locked, so headroom shows
+// as the CPU work estimate (AD.last) staying well under the budget, and the frame p90 staying at the display rate. Desktop keeps adaptQuality above.
+/** quality and screen-pass canvas px per css px (capped by dpr in render.ts); one step per promotion */
+const QLADDER: { q: 0 | 1; s: number }[] = [{ q: 0, s: 0.6 }, { q: 0, s: 0.8 }, { q: 0, s: 1 }, { q: 1, s: 1 }, { q: 1, s: 1.5 }];
+const QL_KEY = 'frost.qlevel';                                             // last stable level on this device; the next session starts one step below it
+const QL_REFRESH = [8.33, 11.11, 13.89, 16.67];                            // frame intervals of 120 / 90 / 72 / 60 Hz
+const QL_WIN = 3000, QL_FAST = 1000, QL_DROP = 20, QL_BLOCK = 30000;       // ms: decision window, fast-drop window, drop threshold, re-promotion block
+
+const pctOf = (a: number[], p: number): number => {
+  if (!a.length) return 0;
+  const s = a.slice().sort((x, y) => x - y);
+  return s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)];
+};
+/** display frame interval: the largest standard interval that the 10th-percentile frame still reaches */
+const snapRefresh = (p10: number): number => { let r = QL_REFRESH[0]; for (const c of QL_REFRESH) if (p10 >= 0.9 * c) r = c; return r; };
+
+/**
+ * Touch quality ladder as a state machine over (timestamp ms, frame ms, work ms). No DOM, so __frost.qctl can drive it with synthetic frames.
+ * - a 3 s window with p90 frame <= 1.05 x refresh (17.5 ms at 60 Hz) and p90 work <= 70% of refresh promotes one step, as a probe;
+ * - the window after a promotion decides the probe: p90 frame over the limit undoes it;
+ * - any 1 s stretch with p90 frame > 20 ms demotes at once (on the bottom step: a dynamic-resolution drop instead);
+ * - a demoted step is not promoted into again for 30 s, so the ladder cannot chatter.
+ * save() is called with each level that passes a window with no probe pending, i.e. the last stable one.
+ */
+function createLadder(o: { start: number; apply: (level: number) => void; save: (level: number) => void; emergency: () => void }) {
+  const N = QLADDER.length;
+  let level = Math.max(0, Math.min(N - 1, o.start | 0)), probe = false, saved = -1, refresh = 16.67, lastFast = -1e9, winStart = 0, lastT = 0;
+  const blocked = new Array<number>(N).fill(-1e9);
+  let win: { t: number; ms: number; w: number }[] = [];
+  const set = (i: number) => { level = i; o.apply(i); };
+  const commit = () => { if (level !== saved) { saved = level; o.save(level); } };
+  const demote = (now: number) => {
+    win = [];
+    if (level === 0) { o.emergency(); return; }
+    blocked[level] = now + QL_BLOCK; probe = false; set(level - 1);
+  };
+  const decide = (now: number) => {
+    const p90 = pctOf(win.map((s) => s.ms), 0.9), w90 = pctOf(win.map((s) => s.w), 0.9);
+    refresh = snapRefresh(pctOf(win.map((s) => s.ms), 0.1));
+    const ok = 1.05 * refresh;
+    win = []; winStart = now;
+    if (probe) {
+      probe = false;
+      if (p90 > ok) { blocked[level] = now + QL_BLOCK; set(level - 1); } else commit();
+      return;
+    }
+    if (p90 > ok) return;                                                   // 17.5-20 ms: hold where we are
+    commit();
+    if (level < N - 1 && w90 <= 0.7 * refresh && now >= blocked[level + 1]) { set(level + 1); probe = true; }
+  };
+  return {
+    feed(now: number, ms: number, work: number) {
+      lastT = now;
+      if (!win.length) winStart = now;
+      win.push({ t: now, ms, w: work });
+      if (now - lastFast >= 250 && win[0].t <= now - 0.9 * QL_FAST) {
+        lastFast = now;
+        if (pctOf(win.filter((s) => s.t > now - QL_FAST).map((s) => s.ms), 0.9) > QL_DROP) { demote(now); return; }
+      }
+      if (now - winStart >= QL_WIN) decide(now);
+    },
+    reset() { win = []; },
+    level: () => level,
+    state: () => ({ level, quality: QLADDER[level].q, scale: QLADDER[level].s, probe, refresh, saved, blockedSec: blocked.map((b) => Math.max(0, Math.round((b - lastT) / 1000))) }),
+  };
+}
+
+let QL: ReturnType<typeof createLadder> | null = null;   // touch only; created at boot
+function qlStart(): number {
+  try { const v = parseInt(localStorage.getItem(QL_KEY) || '', 10); if (v >= 0) return Math.max(0, v - 1); } catch { /* storage blocked: start at 0 */ }
+  return 0;
+}
+function applyQLevel(i: number) {
+  const L = QLADDER[i];
+  G.quality = L.q; renderer.setScaleOverride(L.s); renderer.setDyn(1); resize();
+}
+function saveQLevel(i: number) { try { localStorage.setItem(QL_KEY, String(i)); } catch { /* storage blocked: not remembered */ } }
+/** bottom step only: drop the dynamic resolution, as the desktop rule does (the fast check waits for a fresh second of frames, so this runs about once a second at most) */
+function qlEmergency() { const d = renderer.getDyn(), lo = renderer.dynMin(); if (d > lo + 0.01) renderer.setDyn(Math.max(lo, d * 0.85)); }
+function qlInit() {
+  if (!G.mobile) return;
+  QL = createLadder({ start: qlStart(), apply: applyQLevel, save: saveQLevel, emergency: qlEmergency });
+  applyQLevel(QL.level());
+}
+/** touch: feed the frame times of real gameplay only (title, pause, portrait hold and the benchmark are not representative) */
+function qlFrame(now: number, ms: number, play: boolean) {
+  if (!QL || (window as unknown as { __noAdapt?: boolean }).__noAdapt) return;
+  if (!play || ms > 1000) { QL.reset(); return; }
+  QL.feed(now, ms, AD.last);
+}
+
 // ---------------- main loop ----------------
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60;
 let aimWorld: [number, number] | null = null;
@@ -601,7 +693,8 @@ function frameBody(now: number) {
   fpsAcc += realDt; fpsN++;
   if (prof.on) prof.frameMs = prof.frameMs === undefined ? realDt * 1000 : prof.frameMs + (realDt * 1000 - prof.frameMs) * 0.1;
   if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
-  adaptQuality(rawMs);
+  if (G.mobile) qlFrame(now, rawMs, running && !paused && !(input.mobile && window.innerHeight > window.innerWidth));   // touch: quality ladder
+  else adaptQuality(rawMs);
   const s = bench.active ? bench.input : input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
@@ -711,12 +804,10 @@ ui.onSound = (on) => { sound.init(); sound.setMuted(!on); };
 sound.setVolume(ui.volume);
 ui.onVolume = (v) => { sound.setVolume(v); };
 
-// ---------------- physics engine switch (compare planck vs Rapier) ----------------
-async function toggleEngine() { await setEngine(engine === 'rapier' ? 'planck' : 'rapier'); ui.toast('Движок физики: ' + (engine === 'rapier' ? 'Rapier 2D (wasm)' : 'planck.js'), 'info'); }
-(ui as any).onEngine = toggleEngine;
+// ---------------- physics lab (pause menu): stress test ----------------
 (ui as any).onStress = () => spawnStressTest(40, pl.x, pl.y - 140);
-window.addEventListener('keydown', (e) => { if (e.repeat || !running || ended) return; if (e.code === 'KeyP') toggleEngine(); if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
-setInterval(() => { (ui as any).setPhysInfo?.(`${engine === 'rapier' ? 'Rapier 2D' : 'planck.js'} · ${Math.round(fps)} к/с · тел ${allBodies().size}`); }, 500);
+window.addEventListener('keydown', (e) => { if (e.repeat || !running || ended) return; if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
+setInterval(() => { (ui as any).setPhysInfo?.(`Rapier 2D · ${Math.round(fps)} к/с · тел ${allBodies().size}`); }, 500);
 
 function showTitleScreen() { ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); }); }
 
@@ -727,11 +818,11 @@ const bench = createBench({
   setLoop: (r, p) => { running = r; paused = p; if (r) last = performance.now(); },
   snapCam: () => updateCamera(0, true),
   blocked: () => input.mobile && window.innerHeight > window.innerWidth,
-  setQuality: (q) => { G.quality = q; renderer.setDyn(1); resize(); },
+  setQuality: (q) => { G.quality = q; renderer.setScaleOverride(null); renderer.setDyn(1); resize(); },
   getViewport: () => ({ w: cssW, h: cssH, dpr }),
   setViewport: (v) => { vpOverride = v; resize(); updateCamera(0, true); },
   mute: (on) => { sound.setMuted(on || !(ui as unknown as { soundOn: boolean }).soundOn); },
-  noAdapt: (on) => { (window as unknown as { __noAdapt?: boolean }).__noAdapt = on; AD.n = 0; },
+  noAdapt: (on) => { (window as unknown as { __noAdapt?: boolean }).__noAdapt = on; AD.n = 0; if (!on && QL) { QL.reset(); applyQLevel(QL.level()); } },   // the bench changed quality: put the ladder's step back
   mobile: () => G.mobile,
   fps: () => fps,
   closed: () => { newGame(); running = false; paused = false; showTitleScreen(); },
@@ -739,7 +830,8 @@ const bench = createBench({
 ui.onBench = (fromPause) => { sound.init(); void bench.start({ source: fromPause ? 'pause' : 'title' }); };
 
 async function boot() {
-  try { await setEngine('rapier'); } catch (e) { console.warn('Rapier failed, using planck', e); }
+  qlInit();
+  try { await initPhysics(); } catch (e) { console.error('Rapier failed to load', e); }
   newGame();
   requestAnimationFrame(frame);
   setTimeout(() => { try { renderer.prewarm(); } catch (e) { console.warn('shader prewarm', e); } }, 400);
@@ -753,7 +845,7 @@ boot();
 (window as unknown as Record<string, unknown>).__frost = {
   G, pl, inv, tool, bodies, mat, dens, bond, W, H, idx, inb, CELL,
   start: () => { running = true; ui.hide(); },
-  setEngine, engine: () => engine, stress: (n: number) => spawnStressTest(n, pl.x, pl.y - 140),
+  engine: () => 'rapier', stress: (n: number) => spawnStressTest(n, pl.x, pl.y - 140),
   teleport: (x: number) => { pl.x = x; pl.y = surfaceAt(x) - 1; pl.vy = 0; updateCamera(0, true); },
   give: (k: string, n: number) => { const o = inv as unknown as Record<string, unknown>; if (k === 'blocks') for (let i = 0; i < n; i++) inv.blocks.push(320); else if (typeof o[k] === 'number') o[k] = (o[k] as number) + n; else o[k] = true; },
   setTime: (min: number) => { G.time = min; },
@@ -770,6 +862,8 @@ boot();
   interact: () => interact(),
   eat: () => eat(),
   fps: () => fps, prof, dyn: () => renderer.getDyn(),
+  /** touch quality ladder: current step index (-1 on desktop), its state, and the controller factory for synthetic-frame tests */
+  qlevel: () => (QL ? QL.level() : -1), qstate: () => (QL ? QL.state() : null), qladder: QLADDER, qctl: createLadder,
   /** automatic benchmark: Promise of the JSON result (see bench.ts); opts: { quick, only: string[] } */
   bench: (opts?: { quick?: boolean; only?: string[] }) => bench.start({ source: 'api', ...opts }),
   benchResult: () => bench.last(),

@@ -882,6 +882,8 @@ export class Renderer {
   private pStart = [0, 0, 0]; private pCount = [0, 0, 0];
   private lp = new Float32Array(32); private lc = new Float32Array(24);
   private cssW = 1; private cssH = 1; private dpr = 1; private scale = 1; private dyn = 1;
+  /** touch quality ladder (main.ts): screen-pass canvas px per css px for the current quality, still capped by dpr; null = built-in rule */
+  private scaleOverride: number | null = null;
   private frame = 0; private full = true; private lost = false; private maxPt = 64;
   private tint: V3 = v3();
   /** unmasked GPU string (lower case), '' when the browser hides it */
@@ -999,8 +1001,9 @@ export class Renderer {
   }
   /** Compile the shader variants a session will hit (night, storm, fire) while the title screen is up, so the first dusk / storm / campfire does not hitch. */
   prewarm() {
-    const hq = G.quality ? CF.HIQ : 0;
-    for (const l of [0, CF.LIGHTS]) for (const w of [0, CF.WIND]) this.cellProg(hq | l | w);
+    // touch: the quality ladder can promote to quality 1 at any moment, so both cell variants are compiled up front (no hitch on promotion)
+    const hqs = G.mobile ? [0, CF.HIQ] : [G.quality ? CF.HIQ : 0];
+    for (const hq of hqs) for (const l of [0, CF.LIGHTS]) for (const w of [0, CF.WIND]) this.cellProg(hq | l | w);
     for (const n of [0, SF.NIGHT]) for (const w of [0, SF.STORM | SF.DRIFT]) this.scrProg(n | w);
   }
 
@@ -1034,12 +1037,19 @@ export class Renderer {
 
   /** Canvas pixels per css pixel at full dynamic scale (low quality renders at 0.6x and lets the browser upscale). */
   private baseScale() {
+    if (this.scaleOverride !== null) return Math.min(this.dpr || 1, this.scaleOverride);
     if (G.quality === 0) return 0.6;
     return Math.min(this.dpr || 1, G.mobile ? TOUCH_Q1_SCALE : 2);   // touch: quality 1 never at full device resolution
   }
   /** Lowest dynamic multiplier we allow: keep >= ~1.1 canvas px per world cell so pixel art stays readable. */
   dynMin(): number { return clamp(1.1 / (G.cam.zoom * this.baseScale()), 0.45, 1); }
   getDyn() { return this.dyn; }
+  /** touch quality ladder: set (or clear with null) the screen-pass scale for the current quality; the caller then resizes */
+  setScaleOverride(s: number | null) {
+    this.scaleOverride = s;
+    this.dyn = clamp(this.dyn, this.dynMin(), 1);
+    this.applySize();
+  }
   /** drawing-buffer size in pixels */
   size(): [number, number] { return [this.canvas.width, this.canvas.height]; }
   /** Dynamic resolution: multiplier on the canvas size (screen pass + particles); the cell pass is resolution independent. */

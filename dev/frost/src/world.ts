@@ -40,8 +40,8 @@ export function nextBeamId(): number { beamSeq = beamSeq >= 65535 ? 1 : beamSeq 
 export const awake = new Uint8Array(CW * CHH);       // quiet passes left before the chunk sleeps (0 = asleep, the automaton skips it)
 export const gpuDirty = new Uint8Array(CW * CHH);    // needs texture upload (set only where cells actually changed)
 export const solidVer = new Uint32Array(CW * CHH);   // bumps when rigid layout changes
-/** Hysteresis: a chunk whose last full pass changed nothing sleeps after this many more passes. */
-export const AWAKE_T = 12;
+/** Hysteresis: a chunk whose last full pass changed nothing sleeps after this many more passes (a pending slide or creep also counts as a change). */
+export const AWAKE_T = 8;
 
 export const idx = (x: number, y: number) => y * W + x;
 export const inb = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;

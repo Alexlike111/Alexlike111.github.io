@@ -7,7 +7,7 @@ import { G, FORCE } from './state';
 import { pl } from './player';
 import { tool, inv, TOOLS } from './tools';
 import { P, PK, PMAX, spawn } from './particles';
-import { engine, setEngine, allBodies, spawnStressTest } from './phys';
+import { engine, allBodies, spawnStressTest } from './phys';
 import { markStruct } from './structure';
 import { prof, pacc } from './prof';
 import { el, ico } from './ui';
@@ -108,7 +108,7 @@ interface Kit {
 }
 interface Scn {
   id: string; name: string; group: string; note: string;
-  fresh?: boolean; mode?: 'title' | 'pause'; engine?: 'rapier' | 'planck';
+  fresh?: boolean; mode?: 'title' | 'pause'; 
   quality?: 0 | 1; dyn?: 'min' | 1; view?: 'phone' | 'desktop';
   force?: Partial<typeof FORCE>;
   setup?(k: Kit): void;
@@ -290,12 +290,9 @@ const SCENARIOS: Scn[] = [
   { id: 'particles', name: 'Насыщение частицами (24 000)', group: 'Нагрузка', note: 'буфер частиц добит до предела: шаг частиц CPU, выборка, отрисовка точек',
     setup: (k) => { k.clock(12 * 60); k.stand(START_X); },
     tick: (k) => { const c = G.cam; if (P.n < PMAX * 0.96) spawnMix(Math.min(2400, PMAX * 0.97 - P.n), c.x, c.y, c.vw, c.vh, k.rnd); } },
-  // ---------------- rigid bodies, both engines
-  { id: 'rigid_rapier', name: 'Жёсткие тела: Rapier (wasm), 40+30 тел', group: 'Физика тел', note: 'брёвна и снежные плиты падают в кадр; тот же сценарий на planck ниже',
-    engine: 'rapier', setup: (k) => { k.clock(12 * 60); k.stand(START_X); },
-    tick: (k, t, tm) => { if (tm > -0.05 && !k.data.a) { k.data.a = 1; k.data.m = spawnStressTest(40, pl.x, pl.y - 140); } if (tm > 2.4 && !k.data.b) { k.data.b = 1; spawnStressTest(30, pl.x + 20, pl.y - 140); } void t; } },
-  { id: 'rigid_planck', name: 'Жёсткие тела: planck.js, 40+30 тел', group: 'Физика тел', note: 'то же, что выше, на planck.js',
-    engine: 'planck', setup: (k) => { k.clock(12 * 60); k.stand(START_X); },
+  // ---------------- rigid bodies (Rapier)
+  { id: 'rigid_rapier', name: 'Жёсткие тела: Rapier (wasm), 40+30 тел', group: 'Физика тел', note: 'брёвна и снежные плиты падают в кадр',
+    setup: (k) => { k.clock(12 * 60); k.stand(START_X); },
     tick: (k, t, tm) => { if (tm > -0.05 && !k.data.a) { k.data.a = 1; k.data.m = spawnStressTest(40, pl.x, pl.y - 140); } if (tm > 2.4 && !k.data.b) { k.data.b = 1; spawnStressTest(30, pl.x + 20, pl.y - 140); } void t; } },
   // ---------------- render cost matrix: night storm + two fires at each quality / resolution
   { id: 'rq0_d1', name: 'Рендер: качество 0, полное разрешение', group: 'Рендер', note: 'ночная буря + 2 костра: самый тяжёлый путь шейдеров',
@@ -349,7 +346,7 @@ class Bench {
   private strip: HTMLElement | null = null; private stripT = 0;
   private idx = 0; private total = 0;
   private opts: BenchOpts = { source: 'api' };
-  private saved!: { profOn: number; nosync: number; rnd: () => number; engine: 'planck' | 'rapier'; q: number; dyn: number; vp: { w: number; h: number; dpr: number } };
+  private saved!: { profOn: number; nosync: number; rnd: () => number; engine: string; q: number; dyn: number; vp: { w: number; h: number; dpr: number } };
 
   constructor(private host: BenchHost) {}
 
@@ -462,7 +459,6 @@ class Bench {
     prof.on = this.saved.profOn; prof.nosync = this.saved.nosync;
     FORCE.storm = FORCE.snowfall = FORCE.wind = NaN; G.xray = 0; G.timeScale = 1;
     h.setViewport(null); h.setQuality(this.saved.q); h.renderer.setDyn(Math.min(1, this.saved.dyn));
-    if (engine !== this.saved.engine) { try { await setEngine(this.saved.engine); } catch { /* keep the other engine */ } }
     h.noAdapt(false); h.mute(false);
     h.newGame(20261106 + Math.floor(Math.random() * 1000));
     h.setLoop(false, false);
@@ -486,8 +482,6 @@ class Bench {
     const baseQ = this.saved.q;
     const wantQ = sc.quality ?? baseQ;
     if (skip) return this.emptyResult(sc, skip);
-    if (sc.engine && engine !== sc.engine) { try { await setEngine(sc.engine); } catch { return this.emptyResult(sc, 'движок недоступен'); } }
-    else if (!sc.engine && engine !== this.saved.engine) { try { await setEngine(this.saved.engine); } catch { /* ignore */ } }
     h.setViewport(vp); h.setQuality(wantQ);
     h.renderer.setDyn(sc.dyn === 'min' ? h.renderer.dynMin() : 1);
     FORCE.storm = sc.force?.storm ?? NaN; FORCE.snowfall = sc.force?.snowfall ?? NaN; FORCE.wind = sc.force?.wind ?? NaN;
@@ -640,7 +634,7 @@ class Bench {
       <div class="kicker"><i></i><span>Стенд · журнал замеров</span><i></i></div>
       <h2 class="card-title">Результаты${res.aborted ? ' <small>прервано</small>' : ''}</h2>
       <p class="bench-sum">${worstLine}</p>
-      <div class="bench-dev mono">${esc(String(dev.gpu))} · dpr ${dev.dpr} · канвас ${dev.canvas} · ${dev.cores || '?'} ядер · качество ${dev.quality} · ${dev.engine === 'rapier' ? 'Rapier' : 'planck'}${sm.hz ? ' · ≈' + sm.hz + ' Гц' : ''}${sm.throttle !== '—' ? ' · троттлинг: ' + esc(sm.throttle) : ''}</div>
+      <div class="bench-dev mono">${esc(String(dev.gpu))} · dpr ${dev.dpr} · канвас ${dev.canvas} · ${dev.cores || '?'} ядер · качество ${dev.quality} · Rapier${sm.hz ? ' · ≈' + sm.hz + ' Гц' : ''}${sm.throttle !== '—' ? ' · троттлинг: ' + esc(sm.throttle) : ''}</div>
       <div class="bench-legend"><span class="lg ok"></span>p95 ≤ 16,7<span class="lg warn"></span>≤ 33<span class="lg bad"></span>&gt; 33 мс <em>· тап по строке — подсистемы</em></div>
       <div class="bench-scroll"><div class="bench-table" role="table"></div></div>
       <textarea class="bench-ta mono" readonly hidden aria-label="Отчёт"></textarea>
@@ -744,13 +738,6 @@ export function makeReport(res: BenchResult): string {
   L.push('');
   L.push('## Рейтинг CPU-подсистем (среднее по всем игровым сценариям, мс/кадр; максимум и где)');
   for (const [k, mean, mx, where] of sm.cpuRank) if (mean >= 0.03) L.push(`- ${label(k)} (${k}): ср. ${n(mean, 2)}, макс ${n(mx, 2)} в «${where}»`);
-  const rr = res.scenarios.find((s) => s.id === 'rigid_rapier'), rp = res.scenarios.find((s) => s.id === 'rigid_planck');
-  if (rr && rp && !rr.skipped && !rp.skipped) {
-    L.push('');
-    L.push('## Rapier vs planck (тот же сценарий)');
-    L.push(`- Rapier: p95 ${n(rr.p95)} / max ${n(rr.max)} мс, к/с ${Math.round(rr.fps)}, тела ${n(rr.sub.bodies || 0, 2)} мс (шаг ${n(rr.sub.bStep || 0, 2)}, синхр. ${n(rr.sub.bSync || 0, 2)}, штамп ${n(rr.sub.bStamp || 0, 2)}, коллайдеры ${n(rr.sub.bColl || 0, 2)}), статика ${n(rr.sub.structure || 0, 2)}`);
-    L.push(`- planck: p95 ${n(rp.p95)} / max ${n(rp.max)} мс, к/с ${Math.round(rp.fps)}, тела ${n(rp.sub.bodies || 0, 2)} мс (шаг ${n(rp.sub.bStep || 0, 2)}, штамп ${n(rp.sub.bStamp || 0, 2)}, коллайдеры ${n(rp.sub.bColl || 0, 2)}), статика ${n(rp.sub.structure || 0, 2)}`);
-  }
   const rq = ['rq0_d1', 'rq1_d1', 'rq0_dmin', 'rq1_dmin', 'view_phone', 'view_desktop'].map((id) => res.scenarios.find((s) => s.id === id)).filter((s): s is ScnResult => !!s && !s.skipped);
   if (rq.length) {
     L.push('');
