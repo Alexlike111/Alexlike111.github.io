@@ -35,6 +35,8 @@ const ICONS: Record<string, string> = {
   rotate: '<path d="M19.200 8.300A8 8 0 1 0 20 14"/><path d="M19.600 3.200v5.300h-5.300"/>',
   xray: '<path d="M2.500 12S6 6 12 6s9.500 6 9.500 6-3.500 6-9.500 6-9.500-6-9.500-6z"/><circle cx="12" cy="12" r="2.800"/>',
   pause: '<path d="M8 5v14M16 5v14"/>',
+  full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  unfull: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
   sound: '<path d="M4 9.500h3.200L12 5.500v13l-4.800-4H4z"/><path d="M15.500 9a4.200 4.200 0 0 1 0 6M18 6.500a7.600 7.600 0 0 1 0 11"/>',
   mute: '<path d="M4 9.500h3.200L12 5.500v13l-4.800-4H4z"/><path d="M16 9.500l5 5M21 9.500l-5 5"/>',
   bolt: '<path d="M13.500 2.800L6 13.200h5.200l-1.100 8 7.900-11h-5.500z"/>',
@@ -430,6 +432,7 @@ export class UI {
     pause.tabIndex = -1;
     pause.setAttribute('aria-label', 'Пауза');
     this.bindPress(pause, () => this.input.press('pause'));
+    row.appendChild(this.fsButton('round-btn fs-btn'));
     row.appendChild(pause);
     box.appendChild(row);
 
@@ -930,6 +933,34 @@ export class UI {
     window.setTimeout(() => ov.remove(), 450);
   }
 
+  /** «На весь экран»: Fullscreen API (+ landscape lock where allowed); every instance follows fullscreenchange */
+  private fsBtns: HTMLButtonElement[] = [];
+  private fsButton(cls: string): HTMLButtonElement {
+    const b = el('button', cls, ico('full')) as HTMLButtonElement;
+    b.type = 'button'; b.tabIndex = -1;
+    this.fsBtns.push(b);
+    if (this.fsBtns.length === 1) {
+      const sync = () => { const on = !!(document.fullscreenElement || (document as any).webkitFullscreenElement); for (const x of this.fsBtns) { x.innerHTML = ico(on ? 'unfull' : 'full'); const t = on ? 'Выйти из полноэкранного режима' : 'На весь экран'; x.title = t; x.setAttribute('aria-label', t); x.setAttribute('aria-pressed', String(on)); } };
+      document.addEventListener('fullscreenchange', sync); document.addEventListener('webkitfullscreenchange', sync);
+      queueMicrotask(sync);
+    }
+    const fn = () => { void this.toggleFullscreen(); };
+    if (cls.includes('round-btn')) this.bindPress(b, fn); else b.addEventListener('click', (e) => { e.preventDefault(); fn(); b.blur(); });
+    return b;
+  }
+  private async toggleFullscreen(): Promise<void> {
+    const d = document as any, root = document.documentElement as any;
+    try {
+      if (document.fullscreenElement || d.webkitFullscreenElement) { await (document.exitFullscreen ? document.exitFullscreen() : d.webkitExitFullscreen?.()); return; }
+      const req = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (!req) throw new Error('no api');
+      await req.call(root, { navigationUI: 'hide' });
+      try { await (screen.orientation as any)?.lock?.('landscape'); } catch { /* not allowed here: fine */ }
+    } catch {
+      this.toast('Полный экран здесь недоступен — открой игру в отдельной вкладке браузера', 'warn');
+    }
+  }
+
   private btn(label: string, cls: string, fn: () => void): HTMLButtonElement {
     const b = el('button', `btn ${cls}`, `<span>${label}</span>`);
     b.type = 'button';
@@ -995,7 +1026,7 @@ export class UI {
     const benchBtn = this.btn('Тест производительности', 'btn-ghost btn-bench', () => { this.onBench(false); });
     benchBtn.insertAdjacentHTML('afterbegin', ico('timer'));
     benchBtn.title = 'Автоматический прогон всех сценариев игры: кадры, узкие места, отчёт';
-    actions.append(start, snd, benchBtn);
+    actions.append(start, snd, this.fsButton('btn btn-ghost btn-sound btn-fs'), benchBtn);
     this.setOverlay(ov, 'title');
     window.setTimeout(() => start.focus({ preventScroll: true }), 60);
   }
