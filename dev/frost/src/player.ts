@@ -1,5 +1,5 @@
 // Player controller (cells, y down) + body heat balance.
-import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, blocksPlayer, isGranular, F_DIST, CELL } from './world';
+import { W, H, M, mat, dens, bond, flags, body, idx, inb, set, wake, blocksPlayer, isGranular, F_DIST, CELL } from './world';
 import { G } from './state';
 import { tempAt, windAt, shelterAt } from './heat';
 import { spawn, PK } from './particles';
@@ -28,15 +28,20 @@ function compactUnder(fx: number, fy: number): boolean {
   const i = idx(fx, fy);
   if (mat[i] !== M.SNOW || body[i]) return blocksPlayer(i);
   if (dens[i] >= bearing() || bond[i] > 160) return true;
-  // push this cell's mass into the one below (mass conserving)
+  // push this cell's mass into the one below (mass conserving, cap 917, remainder stays)
   const j = i + W;
   if (fy + 1 < H && mat[j] === M.SNOW && !body[j]) {
-    dens[j] = Math.min(560, dens[j] + dens[i]);
-    bond[j] = Math.max(bond[j], 30); flags[j] |= F_DIST;
-    set(fx, fy, M.AIR);
-    return false;
+    const add = Math.min(dens[i], 917 - dens[j]);
+    if (add > 0) {
+      dens[j] += add;
+      bond[j] = Math.max(bond[j], 30); flags[j] |= F_DIST;
+      wake(fx, fy + 1);
+    }
+    if (add >= dens[i]) { set(fx, fy, M.AIR); return false; }
+    dens[i] -= add;
+    return true; // the cell below is full: it carries the load
   }
-  if (fy + 1 < H && blocksPlayer(j)) { dens[i] = Math.min(560, dens[i] + 80); return dens[i] >= bearing(); }
+  if (fy + 1 < H && blocksPlayer(j)) return true; // hard ground below
   return true;
 }
 
@@ -48,17 +53,23 @@ function wade(px: number, top: number, bottom: number): number {
     if (!inb(x, y)) continue;
     const i = idx(x, y);
     if (!isGranular(i) || body[i]) continue;
-    // push to the side away from the body centre, compacting into neighbours
+    // push to the side away from the body centre; moves the cell's whole mass (cap 917), leftover stays
     const dir = x < px ? -1 : 1;
     const tx = dir < 0 ? x0 - 1 : x1 + 1;
-    let placed = false;
-    for (let up = 0; up < 8 && !placed; up++) {
+    const mi = mat[i];
+    let rem = dens[i];
+    for (let up = 0; up < 8 && rem > 0; up++) {
       const ty = y - up; if (!inb(tx, ty)) break;
       const t = idx(tx, ty);
-      if (mat[t] === M.AIR) { set(tx, ty, M.SNOW, Math.min(400, dens[i] + 30), 10, F_DIST); placed = true; }
-      else if (mat[t] === M.SNOW && dens[t] < 400) { dens[t] = Math.min(450, dens[t] + dens[i] * 0.5); placed = true; }
+      if (body[t]) continue;
+      if (mat[t] === M.AIR) { set(tx, ty, mi, rem, 10, F_DIST); rem = 0; }
+      else if (mat[t] === mi && dens[t] < 400) {
+        const add = Math.min(rem, 917 - dens[t]);
+        if (add > 0) { dens[t] += add; rem -= add; wake(tx, ty); }
+      }
     }
-    set(x, y, M.AIR);
+    if (rem <= 0) set(x, y, M.AIR);
+    else if (rem !== dens[i]) dens[i] = rem;
     n++;
   }
   return n;
@@ -234,9 +245,9 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
   pl.food = Math.max(0, pl.food);
   // snow on clothes melts when warm → wetness; dries near fire
   const warm = pl.airT > -1 || rad > 60;
-  if (warm && pl.snowOn > 0) { const m = Math.min(pl.snowOn, dtReal * 0.05); pl.snowOn -= m; pl.wet = Math.min(1, pl.wet + m * 0.9); }
-  else pl.snowOn = Math.max(0, pl.snowOn - dtReal * 0.004); // brush off / sublimate
-  if (G.snowfall > 0.02 && pl.shelter < 0.4) pl.snowOn = Math.min(1, pl.snowOn + dtReal * G.snowfall * 0.03);
+  if (warm && pl.snowOn > 0) { const m = Math.min(pl.snowOn, dtReal * G.timeScale * 0.05); pl.snowOn -= m; pl.wet = Math.min(1, pl.wet + m * 0.9); }
+  else pl.snowOn = Math.max(0, pl.snowOn - dtReal * G.timeScale * 0.004); // brush off / sublimate
+  if (G.snowfall > 0.02 && pl.shelter < 0.4) pl.snowOn = Math.min(1, pl.snowOn + dtReal * G.timeScale * G.snowfall * 0.03);
   if (rad > 40) pl.wet = Math.max(0, pl.wet - dtReal * 0.004 * (rad / 100) * G.timeScale);
   if (pl.core < 28) die(pl.feelT < pl.airT - 8 ? 'Переохлаждение. Ветер выдул тепло быстрее, чем тело успевало его вырабатывать.' : pl.wet > 0.4 ? 'Переохлаждение. Мокрая одежда перестала держать тепло.' : pl.food <= 0.01 ? 'Переохлаждение от истощения. Телу не из чего было греться.' : 'Переохлаждение. Мороз оказался сильнее.');
 }

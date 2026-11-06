@@ -78,8 +78,8 @@ function profileT(hx: number, hy: number): number {
   return nSol[h] < 8 ? Math.min(amb, ts + 2) : ts;            // cavities below the surface sit near the snow temperature
 }
 
-function scanSurf(x: number, hint: number) {
-  let y = Math.max(0, hint - 24);
+function scanSurf(x: number, hint: number, full = false) {
+  let y = full ? 0 : Math.max(0, hint - 24);
   const m0 = mat[y * W + x]; if (m0 !== M.AIR && m0 !== M.NEEDLE) y = 0;
   for (; y < H; y++) { const m = mat[y * W + x]; if (m !== M.AIR && m !== M.NEEDLE) break; }
   surf[x] = y;
@@ -159,7 +159,7 @@ function phase(hx: number, hy: number, dtRow: number) {
         const o = (q + r) & 15, x = hx * HS + (o & 3), y = hy * HS + (o >> 2), i = y * W + x;
         if (mat[i] !== M.SNOW) continue;
         if (!exposed(x, y)) continue;
-        set(x, y, M.WATER, 1000, 0, 0); done++;
+        set(x, y, M.WATER, dens[i], 0, 0); done++; // water keeps the snow's mass
       }
       T[h] = Math.max(-1, t - (done * cost) / cap[h]);
       if (done === 0) T[h] = t * 0.995;                           // buried snow: no air to drain into, stays wet
@@ -170,7 +170,7 @@ function phase(hx: number, hy: number, dtRow: number) {
     for (let q = 0; q < 16 && done < n; q++) {
       const i = base + (q >> 2) * W + (q & 3);
       if (mat[i] !== M.WATER) continue;
-      set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, 917, 255, 0); done++;
+      set(hx * HS + (q & 3), hy * HS + (q >> 2), M.ICE, dens[i], 255, 0); done++; // ice keeps the water's mass
     }
     T[h] += (done * MELT_E * FREEZE_HEAT) / cap[h];
   }
@@ -194,7 +194,8 @@ export function stepHeat(dt: number) {
   const amb = G.ambientT;
 
   // staggered: surface scan (a quarter of the columns), composition + phase change (a quarter of the rows)
-  for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x]);
+  // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
+  for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
   for (let hy = hy0 + (tick & 3); hy <= hy1; hy += 4) for (let hx = hx0; hx <= hx1; hx++) { compose(hx, hy); }
   if ((tick & 1) === 0) windPass();

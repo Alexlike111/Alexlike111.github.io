@@ -2,7 +2,7 @@
 // sintering, wind transport (saltation), snowfall deposition, particles.
 import {
   W, H, CH, CW, CHH, M, F_DIST, F_WET, F_DRIFT, BOND_SOLID, mat, dens, bond, flags, body, stamp, awake, idx, inb,
-  wake, touch, set, rigidAt, freshDens, CELL,
+  wake, touch, set, rigidAt, solidChanged, freshDens, CELL,
 } from './world';
 import { G } from './state';
 import { P, PK, spawn, kill } from './particles';
@@ -11,6 +11,35 @@ import { tempAt, windAt, surf } from './heat';
 let frameStamp = 1;
 const pending = new Float32Array(W); // fresh snow (cells) waiting to be deposited per column (outside window)
 const acc = new Float32Array(W);     // fractional deposit accumulator per column (inside window)
+const PENDING_MAX = 60;
+const clampX = (x: number) => (x < 1 ? 1 : x > W - 2 ? W - 2 : x);
+/** Return a mass-carrying particle's mass to the books (never destroy it). */
+function refund(i: number) {
+  const k = P.kind[i];
+  if (k === PK.FLAKE) { if (P.layer[i] === 0 && P.m[i] > 0) acc[clampX(P.x[i] | 0)] += P.m[i]; }
+  else if (k === PK.DRIFT || k === PK.CLUMP) {
+    const c = clampX(P.x[i] | 0);
+    pending[c] = Math.min(PENDING_MAX, pending[c] + P.d[i] / Math.max(1, freshDens(G.ambientT)));
+  }
+}
+/** Place d at the nearest free air cell at/above (x,y) (also tries neighbour columns). */
+function depositNear(x: number, y: number, d: number, fl: number, b: number): boolean {
+  x = clampX(x | 0); y = Math.max(1, Math.min(H - 3, y | 0));
+  for (let q = 0; q < 3; q++) {
+    const xx = x + (q === 0 ? 0 : q === 1 ? 1 : -1);
+    if (xx < 1 || xx >= W - 1) continue;
+    for (let up = 0; up <= 6; up++) {
+      const yy = y - up; if (yy < 1) break;
+      const i = idx(xx, yy);
+      if (mat[i] === M.AIR && !body[i]) {
+        set(xx, yy, M.SNOW, d, mat[i + W] !== M.AIR ? b : 0, fl);
+        if (surf[xx] > yy) surf[xx] = yy;
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 const isAirLike = (i: number) => mat[i] === M.AIR;
 function canEnter(i: number, m: number) {
@@ -105,8 +134,11 @@ function moveWater(i: number, x: number, y: number): boolean {
   if (bm === M.AIR && !body[below]) { swap(i, below); wakeI(below); wakeI(i); return true; }
   // soak into loose snow -> slush
   if (bm === M.SNOW && bond[below] < 200 && dens[below] < 520) {
-    dens[below] = Math.min(600, dens[below] + 220); flags[below] |= F_WET; bond[below] = Math.min(255, bond[below] + 30);
-    mat[i] = M.AIR; dens[i] = 0; flags[i] = 0; wakeI(i); return true;
+    const add = Math.min(dens[i], 917 - dens[below]);
+    if (add <= 0) return false;
+    dens[below] += add; flags[below] |= F_WET; bond[below] = Math.min(255, bond[below] + 30);
+    if (add >= dens[i]) { mat[i] = M.AIR; dens[i] = 0; flags[i] = 0; } else dens[i] -= add;
+    wakeI(i); touch(i % W, (i / W) | 0); return true;
   }
   const d = Math.random() < 0.5 ? -1 : 1;
   for (let s = 0; s < 2; s++) {
@@ -126,6 +158,7 @@ function moveWater(i: number, x: number, y: number): boolean {
 }
 
 // ---------- slow pass: compaction + sintering over the window, staggered ----------
+const COMPACT_K = 0.05; // 1/h per unit of density deficit at visc=1
 let slowRow = 0;
 const SLOW_SLICES = 10; // each cell visited every 10 frames
 function stepSlow(dtReal: number) {
@@ -169,16 +202,19 @@ function stepSlow(dtReal: number) {
         const dj = dens[j];
         if (dj < target) {
           const visc = Math.exp(0.07 * (Tc + 5)) * (1 + (flags[j] & F_WET ? 3 : 0));
-          let dd = Math.min(target - dj, (target - dj) * 0.35 * visc * dtGameH + 0.5);
-          dd = Math.min(dd, d);
-          if (dd >= 1) {
-            dens[j] = dj + dd;
-            const left = d - dd;
-            if (left < 22) { // top cell has collapsed into the one below
-              dens[j] = Math.min(917, dens[j] + left);
-              mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0;
-              wake(x, y);
-            } else dens[i] = left;
+          const diff = target - dj;
+          // stochastic rounding: exact integer mass moved, no truncation loss, works for tiny rates
+          let n = Math.floor(Math.min(d, diff, diff * COMPACT_K * visc * dtGameH) + Math.random());
+          n = Math.min(n, d, 917 - dj);
+          if (n > 0) {
+            dens[j] = dj + n;
+            let left = d - n;
+            if (left < 22) { // top cell has collapsed: move ALL remaining mass down (cap 917)
+              const m2 = Math.min(left, 917 - dens[j]);
+              dens[j] += m2; left -= m2;
+            }
+            if (left <= 0) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; wake(x, y); }
+            else dens[i] = left;
             touch(x, y);
           }
         }
@@ -197,7 +233,7 @@ function stepWeather(dt: number) {
   // outside window: accumulate statistically
   for (let x = 0; x < W; x += 1) {
     if (x >= x0 && x <= x1) continue;
-    pending[x] += cellsPerSecPerCol * dt * (0.8 + 0.4 * Math.random());
+    pending[x] = Math.min(PENDING_MAX, pending[x] + cellsPerSecPerCol * dt * (0.8 + 0.4 * Math.random()));
   }
   // visual + mass-carrying flakes in window
   const cols = x1 - x0;
@@ -210,15 +246,17 @@ function stepWeather(dt: number) {
     flakeAcc -= 1;
     const r = Math.random();
     const layer = r < 0.62 ? 0 : r < 0.92 ? 1 : 2;
-    const x = x0 - wind * 6 + Math.random() * (cols + Math.abs(wind) * 12);
+    const x = clampX(x0 - wind * 6 + Math.random() * (cols + Math.abs(wind) * 12));
     const fall = 14 + Math.random() * 14; // 0.7–1.4 m/s
-    spawn(PK.FLAKE, x, top + Math.random() * 30, wind * 20 * 0.8, fall, 40, layer === 0 ? massPerFlake * 1.6 : 0, 0, layer);
+    const fm = layer === 0 ? massPerFlake * 1.6 : 0;
+    if (spawn(PK.FLAKE, x, top + Math.random() * 30, wind * 20 * 0.8, fall, 40, fm, 0, layer) < 0 && fm > 0) pending[clampX(x | 0)] = Math.min(PENDING_MAX, pending[clampX(x | 0)] + fm);
   }
   // deposit pending for columns entering the window
   for (let x = Math.max(1, x0); x < Math.min(W - 1, x1); x++) {
+    if (pending[x] > PENDING_MAX) pending[x] = PENDING_MAX;
     if (pending[x] >= 1) {
-      let n = Math.floor(pending[x]); pending[x] -= n;
-      while (n-- > 0) depositAt(x, freshDens(G.ambientT), 0);
+      let n = Math.min(4, Math.floor(pending[x])); pending[x] -= n;
+      while (n-- > 0) { if (!depositAt(x, freshDens(G.ambientT), 0)) pending[x] += 1; }
     }
   }
   // saltation: lift surface powder in strong local wind
@@ -233,23 +271,47 @@ function stepWeather(dt: number) {
     if (u < thr) continue;
     if (Math.random() > (u - thr) * 0.25 * dt * 10) continue;
     const d = dens[i];
+    if (spawn(PK.DRIFT, x, y - 1, Math.sign(G.wind) * u * 20 * 0.5, -(10 + Math.random() * 30), 6, 1, d, 0) < 0) continue;
     set(x, y, M.AIR);
-    spawn(PK.DRIFT, x, y - 1, Math.sign(G.wind) * u * 20 * 0.5, -(10 + Math.random() * 30), 6, 1, d, 0);
   }
 }
 
 /** Put one cell of snow on top of column x (at the first air cell above the surface found from y hint). */
-export function depositAt(x: number, d: number, fl: number, yHint = -1) {
-  if (x < 1 || x >= W - 1) return;
+export function depositAt(x: number, d: number, fl: number, yHint = -1, b = 0): boolean {
+  if (x < 1 || x >= W - 1) return false;
   let y = yHint >= 0 ? yHint : Math.max(1, surf[x] - 1);
   // find first air cell scanning up from hint if occupied, or down if floating
   let i = idx(x, y);
   if (mat[i] !== M.AIR) { while (y > 1 && mat[idx(x, y)] !== M.AIR) y--; }
   else { while (y < H - 2 && mat[idx(x, y + 1)] === M.AIR) y++; }
   i = idx(x, y);
-  if (mat[i] !== M.AIR || body[i]) return;
-  set(x, y, M.SNOW, d, 0, fl | F_DIST * 0);
+  if (mat[i] !== M.AIR || body[i]) return false;
+  set(x, y, M.SNOW, d, b, fl | F_DIST * 0);
   if (surf[x] > y) surf[x] = y;
+  return true;
+}
+
+/** A DRIFT/CLUMP grain comes to rest after hitting solid cell c from air cell (px0,py0). Mass-exact. */
+function landGrain(i: number, k: number, c: number, px0: number, py0: number) {
+  let d = P.d[i];
+  const drift = k === PK.DRIFT;
+  const fl = F_DIST | (drift ? F_DRIFT : 0);
+  if (drift && mat[c] === M.SNOW && !body[c] && dens[c] < 330) {
+    // wind packing: many grains merge into the slab they hit
+    const add = Math.min(d, 917 - dens[c]);
+    const was = rigidAt(c);
+    dens[c] += add; d -= add;
+    flags[c] |= fl;
+    if (mat[c + W] !== M.AIR) bond[c] = Math.max(bond[c], 60);
+    const cx = c % W, cy = (c / W) | 0;
+    wake(cx, cy);
+    if (was !== rigidAt(c)) solidChanged(cx, cy);
+    if (d <= 0) return;
+  }
+  if (!depositNear(px0, py0, d, fl, drift ? 60 : 0)) {
+    const col = clampX(px0 | 0);
+    pending[col] = Math.min(PENDING_MAX, pending[col] + d / Math.max(1, freshDens(G.ambientT)));
+  }
 }
 
 // ---------- particles ----------
@@ -257,7 +319,7 @@ export function stepParticles(dt: number) {
   const g = 196; // cells/s² (9.8 m/s²)
   for (let i = 0; i < P.n; i++) {
     P.life[i] -= dt;
-    if (P.life[i] <= 0) { kill(i); i--; continue; }
+    if (P.life[i] <= 0) { refund(i); kill(i); i--; continue; }
     const k = P.kind[i];
     let x = P.x[i], y = P.y[i];
     if (k === PK.FLAKE) {
@@ -269,12 +331,17 @@ export function stepParticles(dt: number) {
       P.x[i] = x; P.y[i] = y;
       if (P.layer[i] !== 0) { if (y > G.win.y1 + 40) { kill(i); i--; } continue; }
       const cx = x | 0, cy = y | 0;
-      if (!inb(cx, cy) || cy >= H - 2) { kill(i); i--; continue; }
+      if (!inb(cx, cy) || cy >= H - 2) { refund(i); kill(i); i--; continue; }
       const c = idx(cx, cy);
       if (mat[c] !== M.AIR) {
         // landed: add mass to the column accumulator (boughs catch snow too)
-        acc[cx] += P.m[i];
-        if (acc[cx] >= 1) { acc[cx] -= 1; depositAt(cx, freshDens(G.ambientT), 0, cy - 1); }
+        const lx = clampX(cx);
+        acc[lx] += P.m[i];
+        for (let t = 0; t < 4 && acc[lx] >= 1; t++) {
+          acc[lx] -= 1;
+          if (!depositAt(lx, freshDens(G.ambientT), 0, cy - 1)) { acc[lx] += 1; break; }
+        }
+        if (acc[lx] > 8) acc[lx] = 8;
         kill(i); i--; continue;
       }
       continue;
@@ -285,28 +352,28 @@ export function stepParticles(dt: number) {
       P.vy[i] += g * dt * (k === PK.DRIFT ? 0.35 : 1);
       const nx = x + P.vx[i] * dt, ny = y + P.vy[i] * dt;
       const steps = Math.max(1, Math.ceil(Math.max(Math.abs(nx - x), Math.abs(ny - y))));
-      let landed = false;
+      let landed = false, bounced = false;
       for (let s = 1; s <= steps; s++) {
         const px = x + ((nx - x) * s) / steps, py = y + ((ny - y) * s) / steps;
         const cx = px | 0, cy = py | 0;
-        if (!inb(cx, cy) || cy >= H - 2 || cx < 1 || cx >= W - 1) { landed = true; break; }
+        if (!inb(cx, cy) || cy >= H - 2 || cx < 1 || cx >= W - 1) { refund(i); landed = true; break; }
         const c = idx(cx, cy);
         if (mat[c] !== M.AIR || body[c]) {
           const px0 = (x + ((nx - x) * (s - 1)) / steps) | 0, py0 = (y + ((ny - y) * (s - 1)) / steps) | 0;
           // drift settles only where wind drops (lee) — else bounce on
           const lu = Math.abs(windAt(px0, py0));
-          if (k === PK.DRIFT && lu > 6 && Math.random() < 0.7 && P.life[i] > 0.5) { P.vy[i] = -Math.abs(P.vy[i]) * 0.5 - 8; P.x[i] = px0; P.y[i] = py0 - 1; landed = false; s = steps + 1; break; }
-          if (inb(px0, py0) && mat[idx(px0, py0)] === M.AIR) {
-            const dd = k === PK.DRIFT ? Math.max(P.d[i], 260) : P.d[i];
-            set(px0, py0, M.SNOW, Math.min(400, dd), 0, F_DIST | (k === PK.DRIFT ? F_DRIFT : 0));
+          if (k === PK.DRIFT && lu > 6 && Math.random() < 0.7 && P.life[i] > 0.5) {
+            P.vy[i] = -Math.abs(P.vy[i]) * 0.5 - 8; P.x[i] = px0; P.y[i] = Math.max(0, py0 - 1); bounced = true; break;
           }
+          landGrain(i, k, c, px0, py0);
           landed = true; break;
         }
       }
+      if (bounced) continue;
       if (landed) { kill(i); i--; continue; }
       if (P.life[i] < 0.05 && k === PK.DRIFT) { // ran out of time aloft: deposit where it is
         const cx = nx | 0, cy = ny | 0;
-        if (inb(cx, cy) && mat[idx(cx, cy)] === M.AIR) depositAt(cx, Math.max(P.d[i], 250), F_DRIFT | F_DIST, cy);
+        if (!(inb(cx, cy) && mat[idx(cx, cy)] === M.AIR && depositAt(cx, P.d[i], F_DRIFT | F_DIST, cy, 60))) refund(i);
         kill(i); i--; continue;
       }
       P.x[i] = nx; P.y[i] = ny;
