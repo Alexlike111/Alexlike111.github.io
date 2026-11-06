@@ -16,10 +16,11 @@ const SRC = 1 / 400;       // W -> heat units/s: a 4000 W fire = 10 u/s (Q/Ccell
 const FIRE_AIR = 5.2;        // multiplier on the share of fire power that warms the air around the flame (a campfire heats a closed shelter in ~1 min)
 const FIRE_CONTACT = 8;    // multiplier on the share of fire power going into the cell right below the flame
 const BUOY = 0.9;          // 1/s: warm air hands heat to the air cell above
-const VENT_SKY = 0.05;     // 1/s ventilation of sky-open air cells towards ambient
-const VENT_LEAK = 0.006;   // 1/s leak of roofed air cells (cracks, breathing)
-const VENT_WIND = 0.12;    // extra 1/s per m/s of local wind
-const ROOF_WIND = 0.25;    // roofed cells only exchange this share of the wind-driven ventilation (draught through openings)
+const VENT_SKY = 0.05;     // 1/s exchange of exposed air (open sky, no solid within EXPOSE_R cells on its row) with ambient
+const VENT_WIND = 0.12;   // extra 1/s per m/s of local wind, exposed air only: wind does not get into a pit or a roofed cave
+const VENT_OPEN = 0.02;    // 1/s: sheltered air under an open top (vertical shaft, pit) breathes out slowly
+const VENT_LEAK = 0.002;   // 1/s: roofed air (sealed cave, cabin) only leaks through cracks
+const EXPOSE_R = 2;        // heat cells: a solid this close on the same row shelters an open cell (pit walls, lip)
 const SKY_COOL = 0.012;    // 1/s: exposed surface snow relaxes to ambient-2
 const GROUND_T = -2, GROUND_RATE = 0.1, GROUND_DEEP = 6; // dirt/rock deeper than 6 cells below groundY is pinned
 const DEEP_SNOW_T = -4, SNOW_PROFILE_LEN = 40;           // initial snow profile: ambient at surface -> -4 at depth
@@ -63,6 +64,9 @@ const nWat = new Uint8Array(HW * HH);
 const nGnd = new Uint8Array(HW * HH);              // dirt/rock/bedrock
 const sDens = new Uint16Array(HW * HH);            // mean snow density
 const sky = new Uint8Array(HW * HH);               // 1 = no blocking heat cell above in the column
+const ex = new Uint8Array(HW * HH);                // 1 = exposed air: above the ground, sky-open, not sheltered by a solid on its row (wind and sky act here only)
+const grd = new Int16Array(HW);                    // ground row of each heat column: the highest surface within 3 heat columns (a pit does not lower it)
+const fireNear = new Uint8Array(HW * HH);          // 1 = within reach of an active fire: meltwater there does not freeze
 // conduction coefficients derived from the composition (refreshed with it, so the solver does no divisions per step)
 const ic = new Float32Array(HW * HH).fill(1);      // 1 / cap
 const air = new Uint8Array(HW * HH);               // 1 = air-like cell (cap <= 2)
@@ -183,19 +187,30 @@ function windPass() {
       if (hx === xb) break;
     }
   }
-  // sky exposure (nothing blocking above in this column) and the per-cell relaxation rates the conduction uses
+  // sky exposure (nothing blocking above in this column), exposure (above the ground, open, and no solid within EXPOSE_R on the row:
+  // a pit, a roofed cave or a cave under a shaft is sheltered from the wind), and the per-cell relaxation rates the conduction uses
+  for (let hx = hx0; hx <= hx1; hx++) {
+    let g = 1 << 14;
+    for (let k = -3; k <= 3; k++) { const x = hx * HS + 2 + k * HS; if (x >= 0 && x < W && surf[x] < g) g = surf[x]; }
+    grd[hx] = g;
+  }
   for (let hx = hx0; hx <= hx1; hx++) {
     let open = 1;
     for (let hy = hy0; hy <= hy1; hy++) {
       const h = hy * HW + hx, ns = nSol[h];
       sky[h] = open;
+      let e = open && hy * HS + 2 < grd[hx] ? 1 : 0;
+      for (let d = -EXPOSE_R; d <= EXPOSE_R && e; d++) if (hx + d >= hx0 && hx + d <= hx1 && nSol[h + d] >= 8) e = 0;
+      // the mouth of a pit (air below, pit walls beside it) is sheltered by the lip; open ground above a flat surface is not
+      if (e && hy < hy1 && nSol[h + HW] < 8) for (let d = -EXPOSE_R; d <= EXPOSE_R && e; d++) if (hx + d >= hx0 && hx + d <= hx1 && nSol[h + HW + d] >= 8) e = 0;
+      ex[h] = e;
       if (ns <= 4) {                                                // (mostly) air cells: ventilation
         const aw = Math.abs(WND[h]);
-        vR[h] = open ? VENT_SKY + VENT_WIND * aw : VENT_LEAK + VENT_WIND * ROOF_WIND * aw;
+        vR[h] = ex[h] ? VENT_SKY + VENT_WIND * aw : open ? VENT_OPEN : VENT_LEAK;
         sR[h] = 0;
       } else {
         vR[h] = 0;
-        sR[h] = ns < 16 && nSnow[h] >= 4 && hy > hy0 && sky[h - HW] ? SKY_COOL : 0;   // sky radiative cooling of the exposed surface
+        sR[h] = ns < 16 && nSnow[h] >= 4 && hy > hy0 && ex[h - HW] ? SKY_COOL : 0;   // sky radiative cooling of the exposed surface only
       }
       if (ns >= 8) open = 0;
     }
@@ -222,7 +237,7 @@ function phase(hx: number, hy: number, dtRow: number) {
       T[h] = Math.max(-1, t - (done * cost) / cap[h]);
       if (done === 0) T[h] = t * 0.995;                           // buried snow: no air to drain into, stays wet
     }
-  } else if (nWat[h] > 0 && t < FREEZE_T) {
+  } else if (nWat[h] > 0 && t < FREEZE_T && !fireNear[h]) {          // no ice forms under an active fire: the meltwater stays slush
     const n = Math.min(nWat[h], Math.round(nWat[h] * Math.min(1, FREEZE_RATE * dtRow) + Math.random() - 0.5));
     let done = 0;
     for (let q = 0; q < 16 && done < n; q++) {
@@ -263,6 +278,13 @@ export function stepHeat(dt: number) {
   // every 16th visit of a column does a full rescan from the top (catches structures built >24 cells above the old surface)
   for (let x = (hx0 * HS) + (tick & 3); x < (hx1 + 1) * HS; x += 4) scanSurf(x, surf[x], (((tick >> 2) + (x >> 2)) & 15) === 0);
   const dtRow = Math.min(0.5, dtAvg * 4);
+  // heat cells under and beside a burning fire (the pit it melts, about 1 m deep): meltwater there stays liquid and soaks away
+  fireNear.fill(0);
+  for (const f of G.fires) {
+    if (!f.lit) continue;
+    const fx = (f.x / HS) | 0, fy = ((f.y - 2) / HS) | 0;
+    for (let yy = fy - 2; yy <= fy + 5; yy++) for (let xx = fx - 2; xx <= fx + 2; xx++) if (xx >= hx0 && xx <= hx1 && yy >= hy0 && yy <= hy1) fireNear[yy * HW + xx] = 1;
+  }
   for (let hy = hy0 + (tick & (COMP_STRIDE - 1)); hy <= hy1; hy += COMP_STRIDE) for (let hx = hx0; hx <= hx1; hx++) compose(hx, hy);
   applyDirty();
   pend('hCompose', pt); pt = pnow();

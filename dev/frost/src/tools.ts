@@ -35,7 +35,7 @@ export function resetTools() {
   Object.assign(inv, { logs: 0, branches: 0, matches: 5, food: 3, crackers: 1, thermos: 0, blocks: [], saw: true, snowshoes: false });
   Object.assign(tool, { tun: false, digDir: 1, cur: 0, cool: 0, rot: 0, load: 0, loadDens: 0, sawT: 0, sawNeed: 1, msg: '' });
   tool.built.clear();
-  G.fires.length = 0; loadWarned = false; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
+  G.fires.length = 0; laid.length = 0; loadWarned = false; fireLatch = false; placeLatch = false; sawX0 = sawY0 = -99; notchTid = -1;
 }
 
 export const shoulder = () => [pl.x, pl.y - pl.h * 0.72] as const;
@@ -332,8 +332,11 @@ function saw(ax: number, ay: number, dt: number) {
 /** cells a snow block / beam would occupy at the aim */
 /** Beam shape from R: 0 = 1 m horizontal, 1 = 2 m horizontal (2 logs), 2 = 1 m vertical, 3 = 2 m vertical (2 logs). Blocks only alternate flat/upright. */
 export const BEAM_MODES = 5;
-export const BEAM_MODE_NAMES = ['брус 1 м', 'брус 2 м', 'стойка 1 м', 'стойка 2 м', 'дверь 1 м (проходимая)'];
-export function beamShape() { const s = ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; return s === 4 ? { vert: true, len: 20, logs: 1, door: true } : { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1, door: false }; }
+export const BEAM_MODE_NAMES = ['брус 1 м', 'брус 2 м', 'стойка 1 м', 'стойка 2 м', 'дверь 1,8 м (проходимая)'];
+/** the door is 36 cells (1.8 m): a standing hero (34) passes it with 2 cells to spare, and a 4-cell lintel (1 m beam) closes the 2 m opening above it.
+ *  Two logs, like a 2 m upright (36 cells of plank is 1.8 logs). */
+export const DOOR_H = 36;
+export function beamShape() { const s = ((tool.rot % BEAM_MODES) + BEAM_MODES) % BEAM_MODES; return s === 4 ? { vert: true, len: DOOR_H, logs: 2, door: true } : { vert: s >= 2, len: s & 1 ? 40 : 20, logs: s & 1 ? 2 : 1, door: false }; }
 const MAT_NAME: Record<number, string> = { [M.DIRT]: 'земля', [M.ROCK]: 'камень', [M.BEDROCK]: 'скала', [M.ICE]: 'лёд', [M.WOOD]: 'дерево', [M.PLANK]: 'брус', [M.DOOR]: 'дверь', [M.CRATE]: 'ящик', [M.POLE]: 'вешка', [M.SNOW]: 'снег или другой блок', [M.WATER]: 'вода' };
 /** placement classes of a world cell: 0 free (air, boughs, loose snow / ash: displaced), 1 rigid snow, 2 hard (rock, timber, ice, water, fallen bodies, world edge) */
 function pcls(x: number, y: number): number {
@@ -353,11 +356,43 @@ function fitsAt(x0: number, y0: number, w: number, h: number): boolean {
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) { const c = pcls(x, y); if (c === 2) return false; if (c === 1) snow++; }
   return snow <= Math.floor(w * h * 0.05);
 }
-/** something firm (not a fallen body) directly under the bottom row */
+/** loose snow from row y down, at most TAMP_DEPTH cells, that the tamp will consolidate under the object reaches firm snow */
+function padFirm(x: number, y0: number): boolean {
+  for (let y = y0; y < y0 + TAMP_DEPTH; y++) {
+    if (!inb(x, y)) return false;
+    const i = idx(x, y);
+    if (body[i]) return false;
+    if (pcls(x, y) >= 1) return true;
+    if (mat[i] !== M.SNOW) return false;
+  }
+  return false;
+}
+/** something firm (not a fallen body) directly under the bottom row, or loose snow that the tamp will hold (see padFirm) */
 function restsAt(x0: number, y0: number, w: number, h: number): boolean {
   const y = y0 + h;
-  for (let x = x0; x < x0 + w; x++) { if (!inb(x, y)) return true; const i = idx(x, y); if (!body[i] && pcls(x, y) >= 1) return true; }
+  for (let x = x0; x < x0 + w; x++) {
+    if (!inb(x, y)) return true;
+    const i = idx(x, y);
+    if (body[i]) continue;
+    if (pcls(x, y) >= 1) return true;
+    // loose snow over firm snow within the tamp depth: the object stands on the surface and the tamp (place) holds it, instead of sinking to the firm layer
+    if (mat[i] === M.SNOW && padFirm(x, y)) return true;
+  }
   return false;
+}
+/** the loose snow the tamp will consolidate under the object (for the support test: it is rigid once placed) */
+function padCells(x0: number, yb: number, w: number): { x: number; y: number; m: number; d: number; b: number }[] {
+  const out: { x: number; y: number; m: number; d: number; b: number }[] = [];
+  for (let x = x0; x < x0 + w; x++) {
+    if (!padFirm(x, yb)) continue;
+    for (let y = yb; y < yb + TAMP_DEPTH; y++) {
+      if (!inb(x, y)) break;
+      const i = idx(x, y);
+      if (mat[i] !== M.SNOW || body[i]) break;
+      if (pcls(x, y) === 0) out.push({ x, y, m: M.SNOW, d: TAMP_DENS, b: TAMP_BOND });
+    }
+  }
+  return out;
 }
 /** Auto-snap: out of firm terrain it overlaps (up to 8 cells up), then DOWN onto the first support within 9 cells (loose snow on the way is displaced).
  *  A horizontal beam therefore lands flush on the highest post / wall top below it, a post stands on the surface. Returns the snapped top row. */
@@ -373,6 +408,22 @@ function snapY(x0: number, y0: number, w: number, h: number): number {
     if (restsAt(x0, y + d, w, h)) return y + d;
   }
   return y;
+}
+/** Gap fill: the beam lands on its highest support, but a post under another part of it can sit 1-4 rows lower (loose snow under that post sank).
+ *  The air or loose snow between the beam's bottom and such a post is packed with snow, so every post carries the beam. Only posts / doors count (not a snow ledge). */
+const GAP_MAX = 4;
+function gapFill(x0: number, yb: number, w: number): { x: number; y: number; m: number; d: number; b: number }[] {
+  const out: { x: number; y: number; m: number; d: number; b: number }[] = [];
+  for (let x = x0; x < x0 + w; x++) {
+    for (let k = 0; k <= GAP_MAX; k++) {
+      const y = yb + k;
+      if (!inb(x, y)) break;
+      const i = idx(x, y);
+      if (!body[i] && (mat[i] === M.PLANK || mat[i] === M.DOOR)) { for (let j = 0; j < k; j++) out.push({ x, y: yb + j, m: M.SNOW, d: 380, b: 175 }); break; }
+      if (pcls(x, y) !== 0) break; // the gap must be air or loose snow
+    }
+  }
+  return out;
 }
 export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
   let w: number, h: number, door = false;
@@ -395,6 +446,7 @@ export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
     } else if (c === 1) firm++;
     if (inb(x, y)) cells.push({ x, y, m: cm, d: kind === 'block' ? (inv.blocks[inv.blocks.length - 1] ?? 300) : 500, b: kind === 'block' ? 170 : 0 });
   }
+  if (kind === 'beam') cells.push(...gapFill(x0, y0 + h, w)); // packed snow under a beam, between it and a lower post
   let blocked = hard > 0;
   if (!blocked && firm > Math.floor(w * h * 0.05)) { blocked = true; bump('плотный снег'); }
   // the player's own body (a door is passable)
@@ -402,13 +454,15 @@ export function ghostCells(kind: 'block' | 'beam', ax: number, ay: number) {
   let reason = '';
   if (!door && x0 < px1 && x0 + w > px0 && y0 < py1 && y0 + h > py0) { blocked = true; reason = 'ты стоишь на этом месте — отойди'; }
   else if (blocked) { let bk = '', bn = 0; for (const [k, n] of why) if (n > bn) { bn = n; bk = k; } reason = `${bk} (${Math.max(1, Math.round(((hard || firm) * 100) / (w * h)))}% места)`; }
-  return { cells, blocked, x0, y0, w, h, reason, door };
+  return { cells, pad: padCells(x0, y0 + h, w), blocked, x0, y0, w, h, reason, door };
 }
 let marginCache = { key: '', v: 1 };
 export function ghostMargin(kind: 'block' | 'beam', ax: number, ay: number) {
   const g = ghostCells(kind, ax, ay);
   const key = kind + g.x0 + ',' + g.y0 + ',' + tool.rot + ',' + (G.frame >> 3);
-  if (marginCache.key !== key) { marginCache = { key, v: g.blocked ? 0 : supportMargin(g.cells) }; }
+  if (marginCache.key !== key) { marginCache = { key, v: g.blocked ? 0 : supportMargin([...g.cells, ...g.pad]) }; }
+  // a block with no support would crumble: the ghost goes red with the reason (place() refuses it the same way)
+  if (kind === 'block' && !g.blocked && marginCache.v <= 0.02) return { ...g, blocked: true, reason: 'Нет опоры', margin: 0 };
   return { ...g, margin: marginCache.v };
 }
 
@@ -427,6 +481,24 @@ function tamp(x0: number, yb: number, w: number) {
   }
 }
 
+/** Blocks laid in the last LAID_WATCH seconds: if the solver lets one go inside that window, it goes back into the pack. */
+const LAID_WATCH = 2;
+const laid: { x0: number; y0: number; w: number; h: number; d: number; age: number }[] = [];
+/** per frame (from stepFires): a fresh block whose cells are no longer rigid snow is refunded; after LAID_WATCH s it is kept for good */
+export function watchLaid(dt: number) {
+  for (let k = laid.length - 1; k >= 0; k--) {
+    const l = laid[k];
+    l.age += dt;
+    if (l.age > LAID_WATCH) { laid.splice(k, 1); continue; }
+    let rigid = 0;
+    for (let y = l.y0; y < l.y0 + l.h; y++) for (let x = l.x0; x < l.x0 + l.w; x++) {
+      if (!inb(x, y)) continue; const i = idx(x, y);
+      if (mat[i] === M.SNOW && !body[i] && rigidAt(i)) rigid++;
+    }
+    if (rigid < l.w * l.h * 0.6) { laid.splice(k, 1); inv.blocks.push(l.d); say('Блок осыпался — вернул в запас'); sfx?.uiDeny(); }
+  }
+}
+
 function place(kind: 'block' | 'beam', ax: number, ay: number) {
   if (kind === 'block' && inv.blocks.length === 0) { say('Нет снежных блоков. Вырежи пилой из плотного наста'); sfx?.uiDeny(); return; }
   if (kind === 'beam' && inv.logs < 1) { say('Нет брёвен. Свали ель топором'); sfx?.uiDeny(); return; }
@@ -436,28 +508,27 @@ function place(kind: 'block' | 'beam', ax: number, ay: number) {
   const vert = bs.vert;
   if (kind === 'beam' && inv.logs < bs.logs) { say(`Для бруса 2 м нужно ${bs.logs} ${plural(bs.logs, 'бревно', 'бревна', 'брёвен')}. R: сменить длину`); sfx?.uiDeny(); return; }
   const door = kind === 'beam' && bs.door;
-  if (kind === 'beam') {
-    const mg = supportMargin(g.cells);
-    if (mg <= 0.02) { say('Повиснет и упадёт — нужна опора'); sfx?.uiDeny(); return; }
-  }
+  // a beam or a block needs a path to the ground or a post, or it hangs and crumbles (the ghost shows the same verdict)
+  if (supportMargin([...g.cells, ...g.pad]) <= 0.02) { say(kind === 'beam' ? 'Повиснет и упадёт — нужна опора' : 'Нет опоры: блок повиснет. Клади на снег или на другой блок'); sfx?.uiDeny(); return; }
   const d = kind === 'block' ? inv.blocks.pop()! : 500;
   const bid = kind === 'beam' ? nextBeamId() : 0;
   for (const c of g.cells) {
     const i = idx(c.x, c.y);
-    if (mat[i] === M.SNOW || mat[i] === M.ASH) { // displace loose snow upward
+    if (mat[i] === M.SNOW || mat[i] === M.ASH) { // displace loose snow upward; it comes to rest loose (bond 0, under the firm density), never as a firm cell on a post top
       let y = c.y - 1; while (y > 0 && mat[idx(c.x, y)] !== M.AIR) y--;
-      if (y > g.y0 - 12 && y > 0) set(c.x, y, mat[i], dens[i], 0, F_DIST);
+      if (y > g.y0 - 12 && y > 0) set(c.x, y, mat[i], Math.min(dens[i], 400), 0, F_DIST);
     }
-    if (kind === 'block') set(c.x, c.y, M.SNOW, d, 175, F_DIST | F_BLOCK);
+    if (c.m === M.SNOW) set(c.x, c.y, M.SNOW, kind === 'block' ? d : c.d, kind === 'block' ? 175 : c.b, F_DIST | (kind === 'block' ? F_BLOCK : 0)); // block cells, or packed gap fill under a beam
     else { set(c.x, c.y, door ? M.DOOR : M.PLANK, 500, 0, vert ? F_VERT : 0); beamId[i] = bid; }
   }
+  if (kind === 'block') laid.push({ x0: g.x0, y0: g.y0, w: g.w, h: g.h, d, age: 0 });
   if (kind === 'beam') inv.logs -= bs.logs;
   tamp(g.x0, g.y0 + g.h, g.w);
   if (kind === 'beam') freshBeam(bid, g.x0, g.y0, g.x0 + g.w, g.y0 + g.h);
   sfx?.place(kind === 'beam');
   tool.cool = 0.25;
   pl.stamina -= 0.03;
-  markStruct(g.x0 - 2, g.y0 - 2, g.x0 + g.w + 2, g.y0 + g.h + 2);
+  markStruct(g.x0 - 2, g.y0 - 2, g.x0 + g.w + 2, g.y0 + g.h + 6); // +6: the gap fill reaches 4 rows below the beam
   tool.built.add(kind === 'beam' ? 'wood' : 'snow');
 }
 
@@ -660,6 +731,7 @@ export function toolHud() {
   };
 }
 export function stepFires(dt: number) {
+  watchLaid(dt); // per-frame tool watch: blocks that crumble just after being laid
   const gm = dt * G.timeScale; // game minutes
   for (let k = G.fires.length - 1; k >= 0; k--) {
     const f = G.fires[k];

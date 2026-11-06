@@ -864,7 +864,7 @@ function frameBody(now: number) {
   pt = pnow();
   if (pl.alive) {
     if (s.primary && aimWorld) { usePrimary(aimWorld[0], aimWorld[1], realDt); working = true; if (tutorial === 0 && tool.load > 0) tutorial = 1; }
-    else idleTool(realDt);
+    else if (!s.primary) idleTool(realDt); // button still held but aim lost for a frame: keep the one-per-press latches
     if (s.secondaryPressed && aimWorld) { useSecondary(aimWorld[0], aimWorld[1]); if (tutorial === 1) tutorial = 2; }
     if (s.interactPressed) { if (!interact()) sound.uiDeny(); }
     if (s.eatPressed) eat();
