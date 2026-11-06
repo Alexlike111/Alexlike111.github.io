@@ -1,0 +1,23 @@
+{
+  "name": "snowcraft",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "test:sim": "tsx tests/sim.test.ts",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "5.9",
+    "vite": "^7.3.0",
+    "vite-plugin-singlefile": "^2.3.4"
+  },
+  "dependencies": {
+    "@fontsource/pixelify-sans": "^5.2.0",
+    "@fontsource/jura": "^5.2.0"
+  }
+}
