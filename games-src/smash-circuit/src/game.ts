@@ -82,6 +82,7 @@ export class Game {
   private resultsReward = 0;
   /** Demolition Arena round in progress (null = race mode) */
   private arena: ArenaMatch | null = null;
+  private arenaBest = 0;
   private readonly arenaUi = new ArenaUi();
 
   private platformPaused = false;
@@ -460,9 +461,7 @@ export class Game {
 
   private endArenaRound(m: ArenaMatch): void {
     const coins = m.coins();
-    let best = 0;
-    try { best = Number(localStorage.getItem('smash-arena-best')) || 0; } catch { /* storage blocked */ }
-    if (m.score > best) { best = m.score; try { localStorage.setItem('smash-arena-best', String(best)); } catch { /* ignore */ } }
+    const best = (this.arenaBest = Math.max(this.arenaBest, m.score));   // this session only (no browser storage: Bridge storage rules)
     this.save = { ...this.save, money: this.save.money + coins };
     void writeSave(this.save);
     this.state = 'results';
