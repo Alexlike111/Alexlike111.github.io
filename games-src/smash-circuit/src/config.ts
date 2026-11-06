@@ -90,7 +90,7 @@ export const CONFIG = {
   damage: {
     zoneMaxHp: 100,
     impulseThreshold: 4500,   // N*s below this: no damage (curb rubbing, light taps) [4.13]
-    impulseToDamage: 0.0018, // hp per N*s above threshold
+    impulseToDamage: 0.0022, // hp per N*s above threshold
     carVsCarMul: 0.7,
     wreckPowerMul: 0.25,      // power when totally wrecked
     partOffHp: 35,            // zone hp below which its part flies off

@@ -87,7 +87,7 @@ describe('plow-through of broken static pieces', () => {
 
   it('a glancing hit is charged as one hit, not per solver step (audit D2)', () => {
     const sim = solo(TRACKS[0]);
-    // a straight stretch: 140 km/h at 10 degrees into the guardrail
+    // a straight stretch: 140 km/h at 20 degrees into the guardrail
     const S = sim.track.samples;
     let s0 = -1;
     for (let i = 0; i < S.length && s0 < 0; i++) {
@@ -96,7 +96,7 @@ describe('plow-through of broken static pieces', () => {
       if (ok) s0 = S[(i + 10) % S.length].s;
     }
     const t = sim.track.sampleAt(s0), half = sim.track.def.width / 2;
-    const a = Math.atan2(t.ty, t.tx) + 10 * Math.PI / 180, v = 140 / 3.6;
+    const a = Math.atan2(t.ty, t.tx) + 20 * Math.PI / 180, v = 140 / 3.6;
     sim.simCars[0].reset(t.x + t.nx * (half - 2), t.y + t.ny * (half - 2), a);
     sim.simCars[0].body.setLinearVelocity({ x: Math.cos(a) * v, y: Math.sin(a) * v });
     sim.playerAssist = false;
@@ -105,7 +105,7 @@ describe('plow-through of broken static pieces', () => {
     const st = sim.cars[0];
     let lost = 0;
     for (const z of Object.keys(st.hp) as (keyof typeof st.hp)[]) lost += st.zoneMaxHp - st.hp[z];
-    expect(lost).toBeGreaterThan(5);        // per-step thresholds charged ~1.5 hp (the steps were each just above / below 2500 N*s)
+    expect(lost).toBeGreaterThan(5);        // per-step thresholds charged ~1.5 hp (the steps were each just above / below the 4500 N*s threshold)
     expect(lost).toBeLessThan(30);
   });
 

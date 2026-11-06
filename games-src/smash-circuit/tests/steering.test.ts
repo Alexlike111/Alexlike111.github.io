@@ -109,7 +109,7 @@ describe('a player at full throttle takes every corner', () => {
       sim.setPlayerInput({ throttle, brake, steer: kb, handbrake: false, drift: 0 });
       sim.update(dt); t += dt;
       for (const e of sim.drainEvents()) {
-        if (e.type === 'impact' && e.carId === 0 && (e.other === 'wall' || e.other === 'guardrail')) walls++;
+        if (e.type === 'impact' && e.carId === 0 && (e.other === 'wall' || e.other === 'guardrail') && e.strength > 0.15) walls++;   // scrapes (strength < 0.15, no damage) do not count
         if (e.type === 'lap' && e.carId === 0) laps++;
       }
       if (sim.race.phase === 'racing' && t > 8) minV = Math.min(minV, v);

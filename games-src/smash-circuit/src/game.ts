@@ -402,6 +402,7 @@ export class Game {
     if (act === 'restart') { this.ui.showCup(this.save, cup.id); return; }
     const idx = this.save.career.run?.results.length ?? 0;
     this.startRace(cup.races[idx].track, { cup, idx });
+  }
 
   // ------------------------------------------------------------------ Demolition Arena
 

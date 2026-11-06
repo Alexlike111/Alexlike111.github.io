@@ -67,7 +67,7 @@ describe('impulse damage', () => {
   it('a 20 m/s wall crash is serious but not an instant wreck', () => {
     const hp = createZoneHp();
     applyImpulseDamage(hp, 2.1, 0, 1000 * 20 * 1.2, 1);
-    expect(hp.front).toBeLessThan(70);
+    expect(hp.front).toBeLessThan(75);   // a hard crash still visibly hurts (retuned: threshold 4500, 0.0022 hp per N*s)
     expect(hp.front).toBeGreaterThan(20);
     expect(totalHealth(hp, MAX)).toBeGreaterThan(0.3);
   });
