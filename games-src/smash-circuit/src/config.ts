@@ -89,8 +89,8 @@ export const CONFIG = {
   },
   damage: {
     zoneMaxHp: 100,
-    impulseThreshold: 2500,   // N*s below this: no damage (curb rubbing, light taps) [4.13]
-    impulseToDamage: 0.0035,  // hp per N*s above threshold
+    impulseThreshold: 4500,   // N*s below this: no damage (curb rubbing, light taps) [4.13]
+    impulseToDamage: 0.0018, // hp per N*s above threshold
     carVsCarMul: 0.7,
     wreckPowerMul: 0.25,      // power when totally wrecked
     partOffHp: 35,            // zone hp below which its part flies off
@@ -108,8 +108,8 @@ export const CONFIG = {
     wheelRadius: 1.0,         // m: a hit this close to a wheel also damages it
     partKick: 6,              // m/s extra velocity of detaching parts
     // ---- appended: visible crash damage (parts knocked off by one hard hit, wheels at heavy damage) ----
-    knockOffImpulse: 15000,   // N*s of ONE solver hit (~1200 per m/s of normal speed: ~45 km/h square into a wall) that knocks the outermost part of the hit side off, whatever the zone hp
-    knockOffSecond: 26000,    // N*s (~80 km/h) from which the hit also knocks the next part of that side off (bumper + hood)
+    knockOffImpulse: 26000,   // N*s of ONE solver hit (~1200 per m/s of normal speed: ~45 km/h square into a wall) that knocks the outermost part of the hit side off, whatever the zone hp
+    knockOffSecond: 42000,    // N*s (~80 km/h) from which the hit also knocks the next part of that side off (bumper + hood)
     wheelOffHp: 0.5,          // wheel zone hp at or below which that wheel comes off
     maxWheelsOff: 2,          // a car never loses more wheels than this (it must still read as a car)
     // ---- appended: fair damage (audit #14 / #19) ----
