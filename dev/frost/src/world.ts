@@ -173,14 +173,17 @@ export function generate(s = 20261106) {
     if (x > W - 60 || (x > lakeA - 20 && x < lakeB + 20) || Math.abs(x - START_X) < 70 || Math.abs(x - DRIFT_X) < 110) continue;
     plantTree(x, 110 + ((rnd() * 140) | 0));
   }
-  // boulders
-  for (let k = 0; k < 14; k++) {
-    const bx = 80 + ((rnd() * (W - 160)) | 0); if (bx > lakeA && bx < lakeB) continue;
-    const r = 6 + rnd() * 10, gy = groundY[bx];
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r * 1.3; dx <= r * 1.3; dx++) {
-      if ((dx / 1.3) ** 2 + dy * dy > r * r) continue;
-      const xx = Math.round(bx + dx), yy = Math.round(gy + dy - r * 0.4);
-      if (inb(xx, yy)) { const i = idx(xx, yy); mat[i] = M.ROCK; dens[i] = 0; bond[i] = 0; flags[i] = 0; treeId[i] = 0; }
+  // boulders: few, irregular, resting on the ground; a wind-scoured hollow in the snow lets the crown of each one stick out (rendered as lit rock)
+  {
+    const placed: number[] = [];
+    for (let att = 0; att < 120 && placed.length < 5; att++) {
+      const bx = 120 + ((rnd() * (W - 240)) | 0), pick = rnd(), hb = 15 + ((rnd() * 13) | 0), seedB = rnd() * 100;
+      if (bx > lakeA - 50 && bx < lakeB + 50) continue;
+      if (Math.abs(bx - START_X) < 90 || Math.abs(bx - DRIFT_X) < 130) continue;
+      if (placed.some(p => Math.abs(p - bx) < 220) || trees.some(t => Math.abs(t.x - bx) < 100)) continue;
+      void pick;
+      placeBoulder(bx, hb, seedB);
+      placed.push(bx);
     }
   }
   // supply crates with orange poles
@@ -242,42 +245,107 @@ function placeCrate(x: number, loot: string[]) {
   for (let yy = poleS - 24; yy < top; yy++) for (let xx = x + 2; xx < x + 4; xx++) { const i = idx(xx, yy); mat[i] = M.POLE; flags[i] = ((yy >> 2) & 1) ? F_VERT : 0; treeId[i] = 0; }
 }
 
+/** flags bit 64: boulder rock (bit 32 is reserved for the "belongs to a rigid body" bit of the GPU upload) */
+export const F_BOULDER = 64;
+/** flags bit 128: thin snow cap lying on a bough (casts only a faint sky shadow, so crowns do not turn into dither) */
+export const F_CAP = 128;
+
+/** A half-buried boulder: irregular lumpy outline resting on the ground, plus a wind-scoured hollow in the snow so its crown pokes out. */
+function placeBoulder(bx: number, h: number, sd: number) {
+  const rx = Math.round(h * (1.1 + 0.4 * hash1(sd)));
+  const lump = hash1(sd + 5) > 0.4, lo = (hash1(sd + 9) > 0.5 ? 1 : -1) * Math.round(rx * 0.6), lr = Math.round(rx * 0.5), lh = h * 0.55;
+  const ht = new Int16Array(2 * rx + 1);
+  for (let dx = -rx; dx <= rx; dx++) {
+    const u = Math.abs(dx) / rx;
+    let f = Math.pow(Math.max(0, 1 - Math.pow(u, 2.3)), 0.6) * (0.82 + 0.36 * noise1(dx * 0.16 + sd)) + (noise1(dx * 0.27 + sd * 3) - 0.5) * 0.1;
+    if (lump) { const ul = Math.abs(dx - lo) / lr; if (ul < 1) f = Math.max(f, (lh / h) * Math.pow(1 - ul * ul, 0.6) * (0.85 + 0.3 * noise1(dx * 0.3 + sd * 7))); }
+    ht[dx + rx] = Math.max(0, Math.round(h * f));
+  }
+  // scour: snow thins out over the rock and rises back to the full depth over ~60 cells
+  for (let dx = -rx - 64; dx <= rx + 64; dx++) {
+    const xx = bx + dx; if (xx < 2 || xx >= W - 2) continue;
+    const g = groundY[xx];
+    let d = 0; while (d < 120 && g - 1 - d > 0 && mat[idx(xx, g - 1 - d)] === M.SNOW) d++;
+    if (d === 0) continue;
+    const e = Math.max(0, Math.abs(dx) - rx * 0.85), hc = Math.abs(dx) <= rx ? ht[dx + rx] : 0;
+    const tgt = Math.ceil(hc * 0.75 + e * 0.8);
+    if (d <= tgt) continue;
+    for (let y = g - d; y < g - tgt; y++) { const i = idx(xx, y); mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; flags[i] = 0; }
+    for (let k = 0; k < 4; k++) { const i = idx(xx, g - tgt + k); if (mat[i] === M.SNOW) { dens[i] = 75 + ((rnd() * 20) | 0); bond[i] = 0; flags[i] = 0; } }
+  }
+  for (let dx = -rx; dx <= rx; dx++) {
+    const xx = bx + dx; if (xx < 2 || xx >= W - 2 || ht[dx + rx] <= 0) continue;
+    const g = groundY[xx];
+    for (let y = g - ht[dx + rx]; y <= g + 1; y++) { const i = idx(xx, y); mat[i] = M.ROCK; dens[i] = 0; bond[i] = 0; flags[i] = F_BOULDER; treeId[i] = 0; }
+  }
+}
+
+/** Spruce: tapering trunk + tiered drooping boughs (solid core, ragged tips), snow caps on the upper surfaces.
+ *  NEEDLE cells carry their tone in `bond` (0 = light tip / top edge .. 255 = dark core / underside); trunk cells hidden by a bough carry bond 255. */
 export function plantTree(x: number, h: number) {
-  let base = groundY[x];
+  const base = groundY[x];
   const trunkW = Math.max(3, Math.round(h / 40));
   const top = base - h;
   const tid = (trees.length % 65535) + 1; // unique per tree (wraps only past 65535 trees)
+  let rs = (Math.imul(x, 7919) + Math.imul(h, 104729) + 12345) >>> 0;       // private stream: the world's rnd() sequence does not depend on crown shape
+  const rr = () => { rs = (Math.imul(rs, 1664525) + 1013904223) >>> 0; return rs / 4294967296; };
+  const sd = rr() * 100;
   for (let y = top; y < base; y++) {
     const t = (base - y) / h;
     const tw = Math.max(1, Math.round(trunkW * (1 - t * 0.7)));
     for (let dx = 0; dx < tw; dx++) { const xx = x - (tw >> 1) + dx; const i = idx(xx, y); mat[i] = M.WOOD; dens[i] = 500; flags[i] = F_TREE | F_VERT; bond[i] = 0; treeId[i] = tid; }
   }
-  // tiers of branches (spruce): wider at bottom, start ~1/5 up
-  const crownStart = base - Math.round(h * 0.18);
-  for (let y = top + 2; y < crownStart; y++) {
-    const t = (y - top) / (crownStart - top); // 0 top .. 1 bottom
-    const tier = ((y - top) % 14) / 14;
-    const half = Math.round((3 + t * h * 0.24) * (0.55 + 0.45 * (1 - tier)));
-    for (let dx = -half; dx <= half; dx++) {
-      const xx = x + dx; if (!inb(xx, y)) continue;
-      const i = idx(xx, y);
-      if (mat[i] !== M.AIR && mat[i] !== M.SNOW) continue;
-      const droop = Math.abs(dx) / (half + 1);
-      if (rnd() < 0.18 + droop * 0.35) continue;
-      mat[i] = M.NEEDLE; dens[i] = 0; bond[i] = 0; flags[i] = F_TREE; treeId[i] = tid;
+  // tiers: each one a drooping triangular bough (apex on the trunk, tip lower and wider), thick near the trunk, thin and ragged at the tip
+  const crownStart = base - Math.round(h * 0.18), crownH = crownStart - top, wMax = 3 + h * 0.2;
+  let yA = top + 1, ti = 0;
+  while (yA < crownStart - 5) {
+    const t = Math.min(1, Math.max(0, (yA - top) / crownH));
+    const S = Math.round(7 + 6 * t + rr() * 2);                      // vertical spacing to the next apex
+    let Wt = 3, D = 4;
+    for (let k = 0; k < 2; k++) { const tt = Math.min(1, Math.max(0, (yA + D - top) / crownH)); Wt = 2.5 + (wMax - 2.5) * Math.pow(tt, 0.85); D = 2 + Wt * 0.45; }
+    const Wl = Wt * (0.82 + 0.3 * rr()), Wr = Wt * (0.82 + 0.3 * rr());
+    const T = S + 5;                                                  // thickness at the trunk (overlaps the next tier's apex)
+    for (let dx = -Math.ceil(Wl); dx <= Math.ceil(Wr); dx++) {
+      const xx = x + dx; if (!inb(xx, 0)) continue;
+      const side = dx < 0 ? Wl : Wr, u = Math.min(1, Math.abs(dx) / side);
+      if (Math.abs(dx) > side) continue;
+      const yTop = yA + Math.round(D * Math.pow(u, 0.85));
+      const nz = noise1(dx * 0.55 + ti * 17.3 + (dx < 0 ? 0 : 91) + sd);
+      const tuft = u > 0.35 ? Math.floor(nz * 3.3 * u) : 0;          // needle tufts hang below the tip
+      const th = 1.6 + (T - 1.6) * Math.pow(1 - u, 1.3);
+      const yBot = Math.min(base - 3, yTop + Math.round(th) + tuft);
+      const along = 1 - u;
+      for (let y = yTop; y < yBot; y++) {
+        if (y < 0 || y >= H) continue;
+        const i = idx(xx, y);
+        const m0 = mat[i];
+        if (m0 === M.WOOD) { if ((flags[i] & F_TREE) && treeId[i] === tid && u < 0.4) bond[i] = 255; continue; }
+        if (m0 !== M.AIR && m0 !== M.SNOW) continue;
+        const v = (y - yTop) / Math.max(1, yBot - yTop - 1);        // 0 top edge .. 1 underside
+        let tone = 0.62 * Math.pow(along, 0.8) + 0.5 * v - 0.17;
+        if ((y - yTop + Math.floor(Math.abs(dx) * 0.5)) % 3 === 0) tone += 0.14;   // drooping needle sprays follow the bough slope
+        mat[i] = M.NEEDLE; dens[i] = 0; bond[i] = Math.max(0, Math.min(255, Math.round(tone * 255))); flags[i] = F_TREE; treeId[i] = tid;
+      }
     }
+    yA += S; ti++;
   }
-  // remove snow inside the crown (tree well) and load snow on boughs
+  // remove snow inside the crown (tree well)
   for (let y = top; y < base; y++) for (let dx = -30; dx <= 30; dx++) {
     const xx = x + dx; if (!inb(xx, y)) continue; const i = idx(xx, y);
     if (mat[i] === M.SNOW && y < base - 6 && Math.abs(dx) < h * 0.2) { mat[i] = M.AIR; dens[i] = 0; bond[i] = 0; }
   }
-  for (let dx = -40; dx <= 40; dx++) {
-    const xx = x + dx; if (!inb(xx, 0)) continue;
-    for (let y = top - 1; y < base; y++) {
-      const i = idx(xx, y), b = idx(xx, y + 1);
-      if (mat[i] === M.AIR && mat[b] === M.NEEDLE) { for (let k = 0; k < 2; k++) { const j = idx(xx, y - k); if (mat[j] === M.AIR) { mat[j] = M.SNOW; dens[j] = 110; bond[j] = 20; } } break; }
-      if (mat[i] !== M.AIR && mat[i] !== M.NEEDLE) break;
+  // snow caps: 1-2 cells lying on the upper surface of the boughs (patchy, coherent), only where the sky is open above
+  const Wc = Math.ceil(wMax * 1.3) + 6;
+  for (let dx = -Wc; dx <= Wc; dx++) {
+    const xx = x + dx; if (!inb(xx, 0) || xx < 1 || xx >= W - 1) continue;
+    for (let y = top - 2; y < crownStart + 12 && y < H - 3; y++) {
+      const i = idx(xx, y), b = i + W;
+      if (mat[i] !== M.AIR || mat[b] !== M.NEEDLE || treeId[b] !== tid || mat[i - W] !== M.AIR || mat[i - 2 * W] !== M.AIR) continue;
+      if (noise1(dx * 0.11 + tid * 3.7 + y * 0.05 + sd) < 0.1) continue;
+      const flat = (mat[b - 1] === M.NEEDLE ? 1 : 0) + (mat[b + 1] === M.NEEDLE ? 1 : 0);
+      if (flat === 0) continue;
+      const thick = flat === 2 || noise1(dx * 0.23 + sd * 2 + y * 0.1) > 0.55 ? 2 : 1;
+      for (let k = 0; k < thick; k++) { const j = i - k * W; if (mat[j] === M.AIR) { mat[j] = M.SNOW; dens[j] = 110; bond[j] = 44; flags[j] = F_CAP; treeId[j] = 0; } }
     }
   }
   trees.push({ x, base, height: h, alive: true });

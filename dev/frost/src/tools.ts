@@ -71,7 +71,11 @@ function dig(ax: number, ay: number) {
   pl.snowOn = Math.min(1, pl.snowOn + 0.01);
   tool.cool = 0.22 + h * 0.45;
   sfx?.dig(h);
-  for (let k = 0; k < 5; k++) spawn(PK.DUST, ax, ay, (Math.random() - 0.5) * 40, -Math.random() * 30, 0.8, 1, 0, 0);
+  // spray: a few fine dust bits plus 2-3 cell clumps (m >= 1.7 draws as a solid clump), lofted in an arc and drifted by the wind
+  for (let k = 0, nb = 4 + Math.min(5, n >> 2); k < nb; k++) {
+    const clump = k % 3 === 0, a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6 + pl.face * 0.35, sp = clump ? 30 + Math.random() * 34 : 16 + Math.random() * 44;
+    spawn(PK.DUST, ax + (Math.random() - 0.5) * 4, ay + (Math.random() - 0.5) * 3, Math.cos(a) * sp, Math.sin(a) * sp, clump ? 0.6 + Math.random() * 0.5 : 0.45 + Math.random() * 0.6, clump ? 1.8 + Math.random() * 0.8 : 0.9 + Math.random() * 0.6, 0, 0);
+  }
   markStruct(ax - 8, ay - 8, ax + 8, ay + 8);
 }
 /** Direction (not normalised) with the longest clear throw from the shoulder: 8 rays in the upper half-plane, behind the player preferred. */
@@ -432,7 +436,7 @@ export function stepFires(dt: number) {
         const lick = 0.78 + 0.32 * Math.sin(tt * (4.1 + j * 1.3) + ph * 1.3);
         const cx = f.x + (j - 1) * 4.6 + sway * 2.4;
         const big = j === 1 ? 1.15 : 0.9;
-        for (let n = burst((j === 1 ? 32 : 22) * (0.5 + 0.5 * pw)); n > 0; n--) {
+        for (let n = burst((j === 1 ? 42 : 29) * (0.5 + 0.5 * pw)); n > 0; n--) {
           spawn(PK.FLAME, cx + (Math.random() - 0.5) * 4.5, f.y - 1.5 - Math.random() * 3, sway * 9 + (Math.random() - 0.5) * 7, -(30 + Math.random() * 34) * lick * (0.6 + 0.4 * pw), 0.5 + Math.random() * 0.5, (1.95 + Math.random() * 1.2) * big * (0.6 + 0.4 * pw), 0, 0);
         }
       }

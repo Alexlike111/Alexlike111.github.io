@@ -176,6 +176,7 @@ export function stepPlayer(inp: MoveIn) {
       const dd = mat[fi] === M.SNOW ? dens[fi] : 600;
       pl.lastStepDens = dd;
       events.steps.push({ dens: dd, run, sink: pl.sink });
+      if (dd < 300 && mat[fi] === M.SNOW) for (let k = 0, nk = run ? 3 : 2; k < nk; k++) spawn(PK.DUST, pl.x - pl.face * 3 + (Math.random() - 0.5) * 3, pl.y - 1, -pl.face * (4 + Math.random() * 14), -(6 + Math.random() * 14), 0.35 + Math.random() * 0.3, 0.9 + Math.random() * 0.5, 0, 0);   // snow kicked up by the boot
     }
   } else pl.walkPhase *= 0.9;
   // stamina
@@ -188,10 +189,10 @@ export function stepPlayer(inp: MoveIn) {
   // breath vapour
   pl.breathT -= dt;
   if (pl.breathT <= 0) {
-    pl.breathT = run ? 0.8 : 1.6 + Math.random() * 0.8;
+    pl.breathT = run ? 0.7 : 1.3 + Math.random() * 0.7;
     const hx = pl.x + pl.face * 4, hy = pl.y - PH + 6;
-    const nb = pl.airT < -15 ? 9 : 5;
-    for (let k = 0; k < nb; k++) spawn(PK.BREATH, hx + Math.random() * 2, hy + Math.random() * 2, pl.face * (8 + Math.random() * 12), -3 + Math.random() * 4, 1.2 + Math.random() * 0.8, 1, 0, 0);
+    const nb = pl.airT < -15 ? 8 : 5;
+    for (let k = 0; k < nb; k++) spawn(PK.BREATH, hx + Math.random() * 2, hy + Math.random() * 2, pl.face * (8 + Math.random() * 12), -3 + Math.random() * 4, 1.4 + Math.random() * 0.9, 1, 0, 0);
   }
 }
 

@@ -334,6 +334,7 @@ function landGrain(i: number, k: number, c: number, px0: number, py0: number) {
     if (was !== rigidAt(c)) solidChanged(cx, cy);
     if (d <= 0) return;
   }
+  if (k === PK.CLUMP && Math.random() < 0.4) spawn(PK.DUST, px0 + 0.5, py0 + 0.5, (Math.random() - 0.5) * 26, -(6 + Math.random() * 20), 0.45 + Math.random() * 0.4, 1.3, 0, 0);   // powder puff where a tossed clump lands
   if (!depositNear(px0, py0, d, fl, drift ? 60 : 0)) {
     const col = clampX(px0 | 0);
     pending[col] = Math.min(PENDING_MAX, pending[col] + d / Math.max(1, freshDens(G.ambientT)));

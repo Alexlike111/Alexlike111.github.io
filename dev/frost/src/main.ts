@@ -470,6 +470,17 @@ function drawOverlay(aim: [number, number] | null) {
   drawFireBase();
   drawContactShadow();
   drawPlayer(aim, 0, 0);
+  // warm firelight on the parka: source-atop only tints what is already drawn (sprite, shadow, logs), stronger on the side facing the fire
+  for (const f of G.fires) {
+    if (!f.lit) continue;
+    const d = Math.hypot(f.x - pl.x, f.y - 8 - pl.y); if (d > 150) continue;
+    const k = (1 - d / 150) * Math.min(1, f.fuel / 20) * (0.85 + 0.15 * Math.sin(G.realTime * 9 + f.id));
+    ctx.save(); ctx.globalCompositeOperation = 'source-atop';
+    const g = ctx.createRadialGradient(f.x, f.y - 7, 3, f.x, f.y - 7, 85);
+    g.addColorStop(0, `rgba(255,150,60,${0.26 * k})`); g.addColorStop(0.5, `rgba(255,120,40,${0.1 * k})`); g.addColorStop(1, 'rgba(255,100,30,0)');
+    ctx.fillStyle = g; ctx.fillRect(f.x - 90, f.y - 95, 180, 100);
+    ctx.restore();
+  }
   // aim reticle & ghost (dark under-stroke so they read on white snow)
   if (aim && pl.alive) {
     const [ax, ay] = reachPoint(aim[0], aim[1]);
@@ -608,7 +619,7 @@ function frame(now: number) {
   // (bodies stamped over the player's head push the player down via collision; heavy impact = injury → cold)
   // lights
   G.lights.length = 0;
-  for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 11, r: 240, power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
+  for (const f of G.fires) if (f.lit && G.lights.length < 8) G.lights.push({ x: f.x, y: f.y - 11, r: 240 * (1 + 0.08 * (0.6 * Math.sin(G.realTime * 7.3 + f.id * 1.9) + 0.4 * Math.sin(G.realTime * 13.1 + f.id * 3.3))), power: f.power / 4200 * 1.4 * (0.9 + 0.06 * Math.sin(G.realTime * 11 + f.id * 2.7) + Math.random() * 0.08), color: [1, 0.62, 0.32] });
   // audio ambient
   let fireNear = 0; for (const f of G.fires) if (f.lit) fireNear = Math.max(fireNear, 1 - Math.hypot(f.x - pl.x, f.y - pl.y) / 200);
   pt = pnow();

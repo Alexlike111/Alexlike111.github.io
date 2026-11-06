@@ -34,7 +34,7 @@ vec4 fetchW(ivec2 c){
 const CELL_BODY = `
 uniform highp usampler2D uTop;
 uniform ivec2 uOrg;
-uniform float uTime, uDay, uStorm, uWind;
+uniform float uTime, uDay, uStorm, uWind, uCamX;
 uniform int uNL, uSteps, uSkyN, uSkyS;
 uniform vec2 uSkyDir;
 uniform vec3 uAmb, uDirCol;
@@ -66,9 +66,14 @@ vec3 skyMarch(ivec2 c, int stp, int jit, int mUp, out float depth){
   for(int i=0;i<16;i++){
     if(i>=lim) break;
     int dy = 2 + i*stp + jit;
-    int mm = mAt(c+ivec2(0,-dy));
+    vec4 tv = texelFetch(uWorld, c+ivec2(0,-dy), 0);
+    int mm = (c.y-dy<0) ? 0 : (c.x<0||c.x>=WI) ? 12 : min(12, int(tv.r*255.+.5));
     if(mm==0){ if(!found){ found=true; depth=float(dy); } }
-    else { A += ABS_S[mm]*float(stp); if(A.g>4.5){ dead=true; break; } }
+    else {
+      vec3 ab = ABS_S[mm];
+      if(mm==1 && int(tv.a*255.+.5)>=128) ab *= .15;                 // snow caps on boughs: faint sky shadow
+      A += ab*float(stp); if(A.g>4.5){ dead=true; break; }
+    }
   }
   if(!dead && !found && lim<nmax) depth = float(2 + lim*stp + jit);
   return exp(-A);
@@ -143,9 +148,9 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     b = mix(b, b*vec3(.95,.97,1.), smoothstep(30.,255.,bn)*.4);
     float amp = mix(mix(.028,.02+.03*slab,old), .08, fresh);
     if((fl&2)!=0) b = mix(b, vec3(.58,.63,.70), .6);
-    float trail = ((fl&1)!=0 && dn>=300. && depth<3.5) ? 1. : 0.;          // trodden path: a hair darker and smoother
-    amp *= 1.-.7*trail;
-    b = mix(b, b*vec3(.9,.935,.975), trail*.8);
+    float trail = ((fl&1)!=0 && dn>=280. && depth<3.5) ? 1. : 0.;          // trodden path: compacted groove, a little darker, bluer and smoother
+    amp *= 1.-.85*trail;
+    b = mix(b, b*vec3(.83,.885,.96), trail*.9);
     b += g*amp;
     b += (vn(vec2(cf.x*.025, cf.y*.9))-.5)*.05*(1.-fresh);                  // thin horizontal strata
     float strat2 = 1.;
@@ -205,6 +210,21 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     if(fract(hh*37.7)>.968) b = mix(b, vec3(.78,.85,.93), .5*(.3+fz));
     return b;
   }
+  if(m==5 && (fl&64)!=0){                                                   // boulder: lumpy grey rock, cracks, lichen, frost
+    float n1 = vn(cf*.17), n2 = vn(cf*.6+9.);
+    vec3 b = mix(vec3(.46,.45,.47), vec3(.70,.67,.64), n1*.8+n2*.2);
+    b *= .84+.3*vn(vec2(cf.x*.11+cf.y*.04, cf.y*.14-cf.x*.05)+17.);                // large facets
+    float cr = vn(vec2(cf.x*.09+cf.y*.05, cf.y*.12-cf.x*.04)+4.);
+    if(abs(cr-.5)<.022) b *= .68;                                          // crack
+    float rim = (1.-smoothstep(0.,2.4,depth))*(1.-upN);
+    b *= 1.-rim*.35;                                                       // shaded sides
+    float topH = upN*(1.-smoothstep(1.,3.2,depth));
+    b = mix(b, vec3(.80,.86,.92), topH*.5)*(1.+topH*.15);                  // lit, frosted crown
+    vec2 pc = floor(cf*.34); float lh = hf(pc*1.3+7.);
+    if(lh>.9 && n1>.35){ vec2 lf = fract(cf*.34)-.5; if(dot(lf,lf)<.12+.1*hf(pc+3.)) b = mix(b, mix(vec3(.62,.68,.30), vec3(.86,.82,.52), hf(pc+1.)), .85); }   // lichen patch
+    if(fract(hh*53.1)>.955) b = mix(b, vec3(.9,.95,1.), .65);              // frost speckle
+    return b*(1.+g*.12);
+  }
   if(m==5){
     float st = cf.y/4.5 + vn(vec2(cf.x*.012, cf.y*.08))*1.6;               // thin, nearly horizontal strata
     float si = floor(st), sf = fract(st);
@@ -226,11 +246,13 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     return vec3(.15,.16,.20)*(.8+.4*vn(cf*.3))*(1.+g*.2);
   }
   if(m==6){
+    if(bn>200.){ return mix(vec3(.05,.16,.115), vec3(.1,.27,.18), vn(cf*.4))*(.95+.1*hh); }   // trunk hidden inside the crown reads as dark needle core
     float s = vert ? vn(vec2(cf.x*1.4, cf.y*.07)) : vn(vec2(cf.x*.07, cf.y*1.4));
     float s2 = vert ? vn(vec2(cf.x*.5+3., cf.y*.3)) : vn(vec2(cf.x*.3, cf.y*.5+3.));
-    vec3 b = mix(vec3(.22,.135,.08), vec3(.43,.29,.175), s*.65+s2*.35);   // dark brown bark
-    if(s<.3) b *= .62;                                                     // furrows
-    if(hh>.93) b *= 1.32;                                                  // lighter bark flakes
+    vec3 b = mix(vec3(.27,.18,.135), vec3(.50,.35,.245), s*.65+s2*.35);   // warm dark brown bark (never black)
+    if(s<.3) b *= .66;                                                     // furrows
+    if(s>.78) b *= 1.14;                                                   // ridges catch light
+    if(hh>.93) b = b*1.25+vec3(.03,.025,.02);                              // lighter bark flakes
     if(top) b = mix(b, vec3(.85,.9,.95), .4);
     return b*(1.+g*.15);
   }
@@ -241,14 +263,13 @@ vec3 albedo(int m, float dn, float bn, int fl, vec2 cf, float hh, float depth, b
     if(e<1.) b *= .62;
     return b;
   }
-  if(m==7){
-    float core = smoothstep(1.,4.,depth);                                  // three tones: dark core, mid, lighter tips
-    float tip = 1.-smoothstep(0.,2.4,depth);
-    vec3 b = mix(mix(vec3(.07,.22,.13), vec3(.17,.37,.23), tip), vec3(.03,.1,.075), core);
-    b *= .84+.32*hh;
-    if(mod(cf.y,3.)<1. && hh>.35) b *= .8;                                 // bough rows
-    if(top) b = mix(b, vec3(.8,.89,.94), .45+.25*hh);                      // frost on the upper side of boughs
-    else if(fract(hh*91.7)>.9) b = mix(b, vec3(.85,.9,.95), .3);
+  if(m==7){                                                               // three tones by position in the bough: light tips / top edge, mid, dark core / underside
+    float t = bn/255.;
+    vec3 cL = vec3(.26,.52,.34), cM = vec3(.12,.33,.215), cD = vec3(.05,.17,.125);
+    vec3 b = mix(mix(cL, cM, smoothstep(.30,.36,t)), cD, smoothstep(.62,.68,t));
+    b = mix(b, cL*1.06, (1.-smoothstep(0.,1.4,depth))*.3*(1.-t));         // tips catch the light
+    b *= .97+.06*hh;
+    if(top) b = mix(b, vec3(.78,.87,.92), .25);
     return b;
   }
   if(m==8) return vec3(.19,.19,.2)*(1.+g*.3);
@@ -281,7 +302,7 @@ void main(){
   int mUp = mAt(c+ivec2(0,-1));
 
   if(m==0){
-    float dUp; vec3 sv3 = skyMarch(c, 3, int(hh*3.), mUp, dUp);
+    float dUp; vec3 sv3 = skyMarch(c, 3, int(vn(wp*.21)*2.99), mUp, dUp);
     float open = smoothstep(.35,.62,sv3.g);
     #ifdef LIGHTS
     vec3 pl = pointLights(wp, c, vec2(0.), 0., hh);
@@ -302,7 +323,7 @@ void main(){
     }
 #endif
   } else {
-    int jit = int(hh*2.);
+    int jit = int(vn(wp*.27)*1.99);   // spatially coherent jitter: smooth shadow edges instead of per-cell dither
     float dUp; vec3 sv3 = skyMarch(c, 2, jit, mUp, dUp);
     float dLat = 40.;
 #ifdef HIQ
@@ -327,8 +348,14 @@ void main(){
       if(air>=1) alb *= 1.-.08*float(3-min(air,3));
       lip = smoothstep(4.,6.,float(air));
       if(m==1){ alb += lip*.035*(.5+.5*uDay); alb = mix(alb, alb*vec3(.8,.86,1.), smoothstep(.2,.8,n.y)*.5); }
+      if(m==1 && mAt(c+ivec2(0,2))==0 && mAt(c+ivec2(0,1))!=0) alb *= vec3(.95,.96,.99);   // second row under an overhang
     }
 #endif
+    if(m==1 && hasN>.5){
+      // cut edges: exposed upper edges get a 1-cell lighter lip, the cell under an overhang sinks into shadow (softens the stair-step look)
+      if(mUp==0) alb = mix(alb, vec3(.97,.985,1.), .22);
+      else if(mAt(c+ivec2(0,1))==0) alb *= vec3(.82,.86,.95);
+    }
     #ifdef LIGHTS
     vec3 pl = pointLights(wp, c, n, hasN, hh);
 #else
@@ -338,20 +365,38 @@ void main(){
     // thick snow still scatters plenty of light: neutral (hue-free) falloff, the blue lives in the albedo gradient
     float svL = smoothstep(0.,.18,dot(sv3,vec3(.33)));
     vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
-    if(m==6 || m==7) lit = max(lit, uAmb*.58 + pl);                       // trunks and boughs under the crown never go black
+    if(m==6) lit = max(lit, uAmb*.82 + pl);                               // bark and boughs under the crown never go black
+    else if(m==7) lit = max(lit, uAmb*.62 + pl);
+    else if(m==5 && (fl&64)!=0) lit = lit*1.2 + uAmb*.15;
     col = alb*lit;
-    if(m==1 && hasN>.5 && depth<1.7){
+    if(m==1 && hasN>.5 && depth<2.2){
       float fac = clamp(dot(n, uSkyDir)*1.3+.35, 0., 1.);                 // surface cells facing the sun / moon
       float night = (1.-uDay)*uVis.y*(1.-uStorm);
       // moon rim light along the surface edge
       col += vec3(.10,.17,.34)*night*smoothstep(.1,.8,dot(n,uSkyDir))*(.6+.4*dirT.g);
       float lum = dot(uDirCol,vec3(.33))*dirT.g;
       float plL = dot(pl,vec3(.33));
-      float site = step(.985, hh) * pow(.5+.5*sin(uTime*(2.5+hh*30.)+hh*200.), 6.);   // crisp glints flickering in time
-      float churn = step(.995, hash3(c, int(floor(uTime*3.))));
-      float gl = max(site, churn);
-      float inten = lum*1.7 + plL*1.5 + .3*uDay*(1.-uStorm) + .35*night;
-      col += mix(vec3(.85,.93,1.), vec3(1.,.97,.9), uDay) * gl * inten * (.35+.65*fac);
+      // glints: clusters of 1-2 bright cells; each flashes with time and with camera movement. Density follows the light: rarer under the moon, warm near fires
+      float hs = hash2(ivec2(c.x/3, c.y>>1));
+      float plW = smoothstep(.04,.35,plL);
+      if(hs > mix(.91,.965,night)){
+        float h2 = hash2(c+ivec2(5,9));
+        if(h2 > .22){
+          float tw = pow(.5+.5*sin(uTime*(1.6+3.*hs) + hs*400. + uCamX*.11*(.4+hs) + h2*6.), 5.);
+          float str = clamp(lum*1.5 + plL*1.6 + .28*uDay*(1.-uStorm) + .22*night, 0., 1.);
+          float h3 = hash2(c+ivec2(11,17)), wc = mix(.12, .6, 1.-uDay);      // by day white would vanish on white snow: prismatic cyan / gold / violet glints dominate
+          vec3 tint = h3<wc ? vec3(2.) : (h3<wc+(1.-wc)*.45 ? vec3(.3,1.0,1.7) : (h3<wc+(1.-wc)*.8 ? vec3(1.8,1.1,.3) : vec3(1.25,.45,1.6)));
+          tint = mix(tint, vec3(1.8,1.15,.55), plW*.85);
+          col = mix(col, tint, clamp(smoothstep(.06,.3,tw)*(.6+.6*str)*(.8+.2*fac),0.,1.));
+        }
+      }
+      // wind crust: a glossy sheen sliding over the slab as the view moves
+      if((fl&16)!=0){
+        float sheen = smoothstep(.45,.95, vn(vec2(cf.x*.045 + uCamX*.006, cf.y*.5)+3.));
+        col += vec3(.9,.97,1.)*sheen*.09*(lum*1.2 + .22*uDay*(1.-uStorm) + .15*night)*fac;
+      }
+      // trodden groove: tiny shadow on the wall on the light side
+      if((fl&1)!=0 && dn>=280. && mUp==0 && mAt(c+ivec2(uSkyDir.x>=0. ? 1 : -1, -1))!=0) col *= .84;
     }
   }
   oCol = enc(vec4(col, openA));
@@ -768,7 +813,7 @@ export class Renderer {
     let v = this.cellV.get(f);
     if (!v) {
       const p = this.compile(VS, fsCell(this.half, f), 'cell');
-      v = { p, u: this.locs(p, ['uWorld', 'uTop', 'uOrg', 'uTime', 'uDay', 'uStorm', 'uWind', 'uNL', 'uSteps', 'uSkyN', 'uSkyS', 'uSkyDir', 'uAmb', 'uDirCol', 'uVis', 'uLP[0]', 'uLC[0]']) };
+      v = { p, u: this.locs(p, ['uWorld', 'uTop', 'uOrg', 'uTime', 'uDay', 'uStorm', 'uWind', 'uCamX', 'uNL', 'uSteps', 'uSkyN', 'uSkyS', 'uSkyDir', 'uAmb', 'uDirCol', 'uVis', 'uLP[0]', 'uLC[0]']) };
       this.cellV.set(f, v);
     }
     return v;
@@ -1005,10 +1050,13 @@ export class Renderer {
         case PK.SMOKE: sz = (3 + (1 - lr) * 6) * m; hd = 0; r = 0.35; g = 0.35; bl = 0.37; a = 0.4 * sstep(0, 0.3, lr) * Math.min(1, (1 - lr) * 8 + 0.2); break;
         case PK.STEAM: sz = (2 + (1 - lr) * 5) * m; hd = 0; a = 0.25 * lr; break;
         case PK.CHIP: sz = 1.2; hd = 1; r = 0.45; g = 0.3; bl = 0.15; a = 1; break;
-        case PK.BREATH: sz = (3.6 + (1 - lr) * 4.4) * m * (0.85 + 0.3 * s); hd = 0.55; r = 0.96; g = 0.985; bl = 1; a = 0.7 * Math.min(1, (1 - lr) * 7 + 0.15) * lr; break; // soft white puff, 2-4 cells, fading
-        default: sz = (0.8 + s * 1.0 + (1 - lr) * 0.5) * m; hd = 0.3 + 0.4 * s; r = 0.94; g = 0.97; a = (0.5 + 0.3 * s) * lr; break; // DUST: small, varied spray
+        case PK.BREATH: sz = Math.max((2.2 + (1 - lr) * 2.0) * m * (0.85 + 0.3 * s), Math.min(4.6, 6.5 / c.zoom)); hd = 0.4; r = 0.96; g = 0.985; bl = 1; a = 0.78 * Math.min(1, 0.7 + (1 - lr) * 3) * sstep(0, 0.55, lr); break; // soft white puff: 2-4 cells (never under ~6 screen px), strong at the start, fading out
+        default:
+          if (m >= 1.7) { sz = 1.4 + s * 1.4; hd = 0.85; r = 0.97; g = 0.985; bl = 1; a = 0.95 * Math.min(1, lr * 3); }   // DUST clump: solid 2-3 cell chunk of snow
+          else { sz = (0.8 + s * 1.0 + (1 - lr) * 0.5) * m; hd = 0.3 + 0.4 * s; r = 0.94; g = 0.97; a = (0.5 + 0.3 * s) * lr; }   // DUST: small, varied spray / puff
+          break;
       }
-      if (!add) { if (k === PK.BREATH || k === PK.DUST) { r *= 0.35 + 0.65 * tn[0]; g *= 0.35 + 0.65 * tn[1]; bl *= 0.35 + 0.65 * tn[2]; } else { r *= tn[0]; g *= tn[1]; bl *= tn[2]; } }   // vapour / spray stay readable at night
+      if (!add) { if (k === PK.BREATH || (k === PK.DUST && m < 1.7)) { r *= 0.35 + 0.65 * tn[0]; g *= 0.35 + 0.65 * tn[1]; bl *= 0.35 + 0.65 * tn[2]; } else { r *= tn[0]; g *= tn[1]; bl *= tn[2]; } }   // vapour / spray stay readable at night
       drawn++;
       const o = (st[b] + cnt[b]++) << 3;
       buf[o] = x; buf[o + 1] = y; buf[o + 2] = add ? -sz : sz; buf[o + 3] = hd;
@@ -1051,7 +1099,7 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.worldTex);
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.topTex);
     gl.uniform1i(uc.uWorld, 0); gl.uniform1i(uc.uTop, 4); gl.uniform2i(uc.uOrg, this.orgX, this.orgY);
-    gl.uniform1f(uc.uTime, G.realTime); gl.uniform1f(uc.uDay, L.day); gl.uniform1f(uc.uStorm, L.storm); gl.uniform1f(uc.uWind, G.wind);
+    gl.uniform1f(uc.uTime, G.realTime); gl.uniform1f(uc.uDay, L.day); gl.uniform1f(uc.uStorm, L.storm); gl.uniform1f(uc.uWind, G.wind); gl.uniform1f(uc.uCamX, c.x);
     gl.uniform1i(uc.uNL, nl); gl.uniform1i(uc.uSteps, lowQ ? 12 : 24);
     gl.uniform1i(uc.uSkyN, lowQ ? 10 : 16); gl.uniform1i(uc.uSkyS, lowQ ? 1 : 0);
     gl.uniform2f(uc.uSkyDir, L.dx, L.dy); gl.uniform2f(uc.uVis, L.vis0, L.vis1);
