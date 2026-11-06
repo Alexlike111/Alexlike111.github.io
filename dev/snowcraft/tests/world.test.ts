@@ -272,7 +272,6 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   t = performance.now();
   const s1 = bfs();
   console.log(`       (walk BFS ${(performance.now() - t).toFixed(0)} ms)`);
-  if ((globalThis as { process?: { env: Record<string, string> } }).process?.env.DEBUG_STEP) { for (const [x, y] of [[258, 263], [257, 263], [256, 263], [255, 263], [254, 263], [253, 263], [254, 264], [254, 267], [253, 267]]) { const bl: string[] = []; for (let yy = y - 19; yy <= y; yy++) for (let xx = x - 4; xx < x + 4; xx++) if (solid[yy * W + xx]) bl.push(xx + ',' + yy + ':' + mat[yy * W + xx]); console.log('       STEP', x, y, 'seen', s1[y * W + x], 'free', free(x, y), 'sup', sup(x, y), bl.slice(0, 5).join(' ')); } }
   ok(near(s1, chestPos('station').x, chestPos('station').y), 'on foot: station chest (through the doors, over the furniture)');
   ok(near(s1, chestPos('cairn').x, chestPos('cairn').y), 'on foot: cairn tin box');
   ok(near(s1, worldInfo.spots.portal.x, worldInfo.spots.portal.y), 'on foot: mine portal');
@@ -281,12 +280,13 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   ok(!near(s1, chestPos('minehut').x, chestPos('minehut').y, 6, 8), 'the miner hut is beyond the collapse (must dig first)');
   ok(!near(s1, M_.lake.x0 + 40, M_.lake.ice - 6, 6, 8), 'the ice lake cavern is sealed in the rock (dig down to it)');
   // dig the collapse and the shed drift (shovel-diggable stuff), then everything else must be walkable
-  for (let x = M_.collapse[0]; x < M_.collapse[1]; x++) for (let y = floorD(x) - 24; y < floorD(x); y++) { const m = at(x, y); if (m === MAT.GRAVEL || m === MAT.LOG || m === MAT.PLANK) mat[y * W + x] = MAT.AIR; }
+  for (let x = M_.collapse[0]; x < M_.collapse[1]; x++) for (let y = floorD(x) - 28; y < floorD(x); y++) { const m = at(x, y); if (m === MAT.GRAVEL || m === MAT.LOG || m === MAT.PLANK) mat[y * W + x] = MAT.AIR; }
   { const { L, R } = LOC.shed; for (let x = (L + 1) * 4; x < (R + 6) * 4; x++) for (let y = (LOC.station.y / 4 - 8) * 4; y < LOC.station.y; y++) { const m = at(x, y); if (m === MAT.PACKED || m === MAT.SNOW) mat[y * W + x] = MAT.AIR; } }
   t = performance.now();
   const s2 = bfs();
   console.log(`       (walk BFS after digging ${(performance.now() - t).toFixed(0)} ms)`);
   if ((globalThis as { process?: { env: Record<string, string> } }).process?.env.DEBUG_REACH) { let mnx = W, mxx = 0; for (let i = 0; i < s2.length; i++) if (s2[i]) { const x = i % W; if (x < mnx) mnx = x; if (x > mxx) mxx = x; } console.log('       reach x', mnx, '..', mxx); for (let y = 250; y < 340; y += 3) { let r = ""; for (let x = 90; x < 300; x++) r += s2[y * W + x] ? "#" : (at(x, y) === MAT.AIR ? "." : at(x, y) === MAT.PLANK ? "P" : at(x, y) === MAT.GRAVEL ? "g" : "x"); console.log("       M" + y, r); } }
+  if ((globalThis as { process?: { env: Record<string, string> } }).process?.env.DEBUG_STEP) { for (const [x, y] of [[178, 331], [177, 331], [176, 331], [175, 331], [174, 331], [173, 331], [172, 331]]) { const bl: string[] = []; for (let yy = y - 19; yy <= y; yy++) for (let xx = x - 4; xx < x + 4; xx++) if (solid[yy * W + xx]) bl.push(xx + ',' + yy + ':' + mat[yy * W + xx]); console.log('       STEP', x, y, 'seen', s2[y * W + x], 'free', free(x, y), 'sup', sup(x, y), bl.slice(0, 6).join(' ')); } }
   const hut = chestPos('minehut');
   ok(near(s2, hut.x, hut.y), 'after digging the collapse: miner hut chest (coil)');
   ok(near(s2, M_.pocket[1] + 6, M_.floorB - 4), 'after digging: the bulkhead of the methane pocket');

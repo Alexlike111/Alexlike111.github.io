@@ -318,9 +318,7 @@ function stampMine(T: Terrain) {
       const fromFloor = f - y, i = y * W + x;
       if (fromFloor > 10 + 15 * prof && fromFloor < HA - 6) continue;       // open gap high up under the ceiling
       const r = rand();
-      if (fromFloor > 21 && r < 0.2) put(x, y, M.STONE);                          // boulders and coal only above head height: the way through is gravel and timber
-      else if (fromFloor > 21 && r < 0.3) put(x, y, M.COAL);
-      else if (r < 0.1 && fromFloor > 4) put(x, y, rand() < 0.5 ? M.LOG : M.PLANK);
+      if (r < 0.1 && fromFloor > 4) put(x, y, rand() < 0.5 ? M.LOG : M.PLANK);       // the way through is gravel and broken timber (shovel and axe)
       else { mat[i] = M.GRAVEL; aux[i] = 0; flags[i] = 0; }
     }
   }
@@ -328,8 +326,8 @@ function stampMine(T: Terrain) {
   { const xm = (c0 + c1) >> 1, ym = floorD(xm) - HA - 3; for (let y = ym - 14; y < ym + 6; y++) for (let x = c0 + 3; x < c1 - 3; x++) { const dx = (x - xm) / 11, dy = (y - ym) / 9; if (dx * dx + dy * dy < 1) put(x, y, AIR); } bgBox(c0, ym - 14, c1, ym + 6, 2); }
   // timber frames (cap beams + posts as wall decoration)
   for (const fx of [284, 270]) timberFrame(fx, FA, HA);
-  for (const fx of [254, 246, 196, 186]) timberFrame(fx, floorD(fx), HA, floorD);
-  timberFrame(168, FB, HA);
+  for (const fx of [254, 246, 196, 186]) for (let tx = fx >> 2; tx <= (fx >> 2); tx++) { const f = floorD(tx * 4); bgBox(tx * 4, f - HA, tx * 4 + 4, f, 7); }      // props on the stairs are background strips only (no beams: the head room is needed)
+  timberFrame(166, FB, HA);
   // portal: heavy header and bg posts
   box(MI.portalX - 6, FA - HA - 2, MI.portalX + 14, FA - HA + 6, M.LOG); bgBox(MI.portalX + 10, FA - HA, MI.portalX + 14, FA, 7); bgBox(MI.portalX - 4, FA - HA, MI.portalX, FA, 7);
   // --- rails with sleepers on the flat adit, a cart ---
@@ -349,12 +347,12 @@ function stampMine(T: Terrain) {
   box(h0, FB, h1, FB + 4, M.PLANK);
   bgBox(h0, FB - 30, h1, FB, 5);
   for (let x = h0; x < h1; x += 12) bgBox(x, FB - 30, x + 4, FB, 7);                                 // support posts (decorative, behind the player)
-  addFixture('bed', 29, FB / 4 - 1, 4, 1);
-  chest('minehut', 35, FB / 4 - 2, [slot('pick', 1), slot('radio_coil', 1), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
-  addFixture('table', 40, FB / 4 - 2, 3, 2);
-  worldInfo.radioParts.coil = { x: 35 * 4 + 4, y: FB - 4, site: 'minehut' };
-  floorNote('n4', 'minehut', 128, FB);
-  floorNote('n6', 'minehut', 150, FB);
+  addFixture('bed', 28, FB / 4 - 1, 4, 1);
+  chest('minehut', 33, FB / 4 - 2, [slot('pick', 1), slot('radio_coil', 1), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
+  addFixture('table', 36, FB / 4 - 2, 3, 2);
+  worldInfo.radioParts.coil = { x: 33 * 4 + 4, y: FB - 4, site: 'minehut' };
+  floorNote('n4', 'minehut', 130, FB);
+  floorNote('n6', 'minehut', 158, FB);
   addSite('minehut', (h0 + h1) / 2, FB - 14, h1 - h0 + 20, 44);
   // --- bulkhead and sealed methane pocket in the west dead end ---
   const [p0, p1] = MI.pocket;

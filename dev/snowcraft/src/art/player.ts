@@ -65,22 +65,22 @@ const HEAD_FUR: Rows = [
   '..HHCCCC.',
 ];
 const TORSO_STATION: Rows = [
-  '.RrrrrR.',
-  'RrrrrrrR',
-  'RrooooorR'.slice(0, 8),
-  'RrrrrrrR',
+  '.Rrrrrr.',
+  'Rrrrrrrr',
+  'Rrrrrrrr',
+  'RooooooR',
+  'Rrrrrrrr',
   'ttttttyt',
-  'RrrrrrrR',
   'RRRRRRRR',
 ];
 const TORSO_FUR: Rows = [
-  '.RrrrrR.',
-  'RrrrrrrR',
-  'RrRrrRrR',
-  'RrrrrrrR',
+  '.Rrrrrr.',
+  'Rrrrrrrr',
+  'RrRrrrRr',
+  'Rrrrrrrr',
+  'rRrrrRrr',
   'ttttttyt',
-  'RrRrrRrr',
-  'oooooooo',
+  'ooRooRoo',
 ];
 
 type LegDef = [number, number, number, number]; // back foot dx, back lift, front foot dx, front lift
@@ -207,8 +207,7 @@ function drawArm(ctx: CanvasRenderingContext2D, look: Look, sx: number, sy: numb
   for (let j = 0; j < mit; j++) for (let i = 0; i < mit; i++) body.add((mx + i) + ',' + (my + j));
   for (const key of body) { const [x, y] = key.split(',').map(Number); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!body.has((x + dx) + ',' + (y + dy))) ctx.fillRect(x + dx, y + dy, 1, 1); }
   for (const [x, y] of pts) pixelRect(ctx, pal.r, x, y);
-  for (const [x, y] of pts) if (!body.has(x + ',' + (y + 1)) || true) { /* shade the lower/rear cell */ }
-  for (const [x, y] of pts) if ((x + y) % 2 === 0) pixelRect(ctx, pal.R, x, y);
+  for (let i = Math.max(0, pts.length - 3); i < pts.length; i++) pixelRect(ctx, pal.R, pts[i][0], pts[i][1]);
   for (let j = 0; j < mit; j++) for (let i = 0; i < mit; i++) pixelRect(ctx, j === mit - 1 || i === 0 ? pal.M : pal.m, mx + i, my + j);
 }
 
@@ -314,7 +313,7 @@ export function renderPose(ctx: CanvasRenderingContext2D, ax: number, ay: number
   const bk: BodyKey = { legs: s.legs, lean: s.lean, headDy: s.headDy, far: s.far, rime: s.rime, torsoDy: s.torsoDy };
   const body = bodyCanvas(look, bk);
   const sx = SH_X + s.lean, sy = SH_Y + s.dy;
-  const hand = s.hand!;
+  const hand: [number, number] = s.hand ?? [1, -6];
   const drawTool = () => {
     const tl = s.tool; if (!tl) return;
     const def = HELD[tl.item]; if (!def) return;
