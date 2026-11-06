@@ -21,7 +21,7 @@ out vec4 fragColor;
 const int WI = ${W}; const int HI = ${H};
 const vec3 DEEP = vec3(.32,.52,.78);
 const vec3 ABS_S[13] = vec3[13](vec3(0.), vec3(.174,.122,.073), vec3(.05), vec3(.08), vec3(6.), vec3(6.), vec3(6.), vec3(.015), vec3(.6), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
-const vec3 ABS_L[13] = vec3[13](vec3(0.), vec3(.163,.211,.274), vec3(.06,.05,.04), vec3(.1), vec3(6.), vec3(6.), vec3(6.), vec3(.2), vec3(1.), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
+const vec3 ABS_L[13] = vec3[13](vec3(0.), vec3(.125,.165,.22), vec3(.06,.05,.04), vec3(.1), vec3(6.), vec3(6.), vec3(6.), vec3(.2), vec3(1.), vec3(6.), vec3(6.), vec3(6.), vec3(6.));
 
 uint ihash(uvec2 v){ v = v*1664525u + 1013904223u; v.x += v.y*1664525u; v.y += v.x*1664525u; v ^= v>>16u; v.x += v.y*1664525u; v.y += v.x*1664525u; v ^= v>>16u; return v.x; }
 float hash2(ivec2 c){ return float(ihash(uvec2(c + ivec2(4096))))*(1./4294967296.); }
@@ -297,7 +297,7 @@ void main(){
     vec3 inner = bw*(uAmb*(.07+.93*sv3) + pl*.9);
     col = inner;
     if(open>.004){
-      vec3 bg = background(sUV, sOff, bgL) + pl*.16;
+      vec3 bg = background(sUV, sOff, bgL) + pl*.4;
       col = mix(inner, bg, open);
     }
     openA = open;
@@ -316,8 +316,9 @@ void main(){
     vec3 alb = albedo(m, dn, bn, fl, cf, hh, depth, mUp==0, n, hasN);
     vec3 pl = uNL>0 ? pointLights(wp, c, n, hasN, hh) : vec3(0.);
     vec3 scat = m==1 ? vec3(.12,.2,.3)*exp(-depth/30.) : vec3(0.);
-    vec3 svS = m==1 ? mix(pow(sv3, vec3(.32)), vec3(1.), .2) : sv3;   // thick snow still scatters plenty of light
-    vec3 lit = uAmb*((m==1?.3:.45)+(m==1?.7:.84)*svS+scat) + uDirCol*diff*dirT + pl;
+    // thick snow still scatters plenty of light: neutral (hue-free) falloff, the blue lives in the albedo gradient
+    float svL = smoothstep(0.,.18,dot(sv3,vec3(.33)));
+    vec3 lit = uAmb*(m==1 ? .22+.78*svL+scat*.5 : .45+.84*sv3+scat) + uDirCol*diff*dirT + pl;
     col = alb*lit;
     if(m==1){
       // never darker than moon-lit snow where it can see the sky
@@ -366,9 +367,9 @@ void main(){
       float w = .5+.28*(2.-fl)*.5;
       acc += (1.-smoothstep(.15,w,perp))*(1.-smoothstep(len*.25,len,along))*(.75-.12*fl);
     }
-    vec3 sc = min(uAmb*1.08+.05, vec3(1.));
-    col = mix(col, sc, clamp(acc,0.,.8)*uStorm*.75);
     vec3 wo = min(uSkyHor*1.1+.03, vec3(1.));
+    vec3 sc = min(max(uAmb*1.08+.05, wo*1.6+.08), vec3(1.));
+    col = mix(col, sc, clamp(acc,0.,.8)*uStorm*.8);
     float wf = uStorm*(.2+.62*smoothstep(.1,.85,dd)) + uStorm*.12*vn(vec2(wp.x*.01-uTime*uWind*.05, wp.y*.02));
     col = mix(col, wo, clamp(wf,0.,.92));
   }
@@ -595,7 +596,7 @@ export class Renderer {
     let hor: V3 = mix3([0.035 * hm, 0.07 * hm, 0.17 * hm], [0.66, 0.77, 0.88], day);   // day haze ~ #9fb4c8-ish, never pink
     hor = [hor[0] + 0.62 * dusk * 0.7, hor[1] + 0.28 * dusk * 0.7, hor[2] + 0.1 * dusk * 0.7];
     top = [top[0] + 0.16 * dusk * 0.3, top[1] + 0.07 * dusk * 0.3, top[2] + 0.18 * dusk * 0.3];
-    const gk = 0.12 + 0.88 * day, grey: V3 = [0.60 * gk, 0.64 * gk, 0.69 * gk];
+    const gk = 0.2 + 0.8 * day, grey: V3 = [0.60 * gk, 0.65 * gk, 0.74 * gk];
     top = mix3(top, [grey[0] * 0.85, grey[1] * 0.85, grey[2] * 0.85], storm * 0.85);
     hor = mix3(hor, grey, storm * 0.85);
     const fog = 0.15 + 0.6 * storm + Math.min(0.15, G.snowfall * 2);
