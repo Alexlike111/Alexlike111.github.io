@@ -1021,6 +1021,8 @@ export class Renderer {
   /** Lowest dynamic multiplier we allow: keep >= ~1.1 canvas px per world cell so pixel art stays readable. */
   dynMin(): number { return clamp(1.1 / (G.cam.zoom * this.baseScale()), 0.45, 1); }
   getDyn() { return this.dyn; }
+  /** drawing-buffer size in pixels */
+  size(): [number, number] { return [this.canvas.width, this.canvas.height]; }
   /** Dynamic resolution: multiplier on the canvas size (screen pass + particles); the cell pass is resolution independent. */
   setDyn(s: number) {
     s = clamp(s, this.dynMin(), 1);

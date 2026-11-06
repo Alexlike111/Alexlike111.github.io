@@ -13,7 +13,7 @@ import { Input } from './input';
 import { UI, HudData } from './ui';
 import { Sound } from './audio';
 import { prof, pnow, pend } from './prof';
-import { createBench } from './bench';
+import { createBench, makeReport } from './bench';
 
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
@@ -767,6 +767,7 @@ boot();
   /** automatic benchmark: Promise of the JSON result (see bench.ts); opts: { quick, only: string[] } */
   bench: (opts?: { quick?: boolean; only?: string[] }) => bench.start({ source: 'api', ...opts }),
   benchResult: () => bench.last(),
+  benchReport: () => { const r = bench.last(); return r ? makeReport(r) : ''; },
   sawCheck, tutorial: () => tutorial,
 };
 void PW; void dens; void bond;

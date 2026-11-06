@@ -132,7 +132,9 @@ function headroom(xa: number, xb: number, feetY: number, look = 3): number {
   for (let x = xa - look; x <= xb + look; x++) {
     const core = x >= xa && x <= xb;
     if (!core) { let wall = false; for (let k = 1; k <= 8 && !wall; k++) wall = hard(x, feetY - k); if (wall) continue; }
-    for (let k = 1; k <= best; k++) if (hard(x, feetY - k)) { best = k - 1; break; }
+    // firm lumps / loose crumbs up to 7 cells above the feet are floor clutter (the hero steps over or crushes them), never a ceiling:
+    // only something at 8+ cells counts, otherwise a single crumb beside the feet would keep the hero crawling (and unable to jump) for ever
+    for (let k = 8; k <= best; k++) if (hard(x, feetY - k)) { best = k - 1; break; }
     if (best <= 0) return 0;
   }
   return best;

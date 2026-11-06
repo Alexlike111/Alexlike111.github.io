@@ -1,5 +1,6 @@
 import './ui.css';
 import type { Input, InputButton } from './input';
+import { Wheel, type WheelItem } from './wheel';
 
 export interface HudData {
   core: number; food: number; stamina: number; wet: number;   // core °C; others 0..1
@@ -46,6 +47,7 @@ const ICONS: Record<string, string> = {
   chev: '<path d="M6 9l6 6 6-6"/>',
   stick: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.400"/><path d="M12 4.200V6M12 18v1.800M4.200 12H6M18 12h1.800" opacity=".6"/>',
   pad: '<circle cx="7.500" cy="7.500" r="3.100"/><circle cx="16.500" cy="7.500" r="3.100"/><circle cx="7.500" cy="16.500" r="3.100"/><circle cx="16.500" cy="16.500" r="3.100"/>',
+  jump: '<path d="M12 20V5.500M6.200 11.200L12 5.400l5.800 5.800"/><path d="M7 22h10" opacity=".55"/>',
   swap: '<path d="M4 8.500h14.500M15 4.800l3.700 3.700-3.700 3.700"/><path d="M20 15.500H5.500M9 11.800l-3.700 3.700L9 19.200"/>',
   timer: '<circle cx="12" cy="13.600" r="7.200"/><path d="M12 13.600V9.400M12 13.600l3 1.800M9.600 3.200h4.800M12 3.200v3.200M18.300 6.600l1.300-1.300"/>',
   copy: '<rect x="8.500" y="8.500" width="11.500" height="12" rx="1.600"/><path d="M15.500 8.500V5.200a1.600 1.600 0 0 0-1.600-1.600H5.700a1.600 1.600 0 0 0-1.600 1.600v9.700a1.600 1.600 0 0 0 1.600 1.600h2.800"/>',
@@ -135,15 +137,49 @@ const BUILT_NAME: Record<string, string> = {
   fire: 'Костёр', snow: 'Снежные блоки', wood: 'Брёвна и брус', dugout: 'Землянка', igloo: 'Иглу', cabin: 'Дом',
 };
 
-// x-ray legend plates: [title, gradient stops, scale labels]. Colours match the renderer.
-interface XrayDef { title: string; a: string; b: string; c: string; ticks: { at: number; text: string; edge?: 'l' | 'r' }[] }
+// x-ray legend strip. The colour ramps are the same functions the shader uses (render.ts xrTurbo / xrInferno / xrTemp).
+type RGB = [number, number, number];
+const c01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+function xrTurbo(x: number): RGB {
+  x = c01(x);
+  const x2 = x * x, x3 = x2 * x, x4 = x2 * x2, x5 = x4 * x;
+  return [
+    0.13572138 + 4.6153926 * x - 42.66032258 * x2 + 132.13108234 * x3 - 152.94239396 * x4 + 59.28637943 * x5,
+    0.09140261 + 2.19418839 * x + 4.84296658 * x2 - 14.18503333 * x3 + 4.27729857 * x4 + 2.82956604 * x5,
+    0.1066733 + 12.64194608 * x - 60.58204836 * x2 + 110.36276771 * x3 - 89.90310912 * x4 + 27.34824973 * x5,
+  ].map(c01) as RGB;
+}
+function xrInferno(t: number): RGB {
+  t = c01(t);
+  const C = [[0.0002189403691192265, 0.001651004631001012, -0.01948089843709184], [0.1065134194856116, 0.5639564367884091, 3.932712388889277],
+    [11.60249308247187, -3.972853965665698, -15.9423941062914], [-41.70399613139459, 17.43639888205313, 44.35414519872813],
+    [77.162935699427, -33.40235894210092, -81.80730925738993], [-71.31942824499214, 32.62606426397723, 73.20951985803202],
+    [25.13112622477341, -12.24266895238567, -23.07032500287172]];
+  return [0, 1, 2].map((k) => c01(C[0][k] + t * (C[1][k] + t * (C[2][k] + t * (C[3][k] + t * (C[4][k] + t * (C[5][k] + t * C[6][k]))))))) as RGB;
+}
+function xrTemp(t: number): RGB {
+  const A: RGB = [.20, .12, .60], B: RGB = [.16, .45, .95], C: RGB = [.35, .85, .95], D: RGB = [.93, .97, 1], E: RGB = [1, .80, .30], F: RGB = [.95, .22, .12];
+  const mix = (p: RGB, q: RGB, k: number): RGB => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k, p[2] + (q[2] - p[2]) * k];
+  if (t < .3) return mix(A, B, t / .3);
+  if (t < .6) return mix(B, C, (t - .3) / .3);
+  if (t < .78) return mix(C, D, (t - .6) / .18);
+  if (t < .84) return mix(D, E, (t - .78) / .06);
+  return mix(E, F, (t - .84) / .16);
+}
+interface XrayDef { title: string; name: string; ramp: (u: number) => RGB; ticks: { at: number; text: string; edge?: 'l' | 'r'; mark?: boolean }[] }
 const XRAY: Record<number, XrayDef> = {
-  1: { title: 'Плотность, кг/м³', a: '#58aef0', b: '#dfe9f2', c: '#c9783a',
+  1: { title: 'Плотность, кг/м³', name: 'плотность', ramp: (u) => xrTurbo(.08 + .84 * u),
     ticks: [{ at: 0, text: '50', edge: 'l' }, { at: 1 / 3, text: '200' }, { at: 2 / 3, text: '350' }, { at: 1, text: '500', edge: 'r' }] },
-  2: { title: 'Спекание', a: '#b5523b', b: '#d9c27a', c: '#6fc28b',
-    ticks: [{ at: 0, text: 'рыхлый', edge: 'l' }, { at: 1, text: 'спёкся', edge: 'r' }] },
-  3: { title: 'Температура, °C', a: '#3d6fd8', b: '#eef3f8', c: '#d8572f',
-    ticks: [{ at: 0, text: '−40', edge: 'l' }, { at: 0.4, text: '−20' }, { at: 0.8, text: '0' }, { at: 1, text: '+10', edge: 'r' }] },
+  2: { title: 'Спекание снега', name: 'спекание', ramp: (u) => xrInferno(.10 + .82 * u),
+    ticks: [{ at: 0, text: 'рыхлый', edge: 'l' }, { at: Math.sqrt(48 / 160), text: 'контур', mark: true }, { at: 1, text: 'спёкся', edge: 'r' }] },
+  3: { title: 'Температура, °C', name: 'температура', ramp: xrTemp,
+    ticks: [{ at: 0, text: '−40', edge: 'l' }, { at: 0.4, text: '−20' }, { at: 0.8, text: '0', mark: true }, { at: 1, text: '+10', edge: 'r' }] },
+};
+const xrGradient = (d: XrayDef) => 'linear-gradient(90deg,' + Array.from({ length: 13 }, (_, i) => { const c = d.ramp(i / 12); return `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)}) ${(i / 12 * 100).toFixed(1)}%`; }).join(',') + ')';
+const XR_TOAST = ['Рентген выкл.', 'Рентген 1/3 · плотность', 'Рентген 2/3 · спекание снега', 'Рентген 3/3 · температура'];
+
+const TOOL_SUB: Record<string, string> = {
+  shovel: 'копать, бросать снег', saw: 'пилить снежные блоки', axe: 'рубить деревья', beam: 'строить из брёвен', block: 'ставить блоки', fire: 'разжечь костёр',
 };
 
 export class UI {
@@ -208,6 +244,17 @@ export class UI {
   private tags: { root: HTMLElement; name: Cached; key: Cached; count: Cached; load: HTMLElement }[] = [];
   private beltSig = '';
   private btnWait!: HTMLElement;
+  // radial wheels (touch layout buttons / Q on PC)
+  private toolWheel!: Wheel;
+  private actWheel!: Wheel;
+  private lastH: HudData | null = null;
+  private cbTool!: HTMLElement;
+  private cbToolIco!: HTMLElement;
+  private cbToolBadge!: HTMLElement;
+  private cbToolLoad!: HTMLElement;
+  private cbActs!: HTMLElement;
+  private cbPut!: HTMLElement;
+  private cbJump!: HTMLElement;
 
   // joystick
   private stick!: HTMLElement;
@@ -399,23 +446,25 @@ export class UI {
   private buildXray(): void {
     this.xrayEl = el('div', 'plate xray');
     this.xrayEl.setAttribute('aria-hidden', 'true');
-    this.hud.appendChild(this.xrayEl);
+    // compact strip in the top-centre flow (under the pack chips): never over the player
+    this.hudTc.insertBefore(this.xrayEl, this.warnLine);
   }
 
-  /** X-ray legend: mode 0 hides it, 1 density, 2 sintering, 3 temperature. */
+  /** X-ray legend: mode 0 hides it, 1 density, 2 sintering, 3 temperature. Also says the mode name in a toast. */
   setXray(mode: number): void {
     const m = XRAY[mode] ? mode : 0;
     if (m === this.xrayMode) return;
     this.xrayMode = m;
     const d = XRAY[m];
     if (d) {
-      this.xrayEl.style.setProperty('--xa', d.a); this.xrayEl.style.setProperty('--xb', d.b); this.xrayEl.style.setProperty('--xc', d.c);
-      const ticks = d.ticks.map((t) => `<i style="left:${(t.at * 100).toFixed(1)}%"></i><span class="${t.edge ?? ''}" style="left:${(t.at * 100).toFixed(1)}%">${t.text}</span>`).join('');
-      this.xrayEl.innerHTML = `<div class="xr-head"><span class="cap">${ico('xray')}Рентген</span><span class="xr-mode mono">${m}/3</span></div><div class="xr-title"></div><div class="xr-bar"></div><div class="xr-scale">${ticks}</div>`;
+      const ticks = d.ticks.map((t) => `<i class="${t.mark ? 'mk' : ''}" style="left:${(t.at * 100).toFixed(1)}%"></i><span class="${t.edge ?? ''}" style="left:${(t.at * 100).toFixed(1)}%">${t.text}</span>`).join('');
+      this.xrayEl.innerHTML = `<div class="xr-head"><span class="cap">${ico('xray')}<b class="cap-t">Рентген</b></span><span class="xr-mode mono">${m}/3</span></div><div class="xr-title"></div><div class="xr-key"><div class="xr-bar"></div><div class="xr-scale">${ticks}</div></div>`;
       (this.xrayEl.querySelector('.xr-title') as HTMLElement).textContent = d.title;
+      (this.xrayEl.querySelector('.xr-bar') as HTMLElement).style.background = xrGradient(d);
     }
     this.xrayEl.classList.toggle('on', m > 0);
     this.root.classList.toggle('has-xray', m > 0);
+    this.toast(XR_TOAST[m], 'info');
   }
 
   /** Pause-screen physics line, e.g. "Rapier 2D · 58 к/с · тел 12". Call as often as you like. */
@@ -496,28 +545,101 @@ export class UI {
     };
     zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
 
-    // action buttons
-    const pad = el('div', 'actions');
-    const defs: [string, string, string, () => void][] = [
-      ['put', 'Положить', 'put', () => this.input.press('secondary')],
-      ['take', 'Взять', 'take', () => this.input.press('interact')],
-      ['eat', 'Съесть', 'eat', () => this.input.press('eat')],
-      ['wait', 'Ждать', 'wait', () => this.input.toggleWait()],
-      ['rotate', 'Поворот', 'rotate', () => this.input.press('rotate' as InputButton)],
-      ['xray', 'Рентген', 'xray', () => this.input.press('xray')],
-    ];
-    for (const [id, label, icon, fn] of defs) {
-      const b = el('button', `abtn ab-${id}`, `${ico(icon)}<span>${label}</span>`);
-      b.type = 'button';
-      b.tabIndex = -1;
-      b.setAttribute('aria-label', label);
-      this.bindPress(b, fn);
-      pad.appendChild(b);
-      if (id === 'wait') { this.btnWait = b; b.setAttribute('aria-pressed', 'false'); }
-      if (id === 'eat') this.btnEat = b;
-    }
-    touch.appendChild(pad);
+    // compact cluster: tool wheel button, actions wheel button, put/throw, jump (hold)
+    const cl = el('div', 'tcluster');
+    const mk = (cls: string, label: string, html: string) => {
+      const b = el('button', `cbtn ${cls}`, html);
+      b.type = 'button'; b.tabIndex = -1; b.setAttribute('aria-label', label); b.title = label;
+      return b;
+    };
+    this.cbTool = mk('cb-tool wheel-opener', 'Инструмент', `<span class="cb-ico">${ico('shovel')}</span><i class="cb-badge mono"></i><i class="cb-load"><i></i></i>`);
+    this.cbToolIco = this.cbTool.querySelector('.cb-ico') as HTMLElement;
+    this.cbToolBadge = this.cbTool.querySelector('.cb-badge') as HTMLElement;
+    this.cbToolLoad = this.cbTool.querySelector('.cb-load i') as HTMLElement;
+    this.cbActs = mk('cb-acts wheel-opener', 'Действия', ico('pad'));
+    this.cbPut = mk('cb-put', 'Положить, бросить', ico('put'));
+    this.cbJump = mk('cb-jump', 'Прыжок', ico('jump'));
+    this.cbTool.setAttribute('aria-haspopup', 'menu'); this.cbActs.setAttribute('aria-haspopup', 'menu');
+    cl.append(this.cbTool, this.cbActs, this.cbPut, this.cbJump);
+    this.bindPress(this.cbPut, () => this.input.press('secondary'));
+    // jump: holdable (pushing against a wall while holding it climbs out of a pit)
+    const jb = this.cbJump;
+    jb.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      try { jb.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      jb.classList.add('down'); this.input.setJumpHeld(true);
+    });
+    const jup = () => { jb.classList.remove('down'); this.input.setJumpHeld(false); };
+    jb.addEventListener('pointerup', jup); jb.addEventListener('pointercancel', jup); jb.addEventListener('pointerleave', jup); jb.addEventListener('lostpointercapture', jup);
+    jb.addEventListener('mousedown', (e) => e.preventDefault()); jb.addEventListener('click', (e) => e.preventDefault());
+
+    // wheels
+    this.toolWheel = new Wheel(this.root, 'Инструмент', 'выбери', 'wheel-tools');
+    this.actWheel = new Wheel(this.root, 'Действия', 'выбери', 'wheel-acts');
+    const toggled = (w: Wheel, btn: HTMLElement | null) => (open: boolean) => {
+      this.input.setBlocked(this.toolWheel.open || this.actWheel.open || open);
+      this.root.classList.toggle('wheel-open', this.toolWheel.open || this.actWheel.open);
+      btn?.classList.toggle('open', open); btn?.setAttribute('aria-expanded', String(open));
+      if (!open) window.setTimeout(() => this.input.setBlocked(this.toolWheel.open || this.actWheel.open), 0);
+      void w;
+    };
+    this.toolWheel.onToggle = toggled(this.toolWheel, this.cbTool);
+    this.actWheel.onToggle = toggled(this.actWheel, this.cbActs);
+    this.toolWheel.onPick = (id) => { this.input.pressTool(Number(id)); };
+    this.actWheel.onPick = (id) => {
+      if (id === 'wait') this.input.toggleWait();
+      else this.input.press(id as InputButton);
+    };
+    const bindOpen = (btn: HTMLElement, w: Wheel, other: Wheel, items: () => WheelItem[]) => {
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        other.close();
+        if (w.open) { w.close(); return; }
+        w.setItems(items());
+        const r = btn.getBoundingClientRect();
+        w.show(r.left + r.width / 2, r.top + r.height / 2, 'drag', e.pointerId);
+      });
+      btn.addEventListener('mousedown', (e) => e.preventDefault());
+      btn.addEventListener('click', (e) => e.preventDefault());
+    };
+    bindOpen(this.cbTool, this.toolWheel, this.actWheel, () => this.toolItems());
+    bindOpen(this.cbActs, this.actWheel, this.toolWheel, () => this.actItems());
+    // PC: hold Q = the same tool wheel at the cursor, release over an item picks it
+    this.input.onWheelKey = (ph) => {
+      if (ph === 'open') {
+        if (this.overlay) return;
+        const s = this.input.state;
+        this.actWheel.close();
+        this.toolWheel.setItems(this.toolItems());
+        this.toolWheel.show(s.hasAim ? s.aimX : window.innerWidth / 2, s.hasAim ? s.aimY : window.innerHeight / 2, 'hold');
+      } else if (ph === 'close') this.toolWheel.release();
+      else this.toolWheel.close();
+    };
+    touch.appendChild(cl);
+    this.root.classList.add('has-wheels');
     this.hud.appendChild(touch);
+  }
+
+  private toolItems(): WheelItem[] {
+    const h = this.lastH; if (!h) return [];
+    return h.tools.map((t, i) => ({
+      id: String(i), label: t.name, icon: ico(TOOL_ICON[t.id] ?? 'block'),
+      badge: t.count === undefined ? undefined : String(t.count), sub: TOOL_SUB[t.id] ?? '',
+      cls: [i === h.tool ? 'sel' : '', t.enabled ? '' : 'off', t.count === 0 ? 'empty' : '', t.id === 'fire' ? 'fire' : ''].filter(Boolean).join(' '),
+    }));
+  }
+
+  private actItems(): WheelItem[] {
+    const h = this.lastH;
+    const food = h?.inv.food ?? 0, hungry = !!h && h.food < 0.3 && food > 0;
+    return [
+      { id: 'interact', label: 'Взять', icon: ico('take'), sub: 'подобрать, открыть' },
+      { id: 'eat', label: 'Съесть', icon: ico('eat'), badge: String(food), sub: food > 0 ? 'утолить голод' : 'еды нет', cls: hungry ? 'urgent' : food > 0 ? '' : 'empty' },
+      { id: 'wait', label: 'Ждать', icon: ico('wait'), sub: h?.waiting ? 'идёт, нажми — стоп' : 'в укрытии, время быстрее', cls: h?.waiting ? 'on' : (h && h.shelter >= 0.6 ? 'ready' : '') },
+      { id: 'rotate', label: 'Поворот', icon: ico('rotate'), sub: 'брус, блок' },
+      { id: 'xray', label: 'Рентген', icon: ico('xray'), sub: this.xrayMode ? XRAY[this.xrayMode].name + ' ' + this.xrayMode + '/3' : 'выкл.', cls: this.xrayMode ? 'on' : '' },
+      { id: 'secondary', label: 'Положить', icon: ico('put'), sub: 'бросить, поставить' },
+    ];
   }
 
   private stickMove(cx: number, cy: number): void {
@@ -542,6 +664,7 @@ export class UI {
   update(h: HudData): void {
     const inp = this.input;
     inp.currentTool = h.tool;
+    this.lastH = h;
     this.updateReticle();
 
     const now = performance.now();
@@ -664,6 +787,22 @@ export class UI {
       }
     });
 
+    // ---- touch cluster: the tool button shows the current tool + count; the actions button carries the urgent / waiting state
+    const ct = h.tools[h.tool];
+    if (ct) {
+      this.m('cbtool', ct.id, () => { this.cbToolIco.innerHTML = ico(TOOL_ICON[ct.id] ?? 'block'); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
+      const cnt = ct.count === undefined ? '' : String(ct.count);
+      this.m('cbcnt', cnt, () => { this.cbToolBadge.textContent = cnt; this.cbToolBadge.style.display = cnt ? '' : 'none'; this.cbTool.classList.toggle('empty', ct.count === 0); });
+      if (ct.id === 'shovel') { const l = Math.round(clamp(h.shovelLoad, 0, 1) * 40) / 40; this.m('cbload', l, () => { this.cbToolLoad.style.transform = `scaleX(${l})`; this.cbTool.classList.toggle('loaded', l > 0.02); this.cbTool.classList.toggle('full', l > 0.85); }); }
+      else this.m('cbload', -1, () => { this.cbTool.classList.remove('loaded', 'full'); });
+    }
+    this.m('cbacts', (hungry && !eatNone ? 1 : 0) + (waiting ? 2 : 0) + (this.xrayMode ? 4 : 0), () => {
+      this.cbActs.classList.toggle('urgent', hungry && !eatNone);
+      this.cbActs.classList.toggle('on', waiting || this.xrayMode > 0);
+    });
+    if (this.toolWheel?.open) this.toolWheel.setItems(this.toolItems());
+    if (this.actWheel?.open) this.actWheel.setItems(this.actItems());
+
     // ---- hint
     const hint = h.hint ?? '';
     this.m('hint', hint, () => {
@@ -754,6 +893,7 @@ export class UI {
   private setOverlay(node: HTMLElement, mode: 'title' | 'pause' | 'end' | 'bench'): void {
     // anything still fading out must go now, otherwise stacked leaving overlays leak
     this.root.querySelectorAll('.overlay.leaving').forEach((n) => n.remove());
+    this.toolWheel?.close(); this.actWheel?.close();
     this.overlay?.remove();
     this.physEls = null;
     this.overlay = node;

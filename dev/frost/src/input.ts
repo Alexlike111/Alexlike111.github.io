@@ -34,6 +34,10 @@ export class Input {
   currentTool = 0;
   toolCount = 6;
   onModeChange: ((mobile: boolean) => void) | null = null;
+  /** hold Q (PC) opens the radial tool wheel: 'open' after a short hold, 'close' on release (pick), 'cancel' on blur. A quick tap of Q still eats. */
+  onWheelKey: ((phase: 'open' | 'close' | 'cancel') => void) | null = null;
+  /** a radial wheel is open: the world ignores pointer / wheel input */
+  blocked = false;
   /** performance.now() of the last touch down / move / up on the world; the UI fades the reticle 1.5 s after it */
   touchAt = 0;
 
@@ -45,6 +49,9 @@ export class Input {
   private stickRun = false;
   private waitToggle = false;
   private touchId: number | null = null;
+  private qTimer = 0;
+  private qWheel = false;
+  private jumpLatch = false;
 
   constructor(canvas: HTMLElement) {
     this.canvas = canvas;
@@ -77,6 +84,7 @@ export class Input {
     s.secondaryPressed = false; s.interactPressed = false; s.eatPressed = false;
     s.firePressed = false; s.rotatePressed = false; s.xrayPressed = false;
     s.pausePressed = false; s.toolSelect = -1;
+    if (this.jumpLatch && !this.jumpBtn) { this.jumpLatch = false; this.recompute(); }
   }
 
   // ---- API used by the touch widgets in ui.ts ----
@@ -95,7 +103,9 @@ export class Input {
       case 'pause': s.pausePressed = true; break;
     }
   }
-  setJumpHeld(on: boolean): void { this.jumpBtn = on; this.recompute(); }
+  /** Jump button: held = jump. A tap shorter than one frame is latched until the next frame has seen it. */
+  setJumpHeld(on: boolean): void { this.jumpBtn = on; if (on) this.jumpLatch = true; this.recompute(); }
+  setBlocked(b: boolean): void { this.blocked = b; if (b) this.state.primary = false; }
   pressTool(i: number): void { this.state.toolSelect = i; this.currentTool = i; }
   toggleWait(): void { this.waitToggle = !this.waitToggle; this.recompute(); }
   setWait(on: boolean): void { this.waitToggle = on; this.recompute(); }
@@ -111,6 +121,8 @@ export class Input {
 
   private reset = (): void => {
     this.keys.clear();
+    window.clearTimeout(this.qTimer); this.qTimer = 0;
+    if (this.qWheel) { this.qWheel = false; this.onWheelKey?.('cancel'); }
     this.state.primary = false;
     this.touchId = null;
     this.stickX = 0; this.stickJump = false; this.stickRun = false; this.jumpBtn = false;
@@ -123,7 +135,7 @@ export class Input {
     if (k.has('KeyA') || k.has('ArrowLeft')) kx -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) kx += 1;
     s.moveX = kx !== 0 ? kx : this.stickX;
-    s.jump = k.has('KeyW') || k.has('Space') || k.has('ArrowUp') || this.stickJump || this.jumpBtn;
+    s.jump = k.has('KeyW') || k.has('Space') || k.has('ArrowUp') || this.stickJump || this.jumpBtn || this.jumpLatch;
     s.run = k.has('ShiftLeft') || k.has('ShiftRight') || this.stickRun;
     s.waitHeld = k.has('KeyT') || this.waitToggle;
   }
@@ -139,7 +151,7 @@ export class Input {
     const s = this.state;
     if (e.pointerType === 'touch') {
       this.applyMode(true);
-      if (this.touchId !== null) return;
+      if (this.blocked || this.touchId !== null) return;
       this.touchId = e.pointerId;
       try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
       this.setAim(e);
@@ -149,6 +161,7 @@ export class Input {
       return;
     }
     if (!matchMedia('(pointer: coarse)').matches) this.applyMode(false);
+    if (this.blocked) return;
     this.setAim(e);
     if (e.button === 0) s.primary = true;
     else if (e.button === 2) s.secondaryPressed = true;
@@ -173,7 +186,7 @@ export class Input {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    if (Math.abs(e.deltaY) < 1) return;
+    if (this.blocked || Math.abs(e.deltaY) < 1) return;
     const n = this.toolCount;
     const dir = e.deltaY > 0 ? 1 : -1;
     const next = (((this.currentTool + dir) % n) + n) % n;
@@ -193,7 +206,10 @@ export class Input {
     if (!e.repeat) {
       switch (c) {
         case 'KeyE': s.interactPressed = true; break;
-        case 'KeyQ': s.eatPressed = true; break;
+        case 'KeyQ': // tap = eat (on release), hold = tool wheel
+          window.clearTimeout(this.qTimer);
+          this.qTimer = window.setTimeout(() => { this.qTimer = 0; if (this.keys.has('KeyQ') && this.onWheelKey && !overlay) { this.qWheel = true; this.onWheelKey('open'); } }, 200);
+          break;
         case 'KeyF': s.firePressed = true; break;
         case 'KeyR': s.rotatePressed = true; break;
         case 'KeyX': s.xrayPressed = true; break;
@@ -208,6 +224,10 @@ export class Input {
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
+    if (e.code === 'KeyQ') {
+      if (this.qWheel) { this.qWheel = false; this.onWheelKey?.('close'); }
+      else if (this.qTimer) { window.clearTimeout(this.qTimer); this.qTimer = 0; this.state.eatPressed = true; }
+    }
     // Shift released with the key state out of sync (e.g. alt-tab) is handled by blur reset
     this.recompute();
   };
