@@ -1564,6 +1564,7 @@ boot();
   rescue: () => rescueState(),
   events: () => eventLog().map((e) => ({ kind: e.kind, t: e.t, text: e.text })),
   visibility: () => visibilityFactor(),
+  temp: (x: number, y: number) => tempAt(x, y),
   ambient: (t: number) => { FORCE.ambientT = t; },
   fires: () => G.fires.map((f) => ({ x: f.x, y: f.y, fuel: f.fuel, lit: f.lit })),
 };

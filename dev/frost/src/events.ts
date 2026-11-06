@@ -33,7 +33,7 @@
 //             check a crack cue. Toast at most every 20 s. Three cracks within 12 s while still standing there:
 //             "проваливается" toast, then 1.5 real s later the ICE cells directly under the feet turn to WATER.
 //             The hero steps back onto the snow; at most one break per 30 game min.
-//             NOTE: generate() currently lays lake ICE on the ground with no WATER; locations.ts must put water under the ice.
+//             The lake (locations.ts) has WATER under its ICE lid; heat keeps that water liquid and the lid does not thicken.
 //  FLARE      Each night a 45% plan: at 21:00-23:30 a red flare rises at 45 m on one side of the horizon, only if
 //             ctx.radioParts() >= 1 and G.storm < 0.2. Once per game.
 //  SUPPLY DROP  The next morning (07:00-09:30) a parachute container descends for 10 real s onto a snow spot

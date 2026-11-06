@@ -4,7 +4,7 @@
 import { W, H, HS, HW, HH, M, F_WET, mat, dens, bond, flags, idx, inb, set, groundY, noise1 } from './world';
 import { G } from './state';
 import { pnow, pend } from './prof';
-import { isWarm, isLakeWater } from './locations';
+import { isWarm, isLakeWater, warmSprings } from './locations';
 
 export const T = new Float32Array(HW * HH);    // temperature per heat cell
 export const WND = new Float32Array(HW * HH);  // local horizontal wind, m/s (+ toward +x)
@@ -42,8 +42,9 @@ const HEAT_DT = 0.05;
 const COMP_STRIDE = 8;     // composition: each heat row is re-read every 8 solver runs (~0.4 s; the surface and phase passes keep their own rhythm)
 const WIND_EVERY = 2;      // wind / sky / ventilation rates refresh every WIND_EVERY solver runs
 // warm spring (locations.ts isWarm): the pool is a heat source, so its water never freezes and the air just above warms
-const WARM_WATER_T = 4, WARM_AIR_T = 1;      // degC the pool water and the air over it are held near
-const WARM_WATER_K = 0.5, WARM_AIR_K = 0.2;  // 1/s relaxation toward those (per real second)
+const WARM_WATER_T = 4, WARM_AIR_T = 1;      // degC the pool water and the air around it are held near
+const WARM_WATER_K = 0.5, WARM_AIR_K = 0.25; // 1/s relaxation toward those (per real second); the air zone is sealed from the wind (vR = 0)
+const WARM_PAD_X = 24, WARM_PAD_UP = 40, WARM_PAD_DN = 4;   // the warm zone: 1 m beside the pool, 2 m above it, a little below the surface
 
 // ---------------- per-material tables ----------------
 const SK = new Float32Array(1024), SC = new Float32Array(1024);
@@ -156,13 +157,14 @@ export function initHeat() {
   WND.fill(0); vR.fill(0); sR.fill(0); meltAcc.fill(0); fireSeen.fill(0); prevValid = false;
   warmH.fill(0); warmList = [];
   for (let hy = 0; hy < HH; hy++) for (let hx = 0; hx < HW; hx++) {
-    if (!isWarm(hx * HS + 2, hy * HS + 2)) continue;
+    const cx = hx * HS + 2, cy = hy * HS + 2;
+    let inZone = isWarm(cx, cy);
+    for (const w of warmSprings) if (cx >= w.x0 - WARM_PAD_X && cx <= w.x1 + WARM_PAD_X && cy >= w.y0 - WARM_PAD_UP && cy <= w.y1 + WARM_PAD_DN) inZone = true;
+    if (!inZone) continue;
     const h = hy * HW + hx;
     warmH[h] = 1; warmList.push(h);
   }
 }
-
-
 
 // ---------------- window ----------------
 let hx0 = 0, hx1 = 0, hy0 = 0, hy1 = 0, prevValid = false, tick = 0, dtAvg = 1 / 60, hAcc = 0;
@@ -231,6 +233,7 @@ function windPass() {
       if (ns <= 4) {                                                // (mostly) air cells: ventilation
         const aw = Math.abs(WND[h]);
         vR[h] = ex[h] ? VENT_SKY + VENT_WIND * aw : open ? VENT_OPEN : VENT_LEAK;
+        if (warmH[h]) vR[h] = 0;                                    // the warm spring's air is not blown away: the source holds it
         sR[h] = 0;
       } else {
         vR[h] = 0;

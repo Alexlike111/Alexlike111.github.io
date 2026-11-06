@@ -1415,10 +1415,11 @@ export class Renderer {
 function drawFlare(g: CanvasRenderingContext2D, f: NonNullable<Effects['flare']>, v: { x0: number; y0: number; x1: number; y1: number }): void {
   const inView = f.x >= v.x0 && f.x <= v.x1 && f.y >= v.y0 && f.y <= v.y1;
   const x = inView ? f.x : clamp(f.x, v.x0 + 30, v.x1 - 30), y = inView ? f.y : clamp(f.y, v.y0 + 30, v.y1 - 40);
-  const r = inView ? 140 : 90, a = f.bright;
+  const r = inView ? 190 : 170, a = f.bright;
   const grd = g.createRadialGradient(x, y, 2, x, y, r);
-  grd.addColorStop(0, `rgba(255,70,40,${0.9 * a})`);
-  grd.addColorStop(0.25, `rgba(255,60,30,${0.42 * a})`);
+  grd.addColorStop(0, `rgba(255,80,40,${1.0 * a})`);
+  grd.addColorStop(0.2, `rgba(255,60,30,${0.6 * a})`);
+  grd.addColorStop(0.55, `rgba(255,40,20,${0.18 * a})`);
   grd.addColorStop(1, 'rgba(255,40,20,0)');
   g.save();
   g.globalCompositeOperation = 'lighter';

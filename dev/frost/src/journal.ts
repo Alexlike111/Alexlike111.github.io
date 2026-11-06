@@ -28,17 +28,17 @@ const STYLE = `
 .jr-card{position:relative;width:min(560px,100%);max-height:min(86vh,720px);display:flex;flex-direction:column;
   background:linear-gradient(180deg,rgba(26,43,66,.96),rgba(7,13,23,.97));border:1px solid rgba(190,228,255,.42);border-radius:6px;
   box-shadow:0 18px 60px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.07);overflow:hidden}
-.jr-head{display:flex;align-items:flex-end;gap:10px;padding:14px 16px 8px;border-bottom:1px solid rgba(143,211,255,.22)}
+.jr-head{flex:none;display:flex;align-items:flex-end;gap:10px;padding:14px 16px 8px;border-bottom:1px solid rgba(143,211,255,.22)}
 .jr-kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ice,#8fd3ff);opacity:.85}
 .jr-title{font-family:var(--font-display,'Unbounded',sans-serif);font-size:17px;margin:0;flex:1;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .jr-prog{font-family:var(--font-mono,monospace);font-size:12px;color:var(--ice,#8fd3ff);white-space:nowrap}
 .jr-close{all:unset;cursor:pointer;width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(143,211,255,.35);border-radius:50%;
   font-size:20px;line-height:1;color:var(--frost,#eaf3fb);flex:none}
 .jr-close:focus-visible,.jr-tab:focus-visible{outline:2px solid var(--ember,#ffab45);outline-offset:2px}
-.jr-tabs{display:flex;gap:4px;padding:8px 10px 0;overflow-x:auto;scrollbar-width:none}
+.jr-tabs{flex:none;display:flex;gap:4px;padding:8px 10px 0;overflow-x:auto;scrollbar-width:none}
 .jr-tab{all:unset;cursor:pointer;padding:7px 10px 8px;font-size:13px;letter-spacing:.04em;color:rgba(234,243,251,.62);border-bottom:2px solid transparent;white-space:nowrap}
 .jr-tab[aria-selected=true]{color:var(--frost,#eaf3fb);border-bottom-color:var(--ice,#8fd3ff)}
-.jr-body{padding:12px 16px 16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;min-height:200px}
+.jr-body{flex:1 1 auto;min-height:0;padding:12px 16px 16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .jr-item{padding:10px 0;border-bottom:1px dashed rgba(143,211,255,.18)}
 .jr-item:last-child{border-bottom:0}
 .jr-name{font-size:15px;margin:0 0 3px;letter-spacing:.02em}
@@ -50,8 +50,8 @@ const STYLE = `
 .jr-box.on{background:var(--ice,#8fd3ff);box-shadow:0 0 8px rgba(143,211,255,.6)}
 .jr-note{font-size:13px;color:rgba(234,243,251,.7);margin:0 0 10px;line-height:1.45}
 .jr-empty{font-size:14px;color:rgba(234,243,251,.55);padding:14px 0}
-.jr-foot{font-size:11.5px;color:rgba(234,243,251,.45);padding:8px 16px 10px;border-top:1px solid rgba(143,211,255,.14);letter-spacing:.03em}
-@media (max-width:520px){.jr-title{font-size:15px}.jr-text{font-size:14px}.jr-body{min-height:0}}
+.jr-foot{flex:none;font-size:11.5px;color:rgba(234,243,251,.45);padding:8px 16px 10px;border-top:1px solid rgba(143,211,255,.14);letter-spacing:.03em}
+@media (max-width:520px){.jr-title{font-size:15px}.jr-text{font-size:14px}}
 `;
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
