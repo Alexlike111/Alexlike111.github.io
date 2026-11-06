@@ -74,7 +74,7 @@ function thermoSVG(): string {
   }
   const y35 = tY(35).toFixed(1), y366 = tY(36.6).toFixed(1);
   return `
-  <svg class="thermo-svg" viewBox="0 0 84 252" aria-hidden="true" focusable="false">
+  <svg class="thermo-svg" viewBox="-12 0 96 252" aria-hidden="true" focusable="false">
     <defs>
       <linearGradient id="gl-glass" x1="0" x2="1"><stop offset="0" stop-color="var(--glass-lo)"/><stop offset=".45" stop-color="var(--glass-hi)"/><stop offset="1" stop-color="var(--glass-lo)"/></linearGradient>
     </defs>
@@ -133,11 +133,11 @@ export class UI {
   private soundOn = true;
   private overlay: HTMLElement | null = null;
   private overlayTimer = 0;
-  private toasts: HTMLElement;
+  private toasts!: HTMLElement;
   private hintCard: HTMLElement;
   private hintText: HTMLElement;
-  private warnLine: Cached;
-  private warnText: Cached;
+  private warnLine!: Cached;
+  private warnText!: Cached;
   private reticleEl: HTMLElement;
   private mercCold = [93, 180, 255];
   private mercWarm = [240, 71, 58];
@@ -186,9 +186,7 @@ export class UI {
     this.buildBottom();
     this.buildTouch();
 
-    this.toasts = el('div', 'toasts');
     this.toasts.setAttribute('aria-live', 'polite');
-    this.hud.appendChild(this.toasts);
 
     this.hintCard = el('div', 'hint');
     this.hintText = el('span', 'hint-text');
@@ -266,6 +264,8 @@ export class UI {
     this.warnText = this.warnLine.querySelector('.warn-text') as Cached;
     this.warnLine.setAttribute('role', 'status');
     box.appendChild(this.warnLine);
+    this.toasts = el('div', 'toasts');
+    box.appendChild(this.toasts);
     this.hud.appendChild(box);
   }
 
@@ -616,7 +616,7 @@ export class UI {
       <div class="title-frame">
         <div class="kicker"><i></i><span>Полевой журнал · плато</span><i></i></div>
         <h1 class="title-name"><span>БЕЛАЯ</span><span>МГЛА</span></h1>
-        <p class="premise">Метель отрезала тебя от лагеря. Вокруг только снег, ветер и мороз, а до рассвета ещё далеко.<br>Копай, руби, строй укрытие из снега и брёвен, береги огонь и сухую одежду.</p>
+        <p class="premise">Метель отрезала тебя от лагеря: вокруг только снег, ветер и мороз.<br>Копай, руби, строй укрытие, береги огонь и сухую одежду.</p>
         <div class="goal"><span class="goal-moons">${ico('moon')}${ico('moon')}${ico('moon')}</span><span class="goal-text">Цель: <b>переживи 3 ночи</b></span></div>
         <div class="controls controls-pc">
           <div><span class="kk">${keys(['A', 'D'])}</span><em>идти</em></div>

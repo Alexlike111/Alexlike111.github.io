@@ -15,7 +15,7 @@ import { Sound } from './audio';
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
 const ctx = fx.getContext('2d')!;
-const input = new Input(glCanvas.parentElement || document.body);
+const input = new Input(glCanvas);
 const ui = new UI(document.getElementById('ui')!, input);
 const sound = new Sound();
 bindSound(sound);
