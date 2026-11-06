@@ -47,13 +47,16 @@ const ICONS: Record<string, string> = {
   stick: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.400"/><path d="M12 4.200V6M12 18v1.800M4.200 12H6M18 12h1.800" opacity=".6"/>',
   pad: '<circle cx="7.500" cy="7.500" r="3.100"/><circle cx="16.500" cy="7.500" r="3.100"/><circle cx="7.500" cy="16.500" r="3.100"/><circle cx="16.500" cy="16.500" r="3.100"/>',
   swap: '<path d="M4 8.500h14.500M15 4.800l3.700 3.700-3.700 3.700"/><path d="M20 15.500H5.500M9 11.800l-3.700 3.700L9 19.200"/>',
+  timer: '<circle cx="12" cy="13.600" r="7.200"/><path d="M12 13.600V9.400M12 13.600l3 1.800M9.600 3.200h4.800M12 3.200v3.200M18.300 6.600l1.300-1.300"/>',
+  copy: '<rect x="8.500" y="8.500" width="11.500" height="12" rx="1.600"/><path d="M15.500 8.500V5.200a1.600 1.600 0 0 0-1.600-1.600H5.700a1.600 1.600 0 0 0-1.600 1.600v9.700a1.600 1.600 0 0 0 1.600 1.600h2.800"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1.800"/>',
 };
 
-function ico(name: string, cls = ''): string {
+export function ico(name: string, cls = ''): string {
   return `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] ?? ''}</svg>`;
 }
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
+export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (html) e.innerHTML = html;
@@ -152,6 +155,8 @@ export class UI {
   /** pause-screen physics comparison: switch engine / drop 40 test bodies */
   onEngine: () => void = () => {};
   onStress: () => void = () => {};
+  /** «Тест производительности» (title card / pause menu); the argument says where it was pressed */
+  onBench: (fromPause: boolean) => void = () => {};
 
   private root: HTMLElement;
   private input: Input;
@@ -746,23 +751,28 @@ export class UI {
   }
 
   // ------------------------------------------------------------ overlays
-  private setOverlay(node: HTMLElement, mode: 'title' | 'pause' | 'end'): void {
+  private setOverlay(node: HTMLElement, mode: 'title' | 'pause' | 'end' | 'bench'): void {
     // anything still fading out must go now, otherwise stacked leaving overlays leak
     this.root.querySelectorAll('.overlay.leaving').forEach((n) => n.remove());
     this.overlay?.remove();
     this.physEls = null;
     this.overlay = node;
     this.root.appendChild(node);
-    this.root.classList.remove('ov-title', 'ov-pause', 'ov-end');
+    this.root.classList.remove('ov-title', 'ov-pause', 'ov-end', 'ov-bench');
     this.root.classList.add('has-overlay', 'ov-' + mode);
     document.documentElement.dataset.overlay = '1';
     requestAnimationFrame(() => node.classList.add('in'));
   }
 
+  /** bench.ts: show a custom full-screen card (results) through the normal overlay machinery */
+  mountOverlay(node: HTMLElement, mode: 'bench'): void { this.setOverlay(node, mode); }
+  /** bench.ts: the HUD root, to mount the run strip into */
+  get host(): HTMLElement { return this.root; }
+
   hide(): void {
     const ov = this.overlay;
     this.overlay = null;
-    this.root.classList.remove('has-overlay', 'ov-title', 'ov-pause', 'ov-end');
+    this.root.classList.remove('has-overlay', 'ov-title', 'ov-pause', 'ov-end', 'ov-bench');
     document.documentElement.dataset.overlay = '0';
     (document.activeElement as HTMLElement | null)?.blur?.();
     if (!ov) return;
@@ -834,7 +844,10 @@ export class UI {
       this.onSound(this.soundOn);
       snd.blur();
     });
-    actions.append(start, snd);
+    const benchBtn = this.btn('Тест производительности', 'btn-ghost btn-bench', () => { this.onBench(false); });
+    benchBtn.insertAdjacentHTML('afterbegin', ico('timer'));
+    benchBtn.title = 'Автоматический прогон всех сценариев игры: кадры, узкие места, отчёт';
+    actions.append(start, snd, benchBtn);
     this.setOverlay(ov, 'title');
     window.setTimeout(() => start.focus({ preventScroll: true }), 60);
   }
@@ -903,6 +916,22 @@ export class UI {
     (phys.querySelector('.pb-stress') as HTMLButtonElement).addEventListener('click', (e) => { this.onStress(); (e.currentTarget as HTMLElement).blur(); });
     lab.append(toggle, phys);
     card.appendChild(lab);
+
+    // performance test: a quiet instrument row right under the laboratory; two taps because the run replaces the current game
+    const bt = el('button', 'bench-link', `<i class="lab-line"></i>${ico('timer', 'lab-ico')}<span>Тест производительности</span><i class="lab-line"></i>`);
+    bt.type = 'button';
+    let benchArmed = false, benchTid = 0;
+    const benchLab = bt.querySelector('span') as HTMLElement;
+    bt.addEventListener('click', () => {
+      if (!benchArmed) {
+        benchArmed = true; bt.classList.add('armed'); benchLab.textContent = 'Точно? Игра сбросится, ≈3 мин';
+        benchTid = window.setTimeout(() => { benchArmed = false; bt.classList.remove('armed'); benchLab.textContent = 'Тест производительности'; }, 3500);
+        return;
+      }
+      window.clearTimeout(benchTid);
+      this.onBench(true);
+    });
+    card.appendChild(bt);
 
     ov.appendChild(card);
     this.setOverlay(ov, 'pause');

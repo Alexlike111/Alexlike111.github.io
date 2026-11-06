@@ -638,6 +638,27 @@ vec3 background(vec2 sUV, vec2 sOff, vec3 bgL){
   return col;
 }
 
+// x-ray colour ramps (polynomial fits of turbo / inferno; hand-picked diverging ramp for temperature) – keep in sync with XR_RAMPS in ui.ts
+vec3 xrTurbo(float x){
+  x = clamp(x,0.,1.);
+  vec4 v4 = vec4(1.,x,x*x,x*x*x); vec2 v2 = v4.zw*v4.z;
+  return clamp(vec3(dot(v4,vec4(.13572138,4.6153926,-42.66032258,132.13108234))+dot(v2,vec2(-152.94239396,59.28637943)),
+                    dot(v4,vec4(.09140261,2.19418839,4.84296658,-14.18503333))+dot(v2,vec2(4.27729857,2.82956604)),
+                    dot(v4,vec4(.1066733,12.64194608,-60.58204836,110.36276771))+dot(v2,vec2(-89.90310912,27.34824973))),0.,1.);
+}
+vec3 xrInferno(float t){
+  t = clamp(t,0.,1.);
+  return clamp(vec3(.0002189403691192265,.001651004631001012,-.01948089843709184)+t*(vec3(.1065134194856116,.5639564367884091,3.932712388889277)+t*(vec3(11.60249308247187,-3.972853965665698,-15.9423941062914)+t*(vec3(-41.70399613139459,17.43639888205313,44.35414519872813)+t*(vec3(77.162935699427,-33.40235894210092,-81.80730925738993)+t*(vec3(-71.31942824499214,32.62606426397723,73.20951985803202)+t*vec3(25.13112622477341,-12.24266895238567,-23.07032500287172)))))),0.,1.);
+}
+vec3 xrTemp(float t){
+  const vec3 A=vec3(.20,.12,.60), B=vec3(.16,.45,.95), C=vec3(.35,.85,.95), D=vec3(.93,.97,1.), E=vec3(1.,.80,.30), F=vec3(.95,.22,.12);
+  if(t<.3) return mix(A,B,t/.3);
+  if(t<.6) return mix(B,C,(t-.3)/.3);
+  if(t<.78) return mix(C,D,(t-.6)/.18);
+  if(t<.84) return mix(D,E,(t-.78)/.06);
+  return mix(E,F,(t-.84)/.16);
+}
+
 vec4 dec(vec4 v){
 #ifdef HALF
   return v;
@@ -711,26 +732,39 @@ void main(){
 
 #ifdef XRAY
   if(uXray>0){
+    // "scanner" view: everything that is not the measured quantity is crushed to a dark desaturated relief,
+    // the quantity itself is drawn with a perceptual colour map (same ramps as the legend in ui.ts), over a faint grid + scanlines.
     vec4 tx = fetchW(c);
     int m = int(tx.r); float dn = tx.g*4., bn = tx.b;
-    vec3 xc = vec3(0.); bool use = false; float k = .8;
+    float lum = dot(col, vec3(.299,.587,.114));
+    vec3 base = m==0 ? vec3(.012,.026,.040) + lum*vec3(.035,.055,.075) : vec3(.030,.045,.060) + lum*vec3(.20,.24,.28);
+    vec3 xc = base; float k = 0.;
+    float ppc = uRes.x/uView.x;                                              // canvas pixels per world cell
     if(uXray==1 && m==1){
       float t = clamp((dn-50.)/450.,0.,1.);
-      xc = t<.5 ? mix(vec3(.345,.682,.941), vec3(.875,.914,.949), t*2.) : mix(vec3(.875,.914,.949), vec3(.788,.471,.227), (t-.5)*2.);
-      use = true;
+      xc = xrTurbo(.08+.84*t); k = .94;
     } else if(uXray==2 && m==1){
-      float t = bn/255.;
-      xc = t<.5 ? mix(vec3(.71,.322,.231), vec3(.851,.761,.478), t*2.) : mix(vec3(.851,.761,.478), vec3(.435,.761,.545), (t-.5)*2.);
+      float t = clamp(sqrt(bn/160.),0.,1.);
+      xc = xrInferno(.10+.82*t); k = .94;
       vec4 xr = fetchW(c+ivec2(1,0)), xd = fetchW(c+ivec2(0,1));          // contour where bond crosses BOND_SOLID (48)
-      if((xr.r==1. && (bn>=48.)!=(xr.b>=48.)) || (xd.r==1. && (bn>=48.)!=(xd.b>=48.))) xc = vec3(1.);
-      use = true;
+      if((xr.r==1. && (bn>=48.)!=(xr.b>=48.)) || (xd.r==1. && (bn>=48.)!=(xd.b>=48.))) { xc = vec3(.55,1.,.95); k = 1.; }
     } else if(uXray==3){
       float tc = texture(uHeat, wp/vec2(float(WI),float(HI))).r*127.5-60.;
       float t = clamp((tc+40.)/50.,0.,1.);
-      xc = t<.5 ? mix(vec3(.239,.435,.847), vec3(.933,.953,.973), t*2.) : mix(vec3(.933,.953,.973), vec3(.847,.341,.184), (t-.5)*2.);
-      use = true; k = .72;
+      xc = xrTemp(t); k = m==0 ? .5 : .94;
+      float iso = abs(fract(tc*.1+.5)-.5)*10.;                            // isotherm every 10 deg, 0 deg brighter
+      float il = 1.-smoothstep(.0,1.4/ppc+.05,iso);
+      xc = mix(xc, vec3(1.), il*(abs(tc)<1.2 ? .75 : .28)*(m==0?.6:1.));
     }
-    col = use ? mix(col*(uXray==3?.5:.4), xc, k) : col*.4;
+    vec3 xo = mix(base, xc, k);
+    if(m==1 && k>0.){                                                       // thin bright rim where snow meets open air: keeps the terrain shape readable
+      if(fetchW(c+ivec2(0,-1)).r==0. || fetchW(c+ivec2(-1,0)).r==0.) xo = mix(xo, vec3(.92,1.,1.), .55);
+    }
+    vec2 gd = abs(fract(wp*(1./16.)+.5)-.5)*16.;
+    xo += vec3(.02,.09,.10)*max(step(gd.x,1./ppc), step(gd.y,1./ppc));      // world grid, 16 cells
+    xo *= .86+.14*step(.5, fract(gl_FragCoord.y*.25));                      // scanlines
+    xo += vec3(.0,.20,.16)*exp(-pow((sUV.y-fract(uTime*.11))*28.,2.))*.35;  // slow sweep bar
+    col = xo;
   }
 #endif
   col *= 1.-.3*smoothstep(.35,.75,length(sUV-.5));

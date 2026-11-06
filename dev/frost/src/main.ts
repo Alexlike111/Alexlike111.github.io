@@ -1,5 +1,5 @@
 import { W, H, M, mat, dens, bond, idx, inb, generate, START_X, surfaceAt, crates, CELL } from './world';
-import { G } from './state';
+import { G, FORCE } from './state';
 import { P } from './particles';
 import { initHeat, stepHeat, tempAt } from './heat';
 import { stepSim } from './sim';
@@ -13,6 +13,7 @@ import { Input } from './input';
 import { UI, HudData } from './ui';
 import { Sound } from './audio';
 import { prof, pnow, pend } from './prof';
+import { createBench } from './bench';
 
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const fx = document.getElementById('fx') as HTMLCanvasElement;
@@ -31,13 +32,15 @@ G.quality = G.mobile || /swiftshader|llvmpipe|softpipe|software|mali-4|mali-t[0-
 
 let running = false, paused = false, ended = false;
 let cssW = 0, cssH = 0, dpr = 1;
+/** bench.ts: render at a different viewport size (phone / desktop) without touching the window */
+let vpOverride: { w: number; h: number; dpr: number; mobile: boolean } | null = null;
 function resize() {
-  cssW = window.innerWidth; cssH = window.innerHeight; dpr = Math.min(2, window.devicePixelRatio || 1);
+  cssW = vpOverride ? vpOverride.w : window.innerWidth; cssH = vpOverride ? vpOverride.h : window.innerHeight; dpr = vpOverride ? vpOverride.dpr : Math.min(2, window.devicePixelRatio || 1);
   renderer.resize(cssW, cssH, dpr);
   fx.width = Math.round(cssW * dpr); fx.height = Math.round(cssH * dpr);
   fx.style.width = cssW + 'px'; fx.style.height = cssH + 'px';
   // ~17 m wide view on phones, ~22 m on desktop (zoomed in for readability); never less than 13 m tall
-  const viewW = G.mobile ? 340 : 440;
+  const viewW = (vpOverride ? vpOverride.mobile : G.mobile) ? 340 : 440;
   G.cam.zoom = Math.max(cssW / viewW, cssH / 260);
 }
 window.addEventListener('resize', resize);
@@ -61,12 +64,15 @@ function weather(dt: number) {
   }
   if (storm > 0) warn = 'Буря. Укройся и разведи огонь';
   G.storm += (storm - G.storm) * Math.min(1, dt * 0.5);
+  if (FORCE.storm === FORCE.storm) G.storm = FORCE.storm;
   const noise = Math.sin(t * 0.013) * 1.5 + Math.sin(t * 0.0041 + 1) * 2;
   const night = 1 - Math.min(1, sun / 0.35);
   G.ambientT = -23 - 13 * night - (day - 1) * 1.5 + noise - G.storm * 6;
   const gust = Math.sin(G.realTime * 0.7) * 0.6 + Math.sin(G.realTime * 2.3) * 0.3;
   G.wind = (3.5 + 3 * night * 0.3 + G.storm * 13 + gust * (1 + G.storm * 3)) * (1 + 0.2 * Math.sin(t * 0.002));
   G.snowfall = 0.012 + 0.02 * (0.5 + 0.5 * Math.sin(t * 0.003)) + G.storm * 0.09;
+  if (FORCE.snowfall === FORCE.snowfall) G.snowfall = FORCE.snowfall;
+  if (FORCE.wind === FORCE.wind) G.wind = FORCE.wind;
   G.moon = 0.55;
   return { day, warn };
 }
@@ -89,8 +95,8 @@ function updateCamera(dt: number, snap = false) {
 let shake = 0, stats = { built: [] as string[] };
 let hintT = 0, hintText: string | null = null, tutorial = 0;
 let tipCrawlUntil = -1, tipCrawlDone = false, tipDoorUntil = -1, tipDoorDone = false;
-function newGame() {
-  generate(20261106 + Math.floor(Math.random() * 1000));
+function newGame(seed = 20261106 + Math.floor(Math.random() * 1000)) {
+  generate(seed);
   initHeat(); initBodies(); resetTools();
   G.time = 9 * 60; G.timeScale = 1;
   const sx = START_X; const sy = surfaceAt(sx);
@@ -576,6 +582,14 @@ let aimWorld: [number, number] | null = null;
 let waitToggle = false;
 function frame(now: number) {
   requestAnimationFrame(frame);
+  if (!bench.active) { frameBody(now); return; }
+  if (input.state.pausePressed) { input.state.pausePressed = false; bench.cancel(); }   // Esc stops the benchmark
+  bench.beginFrame(now);
+  const tw0 = performance.now();
+  frameBody(now);
+  bench.endFrame(performance.now() - tw0);
+}
+function frameBody(now: number) {
   if ((window as unknown as { __freeze?: boolean }).__freeze) { renderer.render(0); return; }   // dev/test: hold the world still, keep rendering
   const t0 = pnow(), tw = performance.now();
   const rawMs = now - last;
@@ -585,7 +599,7 @@ function frame(now: number) {
   if (prof.on) prof.frameMs = prof.frameMs === undefined ? realDt * 1000 : prof.frameMs + (realDt * 1000 - prof.frameMs) * 0.1;
   if (fpsAcc > 1) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
   adaptQuality(rawMs);
-  const s = input.state;
+  const s = bench.active ? bench.input : input.state;
   if (s.pausePressed && running && !ended) { paused = !paused; if (paused) ui.showPause(() => { paused = false; ui.hide(); }, () => { ui.hide(); newGame(); }); else ui.hide(); }
   const portraitPause = input.mobile && window.innerHeight > window.innerWidth; // touch device held upright: sim waits
   if (!running || paused || portraitPause) { input.endFrame(); renderer.render(dt); drawOverlay(null); return; }
@@ -602,7 +616,8 @@ function frame(now: number) {
   const { day, warn } = weather(realDt);
   pend('weatherMain', pt);
   // aim
-  if (s.hasAim) aimWorld = renderer.screenToWorld(s.aimX, s.aimY);
+  if (bench.active) aimWorld = bench.input.aim;
+  else if (s.hasAim) aimWorld = renderer.screenToWorld(s.aimX, s.aimY);
   // tools
   if (s.toolSelect >= 0 && s.toolSelect < TOOLS.length) { tool.cur = s.toolSelect; sound.uiClick(); }
   if (s.rotatePressed) {
@@ -627,7 +642,7 @@ function frame(now: number) {
   stepBody(realDt, Math.abs(s.moveX), s.run); // survival runs on wall-clock time
   updateCamera(realDt);
   pend('survival', pt);
-  stepFires(realDt);
+  pt = pnow(); stepFires(realDt); pend('fires', pt);
   pt = pnow();
   stepHeat(realDt); pend('heat', pt);
   const nSub = realDt > 0.05 ? 2 : 1;
@@ -697,12 +712,34 @@ async function toggleEngine() { await setEngine(engine === 'rapier' ? 'planck' :
 window.addEventListener('keydown', (e) => { if (e.repeat || !running || ended) return; if (e.code === 'KeyP') toggleEngine(); if (e.code === 'KeyK') spawnStressTest(40, pl.x, pl.y - 140); });
 setInterval(() => { (ui as any).setPhysInfo?.(`${engine === 'rapier' ? 'Rapier 2D' : 'planck.js'} · ${Math.round(fps)} к/с · тел ${allBodies().size}`); }, 500);
 
+function showTitleScreen() { ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); }); }
+
+// ---------------- benchmark (bench.ts): scripted scenarios through the normal game loop ----------------
+const bench = createBench({
+  ui, renderer,
+  newGame: (seed) => { newGame(seed); },
+  setLoop: (r, p) => { running = r; paused = p; if (r) last = performance.now(); },
+  snapCam: () => updateCamera(0, true),
+  blocked: () => input.mobile && window.innerHeight > window.innerWidth,
+  setQuality: (q) => { G.quality = q; renderer.setDyn(1); resize(); },
+  getViewport: () => ({ w: cssW, h: cssH, dpr }),
+  setViewport: (v) => { vpOverride = v; resize(); updateCamera(0, true); },
+  mute: (on) => { sound.setMuted(on || !(ui as unknown as { soundOn: boolean }).soundOn); },
+  noAdapt: (on) => { (window as unknown as { __noAdapt?: boolean }).__noAdapt = on; AD.n = 0; },
+  mobile: () => G.mobile,
+  fps: () => fps,
+  closed: () => { newGame(); running = false; paused = false; showTitleScreen(); },
+});
+ui.onBench = (fromPause) => { sound.init(); void bench.start({ source: fromPause ? 'pause' : 'title' }); };
+
 async function boot() {
   try { await setEngine('rapier'); } catch (e) { console.warn('Rapier failed, using planck', e); }
   newGame();
   requestAnimationFrame(frame);
   setTimeout(() => { try { renderer.prewarm(); } catch (e) { console.warn('shader prewarm', e); } }, 400);
-  ui.showTitle(() => { sound.init(); running = true; ui.hide(); last = performance.now(); });
+  const bq = /[?&]bench(?:=([a-z]*))?(?:&|$)/.exec(location.search);
+  if (bq) { void bench.start({ source: 'url', quick: bq[1] === 'quick' }); }   // ?bench[=quick]: run at once, no title card
+  else showTitleScreen();
 }
 boot();
 
@@ -727,6 +764,9 @@ boot();
   interact: () => interact(),
   eat: () => eat(),
   fps: () => fps, prof, dyn: () => renderer.getDyn(),
+  /** automatic benchmark: Promise of the JSON result (see bench.ts); opts: { quick, only: string[] } */
+  bench: (opts?: { quick?: boolean; only?: string[] }) => bench.start({ source: 'api', ...opts }),
+  benchResult: () => bench.last(),
   sawCheck, tutorial: () => tutorial,
 };
 void PW; void dens; void bond;

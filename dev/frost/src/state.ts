@@ -28,5 +28,8 @@ export const G = {
   player: { x: 600, y: 380, w: 10, h: 34, heat: 100 /* W given to air */ },
 };
 
+/** Weather overrides for the benchmark / debugging (NaN = follow the model). Applied at the end of weather() in main.ts. */
+export const FORCE = { storm: NaN, snowfall: NaN, wind: NaN };
+
 /** Number of game seconds per real second (time compression). */
 export const gameSecPerReal = () => 60 * G.timeScale;
