@@ -293,52 +293,106 @@ function spLine(x0: number, y0: number, x1: number, y1: number, th: number, col:
 }
 const hash1 = (n: number) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 
-/** Tool silhouettes sampled in tool space (u along the shaft from the hand, v across; base units, drawn x1.3). */
+// Tool colours: module constants (the sampler runs once per pixel of the tool box every frame, so no literals inside it)
+const TC = {
+  alu: [186, 196, 208] as C3, aluHi: [238, 243, 249] as C3, aluSh: [122, 134, 148] as C3,
+  steel: [172, 184, 196] as C3, steelHi: [236, 242, 250] as C3, steelSh: [102, 114, 128] as C3, steelDk: [66, 76, 90] as C3,
+  woodHi: [174, 130, 88] as C3, cut: [222, 186, 132] as C3, cutRing: [186, 142, 94] as C3, bark: [104, 72, 44] as C3, barkLt: [138, 100, 62] as C3,
+  grip: [52, 50, 56] as C3, hOr: [222, 120, 56] as C3, hOrDk: [168, 80, 34] as C3,
+  snow: [226, 236, 248] as C3, snowHi: [246, 250, 255] as C3, snowSh: [166, 188, 212] as C3, snowCut: [196, 212, 232] as C3,
+  fOut: [236, 84, 34] as C3, fMid: [255, 150, 56] as C3, fIn: [255, 214, 120] as C3, fCore: [255, 248, 222] as C3,
+  white: [238, 244, 252] as C3,
+};
+let toolCarry = false, toolT = 0;     // set by drawPlayer before the tool is sampled: log carried on the shoulder; time for the flame flicker
+/** Tool silhouettes sampled in tool space (u along the tool from the hand, v across; base units, drawn x1.3). */
 function toolSample(id: string, u: number, v: number, load: number): number {
   const W_ = PAL.wood, WS = PAL.woodSh;
   const inR = (a: number, b: number, c: number, d: number) => u >= a && u < b && v >= c && v < d;
   switch (id) {
-    case 'shovel':
-      if (inR(-3.6, -1.8, -2.4, 2.4) && !(v > -1.2 && v < 1.2 && u > -3.2)) return lc(W_);        // D-grip
-      if (inR(-3.6, 0.2, -2.4, -1.2) || inR(-3.6, 0.2, 1.2, 2.4)) return lc(W_);
-      if (inR(-1.8, 16, -0.8, 0.8)) return lc(v > 0.1 ? WS : W_);                                  // shaft
-      if (inR(15, 18.5, -1.5, 1.5)) return lc(PAL.steelSh);                                         // socket
-      if (u >= 18.5 && u < 29) {                                                                    // spade blade, tapering to a rounded tip
-        const hw = 3.6 - Math.max(0, u - 24.5) * 0.75;
-        if (hw > 0.4 && v >= -hw && v < hw) return lc(v < -hw + 1.1 ? PAL.steelHi : v > hw - 1.1 ? [74, 88, 104] as C3 : [118, 134, 152] as C3, 1 - (u - 18.5) * 0.01);
+    case 'shovel': {
+      // avalanche shovel: D-grip, wood shaft, steel socket, aluminium spade with a rib and a lit rim
+      if (inR(-3.8, -1.6, -2.4, 2.4) && !(v > -1.2 && v < 1.2 && u > -3.4)) return lc(W_);
+      if (inR(-3.8, 0.2, -2.4, -1.2) || inR(-3.8, 0.2, 1.2, 2.4)) return lc(W_);
+      if (inR(-1.6, 15.4, -0.85, 0.85)) return lc(v > 0.2 ? WS : W_);
+      if (inR(15, 18.4, -1.7, 1.7)) return lc(TC.steelSh);
+      if (u >= 18.4 && u < 29.4) {
+        const hw = 3.9 - Math.max(0, u - 24.6) * 0.8;
+        if (hw > 0.4 && v >= -hw && v < hw) {
+          if (v < -hw + 1) return lc(TC.aluHi);
+          if (v > hw - 1) return lc(TC.aluSh);
+          if (Math.abs(v) < 0.5 && u > 20.5 && u < 27.5) return lc(TC.aluSh);
+          return lc(TC.alu, 1 - (u - 18.4) * 0.01);
+        }
       }
-      if (load > 0 && u > 19 && u < 28 && v < -3.2 && v > -3.2 - (1.2 + load * 4.4) * Math.sin((u - 19) / 9 * Math.PI)) return lc([238, 244, 252] as C3);
+      if (load > 0 && u > 19 && u < 28 && v < -3.2 && v > -3.2 - (1.2 + load * 4.4) * Math.sin((u - 19) / 9 * Math.PI)) return lc(TC.white);
       return 0;
+    }
     case 'saw': {
-      if (inR(-1, 5.5, -1.7, 1.7)) return lc([48, 46, 52] as C3);                                   // handle
-      if (inR(5.5, 7.4, -7.6, 1.5) || inR(25.6, 27.5, -7.6, 1.5)) return lc([196, 98, 44] as C3);   // bow uprights
-      if (inR(5.5, 27.5, -7.6, -6.2)) return lc([214, 112, 52] as C3);                             // bow bar
-      if (inR(7.4, 25.6, 0, 1.4)) return lc(PAL.steelHi);                                           // blade
-      if (inR(7.4, 25.6, 1.4, 2.8) && Math.floor(u * 1.25) % 2 === 0) return lc(PAL.steel);        // teeth
-      if (inR(-1, 5.5, -1.7, -0.7)) return lc([78, 74, 84] as C3);
+      // snow saw: rounded grip at the back, steel blade with a lit spine, sawtooth edge on the lower side, sloped tip
+      if (inR(-1.2, 4.6, -2.1, 2.1)) {
+        if (inR(0.2, 1.8, -0.5, 0.5)) return 0;
+        return lc(v < -0.7 ? TC.hOr : TC.hOrDk);
+      }
+      if (u >= 4.6 && u < 27) {
+        const tipTop = u > 25.2 ? -1.2 + (u - 25.2) * 0.7 : -1.2;
+        if (v >= tipTop && v < 1.2) return lc(v < -0.6 ? TC.steelHi : TC.steel);
+        const f = ((u - 4.6) % 1.6) / 1.6;                          // one tooth per 1.6 units
+        if (v >= 1.2 && v < 1.2 + 1.5 * f && u < 25.6) return lc(f > 0.5 ? TC.steelSh : TC.steelHi);
+      }
       return 0;
     }
     case 'axe': {
-      if (inR(-2.4, 19, -0.9, 0.9)) return lc(v > 0.05 ? WS : W_);                                  // haft
-      if (inR(-2.4, -0.4, -1.3, 1.3)) return lc(WS);                                                // knob
-      if (u >= 12 && u < 22) {                                                                      // poll, cheek, flared bit
+      // ash haft (lit upper edge), steel head: dark poll, a sheen band, bright bit
+      if (inR(-2.4, 19, -0.95, 0.95)) return lc(v < -0.35 ? TC.woodHi : v > 0.45 ? WS : W_);
+      if (inR(-2.4, -0.6, -1.4, 1.4)) return lc(WS);                                // knob
+      if (u >= 11.6 && u < 22.2) {
         const top = u < 14.5 ? -2.2 : u < 17 ? -2.4 : -2.4 - (u - 17) * 0.95;
         const bot = u < 14.5 ? 2.2 : u < 17 ? 2.4 : 2.4 + (u - 17) * 0.75;
         if (v >= top && v <= bot) {
-          if (u > 21) return lc(PAL.steelHi);                                                       // cutting edge
-          if (u < 14.5) return lc([70, 80, 92] as C3);                                              // poll
-          return lc(v < -0.2 ? [132, 146, 160] as C3 : [88, 100, 114] as C3);
+          if (u > 20.8) return lc(TC.steelHi);                                      // cutting edge catches the light
+          if (u < 14.5) return lc(TC.steelDk);                                      // poll
+          if (Math.abs(v + 0.4 - (u - 16) * 0.25) < 0.55) return lc(TC.steelHi);    // sheen band across the head
+          return lc(v < -0.2 ? TC.steel : TC.steelSh);
         }
       }
       return 0;
     }
-    case 'beam':
-      if (inR(-1, 17, -2.8, 2.8)) { const bark = Math.floor(v * 2 + Math.floor(u * 0.7)) % 3 === 0; return lc(bark ? [104, 72, 44] as C3 : [138, 100, 62] as C3, v < -1.2 ? 1.15 : v > 1.6 ? 0.82 : 1); }
-      if (inR(17, 18.4, -2.4, 2.4)) return lc([214, 176, 122] as C3);
+    case 'beam': {
+      // log: bark sides, cut end with rings. Carried on the shoulder the log runs back from the hand (cut end behind)
+      const back = toolCarry;
+      if (back && inR(-24.6, -23.2, -2.6, 2.6)) return lc(Math.abs(v) < 1.3 ? TC.cutRing : TC.cut);
+      if (inR(back ? -23.2 : -1, back ? 1.6 : 17, -2.8, 2.8)) {
+        const bark = Math.floor(v * 2 + Math.floor(u * 0.7)) % 3 === 0;
+        return lc(bark ? TC.bark : TC.barkLt, v < -1.2 ? 1.15 : v > 1.6 ? 0.82 : 1);
+      }
+      if (!back && inR(17, 18.4, -2.4, 2.4)) return lc(TC.cut);
       return 0;
-    case 'block':
-      if (inR(1, 13, -5, 5)) return lc(u > 11.2 || v > 3.6 ? [168, 190, 214] as C3 : v < -3.6 || u < 2.6 ? [246, 250, 255] as C3 : [226, 236, 248] as C3);
+    }
+    case 'block': {
+      // snow block: lit top and near face, cooler far and lower faces, saw-cut lines on the near face
+      if (inR(1, 13, -5, 5)) {
+        const shade = u > 11.2 || v > 3.6;
+        if (!shade && u > 1.6 && u < 12.4 && (v + 5) % 3.4 < 0.45) return lc(TC.snowCut);
+        return lc(shade ? TC.snowSh : v < -3.6 || u < 2.6 ? TC.snowHi : TC.snow);
+      }
       return 0;
+    }
+    case 'fire': {
+      // dry branch held in the hand with a flame tuft at its tip, flickering with toolT
+      if (inR(-1, 8.8, -0.85, 0.85)) return lc(v < -0.25 ? TC.woodHi : WS);
+      if (u >= 8.4 && u < 17) {
+        const k = (u - 8.4) / 8.6;                                   // 0 at the branch end, 1 at the tip
+        const sway = Math.sin(toolT * 11 + u * 1.9) * 0.45 * k;
+        const hw = 2.7 * Math.pow(Math.max(0, 1 - k), 0.6) * Math.min(1, (k + 0.25) * 2.5);
+        const d = Math.abs(v - sway);
+        if (d < hw) {
+          if (d < hw * 0.38 && k < 0.7) return lc(k < 0.3 && d < 0.8 ? TC.fCore : TC.fIn, 1.25);
+          if (d < hw * 0.7) return lc(TC.fMid, 1.2);
+          return lc(TC.fOut, 1.15);
+        }
+      }
+      return 0;
+    }
     default:
       if (inR(-1, 9, -0.8, 0.8)) return lc(W_);
       if (inR(9, 11.2, -1.4, 1.4)) return lc([255, 130, 50] as C3, 1.3);
@@ -454,9 +508,11 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
   if (pl.alive) {
     const sx = shX + (spLean ? vf * Math.round(spLean * 0.6) : 0), sy = shY;
     const worldSx = x + sx + spJx, worldSy = y + sy;
-    let ang = vf > 0 ? 0.55 : Math.PI - 0.55;
-    if (aim) ang = Math.atan2(aim[1] - worldSy, aim[0] - worldSx);
     const id = TOOLS[tool.cur].id;
+    // a log carried on the shoulder: the hand is held level in front and the log runs back over the shoulder
+    const carry = id === 'beam' && !aim && !working;
+    let ang = vf > 0 ? (carry ? 0.2 : 0.55) : Math.PI - (carry ? 0.2 : 0.55);
+    if (aim) ang = Math.atan2(aim[1] - worldSy, aim[0] - worldSx);
     let tr = 0, raise = 0;
     if (working) {
       if (id === 'shovel') { const s = Math.sin(t * 15); tr = s * 2.2; raise = (0.5 + 0.5 * s) * 0.5 - 0.15; }
@@ -473,10 +529,11 @@ function drawPlayer(aim: [number, number] | null, shakeX: number, shakeY: number
     // tool (inverse-sampled so rotated shapes stay pixel-solid)
     const sc = 1.3, flipY = dx < 0 ? -1 : 1, R = 40;
     const load = 0; // the blade carries no snow: each dug tile is thrown clear at once
+    toolCarry = carry; toolT = t;
     for (let py = -R; py <= R; py++) for (let px = -R; px <= R; px++) {
       const rx = px + 0.5, ry = py + 0.5;
       const u = (rx * dx + ry * dy) / sc, v = (-rx * dy + ry * dx) / sc * flipY;
-      if (u < -4.5 || u > 30 || v < -9 || v > 6) continue;
+      if (u < -25 || u > 30 || v < -9 || v > 6) continue;
       const col = toolSample(id, u, v, load);
       if (col) spPut(Math.round(hx) + px, Math.round(hy) + py, col);
     }
@@ -1223,6 +1280,6 @@ boot();
   benchResult: () => bench.last(),
   benchReport: () => { const r = bench.last(); return r ? makeReport(r) : ''; },
   sawCheck, tutorial: () => tutorial,
-  spoil: () => spoilInFlight(), pendingSnow: () => pendingTotal(),
+  spoil: () => spoilInFlight(), pendingSnow: () => pendingTotal(), P, FORCE,
 };
 void PW; void dens; void bond;

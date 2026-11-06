@@ -548,8 +548,8 @@ body { position: fixed; inset: 0; width: 100%; }
   --S: clamp(44px, 11.6vh, 48px);     /* secondary buttons: never under 44 px */
   --X: clamp(38px, 10vh, 42px);       /* Рентген: small; its hit area is grown by ::before */
   --r1: clamp(70px, 19vh, 80px);      /* inner ring radius */
-  --rx: clamp(150px, 26vw, 230px);    /* outer arc: horizontal radius */
-  --ry: clamp(100px, 30vh, 130px);    /* outer arc: vertical radius */
+  --rx: clamp(140px, 23vw, 210px);    /* outer arc: horizontal radius */
+  --ry: clamp(100px, 28vh, 120px);    /* outer arc: vertical radius */
   position: absolute; right: calc(var(--pad-r) + var(--J) / 2); bottom: calc(var(--pad-b) + var(--J) / 2);
   width: 0; height: 0; pointer-events: none;
 }
@@ -585,7 +585,7 @@ body { position: fixed; inset: 0; width: 100%; }
 .cbtn.glow { border-color: var(--ice); color: var(--ice); animation: ice-breathe 1.6s ease-in-out infinite; }
 .cbtn.urgent { border-color: var(--ember); color: var(--ember); background: radial-gradient(circle at 30% 22%, rgba(255, 171, 69, 0.3), transparent 60%), linear-gradient(165deg, rgba(74, 46, 20, 0.8), rgba(14, 12, 12, 0.85)); animation: ember-pulse 1.3s ease-in-out infinite; }
 /* not useful right now: dimmed in place, so the layout never reflows */
-.cbtn.dim { opacity: 0.38; filter: saturate(0.3); }
+.cbtn.dim { opacity: 0.45; filter: saturate(0.3); }
 .cb-tool.fire .ico, .cb-put.fire .ico { color: var(--ember); }
 .cb-tool.empty .cb-ico { opacity: 0.45; }
 @media (max-height: 380px) { .cb-lab { display: none; } }

@@ -177,7 +177,7 @@ const SCENARIOS: Scn[] = [
   { id: 'dig_shaft', outcome: (k) => `глубина шахты ${Math.round(pl.y - (k.data.y0 as number))} кл., выбросов ${tool.ins + tool.outs}`, name: 'Копание шахты (КА + выброс снега)', group: 'Снег', note: 'лопата вниз без перерыва: клеточный автомат, авто-бросок, планировщик отвала',
     setup: (k) => { k.clock(12 * 60); k.stand(START_X + 40); k.data.y0 = pl.y; k.useTool('shovel'); },
     tick: (k) => { k.bi.primary = true; k.aim(pl.x, pl.y + 8); } },
-  { id: 'dig_tunnel', outcome: (k) => `проход ${Math.round(pl.x - (k.data.x0 as number))} кл., выбросов по BFS ${tool.outs}, внутрь ${tool.ins}`, name: 'Копание тоннеля в сугробе', group: 'Снег', note: 'лопата горизонтально в наветренный склон большого сугроба: ползком, спойл по BFS',
+  { id: 'dig_tunnel', outcome: (k) => `проход ${Math.round(pl.x - (k.data.x0 as number))} кл., выбросов по BFS ${tool.outs}, внутрь ${tool.ins}`, name: 'Копание тоннеля в сугробе', group: 'Снег', note: 'лопата горизонтально в наветренный склон большого сугроба: проход полного роста (плитки 5×5), спойл по BFS',
     setup: (k) => {
       k.clock(12 * 60);
       const c = driftCrest(); let x = c - 70; while (x < c && groundY[x] - surfaceAt(x) < 34) x++;

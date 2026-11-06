@@ -1,5 +1,5 @@
 import './ui.css';
-import type { Input, InputButton } from './input';
+import type { Input } from './input';
 import { Wheel, type WheelItem } from './wheel';
 import { plural } from './ru';
 
@@ -590,22 +590,35 @@ export class UI {
     };
     zone.addEventListener('pointerup', end); zone.addEventListener('pointercancel', end);
 
-    // compact cluster: tool wheel button, actions wheel button, put/throw, jump (hold)
+    // compact cluster: every action is its own button (right thumb); the tool button opens the one radial wheel left (the tools)
     const cl = el('div', 'tcluster');
     const mk = (cls: string, label: string, html: string) => {
       const b = el('button', `cbtn ${cls}`, html);
       b.type = 'button'; b.tabIndex = -1; b.setAttribute('aria-label', label); b.title = label;
       return b;
     };
-    this.cbTool = mk('cb-tool wheel-opener', 'Инструмент', `<span class="cb-ico">${ico('shovel')}</span><i class="cb-badge mono"></i><i class="cb-load"><i></i></i>`);
+    const icon = (k: string) => `<span class="cb-ico">${ico(k)}</span>`;
+    const cap = (t: string) => `<i class="cb-lab">${t}</i>`;
+    this.cbTool = mk('cb-tool wheel-opener', 'Инструмент', `${icon('shovel')}<i class="cb-badge mono"></i><i class="cb-load"><i></i></i>`);
     this.cbToolIco = this.cbTool.querySelector('.cb-ico') as HTMLElement;
     this.cbToolBadge = this.cbTool.querySelector('.cb-badge') as HTMLElement;
     this.cbToolLoad = this.cbTool.querySelector('.cb-load i') as HTMLElement;
-    this.cbActs = mk('cb-acts wheel-opener', 'Действия', ico('pad'));
-    this.cbPut = mk('cb-put', 'Положить, бросить', ico('put'));
-    this.cbJump = mk('cb-jump', 'Прыжок', ico('jump'));
-    this.cbTool.setAttribute('aria-haspopup', 'menu'); this.cbActs.setAttribute('aria-haspopup', 'menu');
-    cl.append(this.cbTool, this.cbActs, this.cbPut, this.cbJump);
+    this.cbTake = mk('cb-take', 'Взять', `${icon('take')}${cap('Взять')}`);
+    this.cbEat = mk('cb-eat', 'Съесть', `${icon('eat')}${cap('Съесть')}<i class="cb-badge mono"></i>`);
+    this.cbEatN = this.cbEat.querySelector('.cb-badge') as HTMLElement;
+    this.cbWait = mk('cb-wait', 'Ждать', `${icon('wait')}${cap('Ждать')}`);
+    this.cbRot = mk('cb-rot', 'Поворот', `${icon('rotate')}${cap('Поворот')}`);
+    this.cbXray = mk('cb-xray', 'Рентген', `${icon('xray')}<i class="cb-badge mono"></i>`);
+    this.cbXrayN = this.cbXray.querySelector('.cb-badge') as HTMLElement;
+    this.cbPut = mk('cb-put', 'Положить, бросить', `${icon('put')}${cap('Положить')}`);
+    this.cbJump = mk('cb-jump', 'Прыжок', icon('jump'));
+    this.cbTool.setAttribute('aria-haspopup', 'menu');
+    cl.append(this.cbTool, this.cbTake, this.cbEat, this.cbWait, this.cbRot, this.cbXray, this.cbPut, this.cbJump);
+    this.bindPress(this.cbTake, () => this.input.press('interact'));
+    this.bindPress(this.cbEat, () => this.input.press('eat'));
+    this.bindPress(this.cbWait, () => this.input.toggleWait());
+    this.bindPress(this.cbRot, () => this.input.press('rotate'));
+    this.bindPress(this.cbXray, () => this.input.press('xray'));
     this.bindPress(this.cbPut, () => this.input.press('secondary'));
     // jump: holdable (pushing against a wall while holding it climbs out of a pit)
     const jb = this.cbJump;
@@ -618,43 +631,30 @@ export class UI {
     jb.addEventListener('pointerup', jup); jb.addEventListener('pointercancel', jup); jb.addEventListener('pointerleave', jup); jb.addEventListener('lostpointercapture', jup);
     jb.addEventListener('mousedown', (e) => e.preventDefault()); jb.addEventListener('click', (e) => e.preventDefault());
 
-    // wheels
+    // the radial wheel of the six tools
     this.toolWheel = new Wheel(this.root, 'Инструмент', 'выбери', 'wheel-tools');
-    this.actWheel = new Wheel(this.root, 'Действия', 'выбери', 'wheel-acts');
-    const toggled = (w: Wheel, btn: HTMLElement | null) => (open: boolean) => {
-      this.input.setBlocked(this.toolWheel.open || this.actWheel.open || open);
-      this.root.classList.toggle('wheel-open', this.toolWheel.open || this.actWheel.open);
-      btn?.classList.toggle('open', open); btn?.setAttribute('aria-expanded', String(open));
-      if (!open) window.setTimeout(() => this.input.setBlocked(this.toolWheel.open || this.actWheel.open), 0);
-      void w;
+    this.toolWheel.onToggle = (open) => {
+      this.input.setBlocked(this.toolWheel.open || open);
+      this.root.classList.toggle('wheel-open', open);
+      this.cbTool.classList.toggle('open', open); this.cbTool.setAttribute('aria-expanded', String(open));
+      if (!open) window.setTimeout(() => this.input.setBlocked(this.toolWheel.open), 0);
     };
-    this.toolWheel.onToggle = toggled(this.toolWheel, this.cbTool);
-    this.actWheel.onToggle = toggled(this.actWheel, this.cbActs);
     this.toolWheel.onPick = (id) => { this.input.pressTool(Number(id)); };
-    this.actWheel.onPick = (id) => {
-      if (id === 'wait') this.input.toggleWait();
-      else this.input.press(id as InputButton);
-    };
-    const bindOpen = (btn: HTMLElement, w: Wheel, other: Wheel, items: () => WheelItem[]) => {
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        other.close();
-        if (w.open) { w.close(); return; }
-        w.setItems(items());
-        const r = btn.getBoundingClientRect();
-        w.show(r.left + r.width / 2, r.top + r.height / 2, 'drag', e.pointerId);
-      });
-      btn.addEventListener('mousedown', (e) => e.preventDefault());
-      btn.addEventListener('click', (e) => e.preventDefault());
-    };
-    bindOpen(this.cbTool, this.toolWheel, this.actWheel, () => this.toolItems());
-    bindOpen(this.cbActs, this.actWheel, this.toolWheel, () => this.actItems());
+    // tool button: press opens the wheel around itself; drag onto a tool and lift (flick), or tap a tool
+    this.cbTool.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this.toolWheel.open) { this.toolWheel.close(); return; }
+      this.toolWheel.setItems(this.toolItems());
+      const r = this.cbTool.getBoundingClientRect();
+      this.toolWheel.show(r.left + r.width / 2, r.top + r.height / 2, 'drag', e.pointerId);
+    });
+    this.cbTool.addEventListener('mousedown', (e) => e.preventDefault());
+    this.cbTool.addEventListener('click', (e) => e.preventDefault());
     // PC: hold Q = the same tool wheel at the cursor, release over an item picks it
     this.input.onWheelKey = (ph) => {
       if (ph === 'open') {
         if (this.overlay) return;
         const s = this.input.state;
-        this.actWheel.close();
         this.toolWheel.setItems(this.toolItems());
         this.toolWheel.show(s.hasAim ? s.aimX : window.innerWidth / 2, s.hasAim ? s.aimY : window.innerHeight / 2, 'hold');
       } else if (ph === 'close') this.toolWheel.release();
@@ -696,19 +696,6 @@ export class UI {
     if (id === 'saw') return this.sawLive(h) ? q(h.sawP) : 0;
     if (id === 'fire') return h.fire ? q(h.fire.fuel / FIRE_FULL_MIN) : 0;
     return 0;
-  }
-
-  private actItems(): WheelItem[] {
-    const h = this.lastH;
-    const food = h?.inv.food ?? 0, hungry = !!h && h.food < 0.3 && food > 0;
-    return [
-      { id: 'interact', label: 'Взять', icon: ico('take'), sub: 'подобрать, открыть' },
-      { id: 'eat', label: 'Съесть', icon: ico('eat'), badge: String(food), sub: food > 0 ? 'утолить голод' : 'еды нет', cls: hungry ? 'urgent' : food > 0 ? '' : 'empty' },
-      { id: 'wait', label: 'Ждать', icon: ico('wait'), sub: h?.waiting ? 'идёт, нажми — стоп' : 'в укрытии, время быстрее', cls: h?.waiting ? 'on' : (h && h.shelter >= 0.6 ? 'ready' : '') },
-      { id: 'rotate', label: 'Поворот', icon: ico('rotate'), sub: 'брус, блок' },
-      { id: 'xray', label: 'Рентген', icon: ico('xray'), sub: this.xrayMode ? XRAY[this.xrayMode].name + ' ' + this.xrayMode + '/3' : 'выкл.', cls: this.xrayMode ? 'on' : '' },
-      { id: 'secondary', label: 'Положить', icon: ico('put'), sub: 'бросить, поставить' },
-    ];
   }
 
   private stickMove(cx: number, cy: number): void {
@@ -804,11 +791,7 @@ export class UI {
       this.root.classList.toggle('is-night', h.night);
     });
     const waiting = h.waiting;
-    this.m('wait', waiting, () => {
-      this.clockWait.classList.toggle('on', waiting);
-      this.btnWait?.classList.toggle('on', waiting);
-      this.btnWait?.setAttribute('aria-pressed', String(waiting));
-    });
+    this.m('wait', waiting, () => this.clockWait.classList.toggle('on', waiting));
 
     // ---- weather log: entries are stamped with the time they were first noted
     const warn = h.warning ?? '';
@@ -835,16 +818,6 @@ export class UI {
     const hungry = h.food < 0.3 && inv.food > 0;
     this.m('hungry', hungry, () => this.chips.food.root.classList.toggle('warn', hungry));
 
-    // ---- state colour on the touch keys: eat pulses ember when hungry and there is food; wait glows when sheltered
-    const eatNone = inv.food <= 0;
-    this.m('eatst', (hungry ? 1 : 0) + (eatNone ? 2 : 0), () => {
-      this.btnEat?.classList.toggle('urgent', hungry);
-      this.btnEat?.classList.toggle('none', eatNone);
-      this.btnEat?.setAttribute('aria-disabled', String(eatNone));
-    });
-    const sheltered = h.shelter >= 0.5;   // same bar as the wait rule in main.ts
-    this.m('waitready', sheltered, () => this.btnWait?.classList.toggle('ready', sheltered));
-
     // ---- tool tags
     h.tools.forEach((t, i) => {
       const g = this.tags[i]; if (!g) return;
@@ -866,7 +839,7 @@ export class UI {
       });
     });
 
-    // ---- touch cluster: the tool button shows the current tool + count; the actions button carries the urgent / waiting state
+    // ---- touch cluster: the tool button shows the current tool + count (the other buttons: paintTouch)
     const ct = h.tools[h.tool];
     if (ct) {
       this.m('cbtool', ct.id, () => { this.cbToolIco.innerHTML = ico(TOOL_ICON[ct.id] ?? 'block'); this.cbTool.classList.toggle('fire', ct.id === 'fire'); this.cbPut.classList.toggle('fire', ct.id === 'fire'); this.cbTool.title = 'Инструмент: ' + ct.name; this.cbTool.setAttribute('aria-label', 'Инструмент: ' + ct.name); });
@@ -885,12 +858,8 @@ export class UI {
       this.fireChip.classList.toggle('warn', !!fn && !fn.lit);
       this.txt(this.fireChipN, fct);
     });
-    this.m('cbacts', (hungry && !eatNone ? 1 : 0) + (waiting ? 2 : 0) + (this.xrayMode ? 4 : 0), () => {
-      this.cbActs.classList.toggle('urgent', hungry && !eatNone);
-      this.cbActs.classList.toggle('on', waiting || this.xrayMode > 0);
-    });
+    this.paintTouch(h, hungry);
     if (this.toolWheel?.open) this.toolWheel.setItems(this.toolItems());
-    if (this.actWheel?.open) this.actWheel.setItems(this.actItems());
 
     // ---- hint
     const hint = h.hint ?? '';
@@ -902,6 +871,46 @@ export class UI {
       this.hintCard.classList.remove('dim');
       if (hint) this.hintTid = window.setTimeout(() => this.hintCard.classList.add('dim'), Math.max(4000, hint.length * 80));
     });
+  }
+
+  /** Touch cluster state for every button but the tool (memoised per state, so a steady frame paints nothing).
+   *  eat: ember pulse when hungry, dimmed with no food, the count on it · wait: lit while time runs fast, ice ring when waiting is possible here
+   *  (sheltered, or a lit fire within the feed radius), dimmed otherwise · rotate: only the beam and the block turn · x-ray: lit, mode number on it ·
+   *  take: glows when E would feed a campfire at hand (crates and loose logs have no cheap signal in HudData, so they do not glow). */
+  private paintTouch(h: HudData, hungry: boolean): void {
+    const inv = h.inv;
+    const eatNone = inv.food <= 0;
+    this.m('cb-eat', (hungry ? 1 : 0) + (eatNone ? 2 : 0) + ':' + inv.food, () => {
+      this.cbEat.classList.toggle('urgent', hungry && !eatNone);
+      this.cbEat.classList.toggle('dim', eatNone);
+      this.cbEat.setAttribute('aria-disabled', String(eatNone));
+      this.cbEatN.textContent = String(inv.food);
+    });
+
+    // 'on' = time is running fast now; aria-pressed = the toggle itself (it may be armed and wait for a shelter or a fire)
+    const waiting = h.waiting, armed = this.input.waitToggled;
+    const spot = h.shelter >= 0.5 || !!(h.fire && h.fire.lit && h.fire.near);   // main.ts: shelter >= 0.5, or a lit fire within 40 cells
+    this.m('cb-wait', (waiting ? 1 : 0) + (spot ? 2 : 0) + (armed ? 4 : 0), () => {
+      this.cbWait.classList.toggle('on', waiting);
+      this.cbWait.classList.toggle('ready', !waiting && spot);
+      this.cbWait.classList.toggle('dim', !waiting && !spot);
+      this.cbWait.setAttribute('aria-pressed', String(armed));
+    });
+
+    const ct = h.tools[h.tool];
+    const rotOn = !!ct && (ct.id === 'beam' || ct.id === 'block');
+    this.m('cb-rot', rotOn, () => this.cbRot.classList.toggle('dim', !rotOn));
+
+    this.m('cb-xray', this.xrayMode, () => {
+      this.cbXray.classList.toggle('on', this.xrayMode > 0);
+      this.cbXrayN.textContent = this.xrayMode ? String(this.xrayMode) : '';
+      const t = this.xrayMode ? `Рентген ${this.xrayMode}/3: ${XRAY[this.xrayMode].name}` : 'Рентген: выкл.';
+      this.cbXray.title = t; this.cbXray.setAttribute('aria-label', t);
+    });
+
+    // E feeds a fire within the feed radius: a lit one takes a log or branches, an unlit one needs matches and fuel left (feedFire in tools.ts)
+    const feed = !!h.fire && h.fire.near && (h.fire.lit ? inv.logs > 0 || inv.branches > 0 : inv.matches > 0 && h.fire.fuel > 0);
+    this.m('cb-take', feed, () => this.cbTake.classList.toggle('glow', feed));
   }
 
   private setGauge(k: 'food' | 'stamina' | 'wet' | 'shelter', v: number, invert: boolean, calm = false): void {
@@ -984,7 +993,7 @@ export class UI {
   private setOverlay(node: HTMLElement, mode: 'title' | 'pause' | 'end' | 'bench'): void {
     // anything still fading out must go now, otherwise stacked leaving overlays leak
     this.root.querySelectorAll('.overlay.leaving').forEach((n) => n.remove());
-    this.toolWheel?.close(); this.actWheel?.close();
+    this.toolWheel?.close();
     this.overlay?.remove();
     this.physEls = null;
     this.overlay = node;

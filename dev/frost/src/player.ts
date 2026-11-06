@@ -405,7 +405,7 @@ export function stepBody(dtReal: number, moving: number, running: boolean) {
       const sx = Math.round(pl.x + (f.x - pl.x) * s / steps), sy = Math.round(ty + (f.y - 6 - ty) * s / steps);
       if (inb(sx, sy) && blocksPlayer(idx(sx, sy))) vis *= 0.6;
     }
-    rad += (f.power / 5000) * 520 * vis / (1 + d2 / 0.6);   // 520 (was 260): the flame is an extended source, not a point (~130 W at 1 m, ~50 W at 2 m: drying works within ~2.3 m)
+    rad += (f.power / 5000) * 850 * vis / (1 + d2 / 0.6);   // 850: the flame is an extended source plus hot coals and reflected heat (~200 W at 1 m, ~85 W at 2 m): warms within ~2 m, dries within ~2.5 m
   }
   pl.fireRad = rad;
   // metabolism (W)
