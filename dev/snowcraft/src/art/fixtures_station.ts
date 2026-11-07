@@ -29,14 +29,15 @@ export const artHooks = { thawed: (_f: Fixture): boolean => false };
 const GP: Palette = { ...PAL, a: '#6f8f5e', A: '#46633c', b: '#a9ca96', r: '#d8402c', R: '#8e2a22', m: '#ff8b6a', s: '#cfd8e2', S: '#8996a8', z: '#4f5a6e', k: '#23222c', g: '#86e08c', e: '#ffb040' };
 {
   const g = new Grid(12, 11);
-  g.rect(9, 0, 2, 5, 'S'); g.rect(9, 0, 1, 5, 's'); g.rect(8, 0, 4, 1, 'z'); g.rect(8, 5, 4, 1, 'z');              // exhaust stack with a collar
-  g.rect(2, 1, 6, 4, 'r'); g.rect(2, 1, 6, 1, 'm'); g.rect(2, 4, 6, 1, 'R'); g.rect(1, 2, 1, 2, 'R'); g.rect(8, 2, 1, 2, 'R');   // fuel tank
-  g.rect(3, 0, 2, 1, 'y');                                                                                          // filler cap
-  g.rect(0, 5, 12, 5, 'a'); g.rect(0, 5, 12, 1, 'b'); g.rect(0, 9, 12, 1, 'A');                                      // engine block
-  g.rect(0, 5, 1, 5, 'A');
-  for (let x = 2; x < 8; x += 2) { g.rect(x, 6, 1, 3, 'A'); }                                                       // cooling fins
-  g.rect(8, 6, 3, 3, 'z'); g.rect(8, 6, 3, 1, 'S'); g.rect(9, 7, 1, 1, 'k');                                        // alternator housing
-  g.rect(4, 8, 3, 1, 'k'); g.set(5, 8, 'g');                                                                        // panel lamp (recoloured by code)
+  g.rect(9, 0, 2, 4, 'S'); g.rect(9, 0, 1, 4, 's'); g.rect(8, 0, 4, 1, 'z');                                        // exhaust stack with a cap
+  g.rect(8, 4, 4, 5, 'S'); g.rect(8, 4, 4, 1, 's'); g.rect(8, 4, 1, 5, 'z'); g.rect(11, 4, 1, 5, 'z'); g.rect(9, 6, 2, 1, 'z');   // muffler can
+  g.rect(1, 1, 6, 4, 'r'); g.rect(1, 1, 6, 1, 'm'); g.rect(1, 4, 6, 1, 'R'); g.rect(0, 2, 1, 2, 'R');              // fuel tank
+  g.rect(2, 0, 2, 1, 'y');                                                                                          // filler cap
+  g.rect(1, 5, 6, 1, 'k');                                                                                          // tank stands
+  g.rect(0, 6, 8, 4, 'a'); g.rect(0, 6, 8, 1, 'b'); g.rect(0, 9, 8, 1, 'A');                                        // engine block
+  for (let x = 1; x < 5; x += 2) g.rect(x, 7, 1, 2, 'A');                                                           // cooling fins
+  g.rect(5, 7, 3, 2, 'z'); g.set(6, 7, 'S'); g.set(6, 8, 'k');                                                      // flywheel guard
+  g.set(3, 8, 'g');                                                                                                 // panel lamp (recoloured by code)
   g.rect(0, 10, 12, 1, 'k'); g.rect(1, 10, 2, 1, 'z'); g.rect(9, 10, 2, 1, 'z');                                    // skids
   fxs('fx.gen', g.rows(), GP);
 }
@@ -62,9 +63,9 @@ const GP: Palette = { ...PAL, a: '#6f8f5e', A: '#46633c', b: '#a9ca96', r: '#d84
 // ---------------------------------------------------------------------------------------------------------------------------------- first-aid cabinet 8×8
 {
   const g = new Grid(8, 8);
-  g.rect(0, 0, 8, 8, 'n'); g.rect(0, 0, 8, 1, 'N'); g.rect(0, 7, 8, 1, 'S'); g.rect(0, 0, 1, 8, 'N'); g.rect(7, 0, 1, 8, 'S');
-  g.rect(3, 1, 2, 6, 'r'); g.rect(1, 3, 6, 2, 'r'); g.rect(3, 1, 2, 1, 'm'); g.set(6, 4, 'y');
-  fxs('fx.medkit', g.rows(), { ...PAL, m: '#ff7a68', r: '#d8362a' });
+  g.rect(0, 0, 8, 8, 'N'); g.rect(0, 0, 8, 1, 'I'); g.rect(0, 7, 8, 1, 'S'); g.rect(0, 0, 1, 8, 'I'); g.rect(7, 0, 1, 8, 'S');
+  g.rect(3, 1, 2, 6, 'r'); g.rect(1, 3, 6, 2, 'r'); g.rect(3, 1, 2, 1, 'm'); g.set(6, 6, 'y');
+  fxs('fx.medkit', g.rows(), { ...PAL, N: '#9db4b0', I: '#c4d8d2', S: '#5d6f72', m: '#ff7a68', r: '#d8362a' });
   const e = new Grid(8, 8);
   e.rect(0, 0, 8, 8, 'N'); e.rect(0, 0, 8, 1, 'n'); e.rect(0, 7, 8, 1, 'S'); e.rect(3, 1, 2, 6, 'S'); e.rect(1, 3, 6, 2, 'S'); e.set(6, 4, 'y');
   fxs('fx.medkit.empty', e.rows(), PAL);
@@ -175,7 +176,7 @@ function drawGenerator(ctx: Ctx, f: Fixture, b: Box, t: number) {
   rect(ctx, '#1b1726', x0 - 4 - pull, yb - 6, 4, 3); rect(ctx, '#f4cf5a', x0 - 3 - pull, yb - 5, 2, 1);
   rect(ctx, '#8d7c68', x0 - 1 - pull + (pull ? 0 : 0), yb - 5, 1 + pull, 1);
   // panel lamp: green running, red when stalled / dry, off otherwise
-  const lampX = x0 + 5, lampY = yb - 3;
+  const lampX = x0 + 4, lampY = yb - 3;
   const fuel = f.fuel ?? 0;
   if (run) { rectE(ctx, '#86e08c', lampX, lampY, 1, 1); rectE(ctx, 'rgba(160,255,170,0.7)', lampX, lampY - 1, 1, 1); }
   else if (stalled || fuel <= 0) rect(ctx, (((t * 2) | 0) % 2) ? '#ff5040' : '#7a2018', lampX, lampY, 1, 1);
@@ -317,8 +318,8 @@ export function drawChestExtras(ctx: Ctx, f: Fixture, b: Box, t: number, pass: 0
   const dy = dyOf(f), cx = b.x + b.w / 2;
   if (look === 'barrel' && f.data?.frozen === true && !artHooks.thawed(f)) {
     const y = b.y + dy;                                              // top of the barrel
-    for (let i = 0; i < 9; i++) { const hh = 1 + Math.round(2 * hf(i * 3.1 + f.id)); rect(ctx, i % 3 === 1 ? '#bfe3ff' : '#e4f4ff', cx - 5 + i, y - hh, 1, hh + 2); }
-    rect(ctx, '#ffffff', cx - 4, y - 1, 2, 1); rect(ctx, '#8fc4ee', cx - 5, y + 2, 10, 1);
+    for (let i = 0; i < 9; i++) { const hh = Math.round(1.5 * hf(i * 3.1 + f.id)); rect(ctx, i % 3 === 1 ? '#bfe3ff' : '#e4f4ff', cx - 5 + i, y - hh, 1, hh + 1); }
+    rect(ctx, '#ffffff', cx - 4, y, 2, 1); rect(ctx, '#8fc4ee', cx - 5, y + 1, 10, 1);
     rect(ctx, '#cfeaff', cx - 5, y + 3, 1, 2); rect(ctx, '#cfeaff', cx + 4, y + 3, 1, 1);          // icicles on the hoops
   }
   if (look === 'den') {

@@ -189,7 +189,7 @@ ok(sp.spawnX > LOC.house.R * 4 + 4 && LOC.station.y - sp.spawnY >= 12 && LOC.sta
   ok(hash() !== hOff, 'the deep snow changes the world (switchable off for tests)');
   const snowTopAt = (x: number) => { let y = 100; while (y < H && at(x, y) === MAT.AIR) y++; return y; };
   const depthAt = (x: number) => { let y = snowTopAt(x), n = 0; while ((at(x, y) === MAT.SNOW || at(x, y) === MAT.PACKED) && n < 90) { y++; n++; } return n; };
-  const avgDepth = (x0: number, x1: number) => { let a = 0, n = 0; for (let x = x0; x <= x1; x += 2) { a += depthAt(x); n++; } return a / n; };
+  const avgDepth = (x0: number, x1: number) => { let a = 0, n = 0; for (let x = x0; x <= x1; x += 2) { if (at(x, snowTopAt(x)) === MAT.FIXTURE) continue; a += depthAt(x); n++; } return a / n; };       // columns under a chest / cache (placeExtras) are no snow measurement
   // open plains: 1.5-2.5 m (17-28 cells); drifts in the lee of the hills up to 4-5 m (45-55 cells)
   const field = Math.max(...Array.from({ length: 57 }, (_, k) => depthAt(500 + k))), capeLee = avgDepth(150, 225);
   ok(field >= 20 && field <= 56, 'the lee snow field east of the cairn hill is 1.8-5 m deep at its crest', `(${(field * 0.09).toFixed(1)} m = ${field} cells)`);

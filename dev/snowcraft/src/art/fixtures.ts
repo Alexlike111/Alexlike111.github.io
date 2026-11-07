@@ -328,7 +328,10 @@ function drawRadio(ctx: Ctx, f: Fixture, b: Box, t: number) {
     if (broken) rect(ctx, '#1a1a1c', x + 5, y + 2, 2, 2);
     if (parts >= 3) rect(ctx, '#e6c25a', x + 5, y + 2, 2, 2);
   }
-  void t;
+  if (dget(f, 'live')) {                      // the receiver is on (DESIGN §15): a warm dial window and a flicker of the needle
+    rectE(ctx, '#ffd870', x + 1, y + 2, 3, 2); rectE(ctx, '#ff5a40', x + 1 + ((t * 3) % 3 | 0), y + 2, 1, 2);
+    rectE(ctx, 'rgba(255,200,100,0.5)', x, y + 1, 5, 4);
+  }
 }
 function drawBarometer(ctx: Ctx, f: Fixture, b: Box, t: number) {
   bc(ctx, 'fx.barometer', b, 0, 0);

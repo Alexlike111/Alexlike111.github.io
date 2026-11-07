@@ -11,12 +11,13 @@ const CSS = `
 #stn-dial{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(132px + env(safe-area-inset-bottom,0px));z-index:47;width:min(94vw,470px);box-sizing:border-box;
  background:linear-gradient(180deg,rgba(26,30,22,.95),rgba(12,16,12,.95));border:2px solid #6f7d58;border-radius:6px;padding:8px 10px 9px;color:#dfe8c8;
  font-family:'Pixelify Sans','Jura',system-ui,sans-serif;display:none;box-shadow:0 4px 18px rgba(0,0,0,.6);user-select:none;-webkit-user-select:none;touch-action:none}
-body.touch-ui #stn-dial{bottom:calc(86px + env(safe-area-inset-bottom,0px));width:min(66vw,430px);padding:5px 8px 6px}
+body.touch-ui #stn-dial{bottom:calc(4px + env(safe-area-inset-bottom,0px));width:min(60vw,420px);padding:5px 8px 6px}
 #stn-dial .row{display:flex;align-items:center;gap:8px}
 #stn-dial .t{font-size:15px;letter-spacing:.06em;color:#ffd88a;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stn-dial canvas{display:block;width:100%;height:46px;margin:5px 0 4px;image-rendering:pixelated;border-radius:3px}
 #stn-dial .line{min-height:2.5em;font-family:'Jura','Pixelify Sans',system-ui,sans-serif;font-size:14px;line-height:1.25;color:#c9f2c4;text-shadow:0 0 6px rgba(120,255,140,.35)}
 body.touch-ui #stn-dial .line{min-height:2.35em;font-size:13px}
+body.touch-ui #stn-dial canvas{height:32px;margin:3px 0 2px}body.touch-ui #stn-dial .hint{display:none}body.touch-ui #stn-dial button{min-height:34px;min-width:42px;font-size:15px}body.touch-ui #stn-dial .t{font-size:13px}body.touch-ui #stn-dial .line{min-height:1.3em}
 #stn-dial .hint{font-size:12px;opacity:.7;margin-top:2px}
 #stn-dial button{font:inherit;font-size:18px;color:#e8f6ff;background:linear-gradient(180deg,#34402a,#1c2416);border:2px solid #7d8d62;border-radius:4px;min-width:48px;min-height:40px;cursor:pointer;touch-action:none}
 #stn-dial button:active{background:#4a5b38}

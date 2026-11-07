@@ -3,7 +3,7 @@
 import { registerTest } from '../game/selftest';
 import { G, toast } from '../game/state';
 import { LOC } from '../game/locations';
-import { sandbox } from '../game/testkit';
+import { sandbox, put } from '../game/testkit';
 import { mat, W } from '../engine/grid';
 import { capture, saveGame, peekSave, loadGame, deleteSave } from '../game/save';
 import { getView } from '../engine/render';
@@ -26,6 +26,8 @@ registerTest('ui', 'двери дома и дизельной проходимы
       const west = d.data?.side === 'west';
       t.expect(d.th >= 6, 'дверь ниже 6 тайлов: ' + d.th);
       const x0 = d.tx * 4 + (west ? -14 : 18);
+      // the east door sits under the lee drift (DESIGN §13): the test is about the doorway, so the snow in front of it is dug out first (the sandbox restores it)
+      if (!west) for (let y = F - 36; y < F; y++) for (let x = d.tx * 4 + 4; x < d.tx * 4 + 34; x++) { const m = mat[y * W + x]; if (m === MAT.SNOW || m === MAT.PACKED) put(x, y, MAT.AIR); }
       sc.teleport(x0, F); sc.stepFast(10);
       sc.act('interact', d.tx * 4 + 2, d.ty * 4 + 12);
       const startX = G.player.x;
@@ -146,16 +148,24 @@ registerTest('ui', 'телефон: все 6 слотов пояса видны,
   setEnabled(prevOn);
 });
 
-registerTest('ui', 'телефон: при открытой сумке видны только Сумка, Журнал и Парка; подсказка «тяни» скрыта', async t => {
+registerTest('ui', 'телефон: при открытом журнале видны только Сумка, Журнал и Парка; сумка занимает экран и закрывается своей кнопкой', async t => {
   const sc = t.sc; const prevOn = touchEnabled();
   setEnabled(true); sc.step(4);
-  input.craftPressed = true; sc.step(6); await t.wait(60);
   const disp = (id: string) => getComputedStyle(document.getElementById(id)!).display;
-  t.expect(document.body.classList.contains('panel-open'), 'панель не открылась');
-  t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны');
+  const ghostHidden = () => { const ghost = document.querySelector('#touch .ghost') as HTMLElement | null; return !ghost || getComputedStyle(ghost).display === 'none'; };
+  // the journal: the right-hand action buttons step aside, the three top buttons stay
+  input.journalPressed = true; sc.step(6); await t.wait(60);
+  t.expect(document.body.classList.contains('panel-open'), 'журнал не открылся');
+  t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны под журналом');
   t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-parka') !== 'none', 'Сумка / Журнал / Парка пропали');
-  const ghost = document.querySelector('#touch .ghost') as HTMLElement | null;
-  t.expect(!ghost || getComputedStyle(ghost).display === 'none', 'подсказка «тяни» видна поверх панели');
+  t.expect(ghostHidden(), 'подсказка «тяни» видна поверх журнала');
+  input.journalPressed = true; sc.step(6); await t.wait(60);
+  // the bag (DESIGN §12) is a full-screen panel with its own «закрыть»: every touch button is hidden under it
+  input.craftPressed = true; sc.step(6); await t.wait(60);
+  t.expect(document.body.classList.contains('panel-open'), 'сумка не открылась');
+  t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны под сумкой');
+  t.expect(!!document.querySelector('#hud .pnl [data-act="close"]'), 'у сумки нет кнопки «закрыть»');
+  t.expect(ghostHidden(), 'подсказка «тяни» видна поверх сумки');
   input.craftPressed = true; sc.step(6); await t.wait(60);
   setEnabled(prevOn);
 });

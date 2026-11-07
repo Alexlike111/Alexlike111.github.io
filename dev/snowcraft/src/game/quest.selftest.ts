@@ -8,6 +8,7 @@ import { TS } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { inv, count, clearInventory, add } from './inventory';
 import { beltMatches } from './starter';
+import { DOOR } from './snowpack';
 import { GOALS, objectiveText, objectiveTarget, questState, runStats } from './quest';
 
 const goal = (id: string) => GOALS.find(g => g.id === id)!;
@@ -54,7 +55,12 @@ registerTest('quest', 'цепочка: уголь → печь → бароме�
   const tg = objectiveTarget();
   t.expect(!!tg && dist(tg, { x: 740, y: 269 }) < 12, 'указатель не у угля: ' + JSON.stringify(tg));
   t.sc.give('coal', 2); await t.frames(2);
-  t.expect(/Растопи печь/.test(objectiveText()), 'после угля: ' + objectiveText());
+  // the east door is buried under the lee drift (DESIGN §13): digging it out is the step between the coal and the stove; the arrow leads to the door
+  t.expect(/Откопай дверь/.test(objectiveText()), 'после угля — откопать дверь: ' + objectiveText());
+  const dt = objectiveTarget();
+  t.expect(!!dt && Math.abs(dt.x - DOOR.x0) < 8, 'указатель не у двери: ' + JSON.stringify(dt));
+  emit('door_dug', {}); await t.frames(2);
+  t.expect(/Растопи печь/.test(objectiveText()), 'после двери: ' + objectiveText());
   const stove = G.fixtures.find(f => f.kind === 'stove')!;
   const sp = objectiveTarget();
   t.expect(!!sp && !!stove && dist(sp, { x: (stove.tx + stove.tw / 2) * TS, y: (stove.ty + stove.th / 2) * TS }) < 2, 'указатель не на печи: ' + JSON.stringify(sp));
