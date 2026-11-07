@@ -79,7 +79,7 @@ registerTest('world', 'глубокий снег: дверь дома под с�
   const doorGoal = GOALS.find(g => g.id === 'door');
   t.expect(!!doorGoal && (doorGoal.done() || doorFrontSnow() >= 100), 'дверь на старте заметена: снега перед ней ' + doorFrontSnow());
   t.expect(GOALS.some(g => g.id === 'door'), 'первая цель «Откопай дверь» есть в цепочке');
-  let roof = 0; for (let y = 190; y < pad - 36; y++) for (let x = (LOC.house.L - 1) * 4; x < (LOC.house.R + 2) * 4; x++) if (mat[y * W + x] === MAT.SNOW) roof++;
+  let roof = 0; for (let y = 190; y < pad - 36; y++) for (let x = (LOC.house.L - 1) * 4; x < (LOC.house.R + 2) * 4; x++) if (mat[y * W + x] === MAT.SNOW || mat[y * W + x] === MAT.PACKED) roof++;
   t.expect(roof > 500, 'снег на крыше дома: ' + roof + ' клеток');
   let a = 0, n = 0; for (let x = 1120; x < 1330; x += 3) { a += snowDepth(x); n++; }
   t.expect(a / n <= 9 && a / n >= 1, 'на припае 0.1–0.8 м снега (среднее ' + (a / n * 0.09).toFixed(2) + ' м)');

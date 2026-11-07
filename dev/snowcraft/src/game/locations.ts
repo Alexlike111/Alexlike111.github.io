@@ -249,9 +249,15 @@ function cabin(L: number, R: number, F: number, n: number, openEast = false) {
   // snow on the roof: a loose crown over packed snow on a 1:2 slope above the outer step corners
   const cx = ((L - 1) * 4 + (R + 2) * 4) / 2, topY = (top - 1 - kmax) * 4;
   for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) {
-    const sy = Math.round(topY - 9 + Math.abs(x + 0.5 - cx) * 0.5);                 // DESIGN §13: a real snow load on the roof (0.8 m over the step corners)
+    const dx = Math.abs(x + 0.5 - cx);
+    const sy = Math.round(topY - 9 + dx * 0.62);                                     // DESIGN §13: a real snow load on the roof: 0.8 m at the ridge, tapering to ~0.35 m at the eaves (a tall loose face there would avalanche onto the doorway)
     let y = sy; while (y < H && mat[y * W + x] === AIR) y++;
-    for (let yy = sy; yy < y; yy++) { const i = yy * W + x, d = yy - sy; mat[i] = M.SNOW; aux[i] = Math.min(96, 14 + d * 9 + (x * 7 % 7)); flags[i] = 0; }      // powder (not structural: a PACKED slab this wide would fail the support solver), dense enough to read as a slab
+    for (let yy = sy; yy < y; yy++) {
+      const i = yy * W + x, d = yy - sy;
+      // loose crown over the whole roof; below it packed snow near the walls (they carry it) and powder at the ridge (a PACKED slab that wide would fail the support solver)
+      if (d >= 3 && dx > 18) { mat[i] = M.PACKED; aux[i] = Math.min(150, 100 + d * 3 + (x * 7 % 9)); } else { mat[i] = M.SNOW; aux[i] = Math.min(96, 14 + d * 9 + (x * 7 % 7)); }
+      flags[i] = 0;
+    }
   }
   return { top, roofTop: topY - 3 };
 }

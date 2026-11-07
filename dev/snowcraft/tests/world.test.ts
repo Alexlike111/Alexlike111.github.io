@@ -205,7 +205,7 @@ ok(sp.spawnX > LOC.house.R * 4 + 4 && LOC.station.y - sp.spawnY >= 12 && LOC.sta
   { let slab = 0, all = 0; for (let x = wall + 2; x < wall + 20; x++) { const y0 = snowTopAt(x); for (let y = y0 + 5; y < y0 + 16 && y < pad; y++) { if (at(x, y) !== MAT.PACKED) continue; all++; const a = aux[y * W + x]; if (a >= 119 && a <= 200) slab++; } }
     ok(all > 150 && slab / all >= 0.6, 'the lee drift holds a wind slab: mostly 250-380 kg/m3 block snow', `(${slab}/${all})`); }
   // snow on the roofs (house and shed): a real load above the step corners
-  { let roof = 0; for (const [L, R] of [[LOC.house.L, LOC.house.R], [LOC.shed.L, LOC.shed.R]]) for (let y = 190; y < (pad / 4 - 8) * 4 - 4; y++) for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) if (at(x, y) === MAT.SNOW) roof++;
+  { let roof = 0; for (const [L, R] of [[LOC.house.L, LOC.house.R], [LOC.shed.L, LOC.shed.R]]) for (let y = 190; y < (pad / 4 - 8) * 4 - 4; y++) for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) if (at(x, y) === MAT.SNOW || at(x, y) === MAT.PACKED) roof++;
     ok(roof > 900, 'roofs of the house and the shed carry deep snow', `(${roof} cells)`); }
   // the deep pack is PACKED (it never ticks): only the crown is loose snow
   { let loose = 0, packed = 0; for (let x = 480; x < 560; x++) { let y = snowTopAt(x); for (let k = 0; k < 60 && (at(x, y) === MAT.SNOW || at(x, y) === MAT.PACKED); k++, y++) { if (at(x, y) === MAT.SNOW) loose++; else packed++; } }
