@@ -122,6 +122,7 @@ body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area
 #hud .arw{position:absolute;display:none;align-items:center;gap:4px;font-size:14px;color:#ffc46e;pointer-events:none;white-space:nowrap;transform:translate(-50%,-50%);animation:arwblink .8s steps(2,end) infinite}
 #hud .arw svg{width:18px;height:18px;flex:none;filter:drop-shadow(0 0 3px #05080f)}
 #hud .arw path{fill:#ffc46e;stroke:#05080f;stroke-width:1.2;stroke-linejoin:round}
+#hud .arw.still{animation:none;opacity:.8}
 @keyframes arwblink{0%,100%{opacity:1}50%{opacity:.25}}
 #hud .dead{inset:0;background:rgba(40,0,0,.55);display:none;align-items:center;justify-content:center;flex-direction:column;font-size:24px;pointer-events:auto;border:0;border-radius:0;text-align:center}
 #hud .end{inset:0;background:rgba(255,220,160,.18);display:none;align-items:center;justify-content:center;font-size:30px;border:0;border-radius:0}
@@ -303,7 +304,7 @@ function updateArrow(realDt: number) {
   const p = G.player, key = objective();
   if (key !== arrowKey) { arrowKey = key; arrowT = 0; }
   arrowT += realDt;
-  const tgt = p?.alive && !panelOpen && !jOpen && !G.paused && arrowT < 60 ? objectiveTarget() : null;
+  const tgt = p?.alive && !panelOpen && !jOpen && !G.paused ? objectiveTarget() : null;
   if (!tgt || !p) { arrowEl.style.display = 'none'; return; }
   const [sx, sy] = worldToScreen(tgt.x, tgt.y);
   const W = window.innerWidth, H = window.innerHeight, dx = sx - W / 2, dy = sy - H / 2;
@@ -311,7 +312,7 @@ function updateArrow(realDt: number) {
   if (Math.abs(dx) <= hw && Math.abs(dy) <= hh) { arrowEl.style.display = 'none'; return; }
   const k = Math.min(Math.abs(dx) > 0 ? hw / Math.abs(dx) : Infinity, Math.abs(dy) > 0 ? hh / Math.abs(dy) : Infinity);
   arrowEl.style.left = Math.round(W / 2 + dx * k) + 'px'; arrowEl.style.top = Math.round(H / 2 + dy * k) + 'px';
-  arrowEl.style.display = 'flex';
+  arrowEl.style.display = 'flex'; arrowEl.classList.toggle('still', arrowT >= 60);        // it blinks for the first minute of a goal, then stays on, steady: a lost player still has the way
   const deg = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
   if (deg !== arrowDir) { arrowDir = deg; (arrowEl.firstElementChild as SVGElement).style.transform = `rotate(${deg}deg)`; }
   const m = Math.round(Math.hypot(tgt.x - p.x, tgt.y - p.y) * 0.09);

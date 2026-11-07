@@ -5,7 +5,7 @@ import { G } from './state';
 import { on } from './bus';
 import { W, mat, aux, F_PLACED } from '../engine/grid';
 import { MAT } from '../content/materials';
-import { add, count, clearInventory } from './inventory';
+import { add, count, clearInventory, inv, placeInto } from './inventory';
 import { auxOfDensity } from './items';
 import { target } from './tools';
 import { nearestDrop, PICK_R } from './nearby';
@@ -174,3 +174,51 @@ registerTest('tools', 'ракетница: событие flare', async () => {
   });
 });
 
+
+// ---- merge of the playability line with the station objects (DESIGN §15): E must keep doing what the player means next to the new small things ----
+registerTest('tools', 'E у печи зажигает печь: заслонка, чайник и ставня рядом не перехватывают E', async () => {
+  await sandbox(async () => {
+    const s = sc(), stove = G.fixtures.find(f => f.kind === 'stove')!, damper = G.fixtures.find(f => f.kind === 'damper')!;
+    const lvl = () => Number(damper.data?.d ?? 1);
+    for (const dx of [-2, 2, 4]) {                                       // from the front of the stove to the east door (x >= 677 is inside the closed door)
+      clearInventory(); add('matches', 5); add('coal', 3); sc().select(0);
+      stove.lit = false; stove.fuel = 0; const d0 = lvl();
+      s.teleport(stove.tx * 4 + 8 + dx, 272); s.stepFast(10);
+      const p = G.player; p.face = -1;
+      s.act('interact', p.x, 120);                                       // the cursor points at the sky: the choice is made by the position alone
+      s.stepFast(3);
+      t_expect(!!stove.lit, `x=${Math.round(G.player.x)}: печь не зажглась, E ушёл в другой предмет`);
+      t_expect(lvl() === d0, `x=${Math.round(G.player.x)}: заслонка сменила положение`);
+    }
+  });
+});
+function t_expect(c: boolean, m: string) { if (!c) throw new Error(m); }
+
+registerTest('tools', 'E: закрытая дверь перед игроком открывается, а не лестница рядом с ней (на крышу не уносит)', async () => {
+  await sandbox(async () => {
+    const s = sc(), door = G.fixtures.find(f => f.kind === 'door' && f.data?.side === 'west')!;
+    if (door.open) { s.act('interact', door.tx * 4 + 2, door.ty * 4 + 12); s.stepFast(3); }
+    t_expect(!door.open, 'тест: дверь должна быть закрыта');
+    s.teleport(door.tx * 4 - 6, 272); s.stepFast(10);
+    const p = G.player; p.face = 1;
+    s.act('interact', p.x, 120); s.stepFast(3);
+    t_expect(!!door.open, 'E у закрытой двери её не открыл');
+    t_expect(G.player.y > 250, 'игрока унесло на крышу: E ушёл в лестницу, y=' + Math.round(G.player.y));
+  });
+});
+
+registerTest('tools', 'снежные блоки сразу попадают на пояс (резать — класть, без сумки), прочие стопки — в сумку', async () => {
+  await sandbox(async () => {
+    clearInventory();
+    add('snow_block', 3, 300); add('coal', 3); add('can', 2);
+    const bi = inv.slots.findIndex(s => s?.id === 'snow_block');
+    t_expect(bi >= 0 && bi < 6, 'блок не на поясе: слот ' + bi);
+    const ci = inv.slots.findIndex(s => s?.id === 'coal');
+    t_expect(ci >= 6, 'уголь должен лечь в сумку: слот ' + ci);
+    // «Взять всё» from a chest (placeInto): ropes and flares go to the pack, blocks and tools to the belt
+    clearInventory();
+    const rope = placeInto('inv', { id: 'rope', n: 1 }), flare = placeInto('inv', { id: 'flare', n: 3 }), blk = placeInto('inv', { id: 'snow_block', n: 1, dur: 300 }), tool = placeInto('inv', { id: 'axe', n: 1 });
+    t_expect(!!rope && rope.i >= 6 && !!flare && flare.i >= 6, 'верёвка и ракеты из ящика должны лечь в сумку: ' + JSON.stringify([rope, flare]));
+    t_expect(!!blk && blk.i < 6 && !!tool && tool.i < 6, 'блок и инструмент — на пояс: ' + JSON.stringify([blk, tool]));
+  });
+});

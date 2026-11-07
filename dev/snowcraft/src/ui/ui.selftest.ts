@@ -136,8 +136,20 @@ registerTest('ui', 'телефон: прицел касанием смещён �
   void sc;
 });
 
+/** Shut whatever panel an earlier test left open (bag / container / journal) and wait until the HUD classes (`panel-open`, `bag-open`) are gone. */
+async function closePanels(t: { sc: any; wait(ms: number): Promise<void> }) {
+  for (let i = 0; i < 4; i++) {
+    const pn = [...document.querySelectorAll('#hud .pnl')] as HTMLElement[];
+    const bagOpen = pn.some(e => !e.classList.contains('jr') && e.style.display === 'block'), jrOpen = pn.some(e => e.classList.contains('jr') && e.style.display === 'block');
+    if (!bagOpen && !jrOpen && !document.body.classList.contains('panel-open') && !document.body.classList.contains('bag-open')) return;
+    if (bagOpen) input.craftPressed = true; else if (jrOpen) input.journalPressed = true;
+    t.sc.step(6); await t.wait(180);
+  }
+}
+
 registerTest('ui', 'телефон: все 6 слотов пояса видны, шрифт HUD 14 px, полоса цели не заходит на сумку', async t => {
   const sc = t.sc; const prevOn = touchEnabled();
+  await closePanels(t);
   setEnabled(true); sc.step(14); await t.wait(80);
   const slots = [...document.querySelectorAll('#hud .belt .sl')] as HTMLElement[];
   t.expect(slots.length === 6 && slots.every(e => e.offsetParent !== null), 'видимых слотов пояса: ' + slots.filter(e => e.offsetParent !== null).length);
@@ -150,6 +162,7 @@ registerTest('ui', 'телефон: все 6 слотов пояса видны,
 
 registerTest('ui', 'телефон: при открытом журнале видны только Сумка, Журнал и Парка; сумка занимает экран и закрывается своей кнопкой', async t => {
   const sc = t.sc; const prevOn = touchEnabled();
+  await closePanels(t);
   setEnabled(true); sc.step(4);
   const disp = (id: string) => getComputedStyle(document.getElementById(id)!).display;
   const ghostHidden = () => { const ghost = document.querySelector('#touch .ghost') as HTMLElement | null; return !ghost || getComputedStyle(ghost).display === 'none'; };
@@ -157,7 +170,7 @@ registerTest('ui', 'телефон: при открытом журнале ви�
   input.journalPressed = true; sc.step(6); await t.wait(60);
   t.expect(document.body.classList.contains('panel-open'), 'журнал не открылся');
   t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны под журналом');
-  t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-parka') !== 'none', 'Сумка / Журнал / Парка пропали');
+  t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-parka') !== 'none', 'Сумка / Журнал / Парка пропали, body: ' + document.body.className);
   t.expect(ghostHidden(), 'подсказка «тяни» видна поверх журнала');
   input.journalPressed = true; sc.step(6); await t.wait(60);
   // the bag (DESIGN §12) is a full-screen panel with its own «закрыть»: every touch button is hidden under it
@@ -197,4 +210,25 @@ registerTest('ui', 'стрелка к цели: видна у края, когд
   const arrow = document.querySelector('#hud .arw') as HTMLElement;
   t.expect(getComputedStyle(arrow).display !== 'none', 'стрелка не показана, цель за кадром');
   t.expect(/\d+ м$/.test(arrow.textContent ?? ''), 'нет расстояния: ' + arrow.textContent);
+});
+
+registerTest('ui', '«Закрыть ящик» закрывает и панель, которую открыл сам ящик; сумка, открытая клавишей C, остаётся открытой', async t => {
+  await sandbox(async () => {
+    const sc = t.sc, bag = (window as unknown as { __bag: { search: { openContainer(f: unknown): void } } }).__bag;
+    const chest = G.fixtures.find(f => f.kind === 'chest' && f.data?.look === 'shelf')!;
+    const pnl = () => document.querySelector('#hud .pnl') as HTMLElement;
+    const closeBox = () => { (document.querySelector('#hud .pnl [data-act="closebox"]') as HTMLElement).click(); sc.step(8); };
+    sc.teleport(chest.tx * 4 - 6, 272); sc.step(10);
+    bag.search.openContainer(chest); sc.step(10); await t.wait(150);
+    t.expect(pnl().style.display === 'block', 'ящик не открыл панель');
+    closeBox(); await t.wait(150);
+    t.expect(pnl().style.display !== 'block', 'после «Закрыть ящик» панель осталась открытой');
+    input.craftPressed = true; sc.step(8); await t.wait(100);                                  // the player opens the bag himself (C), then a box
+    t.expect(pnl().style.display === 'block', 'C не открыла сумку');
+    bag.search.openContainer(chest); sc.step(10); await t.wait(150);
+    closeBox(); await t.wait(150);
+    t.expect(pnl().style.display === 'block', 'сумка, открытая игроком, закрылась вместе с ящиком');
+    input.craftPressed = true; sc.step(8); await t.wait(100);
+    t.expect(pnl().style.display !== 'block', 'C не закрыла сумку');
+  });
 });

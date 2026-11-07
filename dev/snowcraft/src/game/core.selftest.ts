@@ -192,17 +192,19 @@ registerTest('tools', 'блок: призрак, опора, купол и ра�
 });
 registerTest('tools', 'лопата: зачерпнуть, бросить кучу, утрамбовать; ледоруб; топор/кирка дают предметы', async () => {
   await sandbox(() => {
-    scene({ loose: 4 });
+    const pl = scene({ loose: 4 });
     const s = sc();
+    const calm = () => { pl.core = 37; body.shiver = 0; };               // a shivering hand sways the aim (aimSway) and a one-tile target is missed now and then: this test is about the tools
     s.selectItem('shovel');
     const hl = s.mods.inv.held;
-    hl.load = 0;
+    hl.load = 0; calm();
     s.act('dig', 1010, 274, 0.5);
     if (!(hl.load >= 8)) throw new Error('черпак пуст: ' + hl.load);
     const snowBefore = cellCount(MAT.SNOW, 940, 200, 1060, 280);
     // throw it into the air at a target 3 tiles to the right
     const L0 = hl.load;
-    s.act('dig', 1016, 262, 0.7);
+    // the hand sways a little with real time (aimSway): a throw that lands on a heap digs instead, so aim a little higher on the next try
+    for (let k = 0; k < 3 && hl.load >= L0; k++) { calm(); s.act('dig', 1016, 262 - k * 6, 0.7); }
     if (hl.load >= L0) throw new Error('снег не брошен');
     steps(120);
     const snowAfter = cellCount(MAT.SNOW, 940, 200, 1060, 280) + cellCount(MAT.PACKED, 940, 200, 1000, 262);
@@ -217,14 +219,14 @@ registerTest('tools', 'лопата: зачерпнуть, бросить куч
     s.selectItem('ice_chisel'); add('ice_chisel', 1);
     s.selectItem('ice_chisel');
     const i0 = count('ice');
-    s.act('dig', 1004, 273, 1.2);
+    calm(); s.act('dig', 1004, 273, 1.2);
     if (count('ice') <= i0) throw new Error('пешня не дала лёд');
     // axe & pick
     for (const [tool, key, item, tx] of [['axe', 'LOG', 'log', 1014], ['pick', 'COAL', 'coal', 1018], ['pick', 'METAL', 'scrap', 1022]] as [string, string, string, number][]) {
       arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); s.teleport(1000, 272);
       tileBlock(Math.floor(tx / 4), 67, 1, 1, (MAT as Record<string, number>)[key], 0, 0);
       add(tool, 1); s.selectItem(tool);
-      const c0 = count(item); s.act('dig', Math.floor(tx / 4) * 4 + 2, 270, 2.5);
+      const c0 = count(item); calm(); s.act('dig', Math.floor(tx / 4) * 4 + 2, 270, 2.5);
       if (count(item) <= c0 && !G.drops.some(d => d.item === item)) throw new Error(`${tool} по ${key} не дал ${item}`);
     }
   });

@@ -29,7 +29,7 @@ const S = strings('quest', {
   stove: 'Растопи печь спичками: войди в дом, подойди вплотную, E',
   baro: 'Проверь барометр: E у столба, он стоит западнее дома',
   keeper: 'Прочти журнал смотрителя: сундук-полка в доме',
-  shelter: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — к востоку от дома)',
+  shelter: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — снежное поле к западу, у холма)',
   diary: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
   supplies: 'Запасы на 12 дней: топливо {fuel} ч · еда {food} дн.',
   seal: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
@@ -117,6 +117,8 @@ function nearestCoal(): { x: number; y: number } | null {
 /** Snow (loose or packed) in the cell: a sack in it is buried (a fallen mast beam is not snow). */
 const buriedAt = (x: number, y: number) => { const i = Math.floor(y) * W + Math.floor(x); return i >= 0 && i < mat.length && (mat[i] === MAT.SNOW || mat[i] === MAT.PACKED); };
 function coalText(): string { const c = nearestCoal(); return S.coal + (c && buriedAt(c.x, c.y) ? S.buried : ''); }
+/** The dense lee snow field west of the station (snowpack.ts: 1.5-2 m of wind-packed snow, outside LOC.station): the arrow of the shelter goal. */
+const SNOW_FIELD = { x: 522, y: 238 };
 export const GOALS: Goal[] = [
   { id: 'coal', text: coalText, done: () => flags.has('coal') || count('coal') > 0 || flags.has('stove') },
   // DESIGN §13: the east door of the house is buried under the lee drift at the start. A soft step: done by digging it out, by walking in through the other
@@ -187,6 +189,7 @@ export function objectiveTarget(): { x: number; y: number } | null {
     case 'coal': return pick(G.drops.filter(d => d.item === 'coal'));
     case 'door': return DOOR.crest > 0 ? { x: DOOR.x0 + 2, y: DOOR.y1 - 6 } : null;
     case 'stove': return fixture('stove');
+    case 'shelter': return SNOW_FIELD;
     case 'baro': return worldInfo.spots.barometer ? { x: worldInfo.spots.barometer.x, y: worldInfo.spots.barometer.y } : null;
     case 'keeper': return note('s1');
     case 'diary': return note('n1') ?? { x: worldInfo.spots.cairn.x, y: worldInfo.spots.cairn.y };

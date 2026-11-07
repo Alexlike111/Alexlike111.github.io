@@ -394,7 +394,10 @@ export function attachBag(panel: HTMLElement, setOpen: (v: boolean) => void, cra
     if (rec) { craftClick(+rec.dataset.r!); refresh(); return; }
     onClick(e);
   });
-  on('box_open', () => { ui.want = true; ui.sel = null; lastHtml = ''; });
+  // a panel that only the container opened closes with the container («Закрыть ящик» must not leave the bag standing); one the player opened with C stays
+  let openedByBox = false;
+  on('box_open', () => { openedByBox = panel.style.display !== 'block'; ui.want = true; ui.sel = null; lastHtml = ''; });
+  on('box_close', () => { if (openedByBox) { openedByBox = false; setOpen(false); } });
   on('new_game', () => { ui.sel = null; nearUi.open = false; });
   // «Рядом»: the list overlay and the phone button
   const root = panel.parentElement!;
@@ -413,7 +416,7 @@ export function attachBag(panel: HTMLElement, setOpen: (v: boolean) => void, cra
     document.body.classList.toggle('bag-open', vis);
     if (vis && (boxOpen.box || ui.sel)) renderBag(panel);
     const cur = hi.list.length ? nearbyList() : [];
-    const show = !vis && G.player.alive && cur.length >= 2 && !document.body.classList.contains('title-open');
+    const show = !vis && G.player.alive && cur.length >= 2 && !document.body.classList.contains('title-open') && !document.body.classList.contains('panel-open');      // not over the journal either
     btn.style.display = show && touchy() ? 'flex' : 'none';
     if (show && touchy()) btn.textContent = `${S.nearBtn} ${cur.length}`;
     if (nearUi.open && (vis || cur.length === 0 || !G.player.alive)) nearUi.open = false;

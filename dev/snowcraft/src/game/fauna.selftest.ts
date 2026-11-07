@@ -164,6 +164,7 @@ registerTest('ice', 'тонкий лёд трещит и проламывает�
   const sc = (window as any).__sc;
   const p = G.player, save = { px: p.x, py: p.y }, nextAt0 = driftState.nextAt;
   driftState.nextAt = Infinity;                          // no pack shift while we stand on the ice
+  sc.setWeather({ ambientT: -6, wind: 0, storm: 0, snowfall: 0 });     // fixed mild frost: in a hard frost (left by an earlier test, or the polar night) the lead under the bridge thickens to 3 cells within the test
   // thick pack: 3+ cells of ice -> no hole after a long stand
   const f = driftState.floes.find(q => q.x1 - q.x0 > 30)!;
   const xt = Math.floor((f.x0 + f.x1) / 2) + 12;
@@ -187,6 +188,7 @@ registerTest('ice', 'тонкий лёд трещит и проламывает�
   // the hole is a real hole now; the event test below regenerates the world
   sc.teleport(save.px, save.py);
   p.inWater = 0; p.wet = 0; driftState.nextAt = nextAt0;
+  sc.setWeather(null);
 });
 
 registerTest('ice', 'событие дрейфа: предупреждение, потом сдвиг; полыньи затягиваются', t => {

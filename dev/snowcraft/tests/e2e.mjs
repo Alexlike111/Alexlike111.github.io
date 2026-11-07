@@ -57,8 +57,9 @@ for (const prof of PROFILES) {
   await shot(page, prof, '01-start');
 
   // ---- 0. DESIGN §13: the east door of the house is buried under the lee drift; the first objective is to dig it out (a staircase, with the shovel) ----
-  const door0 = await ev(page, () => { const S = window.__sc; S.setDay(1, 12); S.setWeather({ snowfall: 0, wind: 0, storm: 0 }); S.step(20); return { goal: S.mods.quest.objective(), front: S.mods.quest.doorFrontSnow(), tool: S.stats().sel, p: [Math.round(S.G.player.x), Math.round(S.G.player.y)] }; });
-  check('start: on the lee drift, the first objective is digging out the buried door (shovel selected)', /Откопай/.test(door0.goal) && door0.front > 100 && door0.tool === 1, JSON.stringify(door0));
+  // the chain starts with the coal sack (playability); with the coal in the bag the next line is the buried door
+  const door0 = await ev(page, () => { const S = window.__sc; S.setDay(1, 12); S.setWeather({ snowfall: 0, wind: 0, storm: 0 }); S.step(20); const first = S.mods.quest.objective(); S.give('coal', 4); S.step(4); return { first, goal: S.mods.quest.objective(), front: S.mods.quest.doorFrontSnow(), tool: S.stats().sel, p: [Math.round(S.G.player.x), Math.round(S.G.player.y)] }; });
+  check('start: the first objective is the coal sack, then (coal in the bag) digging out the buried door, shovel selected', /уголь/.test(door0.first) && /Откопай/.test(door0.goal) && door0.front > 100 && door0.tool === 1, JSON.stringify(door0));
   await shot(page, prof, '00-buried-door');
   const dug = await ev(page, () => {
     const S = window.__sc, G = S.G, held = S.mods.inv.held, t0 = G.realTime;
@@ -267,6 +268,7 @@ for (const prof of PROFILES) {
     const bed = F.placeFixture('skin_bed', ig.L + 4, 67, { force: true });
     S.stepFast(600); S.evalShelter();
     p.energy = 30; p.core = 36.5;
+    S.mods.drift.driftState.nextAt = 1e9;                            // the first ice shift (20-40 game minutes after the start) would wake the sleeper: not what this check is about
     const t0 = G.time; F.interact(bed);
     const ok = p.sleeping && G.timeScale === 20;
     S.stepFast(120);
@@ -321,12 +323,13 @@ for (const prof of PROFILES) {
     await shot(page, prof, '07-craft-panel');
     await page.keyboard.press('KeyC');
   } else {
+    await ev(page, () => window.__sc.step(4));                       // the HUD drops `panel-open` on its next update: do not rely on the wall-clock wait after closing the journal
     const t = await ev(page, () => {
       const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-bag', 'tb-jour', 'tb-parka'];
       const rects = ids.map(i => { const r = document.getElementById(i).getBoundingClientRect(); return { i, w: Math.round(r.width), h: Math.round(r.height) }; });
-      return { rects, portraitOverlay: getComputedStyle(document.getElementById('rotate')).display };
+      return { rects, portraitOverlay: getComputedStyle(document.getElementById('rotate')).display, body: document.body.className, pnl: [...document.querySelectorAll('#hud .pnl')].map(e => e.className + ':' + e.style.display) };
     });
-    check('touch buttons present, >= 56 px', t.rects.every(r => r.w >= 56 && r.h >= 50), JSON.stringify(t.rects));
+    check('touch buttons present, >= 56 px', t.rects.every(r => r.w >= 56 && r.h >= 50), JSON.stringify(t));
     check('no rotate overlay in landscape', t.portraitOverlay === 'none');
     // stick: synthetic touch pointer events
     const st = await ev(page, () => {
@@ -356,6 +359,7 @@ for (const prof of PROFILES) {
     await page.touchscreen.tap(Math.round(prof.viewport.width - 140), Math.round(prof.viewport.height - 110));
     await page.waitForTimeout(300);
     await shot(page, prof, '08-radial');
+    await page.touchscreen.tap(60, 200); await page.waitForTimeout(250);          // «тап мимо — закрыть»: the radial must not swallow the next tap (the bag button)
   }
   // ---- 7. inventory + container search + nearby items (DESIGN §12): real mouse drag & drop on desktop, taps on the phone; screenshots shots/inv-*.png ----
   {
@@ -374,7 +378,7 @@ for (const prof of PROFILES) {
     const tapCell = async (z, i) => { const r = await rect(cellSel(z, i)); if (prof.hasTouch) await page.touchscreen.tap(r.x, r.y); else await page.mouse.click(r.x, r.y); await page.waitForTimeout(250); };
     const setup = await ev(page, () => {
       const S = window.__sc, G = S.G, inv = S.mods.inv;
-      S.setWeather({ ambientT: -22, wind: 0, storm: 0, snowfall: 0 });
+      S.setWeather({ ambientT: -4, wind: 0, storm: 0, snowfall: 0 });          // mild: in a hard frost a search with bare hands stalls on purpose (DESIGN §12); the cold-hands case has its own self-test
       S.arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); S.teleport(1000, 272); S.step(10); G.drops.length = 0;
       for (const q of G.fixtures.filter(q => q.tx * 4 > 900 && q.tx * 4 < 1100 && q.ty * 4 > 200 && q.ty * 4 < 300)) S.mods.fixtures.removeFixture(q);     // leftovers of the earlier steps (bed, lamp, ...)
       inv.clearInventory(); inv.giveStartKit();
@@ -385,7 +389,7 @@ for (const prof of PROFILES) {
     });
     // the bag with a heavy load: weight bar with the effect in words
     await togglePanel();
-    check('bag panel opens', await panelOpen());
+    check('bag panel opens', await panelOpen(), await page.evaluate(() => { const b = document.getElementById('tb-bag'), r = b.getBoundingClientRect(), e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return document.body.className + ' | tb-bag ' + JSON.stringify([r.x, r.y, r.width, r.height]) + ' disp ' + getComputedStyle(b).display + ' top element ' + (e ? e.tagName + '#' + e.id + '.' + e.className : 'none') + ' | ' + window.innerWidth + 'x' + window.innerHeight; }));
     const wt = await page.evaluate(() => document.querySelector('#hud .pnl .wtxt')?.textContent);
     check('weight bar says what the load does', !!wt && wt.length > 3, wt);
     await ishot('01-bag');
@@ -411,8 +415,8 @@ for (const prof of PROFILES) {
     await ev(page, () => window.__sc.stepFast(100)); await ishot('03-searching');
     const found1 = await ev(page, () => window.__bag.search.revOf(window.__bag.search.open.box));
     check('some items found, some still hidden', found1 >= 1 && found1 < 6, String(found1));
-    await ev(page, () => window.__sc.stepFast(60 * 10)); await page.waitForTimeout(300);
-    check('search finishes: «Обыскано»', /Обыскано/.test(await page.evaluate(() => document.querySelector('#hud .pnl').textContent)));
+    await ev(page, () => window.__sc.stepFast(60 * 24)); await page.waitForTimeout(300);          // 6 finds at 0.6-1.5 s each, the «на дне» one last
+    { const ptxt = await page.evaluate(() => document.querySelector('#hud .pnl').textContent); check('search finishes: «Обыскано»', /Обыскано/.test(ptxt), ptxt.slice(0, 400)); }
     // take one found item with the real input, then all
     if (prof.hasTouch) { await tapCell('box', 0); const mv = await rect('#hud .pnl [data-act="move"]'); await page.touchscreen.tap(mv.x, mv.y); }
     else { const a = await rect(cellSel('box', 0)), b = await rect(cellSel('inv', 6 + 12)); await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(a.x + 16, a.y + 6, { steps: 3 }); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); }

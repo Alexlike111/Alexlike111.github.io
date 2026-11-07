@@ -34,8 +34,11 @@ function sameStack(a: Slot, id: string, dur?: number): boolean {
   if (id === 'snow_block') return snowClass(a.dur ?? 300) === snowClass(dur ?? 300);
   return true;
 }
+/** Tools go to the belt first; so do snow blocks: a freshly cut block must be placeable at once, not after a trip into the bag panel (the builder's loop is
+ *  cut - place - cut). Everything else stackable goes to the pack first and only then to the belt. */
+export function beltFirst(id: string): boolean { const d = getItem(id); return d.kind === 'tool' || d.kind === 'block' || (d.stack === 1 && d.kind !== 'misc'); }
 function* order(id: string): Generator<number> {
-  const tooly = getItem(id).stack === 1;
+  const tooly = beltFirst(id);
   if (tooly) { for (let i = 0; i < NSLOT; i++) yield i; }
   else { for (let i = BELT; i < NSLOT; i++) yield i; for (let i = 0; i < BELT; i++) yield i; }
 }
@@ -378,6 +381,9 @@ export function placeInto(z: ZoneId, s: Slot, belt?: boolean): Ref | null {
   const n = refSize(z), max = getItem(s.id).stack;
   const lo = z === 'inv' && belt === true ? 0 : z === 'inv' && belt === false ? BELT : 0, hi = z === 'inv' && belt === true ? BELT : z === 'inv' && belt === false ? NSLOT : n;
   if (max > 1) for (let i = lo; i < hi; i++) { const c = refGet({ z, i }); if (c && sameStack(c, s.id, s.dur) && c.n < max) return { z, i }; }
+  // anywhere in the inventory (belt not asked for): the same order as add(): tools and snow blocks fill the belt first, other stacks the pack first,
+  // so «Взять всё» from a chest does not fill the six belt slots with ropes and flares
+  if (z === 'inv' && belt === undefined && !beltFirst(s.id)) { const pk = placeInto('inv', s, false); if (pk) return pk; }
   for (let i = lo; i < hi; i++) if (!refGet({ z, i })) return { z, i };
   if (z === 'box' && boxZone.cur && boxZone.cur.canPut(s)) return { z, i: n };
   return null;

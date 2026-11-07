@@ -209,7 +209,8 @@ function smartAim(sel: ItemDef | null): [number, number] {
     if (workable(tx, row)) return [tx * TS + 2, row * TS + 2];
   }
   if (input.moveY > 0.5 || sel?.id === 'shovel') { if (workable(ptx, fty + 1)) return [ptx * TS + 2, (fty + 1) * TS + 2]; }
-  const f = fixtureNear(p.x, p.y - 8, 14);
+  const pu = pickUsableFixture(p.x, p.y - 8, p.face);
+  const f = pu && Math.hypot(pu.tx * TS + pu.tw * 2 - p.x, pu.ty * TS + pu.th * 2 - (p.y - 8)) <= 22 ? pu : fixtureNear(p.x, p.y - 8, 14);
   if (f) return [f.tx * TS + (f.tw * TS) / 2, f.ty * TS + (f.th * TS) / 2];
   return [(ptx + p.face * 2) * TS + 2, cty * TS + 2];
 }
@@ -782,7 +783,10 @@ function pickUsableFixture(x: number, y: number, face: number): Fixture | null {
     const d = tall ? dx : Math.hypot(dx, dy);
     if (d > 18) continue;
     const front = (o.tx * TS + o.tw * TS / 2 - x) * face >= -2;
-    const sc = d + (o.kind === 'door' || o.kind === 'hide_door' ? 8 : 0) + (front ? 0 : 5);
+    // the doors go last; the kettle and the damper sit ON the stove and the shutter hangs a step from it: standing at the stove must light the stove, not turn the damper or close the window (point at them, or stand right under them, to use them)
+    // a CLOSED door the player stands in front of and faces wins over a ladder or an instrument beside it; otherwise doors go last
+    const door = o.kind === 'door' || o.kind === 'hide_door', shut = door && !o.open && front && d <= 8;
+    const sc = shut ? d - 8 : d + (door ? 8 : o.kind === 'damper' || o.kind === 'kettle' || o.kind === 'shutter' ? 12 : o.kind === 'hatch' ? 6 : tall ? -2 : 0) + (front ? 0 : 5);   // the roof ladder hangs beside the door and the barometer post: it is used when pointed at
     if (sc < bs) { bs = sc; best = o; }
   }
   return best;

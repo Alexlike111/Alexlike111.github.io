@@ -12,6 +12,7 @@ import { strings, fmt } from '../content/i18n';
 
 const S = strings('starter', {
   matchesBelt: 'Спички в поясе: клавиша {k}',
+  matchesBeltTouch: 'Спички в поясе: слот {k}',
 });
 
 export function seedStarterDrift(spawnX: number) {
@@ -53,7 +54,8 @@ export function beltMatches(): number {
   const to = inv.slots.findIndex((s, i) => i < BELT && !s);
   if (to < 0) return -1;
   swap(from, to);
-  toast(fmt(S.matchesBelt, { k: to + 1 }), 'info');
+  const touch = typeof document !== 'undefined' && document.body.classList.contains('touch-ui');         // a phone has no keys: «слот 3»
+  toast(fmt(touch ? S.matchesBeltTouch : S.matchesBelt, { k: to + 1 }), 'info');
   return to;
 }
 on('new_game', () => { beltMatches(); });
