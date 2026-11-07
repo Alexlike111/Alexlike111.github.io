@@ -4,6 +4,7 @@
 import { G, type Fixture, type View } from '../game/state';
 import { defSprite, outline, drawSprite, spriteSize, hasSprite, drawFlame, PAL, type Rows, type Palette } from '../engine/sprites';
 import { Grid } from './grid';
+import './icons_station';
 
 const TS = 4;
 type Ctx = CanvasRenderingContext2D;
@@ -131,31 +132,26 @@ const GP: Palette = { ...PAL, a: '#6f8f5e', A: '#46633c', b: '#a9ca96', r: '#d84
   p.rect(0, 1, 5, 4, 'n'); p.rect(0, 1, 5, 1, 'N'); p.rect(0, 4, 5, 1, 'S'); p.set(2, 0, 'r'); p.set(1, 2, 'k'); p.set(3, 2, 'g');
   fxs('fx.sonde.box', p.rows(), { ...PAL, r: '#d8362a' });
 }
-// ---------------------------------------------------------------------------------------------------------------------------------- frozen barrel 8×8
+// ---------------------------------------------------------------------------------------------------------------------------------- frozen barrel 8×4 (half sunk in the beach gravel)
 {
-  const g = new Grid(8, 8);
-  g.rect(1, 0, 6, 8, 'W'); g.rect(0, 1, 8, 6, 'W'); g.rect(1, 0, 2, 8, 'w'); g.rect(0, 1, 1, 6, 'w');
-  for (const y of [1, 5]) g.rect(0, y, 8, 1, 'z');
-  g.rect(1, 3, 6, 1, 'd'); g.rect(2, 7, 4, 1, 'd');
   const pal = { ...PAL, W: '#7d5a38', w: '#a77d52', z: '#6a7488' };
+  const g = new Grid(8, 5);
+  g.rect(1, 0, 6, 5, 'W'); g.rect(0, 1, 8, 4, 'W'); g.rect(1, 0, 2, 5, 'w'); g.rect(0, 1, 1, 4, 'w');
+  g.rect(0, 2, 8, 1, 'z'); g.rect(1, 0, 6, 1, 'w'); g.rect(2, 4, 4, 1, 'd');
   fxs('fx.chest.barrel', g.rows(), pal);
-  const o = new Grid(8, 8);   // chipped open: lid off, dark inside
-  o.rect(1, 1, 6, 7, 'W'); o.rect(0, 2, 8, 5, 'W'); o.rect(1, 0, 6, 2, 'k'); o.rect(2, 1, 4, 1, 'l'); o.rect(0, 2, 1, 5, 'w');
-  for (const y of [2, 5]) o.rect(0, y, 8, 1, 'z');
+  const o = new Grid(8, 5);   // chipped open: the lid is off and the dark inside shows
+  o.rect(0, 1, 8, 4, 'W'); o.rect(0, 1, 1, 4, 'w'); o.rect(1, 0, 6, 2, 'k'); o.rect(2, 1, 4, 1, 'l'); o.rect(0, 3, 8, 1, 'z');
   fxs('fx.chest.barrel.open', o.rows(), pal);
   fxs('fx.chest.barrel.broken', o.rows(), pal);
 }
-// ---------------------------------------------------------------------------------------------------------------------------------- fox den 8×8: a snow mound with a dark hole
+// ---------------------------------------------------------------------------------------------------------------------------------- fox den 12×5: a low snow mound with a dark hole
 {
-  const g = new Grid(14, 8);
-  for (let x = 0; x < 14; x++) { const k = Math.sin((x + 0.5) / 14 * Math.PI), h = Math.max(1, Math.round(8 * Math.pow(k, 0.8))); g.rect(x, 8 - h, 1, h, 'n'); g.set(x, 8 - h, 'n'); if (h > 3) g.set(x, 7, 'N'); }
-  g.rect(4, 4, 5, 4, 'k'); g.rect(5, 3, 3, 1, 'k'); g.rect(5, 4, 3, 3, 'K'); g.rect(4, 7, 5, 1, 'l');
-  g.set(2, 5, 'i'); g.set(11, 6, 'i'); g.set(9, 3, 'I');
-  g.set(1, 7, 'u'); g.set(12, 7, 'x');   // a bone and some grass peeking out
+  const g = new Grid(12, 5);
+  for (let x = 0; x < 12; x++) { const k = Math.sin((x + 0.5) / 12 * Math.PI), h = Math.max(1, Math.round(5 * Math.pow(k, 0.7))); g.rect(x, 5 - h, 1, h, 'n'); if (h > 2) g.set(x, 4, 'N'); }
+  g.rect(4, 2, 4, 3, 'k'); g.rect(5, 1, 2, 1, 'k'); g.rect(5, 2, 2, 2, 'K'); g.rect(4, 4, 4, 1, 'l');
+  g.set(1, 3, 'i'); g.set(10, 4, 'i'); g.set(8, 2, 'I'); g.set(2, 4, 'u'); g.set(9, 3, 'x');       // a bone and a few scraps at the mouth
   const o = outline(g.rows());
-  defSprite('fx.chest.den', PAL, o.slice(0, o.length - 1));
-  defSprite('fx.chest.den.open', PAL, o.slice(0, o.length - 1));
-  defSprite('fx.chest.den.broken', PAL, o.slice(0, o.length - 1));
+  for (const k of ['', '.open', '.broken']) defSprite('fx.chest.den' + k, PAL, o.slice(0, o.length - 1));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------- drawing
@@ -320,10 +316,10 @@ export function drawChestExtras(ctx: Ctx, f: Fixture, b: Box, t: number, pass: 0
   const look = String(f.data?.look ?? '');
   const dy = dyOf(f), cx = b.x + b.w / 2;
   if (look === 'barrel' && f.data?.frozen === true && !artHooks.thawed(f)) {
-    const y = b.y + b.h + dy;
-    for (let i = 0; i < 9; i++) { const hh = 2 + Math.round(2.5 * hf(i * 3.1 + f.id)); rect(ctx, i % 3 === 1 ? '#bfe3ff' : '#e4f4ff', cx - 5 + i, y - hh - 1, 1, hh); }
-    rect(ctx, '#ffffff', cx - 4, y - 4, 2, 1); rect(ctx, '#8fc4ee', cx - 5, y - 1, 10, 1);
-    for (const k of [-5, 4]) rect(ctx, '#cfeaff', cx + k, y - 7 + (k > 0 ? 1 : 0), 1, 3);          // icicles on the hoops
+    const y = b.y + dy;                                              // top of the barrel
+    for (let i = 0; i < 9; i++) { const hh = 1 + Math.round(2 * hf(i * 3.1 + f.id)); rect(ctx, i % 3 === 1 ? '#bfe3ff' : '#e4f4ff', cx - 5 + i, y - hh, 1, hh + 2); }
+    rect(ctx, '#ffffff', cx - 4, y - 1, 2, 1); rect(ctx, '#8fc4ee', cx - 5, y + 2, 10, 1);
+    rect(ctx, '#cfeaff', cx - 5, y + 3, 1, 2); rect(ctx, '#cfeaff', cx + 4, y + 3, 1, 1);          // icicles on the hoops
   }
   if (look === 'den') {
     const y = b.y + b.h + dy;
@@ -380,5 +376,5 @@ export const STATION_SHEET: { kind: Fixture['kind']; tw: number; th: number; var
   { kind: 'damper', tw: 1, th: 1, variants: [{ name: 'half', patch: { data: { d: 1 } } }, { name: 'open', patch: { data: { d: 2 } } }, { name: 'closed', patch: { data: { d: 0 } } }] },
   { kind: 'bell', tw: 1, th: 2, variants: [{ name: 'still', patch: {} }, { name: 'ringing', patch: { data: { sw: 1 } } }] },
   { kind: 'sonde', tw: 2, th: 4, variants: [{ name: 'pad', patch: {} }, { name: 'ready', patch: { data: { st: 1 } } }, { name: 'flying', patch: { data: { st: 2, fly: 6 } } }] },
-  { kind: 'chest', tw: 2, th: 2, variants: [{ name: 'barrel', patch: { items: [{ id: 'diesel', n: 1 }], data: { look: 'barrel', frozen: true } } }, { name: 'barrel open', patch: { open: true, items: [], data: { look: 'barrel' } } }, { name: 'den', patch: { items: [{ id: 'fat', n: 1 }], data: { look: 'den' } } }] },
+  { kind: 'chest', tw: 2, th: 1, variants: [{ name: 'barrel', patch: { items: [{ id: 'diesel', n: 1 }], data: { look: 'barrel', frozen: true } } }, { name: 'barrel open', patch: { open: true, items: [], data: { look: 'barrel' } } }, { name: 'den', patch: { items: [{ id: 'fat', n: 1 }], data: { look: 'den' } } }] },
 ];

@@ -52,7 +52,7 @@ export type CauseKey = keyof typeof CAUSES;
 
 // ---------------------------------------------------------------------------------------------------------------------
 export const TUNE = {
-  walk: 27, run: 46, accel: 380, gravity: 360, jumpV: 102, swimV: 20, termV: 280, coyote: 0.09, buffer: 0.12, stepUp: 4,
+  walk: 27, run: 46, accel: 380, gravity: 360, jumpV: 102, swimV: 20, termV: 280, coyote: 0.09, buffer: 0.12, stepUp: 8, cutV: -70,
   fallSafe: 175, fallDmg: 0.33,
   // heat balance
   L0: 0.075, KC: 0.0055, coldGain: 0.2, shiverMax: 1.6, shelterK: 0.6, waterLoss: 6, bedBonus: 1.45, skinBonus: 1.7,
@@ -322,7 +322,7 @@ function stepMove(dt: number) {
       p.vy = -TUNE.jumpV * (1 - heavy * 0.2) * (p.frost.feet >= 80 ? 0.9 : 1); jumpBuf = 0; coyote = 0; p.onGround = false;
       p.anim.state = 'jump'; p.anim.t = 0; emit('jump', {});
     }
-    if (!input.jumpHeld && p.vy < -30) p.vy += TUNE.gravity * 0.9 * dt;     // variable jump height
+    if (!input.jumpHeld && p.vy < TUNE.cutV) p.vy += TUNE.gravity * 0.9 * dt;     // variable jump height: a tap is cut short, a hold is not
   }
   const wasGround = p.onGround, wasWater = inw, preVy = p.vy;
   const r = moveBox(p, dt, { stepUp: TUNE.stepUp, swim });
@@ -331,7 +331,7 @@ function stepMove(dt: number) {
   if (landed > 0) {
     emit('land', { speed: landed, mat: matBelow(p.x, p.y) });
     if (landed > TUNE.fallSafe) damage((landed - TUNE.fallSafe) * TUNE.fallDmg, 'fall');
-    if (landed > 90) burstFx('dust', p.x, p.y, 4, 14, 0.5, undefined, 2);
+    if (landed > 40) burstFx('dust', p.x, p.y, 4, 14, 0.5, undefined, 2);
   }
   // walking into a closed door opens it
   if (r.hitWall && ix !== 0) emit('bump', { dir: ix > 0 ? 1 : -1, x: p.x, y: p.y });
@@ -437,10 +437,10 @@ export function stepBody(bdt: number) {
   const eRaw = Math.max(0, Math.min(1.5, (-feel - 8) / 32));
   const act = p.onGround && Math.abs(p.vx) > 3 ? 0.6 : 1;
   const bare = body.fineT > 0; if (bare) body.fineT -= bdt;
-  const wetF = p.wet > 0.4 ? 1.8 : 1;
+  const wetF = p.wet > 0.4 ? 1.3 : 1;
   const vaso = p.core < 35.5 ? 1.5 : 1;
   const calm = eRaw < 0.05;
-  const parts: [keyof Player['frost'], number, number][] = [['hands', 2.6, bare ? 0 : wr.hands], ['feet', 1.8, wr.feet], ['face', 1.6, wr.face]];
+  const parts: [keyof Player['frost'], number, number][] = [['hands', 2.6, bare ? 0 : wr.hands], ['feet', 1.8, wr.feet], ['face', 1.0, wr.face]];
   for (const [k, base, prot] of parts) {
     let fr = p.frost[k];
     if (eRaw * (1 - prot) > 0.04) fr += base * eRaw * (1 - prot) * (k === 'face' ? 1 : act) * wetF * vaso * diff.cold * bdt;

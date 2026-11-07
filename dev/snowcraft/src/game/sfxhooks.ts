@@ -33,6 +33,11 @@ export function initSfxHooks() {
   on('flare', () => call('play', 'flare', { vol: 0.9 }));
   on('storm_start', () => call('play', 'gust', { vol: 1 }));
   on('died', () => call('play', 'death', { vol: 1 }));
+  // knife cut (its own sound, not the shovel's dig loop); pickups throttled so a stack of drops does not buzz; a refused placement says no
+  on('cut_block', () => call('play', 'cut_block', { vol: 0.7 }));
+  let lastPick = -1;
+  on('picked', () => { const now = performance.now() / 1000; if (now - lastPick < 0.15) return; lastPick = now; call('play', 'pickup', { vol: 0.35 }); });
+  on('deny', () => call('play', 'ui_deny', { vol: 0.6 }));
   on('frostbite', () => call('play', 'frostbite', { vol: 0.8 }));
   // fauna & ice (game/fauna.ts, game/drift.ts); distance-scaled volume
   const near = (x: number, full: number, far: number) => { const p = G.player; if (!p) return 1; const d = Math.abs(p.x - x); return d <= full ? 1 : d >= far ? 0.12 : 1 - 0.88 * (d - full) / (far - full); };

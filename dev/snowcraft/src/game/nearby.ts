@@ -2,6 +2,7 @@
 // that are within reach are highlighted in the world. E takes the NEAREST one in front of the player; when several are near, a «Рядом» list (E held, or the
 // phone button) lets you choose. Small light things are picked up by walking over them, but only if the pack has room and the weight allows; heavy things
 // (logs, sacks, blocks, tools, clothes, a backpack) never auto-pick: they need E.
+// Playtest ONB-2 / F1: a loose item right at the feet (PICK_R) wins over a door; the item under the cursor (AIM_R) wins over a nearer one; a note wins a tie.
 import { G, toast, type Drop, type Fixture } from './state';
 import { emit } from './bus';
 import { strings, fmt } from '../content/i18n';
@@ -17,8 +18,19 @@ const S = strings('near', {
   partial: 'Взял часть: {name}',
 });
 export type NearKind = 'drop' | 'pack' | 'box' | 'sled';
-export interface Near { kind: NearKind; id: number; x: number; y: number; dist: number; label: string; item?: string; n?: number; w: number; heavy: boolean; f?: Fixture }
+export interface Near { kind: NearKind; id: number; x: number; y: number; dist: number; rank?: number; label: string; item?: string; n?: number; w: number; heavy: boolean; f?: Fixture }
 export const REACH_NEAR = 26;           // cells: how far E reaches
+/** Pick-up radius of the E key for loose items, in cells (≈1.5 tiles): such an item wins over a door or a fixture. */
+export const PICK_R = 10;
+/** Notes (записки) are picked up from this far, with or without E. */
+export const NOTE_R = 6;
+/** The cursor counts as 'on' an item within this many cells of it (independent of the reach). */
+export const AIM_R = 5;
+/** Where the player aims in the world (tools.ts sets it each frame); an item under it is chosen first by E. */
+export const aim = { x: 0, y: 0, on: false };
+export const isNote = (item: string) => /^note/.test(item);
+/** Items that may be picked up from the ground (a dead player's backpack goes through its own path). */
+export const pickable = (d: Drop) => d.item !== 'backpack';
 export const AUTO_UNIT_MAX = 0.9;       // kg per item and
 export const AUTO_STACK_MAX = 2;        // kg per drop for walking-over pickup
 
@@ -46,7 +58,10 @@ export function nearbyList(): Near[] {
     if (d.age < 0) continue;
     const dx = d.x - px, dy = d.y - py; if (Math.abs(dx) > REACH_NEAR || Math.abs(dy) > REACH_NEAR * 0.85) continue;
     if (d.item === 'backpack') { if (backpacks.has(d.id)) out.push({ kind: 'pack', id: d.id, x: d.x, y: d.y, dist: score(d.x, d.y), label: S.pack, item: 'backpack', n: 1, w: 0, heavy: false }); continue; }
-    out.push({ kind: 'drop', id: d.id, x: d.x, y: d.y, dist: score(d.x, d.y), label: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : ''), item: d.item, n: d.n, w: unitWeight(d.item, dropDur.get(d.id)) * d.n, heavy: isHeavy(d) });
+    const dist = score(d.x, d.y);
+    // the item the cursor is on beats a nearer one that is not aimed at; a note beats a plain item at a tie
+    const rank = dist + (aim.on && Math.hypot(d.x - aim.x, d.y - aim.y) <= AIM_R ? -100 : 0) - (isNote(d.item) ? 1 : 0);
+    out.push({ kind: 'drop', id: d.id, x: d.x, y: d.y, dist, rank, label: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : ''), item: d.item, n: d.n, w: unitWeight(d.item, dropDur.get(d.id)) * d.n, heavy: isHeavy(d) });
   }
   for (const f of G.fixtures) {
     if (!isBoxFixture(f)) continue;
@@ -56,7 +71,7 @@ export function nearbyList(): Near[] {
   }
   const s = inv.sled;
   if (s && !s.hitched && sledNear(p.x, p.y - 4, REACH_NEAR)) out.push({ kind: 'sled', id: -1, x: s.x, y: s.y, dist: score(s.x, s.y) + 4, label: S.sled, w: 0, heavy: false });
-  out.sort((a, b) => a.dist - b.dist);
+  out.sort((a, b) => (a.rank ?? a.dist) - (b.rank ?? b.dist));
   return out;
 }
 const fixtureTitle = (f: Fixture) => boxTitle(f.kind);
@@ -124,3 +139,21 @@ function drawHi(ctx: CanvasRenderingContext2D, v: { x0: number; y0: number; t: n
 let layered = false;
 export function initNearbyLayer() { if (layered) return; layered = true; addLayer(130, (ctx, v) => drawHi(ctx, v)); }
 initNearbyLayer();
+
+/**
+ * The loose item the player means (pure helper, used by the self-tests): the one nearest to the aim point if the aim is within AIM_R of it,
+ * otherwise the nearest one to the player (point `px,py`) within `r`. Notes win a tie.
+ */
+export function nearestDrop(drops: Drop[], px: number, py: number, r: number, aimX?: number, aimY?: number): Drop | null {
+  let best: Drop | null = null, bestScore = Infinity;
+  for (const d of drops) {
+    if (!pickable(d)) continue;
+    const dp = Math.hypot(d.x - px, d.y - py);
+    const da = aimX === undefined || aimY === undefined ? Infinity : Math.hypot(d.x - aimX, d.y - aimY);
+    // an item the cursor is on counts a little farther (4 cells) than the reach: the player is looking at it
+    if (dp > r && !(da <= AIM_R && dp <= r + 4)) continue;
+    const score = (da <= AIM_R ? 0 : 100) + dp - (isNote(d.item) ? 1 : 0);
+    if (score < bestScore) { bestScore = score; best = d; }
+  }
+  return best;
+}

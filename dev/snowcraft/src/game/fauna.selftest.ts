@@ -4,12 +4,13 @@ import { registerTest } from './selftest';
 import { G } from './state';
 import { on, emit } from './bus';
 import { W, mat, aux } from '../engine/grid';
+import { boxFree } from '../engine/phys';
 import { MAT } from '../content/materials';
 import { SEA } from './locations';
 import { worldInfo } from './worldgen';
 import { fauna, stepFauna, groundY, scentAt, scent, setAiMode, aiOf, dogInteract, dogWarmth, dogHunger } from './fauna';
 import { driftState, shiftFloes, stepDrift, iceUnder, freezeLeads } from './drift';
-import { questState, resetQuest, objective, stepQuest, GOALS, suppliesNow, readNote } from './quest';
+import { questState, resetQuest, objective, stepQuest, GOALS, suppliesNow, readNote, runStats } from './quest';
 import { loreSave, loreLoad } from './lore';
 import { inv, add, count, clearInventory, takeAll, spawnDrop, hitchSled, unhitchSled, backpacks } from './inventory';
 import { stepDrops } from './tools';
@@ -161,7 +162,8 @@ registerTest('ice', 'льдина едет вместе со снегом, ве�
 
 registerTest('ice', 'тонкий лёд трещит и проламывается; толстый держит', t => {
   const sc = (window as any).__sc;
-  const p = G.player, save = { px: p.x, py: p.y };
+  const p = G.player, save = { px: p.x, py: p.y }, nextAt0 = driftState.nextAt;
+  driftState.nextAt = Infinity;                          // no pack shift while we stand on the ice
   // thick pack: 3+ cells of ice -> no hole after a long stand
   const f = driftState.floes.find(q => q.x1 - q.x0 > 30)!;
   const xt = Math.floor((f.x0 + f.x1) / 2) + 12;
@@ -184,7 +186,7 @@ registerTest('ice', 'тонкий лёд трещит и проламывает�
   t.expect(broke, 'тонкий лёд под снежным мостом не проломился');
   // the hole is a real hole now; the event test below regenerates the world
   sc.teleport(save.px, save.py);
-  p.inWater = 0; p.wet = 0;
+  p.inWater = 0; p.wet = 0; driftState.nextAt = nextAt0;
 });
 
 registerTest('ice', 'событие дрейфа: предупреждение, потом сдвиг; полыньи затягиваются', t => {
@@ -225,13 +227,17 @@ registerTest('ice', 'событие дрейфа: предупреждение, 
 registerTest('quest', 'цепочка первого дня и концовка «Ледокол»', t => {
   const s0 = { ...questState }, l0 = loreSave();
   resetQuest();
-  t.expect(GOALS[0].id === 'door' && /Откопай/.test(objective()), 'первая цель — откопать дверь: ' + objective());
-  emit('door_dug', {}); t.expect(GOALS[1].id === 'stove' && /печь/.test(objective()), 'вторая цель — печь: ' + objective());
-  emit('fire_lit', { kind: 'stove' }); t.expect(/барометр/i.test(objective()), 'вторая цель: ' + objective());
+  t.expect(GOALS[0].id === 'coal' && /уголь/i.test(objective()), 'первая цель: ' + objective());
+  emit('picked', { item: 'coal', n: 4 }); t.expect(GOALS[1].id === 'door' && /Откопай/.test(objective()), 'вторая цель — откопать дверь (занесена): ' + objective());
+  emit('door_dug', {}); t.expect(/печь/i.test(objective()), 'третья цель — печь: ' + objective());
+  emit('fire_lit', { kind: 'stove' }); t.expect(/барометр/i.test(objective()), 'четвёртая цель: ' + objective());
   emit('barometer', {}); t.expect(/журнал смотрителя/i.test(objective()), 'третья цель — прочесть журнал: ' + objective());
   readNote('s1'); t.expect(/★★|Утепли/.test(objective()), 'четвёртая цель: ' + objective());
   emit('shelter', { stars: 1, closed: true, vent: true }); t.expect(/Утепли/.test(objective()), 'одна звезда не засчитана');
-  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
+  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/Утепли/.test(objective()), 'укрытие без своих блоков не засчитано (станция не в счёт)');
+  const px0 = G.player.x; G.player.x = 1000; runStats.placed = 3;
+  emit('shelter', { stars: 2, closed: true, vent: true }); G.player.x = px0;
+  t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
   readNote('n1'); t.expect(/жир|Запасы/.test(objective()), 'шестая цель: ' + objective());
   const sp = suppliesNow(); t.expect(Number.isFinite(sp.fuelH) && Number.isFinite(sp.foodDays), 'запасы не посчитаны');
   // the radio call -> icebreaker two days later -> signal fire on the cape hill -> ending
@@ -296,4 +302,98 @@ registerTest('core', 'котелок берёт снег лопатой по м�
     if (dr) { add('axe', 1); inv.sel = inv.slots.findIndex(s => s && s.id === 'axe'); interact(dr); t.expect(dr.kind === 'drum', 'полная бочка стала жаровней'); removeFixture(dr); }
   }
   clearInventory(); add('snow_knife', 1); add('shovel', 1); held.load = 0;
+});
+
+// ---- living world (playtest G3: F1-F8) -------------------------------------------------------------------------------------
+registerTest('fauna', 'F1: медведь родился на чистом месте и реально идёт (x меняется, режимы сменяются)', t => {
+  const sc = (window as any).__sc;
+  const b = fauna.bear!, p = G.player;
+  const save = { bx: b.x, by: b.y, px: p.x, py: p.y, hp: p.hp };
+  t.expect(boxFree(b.x, b.y, 26, 15), 'медведь заперт в снегу при спавне');
+  sc.teleport(1400, groundY(1400, 200) - 1);            // far from the bear: he must not see or smell us
+  b.hp = 160; b.vx = 0; setAiMode(b, 'wander'); aiOf(b)!.t = 15; aiOf(b)!.hold = 0; aiOf(b)!.cd = 0;
+  const x0 = b.x;
+  let seen = 0, mx = 0;
+  for (let i = 0; i < 60 * 25; i++) { G.wind = -3; stepFauna(1 / 60); mx = Math.max(mx, Math.abs(b.x - x0)); if (b.state === 'walk') seen++; }
+  t.metric('медведь прошёл за 25 с', Math.round(mx), 'кл');
+  t.expect(mx >= 20 && seen > 0, `медведь не идёт: сдвиг ${mx.toFixed(1)}, кадров walk ${seen}`);
+  t.expect(boxFree(b.x, b.y, 26, 15), 'медведь в снегу после прогулки');
+  b.x = save.bx; b.y = save.by; setAiMode(b, 'wander'); aiOf(b)!.cd = 20; sc.teleport(save.px, save.py); p.hp = save.hp;
+});
+
+registerTest('fauna', 'F2 и F3: Север идёт за игроком через стену; «консервы» его кормят; подсказка при голоде', t => {
+  const sc = (window as any).__sc;
+  const d = fauna.dog!, p = G.player, ai = aiOf(d)!;
+  const keep = { stay: ai.stay, hunger: ai.hunger, hold: ai.hold, cd: ai.cd, state: d.state, px: p.x, py: p.y };
+  ai.stay = false; ai.hold = 0; ai.cd = 0; d.state = 'idle';
+  sc.teleport(700, groundY(700, 200) - 1); p.hp = 100; p.core = 37;
+  d.x = 570; d.y = groundY(570, 150) - 1; d.vx = d.vy = 0;   // at the kennel, behind the house wall
+  for (let i = 0; i < 60 * 25 && Math.abs(d.x - p.x) > 40; i++) { p.hp = 100; p.core = 37; stepFauna(1 / 60); }
+  t.expect(Math.abs(d.x - p.x) <= 40, `пёс не дошёл до игрока за стеной: ${d.x.toFixed(0)} / ${p.x.toFixed(0)}`);
+  // far walk at a walking pace (15 cells/s): he keeps up for 100+ cells
+  for (let i = 0; i < 60 * 12; i++) { p.hp = 100; p.core = 37; p.x = Math.min(900, p.x + 0.25); stepFauna(1 / 60); }
+  for (let i = 0; i < 60 * 4; i++) { p.hp = 100; p.core = 37; stepFauna(1 / 60); }   // then we stop: a husky that lost you finds you within seconds
+  t.expect(Math.abs(d.x - p.x) < 60 && d.state !== 'dead', `пёс отстал на ${(p.x - d.x).toFixed(0)} кл (${d.state}, px ${p.x.toFixed(0)}, vx ${d.vx.toFixed(1)}, ожидание ${ai.stuck?.toFixed(1)})`);
+  // food: a can feeds him
+  ai.hunger = 30; clearInventory(); add('can', 1);
+  d.x = p.x + 6; d.y = p.y;
+  t.expect(dogInteract() && (ai.hunger ?? 0) > 60 && count('can') === 0, 'консервы не покормили пса: ' + ai.hunger);
+  // hungry with nothing to give: a hint is shown (toggle still works)
+  ai.hunger = 20; const s0 = ai.stay;
+  t.expect(dogInteract() && ai.stay !== s0, 'E без еды не переключил «ждать/за мной»');
+  ai.stay = keep.stay; ai.hunger = keep.hunger; ai.hold = keep.hold; ai.cd = keep.cd; d.state = keep.state;
+  sc.teleport(keep.px, keep.py);
+});
+
+registerTest('fauna', 'F4: тюлень всплывает в 400 кл от игрока с событием и облачком дыхания', t => {
+  const s = G.animals.find(a => a.kind === 'seal')!; const ai = aiOf(s)!;
+  const p = G.player, px = p.x, py = p.y;
+  let heard = 0; const off = on('seal_surface', () => { heard++; });
+  G.storm = 0; p.x = s.x + 300; p.vx = 0;
+  ai.mode = 'hidden'; ai.cd = 0; s.state = 'hidden';
+  for (let i = 0; i < 60 * 3 && ai.mode !== 'up'; i++) { p.hp = 100; stepFauna(1 / 60); }
+  off();
+  t.expect(ai.mode === 'up' && heard === 1, `событие всплытия: режим ${ai.mode}, событий ${heard}`);
+  p.x = px; p.y = py; ai.mode = 'hidden'; s.state = 'hidden'; ai.cd = 30;
+});
+
+registerTest('fauna', 'F5: первый сдвиг льда через 20-40 игровых минут после начала', async t => {
+  const sc = (window as any).__sc;
+  sc.start({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore });
+  const dt = driftState.nextAt - G.time;
+  t.expect(dt >= 20 && dt <= 40, `первый сдвиг через ${dt.toFixed(1)} мин`);
+  t.metric('первый сдвиг льда', dt, 'игр. мин');
+});
+
+registerTest('fauna', 'F8: лис стоит на месте 8-20 с, не мерцает walk/sniff', t => {
+  const sc = (window as any).__sc;
+  const f = G.animals.find(a => a.kind === 'fox')!, ai = aiOf(f)!, p = G.player;
+  const px = p.x, py = p.y;
+  sc.teleport(1300, groundY(1300, 200) - 1);            // far from the fox: it only wanders
+  ai.tx = f.x; ai.hold = 0; ai.pause = false; ai.carry = undefined;
+  let changes = 0, prev = '', run = 0, bestSniff = 0;
+  for (let i = 0; i < 60 * 45; i++) {
+    stepFauna(1 / 60);
+    if (f.state !== prev) { changes++; prev = f.state; }
+    if (f.state === 'sniff') { run++; bestSniff = Math.max(bestSniff, run); } else run = 0;
+  }
+  t.metric('смен состояния лиса за 45 с', changes, 'шт');
+  t.expect(bestSniff >= 60 * 8, `лис не постоял 8 с: ${(bestSniff / 60).toFixed(1)} с`);
+  t.expect(changes < 40, `лис мерцает: ${changes} смен за 45 с`);
+  sc.teleport(px, py);
+});
+
+registerTest('fauna', 'F6: с 2-го дня медведь иногда бродит к игроку (в пределах ±400 кл)', t => {
+  const sc = (window as any).__sc;
+  const b = fauna.bear!, p = G.player, a = aiOf(b)!;
+  const save = { day: G.day, bx: b.x, by: b.y, px: p.x, py: p.y, tx: a.tx, mode: a.mode, cd: a.cd };
+  const [pfx] = sc.teleport(600, groundY(600, 200) - 1);   // the ordinary pack-ice targets (960-1940) are mostly out of this window
+  b.x = 1900; b.y = groundY(1900, 200) - 1; b.vx = 0; setAiMode(b, 'wander'); a.cd = 999;   // far: no sight, no smell
+  G.day = 2;
+  let near = 0; const N = 300;
+  for (let i = 0; i < N; i++) { a.t = 15; a.hold = 0; G.wind = 0; stepFauna(1 / 60); if (Math.abs(a.tx - pfx) <= 400) near++; }
+  t.metric('цели бродяги у игрока (из 300)', near, 'шт');
+  t.expect(near >= 45 && near <= 170, `цели у игрока: ${near} из ${N}, ожидалось около 30%`);
+  G.day = save.day; b.x = save.bx; b.y = save.by; a.tx = save.tx; a.mode = save.mode; a.cd = save.cd; b.vx = 0;
+  sc.teleport(save.px, save.py);
 });

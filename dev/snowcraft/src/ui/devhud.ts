@@ -25,7 +25,8 @@ import { uiIcon, moonIcon } from '../art/icons';
 import { knowsForecast, sunElevAt } from '../game/weather';
 import { toast } from '../game/state';
 import { on } from '../game/bus';
-import { objective, initQuest, prog, journal } from '../game/quest';
+import { objective, objectiveTarget, initQuest, prog, journal } from '../game/quest';
+import { worldToScreen } from '../engine/render';
 import { renderBag, attachBag, bagWantsOpen } from './bag';
 import { renderJournalInto, journalClick, setJournalTab } from './journal';
 
@@ -39,18 +40,19 @@ const S = strings('hud', {
   ending: 'Рассвет. Солнце вернулось.',
   bag: 'Сумка', craft: 'Мастерская', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть', pack: 'Пояс и сумка',
   slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь',
-  forecast: 'прогноз: {t}', noForecast: 'барометр?', baroUp: 'давление растёт', baroDown: 'давление падает',
+  forecast: 'прогноз: {t}', noForecast: 'барометр: E у столба', baroUp: 'давление растёт', baroDown: 'давление падает',
   storm: 'ПУРГА', wind: '{w} м/с', calm: 'штиль',
   dens: 'плотность {d}', fine: 'тонкая работа: голые руки', needs: 'нужно: {s}', variant: 'вариант',
   gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
   stNone: '', stTable: 'стол', stFire: 'огонь', stDrum: 'бочка', stAntenna: 'мачта',
-  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок',
+  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс', hintJournal: 'журнал',
   jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
   lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
   wThirst: 'хочется пить', wThirst2: 'жажда мучит', wHunger: 'сосёт под ложечкой', wHunger2: 'живот сводит', wTired: 'устал', wTired2: 'валишься с ног', wHurt: 'ранен', wHurt2: 'при смерти',
 });
 
 let root: HTMLElement, bw: HTMLElement, dial: HTMLElement, stack: HTMLElement, objEl: HTMLElement, chip: HTMLElement, toastBox: HTMLElement, beltEl: HTMLElement, bname: HTMLElement;
+let arrowEl: HTMLElement, arrowKey = '', arrowT = 0, arrowDir = NaN, arrowM = -1;
 let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement;
 let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
@@ -110,11 +112,17 @@ const CSS = `
 #hud .belt .sl .n{position:absolute;right:2px;top:1px;font-size:12px;color:#fff;background:rgba(5,8,15,.7);padding:0 3px;border-radius:2px;font-style:normal;font-variant-numeric:tabular-nums}
 #hud .belt .sl .bar{position:absolute;left:4px;right:4px;bottom:3px;height:3px;background:#123}#hud .belt .sl .bar i{display:block;height:100%;background:#8fe3b0}
 #hud .bname{position:absolute;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:13px;padding:2px 8px;display:none;white-space:nowrap}
-body.touch-ui #hud .belt{left:calc(50% - 40px);padding:3px;gap:3px}
-body.touch-ui #hud .belt .sl{display:none}body.touch-ui #hud .belt .sl.sel{display:flex;width:50px;height:50px}
+body.touch-ui #hud .belt{left:50%;padding:3px;gap:4px}
+body.touch-ui #hud .belt .sl{display:flex;width:40px;height:40px;flex:none}
+body.touch-ui #hud .belt .sl .ic{width:28px;height:28px}
 body.touch-ui #hud .belt .sl .k{display:none}
+body.radial-open #hud .tbox{visibility:hidden}
 body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area-inset-bottom,0px))}
 #hud .tip{pointer-events:none;max-width:260px;font-size:13px;display:none}
+#hud .arw{position:absolute;display:none;align-items:center;gap:4px;font-size:14px;color:#ffc46e;pointer-events:none;white-space:nowrap;transform:translate(-50%,-50%);animation:arwblink .8s steps(2,end) infinite}
+#hud .arw svg{width:18px;height:18px;flex:none;filter:drop-shadow(0 0 3px #05080f)}
+#hud .arw path{fill:#ffc46e;stroke:#05080f;stroke-width:1.2;stroke-linejoin:round}
+@keyframes arwblink{0%,100%{opacity:1}50%{opacity:.25}}
 #hud .dead{inset:0;background:rgba(40,0,0,.55);display:none;align-items:center;justify-content:center;flex-direction:column;font-size:24px;pointer-events:auto;border:0;border-radius:0;text-align:center}
 #hud .end{inset:0;background:rgba(255,220,160,.18);display:none;align-items:center;justify-content:center;font-size:30px;border:0;border-radius:0}
 #hud .pause{left:50%;top:44%;transform:translate(-50%,-50%);display:none;font-size:22px;letter-spacing:2px;padding:8px 18px}
@@ -148,7 +156,7 @@ body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area
 #hud .dev{left:8px;bottom:70px;font-size:11px;font-family:system-ui,sans-serif;display:block;white-space:pre}
 @media (max-width:1100px){#hud .hint{max-width:calc(50vw - 20px);bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
 /* phone: compact HUD (belt collapses to the active slot, the Пояс radial replaces it) */
-body.touch-ui #hud{font-size:12px}
+body.touch-ui #hud{font-size:14px}
 body.touch-ui #hud .bw{padding:3px 5px;gap:5px}body.touch-ui #hud .bw canvas{width:24px;height:48px}
 body.touch-ui #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
 #hud .bw .rows{min-width:84px;gap:1px}body.touch-ui #hud .bw .r{height:13px;gap:3px}body.touch-ui #hud .bw .ic{width:12px;height:12px}
@@ -162,6 +170,15 @@ body.touch-ui #hud .toast{font-size:13px;padding:2px 8px}body.touch-ui #hud .obj
 body.touch-ui #hud .pnl{font-size:12px}
 `;
 
+
+/** Toasts on screen: at most `max`; warnings and bad news first, then the newest; identical texts collapse to the newest; shown in time order. */
+const TOAST_RANK: Record<string, number> = { bad: 0, warn: 1, good: 2, info: 3 };
+function pickToasts(max: number) {
+  const seen = new Set<string>(), uniq: typeof G.toasts = [];
+  for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; if (!seen.has(t.text)) { seen.add(t.text); uniq.push(t); } }
+  const top = uniq.sort((a, b) => TOAST_RANK[a.kind ?? 'info'] - TOAST_RANK[b.kind ?? 'info']).slice(0, max);
+  return top.sort((a, b) => G.toasts.indexOf(a) - G.toasts.indexOf(b));
+}
 
 // ---- body widget ----------------------------------------------------------------------------------------------------------------
 interface Row { icon: string; bar: HTMLElement; v: HTMLElement; row: HTMLElement }
@@ -240,11 +257,12 @@ export function initHud(host: HTMLElement) {
   const mk = (cls: string, parent: HTMLElement = root) => { const d = document.createElement('div'); d.className = 'p ' + cls; parent.appendChild(d); return d; };
   bw = mk('bw'); dial = mk('dial');
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
-  objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
+  objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.className = 'tbox'; toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
   beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
+  arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
-  hintEl.innerHTML = k('WASD', S.hintMove) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('R', S.hintDome) + k('G', S.hintDrop);
+  hintEl.innerHTML = k('Space', S.hintJump) + k('WASD', S.hintMove) + k('Shift', S.hintRun) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('J', S.hintJournal) + k('1–6', S.hintBelt) + k('R', S.hintDome) + k('G', S.hintDrop);
   if (!G.mobile) hintEl.style.display = 'block';
   if (DEV) { devEl = mk('dev'); }
   on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); });
@@ -253,7 +271,6 @@ export function initHud(host: HTMLElement) {
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
-    if (document.body.classList.contains('touch-ui')) { window.dispatchEvent(new Event('sc:radial')); return; }
     select(+el.dataset.i!);
   });
   attachBag(panel, setPanelOpen, craftIdx);         // §12: drag & drop, tap-select, container panel, «Рядом» list (ui/bag.ts)
@@ -281,6 +298,26 @@ function craftIdx(idx: number) {
   panelAcc = 9;
 }
 
+/** Arrow to the current goal, at the screen edge when the goal is off screen: blinks for the first 60 s of each goal, shows metres (1 cell ~ 9 cm). */
+function updateArrow(realDt: number) {
+  const p = G.player, key = objective();
+  if (key !== arrowKey) { arrowKey = key; arrowT = 0; }
+  arrowT += realDt;
+  const tgt = p?.alive && !panelOpen && !jOpen && !G.paused && arrowT < 60 ? objectiveTarget() : null;
+  if (!tgt || !p) { arrowEl.style.display = 'none'; return; }
+  const [sx, sy] = worldToScreen(tgt.x, tgt.y);
+  const W = window.innerWidth, H = window.innerHeight, dx = sx - W / 2, dy = sy - H / 2;
+  const hw = W / 2 - 70, hh = H / 2 - 60;
+  if (Math.abs(dx) <= hw && Math.abs(dy) <= hh) { arrowEl.style.display = 'none'; return; }
+  const k = Math.min(Math.abs(dx) > 0 ? hw / Math.abs(dx) : Infinity, Math.abs(dy) > 0 ? hh / Math.abs(dy) : Infinity);
+  arrowEl.style.left = Math.round(W / 2 + dx * k) + 'px'; arrowEl.style.top = Math.round(H / 2 + dy * k) + 'px';
+  arrowEl.style.display = 'flex';
+  const deg = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+  if (deg !== arrowDir) { arrowDir = deg; (arrowEl.firstElementChild as SVGElement).style.transform = `rotate(${deg}deg)`; }
+  const m = Math.round(Math.hypot(tgt.x - p.x, tgt.y - p.y) * 0.09);
+  if (m !== arrowM) { arrowM = m; arrowEl.lastElementChild!.textContent = m + ' м'; }
+}
+
 const cls = (bad: boolean, warn: boolean) => (bad ? 'bad' : warn ? 'warn' : 'good');
 const fmtClock = () => { const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 60), m = Math.floor(G.time % 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); };
 
@@ -298,7 +335,7 @@ export function updateHud(dt: number, realDt: number) {
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
   for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
-  const shown = G.toasts.slice(document.body.classList.contains('touch-ui') ? -1 : -2);
+  const shown = pickToasts(document.body.classList.contains('touch-ui') ? 2 : 3);
   const tk = shown.map(t => t.text + t.kind).join('|');
   if (tk !== toastKey) {
     toastKey = tk; toastBox.innerHTML = '';
@@ -325,6 +362,7 @@ export function updateHud(dt: number, realDt: number) {
   } else tip.style.display = 'none';
   document.body.classList.toggle('panel-open', panelOpen || jOpen);
 
+  updateArrow(realDt);
   if (acc < 0.1) return;
   acc = 0;
   if (!p) return;

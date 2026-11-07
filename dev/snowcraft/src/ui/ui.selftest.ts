@@ -11,6 +11,10 @@ import { wx, setDay } from '../game/weather';
 import { MAT } from '../content/materials';
 import { icon } from '../engine/sprites';
 import { getItem } from '../game/items';
+import { input } from '../engine/input';
+import { setEnabled, touchEnabled } from './touch';
+import { emit } from '../game/bus';
+import { objectiveTarget } from '../game/quest';
 
 registerTest('ui', 'двери дома и дизельной проходимы пешком (игрок 8×20)', async t => {
   const sc = t.sc;
@@ -109,4 +113,78 @@ registerTest('ui', 'ночью силуэт скалы читается на ф�
     t.expect(ratio >= 3, 'край скалы почти сливается с небом: ' + ratio.toFixed(2));
     wx.override = null;
   });
+});
+
+// ---- playability wave (G5): hints, phone touch, toasts, sound hooks. Each test restores the touch / panel state it changes.
+registerTest('ui', 'подсказки: Space, Shift, 1–6 и J написаны в строке подсказок', t => {
+  const hint = document.querySelector('#hud .hint')?.textContent ?? '';
+  for (const k of ['Space', 'WASD', 'Shift', 'J', '1–6']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
+});
+
+registerTest('ui', 'телефон: прицел касанием смещён вверх от пальца на 48 px', async t => {
+  const sc = t.sc; const prevOn = touchEnabled(); const prevAim = [input.aimX, input.aimY];
+  setEnabled(true);
+  const stage = document.getElementById('stage') ?? document.body;
+  const x = Math.round(window.innerWidth * 0.7), y = 200, id = 977;
+  stage.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  await t.frames(1);
+  t.expect(input.aimX === x && input.aimY === y - 48, `прицел ${input.aimX},${input.aimY}, ждали ${x},${y - 48}`);
+  stage.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'touch', pointerId: id, clientX: x, clientY: y, bubbles: true, isPrimary: true }));
+  setEnabled(prevOn); [input.aimX, input.aimY] = prevAim;
+  void sc;
+});
+
+registerTest('ui', 'телефон: все 6 слотов пояса видны, шрифт HUD 14 px, полоса цели не заходит на сумку', async t => {
+  const sc = t.sc; const prevOn = touchEnabled();
+  setEnabled(true); sc.step(14); await t.wait(80);
+  const slots = [...document.querySelectorAll('#hud .belt .sl')] as HTMLElement[];
+  t.expect(slots.length === 6 && slots.every(e => e.offsetParent !== null), 'видимых слотов пояса: ' + slots.filter(e => e.offsetParent !== null).length);
+  const hud = document.getElementById('hud')!;
+  t.expect(getComputedStyle(hud).fontSize === '14px', 'шрифт HUD: ' + getComputedStyle(hud).fontSize);
+  const stk = document.querySelector('#hud .stk') as HTMLElement;
+  t.expect(getComputedStyle(stk).right === '220px', 'полоса цели right: ' + getComputedStyle(stk).right);
+  setEnabled(prevOn);
+});
+
+registerTest('ui', 'телефон: при открытой сумке видны только Сумка, Журнал и Парка; подсказка «тяни» скрыта', async t => {
+  const sc = t.sc; const prevOn = touchEnabled();
+  setEnabled(true); sc.step(4);
+  input.craftPressed = true; sc.step(6); await t.wait(60);
+  const disp = (id: string) => getComputedStyle(document.getElementById(id)!).display;
+  t.expect(document.body.classList.contains('panel-open'), 'панель не открылась');
+  t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны');
+  t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-parka') !== 'none', 'Сумка / Журнал / Парка пропали');
+  const ghost = document.querySelector('#touch .ghost') as HTMLElement | null;
+  t.expect(!ghost || getComputedStyle(ghost).display === 'none', 'подсказка «тяни» видна поверх панели');
+  input.craftPressed = true; sc.step(6); await t.wait(60);
+  setEnabled(prevOn);
+});
+
+registerTest('ui', 'тосты: до трёх, предупреждения первыми, одинаковые тексты схлопнуты', async t => {
+  const sc = t.sc; const prevOn = touchEnabled();
+  setEnabled(false); G.toasts.length = 0;
+  toast('инфо A', 'info'); toast('Предупреждение', 'warn'); toast('инфо B', 'info'); toast('инфо A', 'info'); toast('инфо C', 'info');
+  sc.step(14); await t.wait(60);
+  const shown = [...document.querySelectorAll('#hud .toast')].map(e => e.textContent);
+  t.expect(shown.length === 3, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
+  t.expect(shown.includes('Предупреждение'), 'предупреждение вытеснено: ' + shown.join(' | '));
+  t.expect(shown.filter(x => x === 'инфо A').length <= 1, 'дубль «инфо A» не схлопнут');
+  G.toasts.length = 0; sc.step(6);
+  setEnabled(prevOn);
+});
+
+registerTest('ui', 'звуковые подписки: вырезание, подбор и отказ не роняют игру', t => {
+  emit('cut_block', { density: 300, cls: 'snow' }); emit('picked', { item: 'log', n: 1 }); emit('picked', { item: 'log', n: 1 }); emit('deny', {});
+  t.expect(true, 'игра жива после событий');
+});
+
+registerTest('ui', 'стрелка к цели: видна у края, когда цель за кадром, с расстоянием в метрах', async t => {
+  const sc = t.sc;
+  const tgt = objectiveTarget();
+  if (!tgt) { t.log('текущая цель без места на карте: проверка пропущена'); return; }
+  const px = tgt.x < 1024 ? Math.min(tgt.x + 420, 2000) : Math.max(tgt.x - 420, 40);
+  sc.teleport(px, 272); sc.step(14); await t.wait(60);
+  const arrow = document.querySelector('#hud .arw') as HTMLElement;
+  t.expect(getComputedStyle(arrow).display !== 'none', 'стрелка не показана, цель за кадром');
+  t.expect(/\d+ м$/.test(arrow.textContent ?? ''), 'нет расстояния: ' + arrow.textContent);
 });

@@ -17,7 +17,7 @@ export const wind = new Float32Array(TW * TH);   // m/s, + = east
 export const sky = new Uint8Array(TW * TH);      // 1 = open to sky
 
 /** Suggested addHeat() powers (units: ≈ °C/s of one air tile with no losses). */
-export const HEAT_POWER = { torch: 6, campfire: 90, furnace: 150, stove: 210, lantern: 2, player: 1 };
+export const HEAT_POWER = { torch: 6, campfire: 90, furnace: 150, stove: 105, lantern: 2, player: 1 };
 
 // ---- tuning ----
 const K_AIR = 6.0;            // effective conductivity of air tiles (convective mixing)

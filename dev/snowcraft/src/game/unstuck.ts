@@ -16,7 +16,11 @@ const S = strings('unstuck', {
   hint: 'Застрял? Копай лопатой вбок или вверх, или нажми U.',
 });
 
-let stillT = 0, lastX = 0, lastY = 0, hintCd = 0, ejectCd = 0, uPressed = false, shaken = 0, hooked = false;
+let stillT = 0, stuckT = 0, lastX = 0, lastY = 0, hintCd = 0, ejectCd = 0, uPressed = false, hooked = false;
+let shakeGameT = -1e9, shakeRealT = -1e9;      // last «Снег засыпал тебя» toast: game minutes and real seconds
+const SHAKE_GAME_CD = 60, SHAKE_REAL_CD = 4;
+/** Counters for tests and the playtest log. */
+export const unstuckStats = { ejects: 0, hints: 0 };
 
 function hook() {
   if (hooked || typeof window === 'undefined') return;
@@ -86,7 +90,7 @@ export function stepUnstuck(dt: number) {
       if (boxFree(p.x, p.y - k, p.w, p.h)) { p.y -= k; if (p.vy > 0) p.vy = 0; p.onGround = true; return; }
     }
     // 2) loose snow packed into the body: shake it off as flying cells
-    if (shakeOff(p.x, p.y, p.w, p.h) > 0) { if (shaken++ % 8 === 0) toast(S.shake, 'info'); return; }
+    if (shakeOff(p.x, p.y, p.w, p.h) > 0) { notifyShake(); return; }
     // 3) something solid: nearest free standing spot
     const s = nearestStand(Math.round(p.x), Math.round(p.y), p.w, p.h, 70) ?? outdoorSpot(p.x, p.w, p.h);
     if (s) { p.x = s.x; p.y = s.y; p.vx = 0; p.vy = 0; toast(S.out, 'info'); }
@@ -96,19 +100,36 @@ export function stepUnstuck(dt: number) {
   // manual "get me out": U
   if (uPressed) {
     uPressed = false;
-    if (ejectCd <= 0) {
-      const s = outdoorSpot(p.x, p.w, p.h);
-      if (s) { p.x = s.x; p.y = s.y; p.vx = 0; p.vy = 0; ejectCd = 10; stillT = 0; toast(S.out, 'info'); }
-    }
+    if (ejectCd <= 0) eject();
   }
 
-  // trapped hint: pushing for 3 s without moving
+  // trapped: pushing (move or jump held) on the ground without moving
   const want = Math.abs(input.moveX) > 0.3 || input.jumpHeld;
   const moved = Math.abs(p.x - lastX) + Math.abs(p.y - lastY);
   lastX = p.x; lastY = p.y;
-  if (want && p.onGround && moved < 0.05) stillT += dt; else stillT = 0;
-  if (stillT > 3 && hintCd <= 0) { toast(S.hint, 'info'); hintCd = 40; stillT = 0; }
+  const pushing = want && p.onGround && moved < 0.05;
+  stillT = pushing ? stillT + dt : 0;
+  stuckT = pushing ? stuckT + dt : 0;
+  // hint after 1.5 s of pushing
+  if (stillT > 1.5 && hintCd <= 0) { toast(S.hint, 'info'); unstuckStats.hints++; hintCd = 40; stillT = 0; }
+  // still pushing after 6 s: get out automatically, as with U
+  if (stuckT > 6 && ejectCd <= 0) { stuckT = 0; eject(); }
+}
+
+/** Move the player to the nearest outdoor standing spot. Returns false (and does nothing) if already there or none found. */
+function eject(): boolean {
+  const p = G.player;
+  const s = outdoorSpot(p.x, p.w, p.h);
+  if (!s || (Math.abs(s.x - p.x) < 0.5 && Math.abs(s.y - p.y) < 0.5)) return false;
+  p.x = s.x; p.y = s.y; p.vx = 0; p.vy = 0; ejectCd = 10; stillT = 0; unstuckStats.ejects++; toast(S.out, 'info');
+  return true;
+}
+
+/** «Снег засыпал тебя»: at most once per 60 game minutes and once per 4 real seconds. */
+function notifyShake() {
+  if (G.time - shakeGameT < SHAKE_GAME_CD || G.realTime - shakeRealT < SHAKE_REAL_CD) return;
+  shakeGameT = G.time; shakeRealT = G.realTime; toast(S.shake, 'info');
 }
 
 /** Test hook: reset timers. */
-export function resetUnstuck() { stillT = 0; hintCd = 0; ejectCd = 0; uPressed = false; shaken = 0; }
+export function resetUnstuck() { stillT = 0; stuckT = 0; hintCd = 0; ejectCd = 0; uPressed = false; shakeGameT = -1e9; shakeRealT = -1e9; }

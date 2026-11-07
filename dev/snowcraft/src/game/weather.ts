@@ -90,14 +90,17 @@ export function applyClock() {
   for (const s of STORMS) { const v = stormIntensity(s, t); if (v > bestI) { bestI = v; stormDir = s.dir; } }
   if (bestI > 0) {
     const gust = 1 + 0.18 * Math.sin(t * 0.9) + 0.12 * Math.sin(t * 2.3 + 1);
-    const sw = stormDir * (15 + 10 * bestI) * gust;
+    const sw = stormDir * (12 + 8 * bestI) * gust;     // 20 m/s at the peak (gusts add up to ~30%)
     wind = wind * (1 - Math.min(1, bestI * 1.6)) + sw * Math.min(1, bestI * 1.6);
   }
   G.wind = wind;
   weatherState.windBase = w0;
   // temperature: clear calm night is the coldest
-  const night = 1 - G.daylight, calm = 1 - Math.min(1, Math.abs(wind) / 8), clear = 1 - Math.min(1, 0.9 * st + 0.35 * weatherState.cloud);
-  G.ambientT = -24 - 16 * clear * calm * (0.4 + 0.6 * night) + 2.5 * G.daylight + 2.2 * Math.sin(t / 520 + seed) + (st > 0.3 ? 3 : 0);
+  // The day/night swing uses the sun's phase, not daylight: in the polar night daylight barely changes between noon and midnight.
+  const sunF = (1 + Math.cos(2 * Math.PI * (h - 12) / 24)) / 2;      // 1 at noon, 0 at midnight
+  const night = 1 - sunF, calm = 1 - Math.min(1, Math.abs(wind) / 8), clear = 1 - Math.min(1, 0.9 * st + 0.35 * weatherState.cloud);
+  const cc = clear * calm;
+  G.ambientT = -24 - 16 * cc * (0.4 + 0.6 * night) + 4 * cc + 2.2 * Math.sin(t / 520 + seed) + (st > 0.3 ? 3 : 0);   // clear calm: noon ~ -26, midnight -36
   G.snowfall = clamp(0.06 + 0.2 * weatherState.cloud + 0.8 * st, 0, 1);
   G.visibility = clamp(1 - 0.68 * st - 0.08 * weatherState.cloud, 0.25, 1);
   // aurora: strength per night, only when the sky is clear

@@ -92,24 +92,24 @@ export function placeStationObjects() {
   const barrels: Slot[][] = [[{ id: 'diesel', n: 2 }, { id: 'rope', n: 1 }], [{ id: 'rope', n: 2 }, { id: 'tin', n: 1 }, { id: 'matches', n: 2 }], [{ id: 'diesel', n: 1 }, { id: 'fat', n: 1 }, { id: 'rope', n: 1 }]];
   let placed = 0;
   for (let k = 0; k < 80 && placed < barrels.length; k++) {
-    const tx = Math.floor((LOC.beach.x0 + 30 + rnd() * 140) / TS);
-    if (G.fixtures.some(f => Math.abs(f.tx - tx) < 12 && f.kind === 'chest' && f.data?.look === 'barrel')) continue;
+    const tx = Math.floor((LOC.beach.x0 + 62 + rnd() * 78) / TS);
+    if (G.fixtures.some(f => Math.abs(f.tx - tx) < 6 && f.kind === 'chest' && f.data?.look === 'barrel')) continue;
     const gs = groundSpan(tx * TS, (tx + 2) * TS, 200);
     if (gs.hi - gs.lo > 7 || gs.lo > 285) continue;                    // gravel above the tide crack, not on a steep face
-    const top0 = Math.floor(gs.lo / TS) - 2;
-    if (!airBox(tx * TS, top0 * TS, (tx + 2) * TS, (top0 + 2) * TS)) continue;
-    const g = onGround(tx, 2, 2, 200);
+    const top0 = Math.floor(gs.lo / TS) - 1;
+    if (!airBox(tx * TS, top0 * TS, (tx + 2) * TS, (top0 + 1) * TS)) continue;
+    const g = onGround(tx, 2, 1, 200);
     if (G.drops.some(d => Math.abs(d.x - (tx + 1) * TS) < 14)) continue;
     const items = barrels[placed].map(s => ({ ...s, n: Math.max(1, Math.round(s.n * G.diff.loot)) }));
-    mk('chest', tx, g.ty, 2, 2, { look: 'barrel', frozen: true, dy: g.dy }, { solid: true, items });
+    mk('chest', tx, g.ty, 2, 1, { look: 'barrel', frozen: true, dy: g.dy }, { solid: true, items });      // half sunk in the gravel: 4 cells high, a step the player walks over
     placed++;
   }
   // ---------------------------------------------------------------- the fox den: next to the fox's home (x 888), cache inside, tracks drawn around it
-  { const tx = 224, gs = groundSpan(tx * TS, (tx + 2) * TS, 230), top0 = Math.floor(gs.lo / TS) - 2;
-    if (airBox(tx * TS, top0 * TS, (tx + 2) * TS, (top0 + 2) * TS)) {
-      const g = onGround(tx, 2, 2, 230);
+  { const tx = 223, gs = groundSpan(tx * TS, (tx + 3) * TS, 230), top0 = Math.floor(gs.lo / TS) - 1;
+    if (airBox(tx * TS, top0 * TS, (tx + 3) * TS, (top0 + 1) * TS)) {
+      const g = onGround(tx, 3, 1, 230);
       const items: Slot[] = [{ id: 'ptarmigan', n: 2 }, { id: 'fat', n: 2 }, { id: 'matches', n: 3 }, { id: 'fox_fur', n: 1 }, { id: 'tin', n: 1 }];
-      mk('chest', tx, g.ty, 2, 2, { look: 'den', dy: g.dy }, { solid: true, items });
+      mk('chest', tx, g.ty, 3, 1, { look: 'den', dy: g.dy }, { solid: true, items });
       }
   }
 }

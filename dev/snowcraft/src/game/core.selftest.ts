@@ -697,7 +697,9 @@ registerTest('input', 'клавиатура и мышь: ход, бег, пры�
     simKey('KeyC', true); if (!input.craftPressed) throw new Error('C'); simKey('KeyC', false); endFrame();
     simMouse(0, true, 100, 100); poll(); if (!input.primary || !input.primaryPressed) throw new Error('LMB'); simMouse(0, false); endFrame();
     // walking really moves the player
-    const x0 = p.x; simKey('KeyD', true); steps(40); simKey('KeyD', false); if (!(p.x > x0 + 10)) throw new Error('персонаж не идёт: ' + (p.x - x0));
+    const x0 = p.x; simKey('KeyD', true); steps(40); simKey('KeyD', false); let mv = p.x - x0;
+    if (!(mv > 10)) { const x1 = p.x; simKey('KeyA', true); steps(40); simKey('KeyA', false); mv = Math.max(mv, x1 - p.x); }   // a snow mound east of the spawn may block one direction
+    if (!(mv > 10)) throw new Error('персонаж не идёт: ' + mv);
     const y0 = p.y; simKey('Space', true); let hi = 0; for (let i = 0; i < 40; i++) { steps(1); hi = Math.max(hi, y0 - p.y); } simKey('Space', false);
     if (!(hi > 8)) throw new Error('прыжок слишком низкий: ' + hi);
     resetInput();

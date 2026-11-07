@@ -28,6 +28,8 @@ export function arena(cx: number, topY: number, o: ArenaOpts = {}) {
     else if (y >= topY) { mat[i] = MAT.SNOW; aux[i] = 30; }
   }
   for (let ty = (topY - up) >> 2; ty <= (topY + depth + 10) >> 2; ty++) for (let tx = x0 >> 2; tx <= x1 >> 2; tx++) bg[ty * (W / TS) + tx] = 0;
+  // fixture records inside the arena would remain as ghosts (chests, flags): drop them with the cells
+  for (let i = G.fixtures.length - 1; i >= 0; i--) { const f = G.fixtures[i]; if (f.tx * TS <= x1 && (f.tx + f.tw) * TS >= x0 && f.ty * TS <= topY + depth + 10 && (f.ty + f.th) * TS >= topY - up) G.fixtures.splice(i, 1); }
   edited(x0, topY - up, x1, topY + depth + 10);
   wakeRect(x0, topY - up, x1, topY + depth, 60);
   return { x: cx, y: topY };

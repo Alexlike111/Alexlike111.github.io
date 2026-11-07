@@ -37,7 +37,7 @@ export const driftState = {
   pending: null as null | { k0: number; k1: number; dir: 1 | -1; steps: number; t: number; creep: number; warned: boolean; x: number },
   nextAt: 0, events: 0, ridges: 0, lastMoveX: 0,
 };
-let freezeAcc = 0, thinT = 0, thinWarn = 0, rndS = 1;
+let freezeAcc = 0, thinT = 0, thinWarn = 0, rndS = 1, farDay = -1;   // farDay: the game day the «far» warning last showed
 const rnd = () => { rndS = (rndS * 1664525 + 1013904223) >>> 0; return rndS / 4294967296; };
 
 function colBottom(x: number): { bot: number; grounded: boolean } {
@@ -80,7 +80,8 @@ export function initDrift(seed = 1, saved?: { holes?: number[]; ev?: number; flo
   driftState.floes = src.map(f => ({ x0: f.x0, x1: f.x1, thick: f.thick, grounded: false }));
   refreshFloes(); syncInfo();
   driftState.pending = null; driftState.events = 0; driftState.ridges = 0;
-  driftState.nextAt = G.time + 5 * 60 + rnd() * 5 * 60;           // the first shift comes on the first evening
+  driftState.nextAt = G.time + 20 + rnd() * 20;                    // the first shift comes within 20-40 game minutes
+  farDay = -1;
   freezeAcc = 0; thinT = 0; thinWarn = 0;
 }
 
@@ -197,7 +198,7 @@ export function stepDrift(dt: number) {
     const dist = Math.abs(p.x - ev.x);
     if (!ev.warned) {
       ev.warned = true;
-      if (dist < 500) { toast(S.warn, 'warn'); } else toast(S.far, 'info');
+      if (dist < 800) { toast(S.warn, 'warn'); } else if (G.day !== farDay) { farDay = G.day; toast(S.far, 'info'); }   // «far» at most once a day
       emit('drift_warn', { x: ev.x });
     }
     const near = dist < 260;
@@ -210,7 +211,7 @@ export function stepDrift(dt: number) {
       if (ev.t >= WARN_S) {                              // blocked: build the ridge now
         const fl = driftState.floes;
         buildRidge(ev.dir > 0 ? fl[ev.k1].x1 : fl[ev.k0].x0, ev.dir);
-        if (dist < 500) toast(S.ridge, 'info');
+        if (dist < 800) toast(S.ridge, 'info');
         if (near) addShake(5);
         driftState.events++; driftState.pending = null;
       }
@@ -229,7 +230,7 @@ export function stepDrift(dt: number) {
           emit('drift_move', { dir: ev.dir });
           if (ev.steps <= 0) {
             driftState.events++; driftState.pending = null;
-            if (dist < 500) toast(S.moved, 'info');
+            if (dist < 800) toast(S.moved, 'info');
           }
         } else {
           ev.steps = 0; driftState.events++; driftState.pending = null;

@@ -36,7 +36,7 @@ const img = (src: string) => `<img class="ic" src="${src}" alt="" draggable="fal
 
 const CSS = `
 #hud .jr .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:2px 0 8px}
-#hud .jr .tab{font:600 13px 'Pixelify Sans','Jura',sans-serif;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:4px 12px;cursor:pointer;min-height:30px}
+#hud .jr .tab{font:600 13px 'Pixelify Sans','Jura',sans-serif;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:4px 12px;cursor:pointer;min-height:44px}
 #hud .jr .tab.on{border-color:#ffc46e;color:#ffc46e;background:#2a2112}
 #hud .jr .row{display:flex;align-items:flex-start;gap:6px;margin:3px 0}
 #hud .jr .row .ic{margin-top:1px}

@@ -26,6 +26,7 @@ let jumpBtn = false, jumpStick = false, actHeld = false, rotatePaused = false;
 let ghost: HTMLElement | null = null;
 let radialTimer = 0;
 const R = 56;                                   // stick radius px
+const AIM_LIFT = 48;                            // the aim cursor sits this many CSS px above the finger (the finger hides the spot it aims at)
 
 const CSS = `
 #touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;
@@ -151,7 +152,7 @@ export function initTouch(uiRoot: HTMLElement) {
       for (const el of [stickBase!, stickKnob!]) { el.style.display = 'block'; el.style.left = sx + 'px'; el.style.top = sy + 'px'; }
     } else if (!left && aimId < 0) {
       aimId = e.pointerId; touch.aimed = true; touch.primary = true;
-      input.aimX = e.clientX; input.aimY = e.clientY; input.hasAim = true; input.aimMode = 'touch'; input.primaryPressed = true;
+      input.aimX = e.clientX; input.aimY = e.clientY - AIM_LIFT; input.hasAim = true; input.aimMode = 'touch'; input.primaryPressed = true;
     }
   });
   addEventListener('pointermove', (ev) => {
@@ -179,7 +180,7 @@ export function initTouch(uiRoot: HTMLElement) {
       wasUp.v = up; jumpStick = up; touch.jumpHeld = up || jumpBtn;
       touch.down = ny > 0.6;
     } else if (e.pointerId === aimId) {
-      input.aimX = e.clientX; input.aimY = e.clientY;
+      input.aimX = e.clientX; input.aimY = e.clientY - AIM_LIFT;
     }
   });
   const end = (ev: Event) => {
@@ -220,7 +221,7 @@ export function setEnabled(on: boolean) {
 }
 export const touchEnabled = () => enabled;
 
-function closeRadial() { if (radial) radial.style.display = 'none'; clearTimeout(radialTimer); }
+function closeRadial() { if (radial) radial.style.display = 'none'; document.body.classList.remove('radial-open'); clearTimeout(radialTimer); }
 function toggleRadial() {
   if (!radial) return;
   if (radial.style.display === 'block') { closeRadial(); return; }
@@ -241,7 +242,7 @@ function toggleRadial() {
   }
   const cap = document.createElement('div'); cap.className = 'cap'; cap.style.top = Math.max(4, cy - rad - 56) + 'px'; cap.style.right = Math.max(4, W - cx - 40) + 'px';
   const sel = inv.slots[inv.sel]; cap.textContent = (sel ? itemName(sel.id) + ' · ' : '') + S.radialCap; radial.appendChild(cap);
-  radial.style.display = 'block';
+  radial.style.display = 'block'; document.body.classList.add('radial-open');
   clearTimeout(radialTimer); radialTimer = window.setTimeout(closeRadial, 7000);
 }
 

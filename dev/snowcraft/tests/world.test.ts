@@ -112,9 +112,13 @@ ok(sites.find(s => s.key === 'ship')!.name.includes('Заря') && sites.find(s 
 const fx = G.fixtures;
 const kinds = (k: string) => fx.filter(f => f.kind === k);
 ok(kinds('stove').length >= 2 && kinds('door').length >= 3 && kinds('bed').length >= 3 && kinds('radio').length === 1 && kinds('table').length >= 2, 'fixtures: stoves, doors, beds, radio, tables', `(stove ${kinds('stove').length}, door ${kinds('door').length}, bed ${kinds('bed').length})`);
-ok(kinds('drum').length >= 5 && kinds('barometer').length === 1 && kinds('kennel').length === 1 && kinds('flag').length === 1 && kinds('mast').length === 1 && kinds('cart').length >= 1 && kinds('signal_fire').length === 1, 'fixtures: drums, barometer, kennel, flag pole, mast, cart, signal fire');
-ok(kinds('chest').length >= 9 && kinds('chest').length <= 14, 'caches: 9-14 chests', `(${kinds('chest').length})`);
-const NONSOLID = ['campfire', 'fat_lamp', 'torch', 'bed', 'snare', 'cache', 'drying_rack', 'skin_bed', 'hide_door', 'signal_fire', 'kennel', 'flag', 'mast', 'cart'];
+ok(kinds('drum').length >= 5 && kinds('barometer').length === 1 && kinds('kennel').length === 1 && kinds('flag').length >= 1 && kinds('mast').length === 1 && kinds('cart').length >= 1 && kinds('signal_fire').length === 1, 'fixtures: drums, barometer, kennel, flag pole, mast, cart, signal fire');
+const stationChest = (f: { data?: Record<string, unknown> }) => f.data?.look === 'barrel' || f.data?.look === 'den';      // DESIGN §15: frozen beach barrels and the fox den are extras
+const baseChests = kinds('chest').filter(f => !stationChest(f)).length;
+ok(baseChests >= 9 && baseChests <= 14, 'caches: 9-14 chests', `(${baseChests})`);
+ok(kinds('chest').length - baseChests === 4, 'DESIGN §15 extras: 3 frozen beach barrels + the fox den');
+const NONSOLID = ['campfire', 'fat_lamp', 'torch', 'bed', 'snare', 'cache', 'drying_rack', 'skin_bed', 'hide_door', 'signal_fire', 'kennel', 'flag', 'mast', 'cart',
+  'ceiling_lamp', 'heater', 'medkit', 'kettle', 'sonde', 'gramophone', 'hatch', 'shutter', 'damper', 'bell'];      // DESIGN §15 objects that are entities only
 let fxOk = true, badFx = '';
 for (const f of fx) {
   if (NONSOLID.includes(f.kind)) continue;

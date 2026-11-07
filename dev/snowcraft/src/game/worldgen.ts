@@ -10,6 +10,7 @@ import { G } from './state';
 import { tundraSnow, stationSnow, finishSnow, makeSpawn, snowpackCfg } from './snowpack';
 import { placeStationObjects } from './stationobjects';
 import { LOC, SEA, stampLocations, resetLocations, worldInfo, Terrain, put, box, pileBlocks, snowBank, topSolid } from './locations';
+import { placeExtras } from './extras';
 
 export { worldInfo, LOC };
 const M = MAT;
@@ -102,6 +103,7 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   sastrugi();
   if (snowpackCfg.on) finishSnow(T);
   finalize();
+  placeExtras();
 
   const sp = makeSpawn();              // a flat terrace on the lee drift, a few cells east of the buried station door
   const sx = sp.x, sy = sp.y;

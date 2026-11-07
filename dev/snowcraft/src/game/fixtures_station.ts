@@ -355,7 +355,7 @@ function climb(f: Fixture): boolean {
   const p = G.player;
   hintOnce(f, 'hatch', S.hintHatch, 'info');
   const top = f.ty * TS, bot = (f.ty + f.th) * TS;
-  if (p.y < top + 6) { p.x = f.tx * TS + 2; p.y = bot - 1; p.vx = p.vy = 0; toast(S.hDown, 'info'); emit('ladder', { x: p.x, up: false }); return true; }
+  if (p.y < top + 6) { p.x = f.tx * TS; p.y = bot - 1; p.vx = p.vy = 0; toast(S.hDown, 'info'); emit('ladder', { x: p.x, up: false }); return true; }
   const s = roofSpot(f);
   p.x = s.x; p.y = s.y - 1; p.vx = p.vy = 0; toast(S.hUp, 'info'); emit('ladder', { x: p.x, up: true });
   return true;

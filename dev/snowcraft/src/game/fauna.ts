@@ -9,7 +9,7 @@ import { emit, on } from './bus';
 import { strings, fmt } from '../content/i18n';
 import { W, H, TS, mat, flags, setCell, edited, wake, F_PLACED } from '../engine/grid';
 import { MAT, WALK } from '../content/materials';
-import { moveBox } from '../engine/phys';
+import { moveBox, boxFree } from '../engine/phys';
 import { worldInfo } from './worldgen';
 import { inv, count, remove, spawnDrop } from './inventory';
 import { getItem } from './items';
@@ -28,7 +28,7 @@ const S = strings('fauna', {
   dogFed: 'Север ест и виляет хвостом',
   dogStay: 'Север: ждать здесь', dogFollow: 'Север: за мной',
   dogDied: 'Север не пережил зиму…',
-  dogNoFood: 'У Севера нет еды у тебя: нужна рыба или мясо',
+  dogNoFood: 'Север голоден: дай ему рыбу, мясо, консервы или сухари (E рядом с ним)',
   bearSeen: 'Белый медведь!',
   bearSniff: 'Ветер несёт твой запах. Что-то идёт по следу…',
   bearRoar: 'Рёв вдали',
@@ -40,7 +40,7 @@ const S = strings('fauna', {
   sealScared: 'Тюлень ушёл под лёд',
 });
 
-type AI = { mode: string; t: number; tx: number; cd: number; hold: number; carry?: string; home?: number; hole?: number; stay?: boolean; hunger?: number; barkT?: number; seen?: boolean; hits?: number; futile?: number; sniffed?: boolean };
+type AI = { mode: string; t: number; tx: number; cd: number; hold: number; carry?: string; home?: number; hole?: number; stay?: boolean; hunger?: number; barkT?: number; seen?: boolean; hits?: number; futile?: number; sniffed?: boolean; stuck?: number; pause?: boolean };
 const ai = new Map<number, AI>();
 const SZ: Record<string, [number, number]> = { dog: [10, 9], bear: [26, 15], seal: [16, 8], fox: [10, 7] };
 
@@ -132,12 +132,29 @@ export function dogInteract(): boolean {
   const d = fauna.dog, p = player(); if (!d || d.state === 'dead' || !p) return false;
   if (Math.abs(d.x - p.x) > 18 || Math.abs(d.y - p.y) > 16) return false;
   const a = ai.get(d.id)!;
-  const food = ['fish_cooked', 'cooked_meat', 'fish', 'seal_meat', 'ptarmigan', 'biscuit'].find(id => count(id) > 0);
+  const food = ['fish_cooked', 'cooked_meat', 'fish', 'seal_meat', 'ptarmigan', 'biscuit', 'can'].find(id => count(id) > 0);
   if (food && (a.hunger ?? 100) < 85) {
     remove(food, 1); a.hunger = Math.min(100, (a.hunger ?? 0) + (getItem(food).food?.raw ? 38 : 48));
     toast(S.dogFed, 'good'); emit('dog_fed', {}); setState(d, 'sniff'); a.hold = 1.2; return true;
   }
+  if (!food && (a.hunger ?? 100) < 60) toast(S.dogNoFood, 'warn');
   a.stay = !a.stay; toast(a.stay ? S.dogStay : S.dogFollow, 'info'); return true;
+}
+const ROOF = new Set<number>([MAT.LOG, MAT.PLANK, MAT.WOOD, MAT.FIXTURE, MAT.GLASS, MAT.BRICK, MAT.METAL]);
+/** A free spot near the player with no roof or wall over it (he finds his way round walls this way). */
+function dogSpotNear(d: Animal, p: { x: number; y: number }): { x: number; y: number } | null {
+  for (const dyMax of [6, 16, 24]) {                      // at his level first, then a little higher or lower (a slope, a mound)
+    for (let k = 0; k < 28; k++) {
+      const off = (k & 1 ? 1 : -1) * (6 + 4 * (k >> 1));  // 6, -6, 10, -10, ... out to 62 cells each side
+      const x = Math.max(2, Math.min(W - 3, Math.round(p.x + off)));
+      const y = groundY(x, Math.max(150, (p.y - 16) | 0)) - 1;
+      if (Math.abs(y - p.y) > dyMax || !boxFree(x, y, d.w, d.h)) continue;
+      let roofed = false;                                 // a house or shed roof over the spot: he is inside, not beside you
+      for (let yy = Math.floor(y - d.h) - 1; yy >= Math.max(0, Math.floor(y) - 40) && !roofed; yy--) if (ROOF.has(mat[yy * W + x])) roofed = true;
+      if (!roofed) return { x, y };
+    }
+  }
+  return null;
 }
 export const dogHunger = () => (fauna.dog ? ai.get(fauna.dog.id)?.hunger ?? 100 : 0);
 
@@ -179,6 +196,14 @@ function stepDog(d: Animal, a: AI, dt: number) {
     const run = ad > 70;
     walkTo(d, p.x - Math.sign(dx) * 14, run ? 44 : 24, dt);
     setState(d, run ? 'run' : 'walk'); a.t = 0;
+    // blocked by a wall or a closed door: he hops, and after 2.5 s he is beside you again
+    a.stuck = Math.abs(d.vx) < 2 ? (a.stuck ?? 0) + dt : 0;
+    if (a.stuck > 1.5 && d.onGround) d.vy = -125;
+    if (a.stuck > 2.5) {
+      const spot = dogSpotNear(d, p);
+      a.stuck = 0;
+      if (spot) { d.x = spot.x; d.y = spot.y; d.vx = d.vy = 0; }
+    }
   } else {
     walkTo(d, d.x, 0, dt);
     a.t += dt;
@@ -211,7 +236,7 @@ function stepSeal(s: Animal, a: AI, dt: number) {
   const pd = p && p.alive ? Math.abs(p.x - s.x) : 999;
   if (a.mode === 'hidden') {
     a.cd -= dt * (pd < 140 ? 1 : 0.3);
-    if (a.cd <= 0 && (G.storm < 0.5)) { a.mode = 'up'; a.t = 0; a.hold = 7 + Math.random() * 8; setState(s, 'surface'); if (pd < 250) emit('seal_surface', { x: s.x, y: s.y }); }
+    if (a.cd <= 0 && (G.storm < 0.5)) { a.mode = 'up'; a.t = 0; a.hold = 7 + Math.random() * 8; setState(s, 'surface'); if (pd < 400) { emit('seal_surface', { x: s.x, y: s.y }); burstFx('dust', s.x, s.y - 9, 4, 8, 1.0, 0xe6eef8, 4); } }
   } else if (a.mode === 'up') {
     a.hold -= dt;
     // movement and noise scare it; so does coming too close
@@ -268,8 +293,11 @@ function stepFox(f: Animal, a: AI, dt: number) {
     return;
   }
   // idle wander near home
-  if (a.t > 4) { a.t = 0; a.tx = (a.home ?? f.x) + (Math.random() - 0.5) * 140; }
-  if (Math.abs(a.tx - f.x) > 4 && Math.random() < 0.97) { walkTo(f, a.tx, 14, dt); setState(f, 'walk'); } else { walkTo(f, f.x, 0, dt); setState(f, a.t % 6 < 3 ? 'sniff' : 'idle'); }
+  // wander near home: walk to a spot, sniff there for 8-20 s, then pick the next spot
+  if (Math.abs(a.tx - f.x) > 4) { walkTo(f, a.tx, 14, dt); setState(f, 'walk'); a.pause = false; return; }
+  if (!a.pause) { a.pause = true; a.hold = 8 + Math.random() * 12; }
+  walkTo(f, f.x, 0, dt); setState(f, 'sniff');
+  if (a.hold <= 0) { a.pause = false; a.tx = (a.home ?? f.x) + (Math.random() - 0.5) * 140; }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -329,7 +357,10 @@ function stepBear(b: Animal, a: AI, dt: number) {
   const seesYou = alive && pd < 90 * aggr && Math.abs(pdy) < 40;
   if (a.mode === 'wander') {
     fauna.bearMode = 'wander';
-    if (a.t > 14 + (a.hold || 0)) { a.t = 0; a.hold = Math.random() * 10; a.tx = 960 + Math.random() * 980; }
+    if (a.t > 14 + (a.hold || 0)) {
+      a.t = 0; a.hold = Math.random() * 10;
+      a.tx = G.day >= 2 && alive && Math.random() < 0.3 ? Math.max(600, Math.min(1940, p.x + (Math.random() * 2 - 1) * 400)) : 960 + Math.random() * 980;
+    }
     const going = Math.abs(a.tx - b.x) > 6;
     if (going && a.t < 40) { walkTo(b, a.tx, 11, dt, { swim: true, jump: 110 }); setState(b, 'walk'); }
     else { walkTo(b, b.x, 0, dt); setState(b, a.t % 20 < 8 ? 'sniff' : a.t % 20 < 14 ? 'idle' : 'sleep'); }
@@ -411,8 +442,14 @@ export function initFauna(spawnX: number, spawnY: number, loaded = false) {
   const fx = 888;                                       // tundra between the shed and the beach (not on a roof)
   const f = mk('fox', fx, groundY(fx, 255) - 1, 8); ai.set(f.id, { mode: 'fox', t: 0, tx: fx, cd: 0, hold: 0, home: fx });
   // the bear starts far out on the pack ice
-  const bx = 1640;
-  const b = mk('bear', bx, groundY(bx, 200) - 1, 160); fauna.bear = b;
+  let bx = 1640, by = groundY(bx, 200) - 1;
+  for (let k = 0; k < 40; k++) {                        // a body must not start inside packed snow: try nearby columns, lift the feet out
+    const cx = 1640 + (k & 1 ? 1 : -1) * ((k + 1) >> 1) * 8;
+    let cy = groundY(cx, 200) - 1;
+    for (let j = 0; j < 40 && !boxFree(cx, cy, SZ.bear[0], SZ.bear[1]); j++) cy--;
+    if (boxFree(cx, cy, SZ.bear[0], SZ.bear[1])) { bx = cx; by = cy; break; }
+  }
+  const b = mk('bear', bx, by, 160); fauna.bear = b;
   ai.set(b.id, { mode: 'wander', t: 0, tx: bx, cd: 20, hold: 0 }); fauna.bearMode = 'wander';
 }
 export function stepFauna(dt: number) {

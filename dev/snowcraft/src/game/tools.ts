@@ -1,7 +1,7 @@
 // Tools & building (DESIGN §4): probe data, snow knife blocks (density classes), block placement with dome lean and support preview,
 // shovel scoop / carry / throw / tamp, ice chisel, axe / pick / saw dig times by hardness, harpoon, fishing, torch / lantern / flare,
 // eating, drops with a magnet to the player, interaction (E), and the target info drawn by draw.ts.
-import { G, toast, type Light, type Fixture } from './state';
+import { G, toast, type Light, type Fixture, type Drop } from './state';
 import { emit } from './bus';
 import { strings, fmt } from '../content/i18n';
 import { input } from '../engine/input';
@@ -12,7 +12,7 @@ import { moveBox, boxFree } from '../engine/phys';
 import { supportPreview, type PreviewCell } from '../engine/structure';
 import { throwCell, spawnFx, burstFx } from '../engine/particles';
 import { tempAt } from '../engine/heat';
-import { setCameraLook } from '../engine/camera';
+import { setCameraLook, addShake } from '../engine/camera';
 import {
   inv, add, count, remove, selected, select, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
 } from './inventory';
@@ -25,7 +25,7 @@ import { extra as shelterExtra } from './shelter';
 import { MIN_PER_SEC } from './weather';
 import { dogInteract } from './fauna';
 import { stepSearch } from './search';
-import { nearbyList, takeNear, autoPickable, stepNearby, isBoxFixture, nearUi, type Near } from './nearby';
+import { nearbyList, takeNear, autoPickable, stepNearby, isBoxFixture, nearUi, aim, PICK_R, NOTE_R, isNote, type Near } from './nearby';
 import { thrown } from './inventory';
 import { isKeyDown } from '../engine/input';
 
@@ -37,7 +37,7 @@ const S = strings('tools', {
   density: '{d} кг/м³ · {c}', iceThick: 'лёд {cm} см',
   shovelFull: 'лопата полна: вывали снег',
   scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Вырезать блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Использовать', feedLight: 'E: подбросить топливо / зажечь (спички)', feed: 'E: подбросить топливо',
-  noSupport: 'нет опоры', span: 'слишком длинный пролёт', ok: 'держится',
+  noSupport: 'нет опоры', span: 'слишком длинный пролёт', ok: 'держится', digLooseFirst: 'сначала откопай снег (лопатой)',
   occupied: 'занято', inYou: 'мешает тебе',
   gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…',
   torchLit: 'Факел горит', torchOut: 'Факел погас', noFlame: 'Нечем зажечь факел',
@@ -89,7 +89,9 @@ function stepSinter(gm: number) {
     sinterQ.splice(i, 1);
   }
 }
-export const REACH = 26;     // cells from the chest
+export const REACH = 26;     // cells from the chest (digging, cutting, probing)
+export const REACH_PLACE = 34; // cells from the chest for placing blocks and fixtures: one stance lays 4–5 blocks of a course
+const CUT_RATE = 2;          // knife cut speed: a block takes ≈0.5 s (was ≈1 s)
 let fishFallback = true;
 export function setFishingFallback(on: boolean) { fishFallback = on; }
 
@@ -167,17 +169,26 @@ export function tileSolid(tx: number, ty: number): boolean {
   for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) if (WALK[mat[(ty * TS + j) * W + tx * TS + i]]) n++;
   return n >= 8;
 }
-function los(px: number, py: number, tx: number, ty: number): boolean {
-  let x = px, y = py;
+function los(px: number, py: number, tx: number, ty: number, ownOk = 0): boolean {
+  let x = px, y = py, own = 0;
   const dx = Math.abs(tx - px), dy = Math.abs(ty - py), sx = px < tx ? 1 : -1, sy = py < ty ? 1 : -1;
   let err = dx - dy, guard = 0;
   while ((x !== tx || y !== ty) && guard++ < 40) {
     const e2 = 2 * err;
     if (e2 > -dy) { err -= dy; x += sx; }
     if (e2 < dx) { err += dx; y += sy; }
-    if ((x !== tx || y !== ty) && tileSolid(x, y)) return false;
+    if ((x !== tx || y !== ty) && tileSolid(x, y)) {
+      // up to `ownOk` of the player's own placed blocks may stand in the line (a course must not block the next block)
+      if (own < ownOk && tileOwn(x, y)) { own++; continue; }
+      return false;
+    }
   }
   return true;
+}
+/** Does the tile hold a block the player placed (F_PLACED, not yet sintered)? */
+function tileOwn(tx: number, ty: number): boolean {
+  for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) if (flags[(ty * TS + j) * W + tx * TS + i] & F_PLACED) return true;
+  return false;
 }
 const chest = () => { const p = G.player; return [p.x, p.y - 11] as const; };
 
@@ -260,10 +271,12 @@ function evaluate(sel: ItemDef | null, dt: number) {
   T.ghostItem = undefined; T.margin = undefined; T.lean = undefined; T.lines.length = 0;
   T.mat = tileMaterial(tx, ty); T.density = null; T.iceCm = null;
   T.fixture = fixtureAtTile(tx, ty);
+  const placing = !!sel && (sel.kind === 'block' || !!sel.place || (sel.kind === 'fixture' && !!sel.fixture));
   const dist = Math.hypot(tx * TS + 2 - cx, ty * TS + 2 - cy);
-  T.inReach = dist <= REACH;
+  T.inReach = dist <= (placing ? REACH_PLACE : REACH);
   const ptx = Math.floor(cx / TS), pty = Math.floor(cy / TS);
-  const sight = T.inReach && los(ptx, pty, tx, ty);
+  // placing: the sight line starts at the head (4 cells above the chest) and may pass one of the player's own blocks
+  const sight = T.inReach && (placing ? los(ptx, Math.floor((cy - 4) / TS), tx, ty, 1) : los(ptx, pty, tx, ty));
   const tk = toolKindOf(sel?.id);
   const lines = T.lines;
 
@@ -301,7 +314,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
   const def = sel ?? null;
   const setPlaceCommon = () => { T.mode = 'place'; T.ghostItem = id; };
   if (!T.inReach) { if (def && (def.kind === 'block' || def.place || def.fixture)) { setPlaceCommon(); T.ok = false; T.reason = S.far; } return finishTarget(T); }
-  if (!sight && !T.fixture) { T.reason = S.blocked; if (def && (def.kind === 'block' || def.place || def.fixture)) setPlaceCommon(); return finishTarget(T); }
+  if (!sight && !T.fixture) { T.reason = S.blocked; if (placing) setPlaceCommon(); return finishTarget(T); }
 
   if (id === 'snow_block') { evalBlock(T, sel!, tx, ty); return finishTarget(T); }
   if (def?.place) { evalSingle(T, def, tx, ty); return finishTarget(T); }
@@ -348,9 +361,18 @@ function evalCut(T: Target, tx: number, ty: number) {
     // try the other half
     const alt = cutRegion(tx0 === tx ? tx - 1 : tx, ty);
     if (alt.ok) { T.tx = tx0 === tx ? tx - 1 : tx; return fillCut(T, alt); }
-    T.ok = false; T.reason = S.thin; return;
+    T.ok = false;
+    // loose snow lies on the crust: the knife cannot cut under it
+    T.reason = looseAbove(tx0, ty) >= 4 ? S.digLooseFirst : S.thin;
+    return;
   }
   fillCut(T, r);
+}
+/** Loose snow cells in the 2×2 tile area over the cut region (the row above and the row itself). */
+function looseAbove(tx0: number, ty: number): number {
+  let n = 0;
+  for (let j = (ty - 1) * TS; j < (ty + 1) * TS; j++) for (let i = tx0 * TS; i < (tx0 + 2) * TS; i++) if (j >= 0 && mat[j * W + i] === MAT.SNOW) n++;
+  return n;
 }
 function fillCut(T: Target, r: { ok: boolean; density: number }) {
   T.density = r.density; T.ok = true;
@@ -383,7 +405,8 @@ function evalBlock(T: Target, sel: ItemDef, tx: number, ty: number) {
   let { tx0 } = blockRect(tx, ty, toolState.aimX);
   const p = G.player;
   const free = (t0: number) => rectFree(t0 * TS, ty * TS, TS * 2, TS) && !overlapsPlayer(t0 * TS, ty * TS, TS * 2, TS);
-  if (!free(tx0)) { const alt = tx0 === tx ? tx - 1 : tx; if (free(alt)) tx0 = alt; }
+  // the aimed spot is taken: the ghost moves to a free neighbour (one tile either way), so "занято" only shows when nothing is free
+  if (!free(tx0)) { const alt = tx0 === tx ? tx - 1 : tx; if (free(alt)) tx0 = alt; else if (free(tx0 + 1)) tx0 = tx0 + 1; else if (free(tx0 - 1)) tx0 = tx0 - 1; }
   T.tx = tx0;
   let lean: -1 | 0 | 1 = 0;
   if (toolState.dome) lean = tx0 * TS + 8 < p.x ? 1 : -1;
@@ -455,13 +478,15 @@ function finishDig(T: Target, tk: string) {
 }
 
 let lastHint = -99;
+/** Loose snow that crumbled from a cut: picked up without a "Взял" message (the crumble message already says it). */
+const quietDrops = new WeakSet<object>();
 function doCut(T: Target, dtEff: number, tk: string) {
   const c = toolState.cut;
   if (c.tx !== T.tx || c.ty !== T.ty) { c.tx = T.tx; c.ty = T.ty; c.p = 0; }
   const r = cutRegion(T.tx, T.ty);
   if (!r.ok) { c.p = 0; return; }
   const cls = r.density < 220 ? 0.7 : r.density <= 250 ? 1.2 : r.density <= 380 ? 1 : r.density <= 420 ? 1.4 : 2.2;
-  c.p += (dtEff * (tk === 'saw' ? 1.6 : 1)) / (0.9 * cls);   // the saw is faster than the knife
+  c.p += (dtEff * CUT_RATE * (tk === 'saw' ? 1.6 : 1)) / (0.9 * cls);   // the saw is faster than the knife
   body.working = 1;
   if ((toolState.digSnd -= dtEff) <= 0) { toolState.digSnd = 0.22; emit('dig', { mat: MAT.PACKED, x: T.x, y: T.y }); spawnFx('dust', T.tx * TS + 4, T.ty * TS + 2, (Math.random() - 0.5) * 12, -8, 0.4, 0xe6eef8); }
   if (c.p >= 1) {
@@ -469,13 +494,24 @@ function doCut(T: Target, dtEff: number, tk: string) {
     const d = r.density;
     for (let k = 0; k < 2; k++) clearTile(T.tx + k, T.ty, (m) => m === MAT.PACKED || m === MAT.SNOWBLOCK);
     chips(T.tx, T.ty, MAT.PACKED, 8); chips(T.tx + 1, T.ty, MAT.PACKED, 8);
-    if (d < 220) { toast(S.crumbled, 'warn'); if (G.realTime - lastHint > 25) { lastHint = G.realTime; toast(S.looseHint, 'info'); } spawnDrop('snow', 2, T.tx * TS + 4, T.ty * TS, 0, -18); }
-    else {
+    if (d < 220) {
+      // one message per crumble: the hint is folded into it (at most once per 25 s); the loose snow is picked up silently
+      const hint = G.realTime - lastHint > 25;
+      if (hint) lastHint = G.realTime;
+      toast(hint ? S.crumbled + ' ' + S.looseHint : S.crumbled, 'warn');
+      const sn = spawnDrop('snow', 2, T.tx * TS + 4, T.ty * TS, 0, -18);
+      if (sn) quietDrops.add(sn);
+    } else {
       const p = G.player;
       const left = add('snow_block', 1, d);
       if (left) spawnDrop('snow_block', 1, p.x, p.y - 12, p.face * 12, -20, d);
       toast(fmt(S.gotBlock, { c: snowClassName(snowClass(d)) }), 'good');
-      emit('cut_block', { density: d, cls: snowClass(d) });
+      // the cut: a knock and a little spray of sparks and dust at the block's centre
+      const bx = T.tx * TS + 4, by = T.ty * TS + 2;
+      addShake(0.6);
+      burstFx('spark', bx, by, 3, 26, 0.35, 0xbfe6ff, 6);
+      burstFx('dust', bx, by, 3, 14, 0.4, 0xe6eef8);
+      emit('cut_block', { density: d, cls: snowClass(d), x: bx, y: by });
     }
     emit('dug', { mat: MAT.PACKED, key: 'PACKED', x: T.x, y: T.y, tx: T.tx, ty: T.ty });
   }
@@ -673,6 +709,7 @@ export function stepTools(dt: number) {
   if (input.ventPressed) toggleParka();
   const sel = sel0 ? getItem(sel0.id) : null;
   const T = evaluate(sel, dt);
+  aim.x = toolState.aimX; aim.y = toolState.aimY; aim.on = true;      // E picks the loose item under the cursor first (nearby.ts)
   setCameraLook(Math.max(-30, Math.min(30, (toolState.aimX - p.x) * 0.2)), Math.max(-16, Math.min(16, (toolState.aimY - p.y + 11) * 0.15)));
 
   const pressed = input.primaryPressed, down = input.primary;
@@ -707,7 +744,8 @@ export function stepTools(dt: number) {
       if (sel.id === 'snow_block') placeBlock(T);
       else if (sel.place) placeSingle(T);
       else if (sel.fixture) placeFixtureItem(T);
-    } else if (T.mode === 'place' && pressed && !T.ok && T.reason) toast(T.reason, 'warn');
+    } else if (T.mode === 'place' && pressed && !T.ok && T.reason) { toast(T.reason, 'warn'); emit('deny', { reason: T.reason }); }
+    else if (T.mode === 'cut' && pressed && !T.ok && T.reason) toast(T.reason, 'warn');
     else if ((T.mode === 'dig' || T.mode === 'chisel') && sel?.id === 'shovel' && held.load > 0 && T.verb === S.throwSnow && (pressed || toolState.throwing)) { toolState.throwing = true; throwSnow(dt, T); held.using = true; toolState.swing = Math.max(toolState.swing, 0.6); }
     else if (T.mode === 'dig' && sel?.id === 'shovel' && T.verb === S.throwSnow) { /* load in the blade: release and press again to throw */ }
     else if ((T.mode === 'dig' || T.mode === 'chisel') && T.ok && T.mat) {
@@ -734,20 +772,41 @@ export function stepTools(dt: number) {
   T.progress = Math.max(T.progress, toolState.dig.tx === T.tx && toolState.dig.ty === T.ty ? toolState.dig.p : 0, toolState.cut.tx === T.tx && toolState.cut.ty === T.ty ? toolState.cut.p : 0);
 }
 
+/** Best fixture for E within reach: nearest wins, doors are the last choice, things behind the player slightly less likely. */
+function pickUsableFixture(x: number, y: number, face: number): Fixture | null {
+  let best: Fixture | null = null, bs = 1e9;
+  for (const o of G.fixtures) {
+    if (!FIXTURE_DEFS[o.kind] || o.kind === 'table' || o.kind === 'workbench') continue;
+    const dx = Math.max(o.tx * TS - x, 0, x - (o.tx + o.tw) * TS), dy = Math.max(o.ty * TS - y, 0, y - (o.ty + o.th) * TS);
+    const tall = o.kind === 'barometer' || o.kind === 'mast';   // mounted high on a pole: reach it from the ground beside the post
+    const d = tall ? dx : Math.hypot(dx, dy);
+    if (d > 18) continue;
+    const front = (o.tx * TS + o.tw * TS / 2 - x) * face >= -2;
+    const sc = d + (o.kind === 'door' || o.kind === 'hide_door' ? 8 : 0) + (front ? 0 : 5);
+    if (sc < bs) { bs = sc; best = o; }
+  }
+  return best;
+}
+
 function interactAction(T: Target, selId: string | null) {
   const p = G.player;
-  // dead player's backpack / loot on the ground handled by the magnet; fixtures first
   let f: Fixture | null = null;
   if (T.fixture && Math.hypot(T.fixture.tx * TS + T.fixture.tw * 2 - p.x, T.fixture.ty * TS + T.fixture.th * 2 - (p.y - 8)) < 56) f = T.fixture;
-  if (!f) f = fixtureNear(p.x, p.y - 8, 18, (o) => !!FIXTURE_DEFS[o.kind] && o.kind !== 'table' && o.kind !== 'workbench' && !(o.kind === 'hide_door' && false));
-  // DESIGN §12: containers, lying things, a backpack and a parked sled are chosen through the nearby list (E = the nearest one in front, E held = the list)
+  // a door must not swallow E when a stove, lamp or chest is within reach (playtest: standing between the door and the stove only toggled the door)
+  const alt = pickUsableFixture(p.x, p.y - 8, p.face);
+  const isDoor = (o: Fixture | null) => !!o && (o.kind === 'door' || o.kind === 'hide_door');
+  if (!f || (isDoor(f) && alt && !isDoor(alt))) f = alt ?? f;
+  // DESIGN §12: containers, lying things, a backpack and a parked sled are chosen through the nearby list (E = the nearest one in front, E held = the list);
+  // the item under the cursor goes first (nearby.aim), a note wins a tie
   const near = nearbyList();
   // the cursor points at the fixture (mouse), or it is the one the target logic picked
   const aimedAt = !!f && input.aimMode === 'mouse' && (T.fixture === f || (toolState.aimX >= f.tx * TS - 3 && toolState.aimX <= (f.tx + f.tw) * TS + 3 && toolState.aimY >= f.ty * TS - 3 && toolState.aimY <= (f.ty + f.th) * TS + 3));
   if (f && !isBoxFixture(f)) {
-    // a stove / door / bed wins when the cursor points at it or it is nearer than the nearest lying thing
+    // a stove / door / bed wins when the cursor points at it or it is nearer than the nearest lying thing; a loose item at the feet (PICK_R) always beats a door
     const fd = Math.hypot(f.tx * TS + f.tw * 2 - p.x, f.ty * TS + f.th * 2 - (p.y - 8));
-    if (aimedAt || !near.length || fd < near[0].dist - 2) { if (fxInteract(f)) return; }
+    const n0 = near[0];
+    const lootAtFeet = !!n0 && n0.kind === 'drop' && Math.hypot(n0.x - p.x, n0.y - (p.y - 2)) <= PICK_R;
+    if (aimedAt || !n0 || (fd < n0.dist - 2 && !(isDoor(f) && lootAtFeet))) { if (fxInteract(f)) return; }
   }
   if (near.length) {
     const aimed = f && aimedAt && isBoxFixture(f) ? near.find(n => n.f === f) : undefined;
@@ -797,6 +856,18 @@ function dropAction(T: Target) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // drops
+/** Put what fits of a loose drop into the bag. Returns what is left (0 = all taken) and leaves the remainder in d.n. */
+function takeDrop(d: Drop): number {
+  const dur = dropDur.get(d.id);
+  const left = add(d.item, d.n, dur);
+  if (left < d.n) {
+    emit('picked', { item: d.item, n: d.n - left });
+    if (left === 0 && !quietDrops.has(d)) toast(fmt(S.picked, { name: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : '') }), 'info');
+  }
+  if (isNote(d.item) && left === 0) emit('note_found', { id: d.item });
+  if (left > 0) d.n = left;
+  return left;
+}
 const box = { x: 0, y: 0, vx: 0, vy: 0, w: 3, h: 3, onGround: false };
 export function stepDrops(dt: number) {
   const p = G.player;
@@ -813,16 +884,12 @@ export function stepDrops(dt: number) {
     // DESIGN §12: only small light things are picked up by walking over them (and only if there is room and weight); the rest waits for E
     if (p && p.alive && d.age > 0.35 && autoPickable(d)) {
       const dx = p.x - d.x, dy = p.y - 8 - d.y, dist = Math.hypot(dx, dy);
-      if (dist < 5.5) picked = true;
+      if (dist < (isNote(d.item) ? NOTE_R : 5.5)) picked = true;
       else if (dist < 20) { const k = (20 - dist) * 14; box.vx += (dx / dist) * k * dt * 3; box.vy += (dy / dist) * k * dt * 3 - 300 * dt * 0.7; }
     }
     if (picked) {
-      const dur = dropDur.get(d.id);
-      const left = add(d.item, d.n, dur);
-      if (left < d.n) { emit('picked', { item: d.item, n: d.n - left }); if (left === 0) { toast(fmt(S.picked, { name: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : '') }), 'info'); } }
-      if (/^note/.test(d.item) && left === 0) emit('note_found', { id: d.item });
+      const left = takeDrop(d);
       if (left <= 0) { dropDur.delete(d.id); arr.splice(i, 1); continue; }
-      d.n = left;
     }
     const r = moveBox(box as never, dt, { stepUp: 0 });
     void r;
