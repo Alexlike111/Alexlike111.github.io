@@ -280,6 +280,101 @@ for (const prof of PROFILES) {
     await page.waitForTimeout(300);
     await shot(page, prof, '08-radial');
   }
+  // ---- 7. inventory + container search + nearby items (DESIGN §12): real mouse drag & drop on desktop, taps on the phone; screenshots shots/inv-*.png ----
+  {
+    const ishot = async (name) => { await ev(page, () => window.__sc.step(2)); await page.waitForTimeout(350); await page.screenshot({ path: path.join(shots, `inv-${prof.name}-${name}.png`) }); };
+    const rect = (sel) => page.evaluate((q) => { const e = document.querySelector(q); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; }, sel);
+    const cellSel = (z, i) => `#hud .pnl [data-z="${z}"][data-i="${i}"]`;
+    const panelOpen = () => page.evaluate(() => document.querySelector('#hud .pnl').style.display === 'block');
+    const togglePanel = async () => { if (prof.hasTouch) { const r = await rect('#tb-bag'); await page.touchscreen.tap(r.x, r.y); } else await page.keyboard.press('KeyC'); await page.waitForTimeout(350); };
+    const tapCell = async (z, i) => { const r = await rect(cellSel(z, i)); if (prof.hasTouch) await page.touchscreen.tap(r.x, r.y); else await page.mouse.click(r.x, r.y); await page.waitForTimeout(250); };
+    const setup = await ev(page, () => {
+      const S = window.__sc, G = S.G, inv = S.mods.inv;
+      S.setWeather({ ambientT: -22, wind: 0, storm: 0, snowfall: 0 });
+      S.arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); S.teleport(1000, 272); S.step(10); G.drops.length = 0;
+      inv.clearInventory(); inv.giveStartKit();
+      S.give('log', 2); S.give('coal', 8); S.give('biscuit', 7); S.give('rope', 3); S.give('fat', 4); S.give('can', 2);
+      const f = S.mods.fixtures.placeFixture('chest', 247, 66, { force: true, items: [{ id: 'coal', n: 5 }, { id: 'rope', n: 2 }, { id: 'fat', n: 3 }, { id: 'tin', n: 2 }, { id: 'matches', n: 6 }, { id: 'flare', n: 2 }], data: { look: 'old' } });
+      G.player.x = f.tx * 4 + 14; S.step(5);
+      return { id: f.id, x: G.player.x, w: inv.weight() };
+    });
+    // the bag with a heavy load: weight bar with the effect in words
+    await togglePanel();
+    check('bag panel opens', await panelOpen());
+    const wt = await page.evaluate(() => document.querySelector('#hud .pnl .wtxt')?.textContent);
+    check('weight bar says what the load does', !!wt && wt.length > 3, wt);
+    await ishot('01-bag');
+    // select + split + drop with the action bar (touch path) / drag & drop (mouse path)
+    const cell = (i) => cellSel('inv', i);
+    if (prof.hasTouch) {
+      await tapCell('inv', 6 + 1);                                    // coal
+      await page.waitForSelector('#hud .pnl [data-act="half"]', { timeout: 2000 });
+      const b = await rect('#hud .pnl [data-act="half"]'); check('action buttons are big enough to tap', b.h >= 47 && b.w >= 47, JSON.stringify(b));
+      await page.touchscreen.tap(b.x, b.y); await page.waitForTimeout(250);
+    } else {
+      const a = await rect(cell(6 + 2)), b = await rect(cell(6 + 9));
+      await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(a.x + 20, a.y + 10, { steps: 3 }); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(250);
+    }
+    const afterMove = await ev(page, () => window.__sc.G && window.__sc.mods.inv.inv.slots.slice(6).map(s => s && s.id + 'x' + s.n));
+    check(prof.hasTouch ? 'split half works from the panel' : 'mouse drag moves a stack to another cell', prof.hasTouch ? afterMove.filter(x => x && x.startsWith('coal')).length === 2 : afterMove[9] && afterMove[2] === null, JSON.stringify(afterMove));
+    await ishot('02-selected');
+    await togglePanel();
+    // E on the chest: panel with «Обыскиваю…», items appear one by one
+    if (prof.hasTouch) { const r = await rect('#tb-take'); await page.touchscreen.tap(r.x, r.y); } else { await page.keyboard.down('KeyE'); await page.waitForTimeout(120); await page.keyboard.up('KeyE'); }
+    await page.waitForTimeout(500);
+    check('E on a chest opens the search panel', await panelOpen() && /Обыскиваю/.test(await page.evaluate(() => document.querySelector('#hud .pnl').textContent)));
+    await ev(page, () => window.__sc.stepFast(100)); await ishot('03-searching');
+    const found1 = await ev(page, () => window.__bag.search.revOf(window.__bag.search.open.box));
+    check('some items found, some still hidden', found1 >= 1 && found1 < 6, String(found1));
+    await ev(page, () => window.__sc.stepFast(60 * 10)); await page.waitForTimeout(300);
+    check('search finishes: «Обыскано»', /Обыскано/.test(await page.evaluate(() => document.querySelector('#hud .pnl').textContent)));
+    // take one found item with the real input, then all
+    if (prof.hasTouch) { await tapCell('box', 0); const mv = await rect('#hud .pnl [data-act="move"]'); await page.touchscreen.tap(mv.x, mv.y); }
+    else { const a = await rect(cellSel('box', 0)), b = await rect(cellSel('inv', 6 + 12)); await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(a.x + 16, a.y + 6, { steps: 3 }); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); }
+    await page.waitForTimeout(300);
+    const took = await ev(page, () => window.__sc.mods.inv.count('coal'));
+    check('a found item can be taken from the container', took >= 9, 'coal ' + took);
+    await ishot('04-found');
+    const ta = await rect('#hud .pnl [data-act="takeall"]');
+    if (prof.hasTouch) await page.touchscreen.tap(ta.x, ta.y); else await page.mouse.click(ta.x, ta.y);
+    await page.waitForTimeout(300);
+    const left = await ev(page, () => window.__bag.search.open.box ? window.__bag.search.open.box.items().length : -1);
+    check('«Взять всё» empties what fits', left >= 0 && left <= 2, String(left));
+    await togglePanel();
+    // frozen crate: chip it free first
+    await ev(page, () => {
+      const S = window.__sc, G = S.G; S.give('ice_chisel', 1);
+      const f = S.mods.fixtures.placeFixture('chest', 252, 66, { force: true, items: [{ id: 'canvas', n: 2 }, { id: 'harpoon', n: 1 }, { id: 'flint', n: 1 }], data: { frozen: true } });
+      G.player.x = f.tx * 4 + 14; S.step(3); window.__bag.search.openContainer(f);
+    });
+    await page.waitForTimeout(400); await ev(page, () => window.__sc.stepFast(70));
+    check('frozen crate shows chipping first', /Скалываю лёд/.test(await page.evaluate(() => document.querySelector('#hud .pnl').textContent)));
+    await ishot('05-frozen');
+    await ev(page, () => { window.__sc.stepFast(60 * 6); }); await page.waitForTimeout(300);
+    check('after chipping the search begins', /Обыскиваю|Обыскано/.test(await page.evaluate(() => document.querySelector('#hud .pnl').textContent)));
+    await togglePanel();
+    // nearby things: highlighted in the world, a list when several are close
+    await ev(page, () => {
+      const S = window.__sc, G = S.G, p = G.player; S.mods.inv.clearInventory(); S.mods.inv.giveStartKit();
+      p.x = 1030; S.step(5);
+      const sp = (id, n, dx) => { const d = S.mods.inv.spawnDrop(id, n, p.x + dx, p.y - 3, 0, 0, undefined, true); d.age = 2; return d; };
+      sp('coal', 4, 8); sp('log', 1, -9); sp('biscuit', 3, 18); sp('note_n3', 1, 14);
+      S.stepFast(30);
+    });
+    await ishot('06-nearby-world');
+    check('lying things are listed as nearby (3+)', (await ev(page, () => window.__bag.nearby.nearbyList().length)) >= 3);
+    if (prof.hasTouch) { const r = await rect('#nearbtn'); check('phone «Рядом» button is shown', !!r && r.w >= 48, JSON.stringify(r)); if (r) await page.touchscreen.tap(r.x, r.y); }
+    else { await page.keyboard.down('KeyE'); await page.waitForTimeout(900); }
+    await page.waitForTimeout(400);
+    check('the nearby list opens (E held / button)', await page.evaluate(() => getComputedStyle(document.querySelector('#hud .nearl')).display !== 'none'));
+    await ishot('07-nearby-list');
+    const first = await rect('#hud .nearl .nr');
+    if (!prof.hasTouch) await page.keyboard.up('KeyE');
+    if (first) { if (prof.hasTouch) await page.touchscreen.tap(first.x, first.y); else await page.mouse.click(first.x, first.y); }
+    await page.waitForTimeout(300);
+    check('choosing from the list takes that thing', (await ev(page, () => window.__sc.mods.inv.count('coal') + window.__sc.mods.inv.count('log') + window.__sc.mods.inv.count('biscuit'))) >= 1);
+    void setup;
+  }
   await shot(page, prof, '09-final');
   if (errors.length) { failures += errors.length; log(`  ERRORS:\n    ` + errors.join('\n    ')); } else log('  no console errors');
   await ctx.close();

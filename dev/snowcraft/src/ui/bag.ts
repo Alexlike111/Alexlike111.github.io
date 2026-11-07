@@ -201,7 +201,7 @@ export function bagHtml(): string {
   ensureStyle();
   const p = G.player;
   const wt = weight(), lv = loadLevel(wt);
-  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_SOFT })}</span></h3>`;
+  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
   h += `<div class="wt"><i style="width:${Math.min(100, wt / WEIGHT_MAX * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
   h += `<div class="top"><div class="wear">`;
   for (let k = 0; k < WEAR_SLOTS.length; k++) {

@@ -7,7 +7,7 @@
 // for the simulation): a crust, a wind slab (aux 140-200 = 290-380 kg/m3, the best block snow) in the drifts, settled pack deeper down.
 import { W, H, TW, mat, aux, flags, bg } from '../engine/grid';
 import { MAT } from '../content/materials';
-import { LOC, Terrain, put, topSolid } from './locations';
+import { LOC, Terrain, put, topSolid, worldInfo } from './locations';
 
 const AIR = MAT.AIR, SNOW = MAT.SNOW, PACKED = MAT.PACKED, FIXTURE = MAT.FIXTURE;
 
@@ -44,35 +44,57 @@ function lay(x: number, base: number, h: number, slab: number): number {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-/** Pass A: how much snow to add on top of the natural surface, per column (cells). */
+/** Pass A: snow added on top of the natural surface, per column. Target depth (snow above the ground, cells): plains 18-28 (1.6-2.5 m), the lee side of
+ *  a rise up to ~45; the existing snow counts toward it. Untouched: the mine portal and its trench (x 255-380), the cairn hill and the signal-fire
+ *  summit (a wind-scoured crest), the lichen patches (thin snow: the ptarmigan feed there), the station plateau (pass B). */
 export function tundraSnow(T: Terrain, seed: number) {
   K = (seed * 2654435761) | 0;
   const x0 = 94, x1 = 556;
+  const top = (x: number) => { let y = Math.max(60, T.surf[x] - 40); while (y < H - 1 && mat[y * W + x] === AIR) y++; return y; };
+  const d0 = (x: number) => { let y = top(x), n = 0; while (n < 80 && (mat[y * W + x] === SNOW || mat[y * W + x] === PACKED)) { y++; n++; } return n; };
   const E = new Float32Array(W), slab = new Float32Array(W);
   for (let x = x0; x < x1; x++) {
-    // the cape hill: its lee (east) flank holds deep drifts; they thin out toward the mine portal
-    const cape = ss(94, 120, x) * (1 - ss(222, 262, x)) * (5 + 9 * vf(x / 23 + 3, 1) + 4 * Math.sin(x / 15));
-    // tundra west of the cairn: a drift field on the way to the mine
-    const tw = ss(376, 404, x) * (1 - ss(410, 428, x)) * (6 + 6 * vf(x / 19 + 8, 2));
-    // the lee snow field east of the cairn hill: the deepest plain of the map, ends in a long ramp down into the scoured station hollow
-    const field = ss(486, 512, x) * (1 - ss(526, 560, x)) * (15 + 10 * vf(x / 21 + 15, 3));
-    E[x] = Math.max(cape, tw, field);
-    slab[x] = clamp(0.35 + 0.65 * ss(0, 1, field / 22) + 0.5 * ss(0, 1, cape / 14), 0, 1);
+    const slopeE = (T.surf[Math.min(W - 1, x + 12)] - T.surf[Math.max(0, x - 12)]) / 24;           // > 0: the ground falls away to the east = the lee of the westerly wind
+    const lee = clamp(slopeE, 0, 0.6) / 0.6;
+    const n = vf(x / 23 + 3, 1);
+    let want = 18 + 10 * n + 24 * lee * ss(0.3, 0.8, vf(x / 41 + 9, 2));                            // target total depth
+    const zone = Math.max(ss(140, 176, x) * (1 - ss(222, 258, x)),                                    // the lee side of the cape hill (its windward crest stays scoured)
+                          ss(380, 404, x) * (1 - ss(414, 434, x)) * 0.8,                              // tundra strip between the portal and the cairn hill
+                          ss(494, 520, x));                                                          // the lee field east of the cairn hill, down to the station hollow
+    E[x] = Math.max(0, want - d0(x)) * zone;
+    slab[x] = clamp(0.3 + 0.7 * lee, 0, 1);
   }
-  // sastrugi-like swell on top (wind-sculpted ridges across the field), then keep every slope <= 45 degrees (the loose crown must not slide)
+  // wind-sculpted swell on top (sastrugi), then keep every slope <= 45 degrees (the loose crown must not slide), never higher than the summit, and
+  // the field ends in a long ramp that meets the plateau at its own height
   const Y = new Float32Array(W);
-  for (let x = x0; x < x1; x++) { const sw = E[x] > 4 ? (vf(x / 5.5 + 40, 4, 2) - 0.45) * 3.2 : 0; Y[x] = T.surf[x] - Math.max(0, E[x] + sw); }
-  for (let x = x0 + 1; x < x1; x++) Y[x] = Math.min(Y[x], Y[x - 1] + 1);
-  for (let x = x1 - 2; x >= x0; x--) Y[x] = Math.min(Y[x], Y[x + 1] + 1);
+  for (let x = x0; x < x1; x++) { const sw = E[x] > 5 ? (vf(x / 5.5 + 40, 4, 2) - 0.45) * 3.2 : 0; Y[x] = T.surf[x] - Math.max(0, E[x] + sw); if (x >= 494) Y[x] = Math.max(Y[x], 228); Y[x] = Math.min(Y[x], T.surf[x]); }
+  Y[x0 - 1] = T.surf[x0 - 1]; Y[x1] = T.surf[x1];                                                   // the untouched ground on both sides
+  for (let x = x0; x < x1; x++) Y[x] = Math.max(Y[x], Y[x - 1] - 1);                                // the added snow tapers off at 45 degrees on both sides
+  for (let x = x1 - 1; x >= x0; x--) Y[x] = Math.max(Y[x], Y[x + 1] - 1);
+  for (let x = x0; x < x1; x++) Y[x] = Math.min(Y[x], T.surf[x]);
   for (let x = x0; x < x1; x++) {
     const h = Math.round(T.surf[x] - Y[x]);
     if (h <= 0) continue;
     T.surf[x] = lay(x, T.surf[x], h, slab[x]);
   }
+  // the lichen patches stay bare: the wind scours a bowl around each one (the ptarmigan feed there; steep packed walls)
+  for (const l of worldInfo.lichen) {
+    if (l.x >= 494) continue;                         // the lee field east of the cairn hill buries its lichen under the drift (the sheltered pocket under the snow)
+    for (let x = Math.max(x0, l.x - 9); x <= Math.min(x1 - 1, l.x + l.w + 9); x++) {
+      const d = Math.max(0, l.x - x, x - (l.x + l.w)), g = lichenTop(x);
+      if (g < 0) continue;
+      const allow = g - 1 - Math.floor(d * 1.4);
+      for (let y = top(x); y < allow; y++) { const i = y * W + x; if (mat[i] === SNOW || mat[i] === PACKED) { mat[i] = AIR; aux[i] = 0; } }
+      T.surf[x] = Math.max(T.surf[x], Math.min(top(x), allow));
+    }
+  }
 }
+/** Row of the top of the lichen / ground at column x under the snow (first cell that is not air or snow), or -1. */
+function lichenTop(x: number): number { let y = 60; while (y < H - 1 && (mat[y * W + x] === AIR || mat[y * W + x] === SNOW || mat[y * W + x] === PACKED)) y++; return y >= H - 1 ? -1 : y; }
 
 // ---------------------------------------------------------------------------------------------------------------------
-export const DOOR = { x0: 0, x1: 0, y0: 0, y1: 0, crest: 0 };       // the buried door's front (cells): the quest checks that it is clear
+/** The buried east door's front (cells): the quest checks that it is clear. crest = how high the drift is above the floor (0 = no drift: nothing to dig). */
+export const DOOR = { x0: 0, x1: 0, y0: 0, y1: 0, crest: 0 };
 
 /** The start: on the lee drift a few cells east of the buried door (snow 12-26 cells above the pad, clear 8x20 box).
  *  Returns the spawn column and the row of the ground under the player (the highest surface under the 8-wide box). */

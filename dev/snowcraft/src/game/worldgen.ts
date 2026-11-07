@@ -7,7 +7,7 @@
 import { W, H, TW, TH, mat, aux, flags, shade, bg, awake, clearWorld, setSeed, rand, randInt, noise1, fbm1, fbm2 } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { G } from './state';
-import { tundraSnow, stationSnow, finishSnow, makeSpawn } from './snowpack';
+import { tundraSnow, stationSnow, finishSnow, makeSpawn, snowpackCfg } from './snowpack';
 import { LOC, SEA, stampLocations, resetLocations, worldInfo, Terrain, put, box, pileBlocks, snowBank, topSolid } from './locations';
 
 export { worldInfo, LOC };
@@ -93,12 +93,12 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   edgesAndBedrock();
   buildBackgrounds();
   rockFeatures();
-  tundraSnow(T, seed);                 // DESIGN §13 deep snow: own hash noise, no rand() draws (the random stream below is unchanged)
+  if (snowpackCfg.on) tundraSnow(T, seed);            // DESIGN §13 deep snow: own hash noise, no rand() draws (the random stream below is unchanged)
   stampLocations(T);
-  stationSnow(T);
+  if (snowpackCfg.on) stationSnow(T);
   cutSealHoles();
   sastrugi();
-  finishSnow(T, LOC.iceberg.x);
+  if (snowpackCfg.on) finishSnow(T, LOC.iceberg.x);
   finalize();
 
   const sp = makeSpawn();              // a flat terrace on the lee drift, a few cells east of the buried station door

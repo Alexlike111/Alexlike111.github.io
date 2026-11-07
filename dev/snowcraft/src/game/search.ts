@@ -88,22 +88,29 @@ export function makePackBox(dropId: number): Box | null {
 
 // ---- the open container as a zone ----------------------------------------------------------------------------------------------
 function adapter(b: Box): BoxAdapter {
+  /** Free room (in items) for a stack: the spare of matching revealed stacks plus the unused slots of the container. */
+  const room = (s: Slot) => {
+    const it = itemsOf(b), max = getItem(s.id).stack, rev = revOf(b);
+    let r = Math.max(0, b.cap - it.length) * max;
+    if (max > 1) for (let k = 0; k < rev; k++) { const q = it[k]; if (q.id === s.id && q.dur === s.dur) r += Math.max(0, max - q.n); }
+    return r;
+  };
   return {
     size: () => revOf(b),
     get: (i) => (i >= 0 && i < revOf(b) ? itemsOf(b)[i] ?? null : null),
     set: (i, s) => {
       const it = itemsOf(b); let rev = revOf(b);
       if (i < rev) { if (s) it[i] = s; else { it.splice(i, 1); rev--; } }
-      else if (s) { it.splice(rev, 0, s); rev++; }
+      else if (s) {
+        // putting something in: top up a matching stack first, the rest becomes new known stacks (what the player puts in is never «hidden»)
+        let left = s.n; const max = getItem(s.id).stack;
+        if (max > 1) for (let k = 0; k < rev && left > 0; k++) { const q = it[k]; if (q.id === s.id && q.dur === s.dur && q.n < max) { const m = Math.min(max - q.n, left); q.n += m; left -= m; } }
+        while (left > 0) { const m = Math.min(max, left); const ns: Slot = { id: s.id, n: m }; if (s.dur !== undefined) ns.dur = s.dur; it.splice(rev, 0, ns); rev++; left -= m; }
+      }
       setRev(b, rev);
       if (b.f && b.kind === 'cart') (b.f.data ??= {}).loaded = '';
     },
-    canPut: (s) => {
-      if (isLocked()) return false;
-      const it = itemsOf(b), max = getItem(s.id).stack;
-      if (s.id && max > 1 && it.some((q, k) => k < revOf(b) && q.id === s.id && q.n < max && q.dur === s.dur)) return true;
-      return it.length < b.cap;
-    },
+    canPut: (s) => !isLocked() && room(s.id ? s : { id: 'rope', n: 1 }) >= (s.id ? s.n : 1),
   };
 }
 export function isLocked(): boolean { return !!open.box && !!open.box.f && open.chipNeed > 0 && open.chip < open.chipNeed; }

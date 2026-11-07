@@ -1,7 +1,7 @@
 // Headless world tests (tsx): `npx tsx tests/world.test.ts`
 // Determinism, DESIGN §1 layout, sites / fixtures / loot / notes, sea level, ice field, snowpack density layering, no trees,
 // structural stability (the support solver must not drop anything at first contact), on-foot reachability (BFS), light/sky/camera maths.
-import { generateWorld, surfaceAt, worldInfo } from '../src/game/worldgen';
+import { generateWorld, surfaceAt, worldInfo, terrain } from '../src/game/worldgen';
 import { sites, LOC, SEA } from '../src/game/locations';
 import { G } from '../src/game/state';
 import { W, H, TW, mat, aux, shade, flags, bg, F_TREE, F_FIXTURE } from '../src/engine/grid';
@@ -11,6 +11,11 @@ import { clusters } from '../src/engine/bodies';
 import { computeLight, lt, lightAt } from '../src/engine/light';
 import { skyState, updateSkyState } from '../src/engine/sky';
 import { updateCamera, clampCamera } from '../src/engine/camera';
+import { initSim, stepSim, snowCfg } from '../src/engine/sim';
+import { initHeat } from '../src/engine/heat';
+import { DOOR, snowpackCfg, tundraSnow, stationSnow, finishSnow } from '../src/game/snowpack';
+import { zoomScales, chooseScale, ZOOM_MIN_CELLS, ZOOM_MAX_CELLS, setZoomIndex, zoomIndex, zoomCells, resetZoom, stepZoom } from '../src/engine/zoom';
+import { rand, setSeed } from '../src/engine/grid';
 
 let pass = 0, fail = 0;
 function ok(cond: unknown, name: string, detail = '') {
@@ -167,7 +172,54 @@ function snowDepthAt(x: number) { let y = surfaceAt(x), n = 0; while ((at(x, y) 
 // ---- spawn ----
 const solidAt = (x: number, y: number) => { const p = PHASE[at(x, y)]; return p === P_SOLID || p === P_POWDER; };
 let clear = true; for (let y = sp.spawnY - 20; y < sp.spawnY; y++) for (let x = sp.spawnX - 4; x < sp.spawnX + 4; x++) if (solidAt(x, y) || at(x, y) === MAT.FIXTURE) clear = false;
-ok(solidAt(sp.spawnX, sp.spawnY) && clear, 'spawn: standing on ground with 8x20 clearance', `(${sp.spawnX},${sp.spawnY})`);
+let footing = false; for (let x = sp.spawnX - 4; x < sp.spawnX + 4; x++) if (solidAt(x, sp.spawnY)) footing = true;     // the drift slopes: the player stands on its highest column
+ok(footing && clear, 'spawn: standing on ground with 8x20 clearance', `(${sp.spawnX},${sp.spawnY})`);
+ok(sp.spawnX > LOC.house.R * 4 + 4 && LOC.station.y - sp.spawnY >= 12 && LOC.station.y - sp.spawnY <= 26, 'spawn: on the lee drift east of the house, 12-26 cells above the pad (DESIGN §13)', `(snow ${LOC.station.y - sp.spawnY} cells above the pad)`);
+
+// ---- deep snow (DESIGN §13): "по крышу в сугробах" ----
+{
+  // the deep snow uses its own hash noise: running all its passes again draws nothing from the shared random stream
+  setSeed(123); const rA = rand(); setSeed(123); tundraSnow(terrain, 1); stationSnow(terrain); finishSnow(terrain, LOC.iceberg.x); const rB = rand();
+  ok(rA === rB, 'deep snow draws nothing from the shared random stream (own hash noise)');
+  snowpackCfg.on = false; generateWorld(1); const hOff = hash(); snowpackCfg.on = true; generateWorld(1);
+  ok(hash() !== hOff, 'the deep snow changes the world (switchable off for tests)');
+  const snowTopAt = (x: number) => { let y = 100; while (y < H && at(x, y) === MAT.AIR) y++; return y; };
+  const depthAt = (x: number) => { let y = snowTopAt(x), n = 0; while ((at(x, y) === MAT.SNOW || at(x, y) === MAT.PACKED) && n < 90) { y++; n++; } return n; };
+  const avgDepth = (x0: number, x1: number) => { let a = 0, n = 0; for (let x = x0; x <= x1; x += 2) { a += depthAt(x); n++; } return a / n; };
+  // open plains: 1.5-2.5 m (17-28 cells); drifts in the lee of the hills up to 4-5 m (45-55 cells)
+  const field = Math.max(...Array.from({ length: 57 }, (_, k) => depthAt(500 + k))), capeLee = avgDepth(150, 225);
+  ok(field >= 20 && field <= 56, 'the lee snow field east of the cairn hill is 1.8-5 m deep at its crest', `(${(field * 0.09).toFixed(1)} m = ${field} cells)`);
+  ok(capeLee >= 17, 'the lee side of the cape hill carries deep snow (plains 1.5-2.5 m and more)', `(${(capeLee * 0.09).toFixed(1)} m = ${capeLee.toFixed(0)} cells)`);
+  const pad = LOC.station.y, wall = LOC.house.R * 4 + 4;
+  const wallDepth = (() => { let y = 241, n = 0; while (at(wall + 1, y) === MAT.AIR) y++; while ((at(wall + 1, y) === MAT.SNOW || at(wall + 1, y) === MAT.PACKED) && n < 90) { y++; n++; } return n; })();    // below the eave overhang
+  ok(wallDepth >= 45 && wallDepth <= 60, 'the lee drift of the station wall is 4-5 m of snow in all (crest to ground)', `(${wallDepth} cells = ${(wallDepth * 0.09).toFixed(1)} m)`);
+  // the station: half-buried on its lee side; the east door sits under the drift
+  const crestAbove = (() => { let y = 241; while (at(wall + 1, y) === MAT.AIR) y++; return pad - y; })();     // below the eave overhang
+  ok(crestAbove >= 28 && crestAbove <= 40, 'lee drift against the east wall of the house is 28-40 cells above the floor', `(${crestAbove})`);
+  let doorSnow = 0, doorCells = 0; for (let y = pad - 24; y < pad; y++) for (let x = wall; x < wall + 8; x++) { doorCells++; if (at(x, y) === MAT.PACKED || at(x, y) === MAT.SNOW) doorSnow++; }
+  ok(doorSnow >= doorCells * 0.9, 'the east door is buried: its whole front is snow', `(${doorSnow}/${doorCells})`);
+  ok(DOOR.x0 === wall && DOOR.crest > 0, 'snowpack exports the door front for the quest');
+  const westDoorFront = (() => { let n = 0; const wx = LOC.house.L * 4; for (let y = pad - 20; y < pad; y++) for (let x = wx - 12; x < wx; x++) if (at(x, y) === MAT.PACKED || at(x, y) === MAT.SNOW) n++; return n; })();
+  ok(westDoorFront < 30, 'the windward (west) door is not buried (scoured side)', `(${westDoorFront} snow cells)`);
+  // wind slab (best block snow) inside the lee drift: density 250-380 kg/m3 = aux 119-200
+  { let slab = 0, all = 0; for (let x = wall + 2; x < wall + 20; x++) { const y0 = snowTopAt(x); for (let y = y0 + 5; y < y0 + 16 && y < pad; y++) { if (at(x, y) !== MAT.PACKED) continue; all++; const a = aux[y * W + x]; if (a >= 119 && a <= 200) slab++; } }
+    ok(all > 150 && slab / all >= 0.6, 'the lee drift holds a wind slab: mostly 250-380 kg/m3 block snow', `(${slab}/${all})`); }
+  // snow on the roofs (house and shed): a real load above the step corners
+  { let roof = 0; for (const [L, R] of [[LOC.house.L, LOC.house.R], [LOC.shed.L, LOC.shed.R]]) for (let y = 190; y < (pad / 4 - 8) * 4 - 4; y++) for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) if (at(x, y) === MAT.SNOW) roof++;
+    ok(roof > 900, 'roofs of the house and the shed carry deep snow', `(${roof} cells)`); }
+  // the deep pack is PACKED (it never ticks): only the crown is loose snow
+  { let loose = 0, packed = 0; for (let x = 480; x < 560; x++) { let y = snowTopAt(x); for (let k = 0; k < 60 && (at(x, y) === MAT.SNOW || at(x, y) === MAT.PACKED); k++, y++) { if (at(x, y) === MAT.SNOW) loose++; else packed++; } }
+    ok(packed > loose * 2 && loose > 100, 'deep snow is mostly PACKED below a loose crown (the sim chunks sleep)', `(loose ${loose}, packed ${packed})`); }
+  // slopes of the land are walkable (no snow cliffs) and the snow surface is rippled (sastrugi)
+  { let maxStep = 0, flips = 0, lastD = 0; for (let x = 486; x < 556; x++) { const d = snowTopAt(x) - snowTopAt(x - 1); maxStep = Math.max(maxStep, Math.abs(d)); if (d !== 0 && lastD !== 0 && Math.sign(d) !== Math.sign(lastD)) flips++; if (d !== 0) lastD = d; }
+    ok(maxStep <= 2 && flips >= 4, 'the snow field is walkable (steps <= 2) and rippled by the wind', `(max step ${maxStep}, ${flips} ripples)`); }
+  // fast ice keeps 0.3-0.8 m of snow so the seal holes stay findable
+  { let a = 0, n = 0; const ds: number[] = []; for (let x = 1120; x < 1440; x += 2) { if (holeX.has(x) || (x > 1325 && x < 1425)) continue; const d = depthAt(x); a += d; n++; ds.push(d); } ds.sort((p, q) => p - q); const mx = ds[Math.floor(ds.length * 0.9)];
+    ok(a / n >= 1.5 && a / n <= 8 && mx <= 12, 'fast ice carries 0.3-0.8 m of snow (seal holes stay findable)', `(avg ${(a / n * 0.09).toFixed(2)} m, p90 ${(mx * 0.09).toFixed(2)} m)`); }
+  // cornices: lips of packed snow hanging over a drop on the iceberg (they hold until cut)
+  { let lip = 0; for (let x = LOC.iceberg.x - 50; x < LOC.iceberg.x + 50; x++) for (let y = 200; y < 300; y++) if (at(x, y) === MAT.PACKED && at(x, y + 1) === MAT.AIR && at(x, y + 2) === MAT.AIR && flags[y * W + x] === 0) lip++;
+    ok(lip >= 6, 'snow cornices overhang the iceberg crest', `(${lip} cells with air under them)`); }
+}
 
 // ---- mine details ----
 const M_ = LOC.mine;
@@ -212,7 +264,7 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   const stove = kinds('stove')[0], radio = kinds('radio')[0];
   ok(stove && radio && (stove.data as { smokeY: number }).smokeY < F * 4 - 40, 'stove has a chimney through the roof (data.smokeX/Y)', `(smokeY ${(stove?.data as { smokeY: number })?.smokeY})`);
   const d = kinds('door'); ok(d.length >= 3 && d.every(f => !f.open), 'doors start closed');
-  ok(worldInfo.spots.barometer.x > 600 && worldInfo.spots.kennel.x > 500 && worldInfo.spots.mast.x > 600, 'barometer, kennel and meteo mast spots exported');
+  ok(worldInfo.spots.barometer.x > 500 && worldInfo.spots.barometer.x < LOC.house.L * 4 && worldInfo.spots.kennel.x > 500 && worldInfo.spots.mast.x > 600, 'barometer (windward, west of the house), kennel and meteo mast spots exported');
 }
 
 // ---- iceberg & ship ----
@@ -274,11 +326,11 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   t = performance.now();
   const s1 = bfs();
   console.log(`       (walk BFS ${(performance.now() - t).toFixed(0)} ms)`);
-  ok(near(s1, chestPos('station').x, chestPos('station').y), 'on foot: station chest (through the doors, over the furniture)');
-  ok(near(s1, chestPos('cairn').x, chestPos('cairn').y), 'on foot: cairn tin box');
-  ok(near(s1, worldInfo.spots.portal.x, worldInfo.spots.portal.y), 'on foot: mine portal');
-  ok(near(s1, M_.collapse[1] + 12, floorD(M_.collapse[1] + 12) - 2), 'on foot: the adit and the decline up to the collapse');
-  ok(near(s1, 790, LOC.station.y - 3), 'on foot: the generator shed through its west door');
+  // DESIGN §13: the start is on the lee drift, the east door of the house is buried: nothing west of the house (house, cairn, mine) is reachable until it is dug out
+  ok(!near(s1, chestPos('station').x, chestPos('station').y), 'the station chest is out of reach from the start: the east door is buried and must be dug out');
+  ok(near(s1, 790, LOC.station.y - 3), 'on foot: the generator shed through its west door (no digging needed)');
+  // the first job: a staircase trench (1 cell of fall per 2 of run) down to the door, as a player would dig it with the shovel
+  { const wall = LOC.house.R * 4 + 4; for (let x = wall; x < wall + 64; x++) { const fy = LOC.station.y - Math.floor((x - wall) * 0.5); for (let y = 150; y < fy; y++) { const m = at(x, y); if (m === MAT.PACKED || m === MAT.SNOW) mat[y * W + x] = MAT.AIR; } } }
   ok(!near(s1, chestPos('minehut').x, chestPos('minehut').y, 6, 8), 'the miner hut is beyond the collapse (must dig first: shovel, axe, and the pick for the rock plug)');
   ok(!near(s1, M_.lake.x0 + 40, M_.lake.ice - 6, 6, 8), 'the ice lake cavern is sealed in the rock (dig down to it)');
   // dig the collapse and the shed drift (shovel-diggable stuff), then everything else must be walkable
@@ -289,6 +341,10 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   t = performance.now();
   const s2 = bfs();
   console.log(`       (walk BFS after digging ${(performance.now() - t).toFixed(0)} ms)`);
+  ok(near(s2, chestPos('station').x, chestPos('station').y), 'after digging out the door: station chest (through the doors, over the furniture)');
+  ok(near(s2, chestPos('cairn').x, chestPos('cairn').y), 'on foot (through the house): cairn tin box');
+  ok(near(s2, worldInfo.spots.portal.x, worldInfo.spots.portal.y), 'on foot (through the house): mine portal');
+  ok(near(s2, M_.collapse[1] + 12, floorD(M_.collapse[1] + 12) - 2), 'on foot (through the house): the adit and the decline up to the collapse');
   const hut = chestPos('minehut');
   ok(near(s2, hut.x, hut.y), 'after digging the collapse: miner hut chest (coil)');
   ok(near(s2, M_.pocket[1] + 6, M_.floorB - 4), 'after digging: the bulkhead of the methane pocket');
@@ -301,7 +357,7 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   ok(near(s2, 1640, 284), 'on foot: across the thin-ice leads to the ship floe');
   const cab = chestPos('ship', 'barometer'); ok(near(s2, cab.x, cab.y), 'on foot: the captain cabin chest on the ship');
   const hold = chestPos('ship', 'radio_triode'); ok(near(s2, hold.x, hold.y), 'on foot: the hold chest (radio triode) via the companionways');
-  ok(near(s1, worldInfo.spots.signalFire.x, worldInfo.spots.signalFire.y - 4), 'on foot: the signal-fire hill on the cape (up the hill flank)');
+  ok(near(s2, worldInfo.spots.signalFire.x, worldInfo.spots.signalFire.y - 4), 'on foot: the signal-fire hill on the cape (up the hill flank)');
 }
 
 // ---- sky / light / camera maths ----
@@ -340,6 +396,61 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   updateCamera(0, W + 500, H + 500, true); ok(G.cam.x <= W - 200 && G.cam.y <= H - 112, 'camera clamps to the world (east/south)');
   updateCamera(0, 1000, 280, true); G.cam.y = 280; updateCamera(1 / 60, 1000, 285); ok(Math.abs(G.cam.y - 280) < 1e-6, 'vertical dead zone holds the camera');
   clampCamera();
+}
+
+// ---- zoom (DESIGN §14): integer device-px-per-cell scales, 200..700 cells across the width ----
+{
+  let allOk = true, detail = '';
+  for (const devW of [640, 844, 1280, 1600, 1688, 1920, 2532, 2560, 3840]) {
+    const list = zoomScales(devW); resetZoom();
+    const asc = list.every((v, i) => i === 0 || v > list[i - 1]), ints = list.every(v => Number.isInteger(v) && v >= 1);
+    const fits = list.length >= 2 && list.every(v => devW / v >= ZOOM_MIN_CELLS - 1e-6 && devW / v <= ZOOM_MAX_CELLS + 1e-6);
+    const pick = chooseScale(devW);
+    if (!(asc && ints && fits && list.includes(pick))) { allOk = false; detail += ` ${devW}:${list.join('/')}`; }
+  }
+  ok(allOk, 'zoom steps are ascending integers, always >= 2 of them, each fits 200..700 cells across', detail);
+  ok(chooseScale(1600) === 4 && Math.round(1600 / chooseScale(1600)) === 400, 'default zoom on a desktop 1600 px window = 400 cells across (4 px per cell)');
+  chooseScale(1600); const n = zoomScales(1600).length; setZoomIndex(0); const wide = zoomCells(); setZoomIndex(n - 1); const near = zoomCells();
+  ok(wide >= near && wide <= ZOOM_MAX_CELLS && near >= ZOOM_MIN_CELLS, 'zoom range of a 1600 px window', `(${wide} .. ${near} cells)`);
+  setZoomIndex(2); const i2 = zoomIndex(); stepZoom(1); const i3 = zoomIndex(); stepZoom(-1); stepZoom(-1);
+  ok(i3 === i2 + 1 && zoomIndex() === i2 - 1, 'stepZoom +1 zooms in, -1 zooms out by one step');
+  for (let k = 0; k < 20; k++) stepZoom(-1); const lo = zoomIndex(); for (let k = 0; k < 20; k++) stepZoom(1); const hi = zoomIndex();
+  ok(lo === 0 && hi === n - 1, 'zoom is clamped at both ends');
+  resetZoom();
+  // light region, camera clamp and world edges at every view size of the zoom range
+  let lightOk = true, clampOk = true;
+  for (const vw of [200, 267, 320, 400, 533, 700]) {
+    const vh = Math.round(vw * 9 / 16); const sizes = new Set<string>();
+    for (let x = 400; x < 520; x += 17) { computeLight({ x0: x, y0: 210, w: vw + 2, h: vh + 2 }, 0); sizes.add(lt.w + 'x' + lt.h); }
+    computeLight({ x0: 0, y0: 100, w: vw + 2, h: vh + 2 }, 0); const w0 = lt.w, west = lt.tx0;
+    computeLight({ x0: W - vw - 2, y0: 100, w: vw + 2, h: vh + 2 }, 0);
+    if (sizes.size !== 1 || lt.w !== w0 || west < 0 || lt.tx0 + lt.w > TW) lightOk = false;
+    G.cam.viewW = vw; G.cam.viewH = vh; updateCamera(0, 5, 5, true); const a = G.cam.x >= vw / 2 - 1e-6 && G.cam.y >= vh / 2 - 1e-6; updateCamera(0, W + 99, H + 99, true);
+    if (!(a && G.cam.x <= W - vw / 2 + 1e-6 && G.cam.y <= H - vh / 2 + 1e-6)) clampOk = false;
+  }
+  ok(lightOk, 'light region keeps a constant size and stays inside the world at every zoom (view 200..700 cells wide)');
+  ok(clampOk, 'camera clamps to the world at every zoom');
+  G.cam.viewW = 400; G.cam.viewH = 225;
+}
+
+// ---- storms add snow (DESIGN §13): the in-game deposition scale (main.ts sets rate 0.12, curve 2) ----
+{
+  generateWorld(1);
+  const win = { x0: 700, y0: 150, x1: 830, y1: 330 };
+  const run = (sf: number, seconds: number) => {
+    Object.assign(G.win, win); G.player = null as never; G.wind = 0; G.ambientT = -25; G.snowfall = sf; G.storm = sf;
+    initHeat(); initSim(); snowCfg.rate = 0.12; snowCfg.curve = 2;
+    G.snowfall = 0; for (let i = 0; i < 20 * 60; i++) stepSim(1 / 60);                // let the freshly generated loose snow settle first
+    G.snowfall = sf;
+    let a = 0; for (let x = 740; x < 800; x++) { let y = 150; while (at(x, y) === MAT.AIR) y++; a += y; }
+    for (let i = 0; i < seconds * 60; i++) stepSim(1 / 60);
+    let b = 0; for (let x = 740; x < 800; x++) { let y = 150; while (at(x, y) === MAT.AIR) y++; b += y; }
+    return (a - b) / 60;
+  };
+  const calm = run(0.1, 60), storm = run(1, 60);
+  ok(storm >= 1 && storm <= 3.6, 'a storm (snowfall 1) adds ~1.8 cells of snow per minute of play (a 12 h storm ~ 9 cells)', `(${storm.toFixed(2)} cells/min)`);
+  ok(calm < 0.15 && storm > calm * 8, 'calm weather adds almost nothing, a storm adds most of the snow', `(calm ${calm.toFixed(3)}, storm ${storm.toFixed(2)} cells/min)`);
+  snowCfg.rate = 1; snowCfg.curve = 1;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

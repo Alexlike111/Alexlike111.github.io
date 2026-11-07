@@ -111,7 +111,7 @@ registerTest('inventory', 'разделить пополам / по одному
 registerTest('inventory', 'вес: слова о нагрузке, предел подъёма, замедление, не бегать после 140 %, пот и выносливость', async (t: TestCtx) => {
   await keepSearch(async () => {
     const p = scene(); clearInventory();
-    t.expect(WEIGHT_SOFT === 25 && WEIGHT_RUN === 35 && WEIGHT_MAX > WEIGHT_RUN, 'пороги веса 25 / 35 кг');
+    t.expect(WEIGHT_SOFT === 60 && WEIGHT_RUN === 80 && WEIGHT_MAX === 100, 'пороги веса 60 / 80 / 100 кг');
     const lv = (kgs: number) => { clearInventory(); inv.slots[P0] = { id: 'stone', n: Math.floor(kgs / 4) }; return loadLevel(); };
     t.expect(lv(0) === 0 && lv(16) === 1 && lv(28) === 2 && lv(36) === 3 && lv(56) === 4, 'уровни нагрузки: ' + [lv(0), lv(16), lv(28), lv(36), lv(56)].join());
     t.expect(/тяжело/.test(loadWords(30)) && /не бежать/.test(loadWords(40)) && /не поднять/.test(loadWords(60)), 'слова об эффекте');

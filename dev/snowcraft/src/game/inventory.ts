@@ -114,10 +114,10 @@ export function weight(): number {
   if (inv.sled?.hitched) sum(inv.sled.slots, 0.35);
   return w;
 }
-// DESIGN §12: 25 kg base load. Above it: slower walk, more sweat, faster stamina drain; above 140 % (35 kg) no running; at WEIGHT_MAX nothing more can be lifted.
-export const WEIGHT_SOFT = 25;      // kg: the comfortable load, slowdown starts above
-export const WEIGHT_RUN = 35;       // kg (140 %): cannot run any more
-export const WEIGHT_MAX = 55;       // kg: crawling, nothing more can be picked up
+// DESIGN §12 (owner: 100 kg pack). Comfortable load up to 60 kg; above it: slower walk, more sweat, faster stamina drain; above 80 kg no running; at WEIGHT_MAX (100 kg) nothing more can be lifted.
+export const WEIGHT_SOFT = 60;      // kg: the comfortable load, slowdown starts above
+export const WEIGHT_RUN = 80;       // kg: cannot run any more
+export const WEIGHT_MAX = 100;       // kg: crawling, nothing more can be picked up
 const LS = strings('inv', {
   l0: 'налегке', l1: 'нормально', l2: 'тяжело: медленнее, потеешь', l3: 'перегруз: не бежать, быстро выдыхаешься', l4: 'не поднять: брось что-нибудь',
 });
