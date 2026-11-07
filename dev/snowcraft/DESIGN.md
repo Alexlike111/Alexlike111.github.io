@@ -17,7 +17,7 @@ Visual identity (must NOT read as a forest/ore sandbox): **no trees anywhere** (
 | zone (x cells) | content |
 |---|---|
 | 0–60 | cliff wall (world edge) |
-| 60–360 **Cape & mine** | rocky hill/cliff; adit of the abandoned **coal mine «Шахта №3»** going into permafrost and rock: timbered tunnels (LOG/PLANK supports), rails, a cart, coal seams (COAL), a soapstone vein (SOAPSTONE), a collapsed section to dig through, a sealed **methane pocket** in a side drift (a lit lamp/torch near it = explosion), a miner's hut chamber with a chest (lamp, pick, notes). Deeper: rock, an underground ice lake. |
+| 60–360 **Cape & mine** | rocky hill/cliff; adit of the abandoned **coal mine «Шахта №3»** going into permafrost and rock: timbered tunnels (LOG/PLANK supports), rails, a cart, coal seams (COAL), a soapstone vein (SOAPSTONE), a collapsed section to dig through, a miner's hut chamber with a chest (lamp, pick, notes). Deeper: rock, an underground ice lake. |
 | 360–520 **Old cairn** | hill with a stone cairn + tin box (note #1 of the 1890s expedition); lichen patches (LICHEN) on tundra; ptarmigan. |
 | 520–900 **Station «Мыс Безмолвия»** | main house (LOG walls, PLANK floor/roof, GLASS window, door): stove (coal), bed, table (workbench), shelves (chest), **radio** (broken — 3 parts missing); generator shed with **fuel drums** (fixtures; diesel; a drum can become a brazier); meteo mast with anemometer + **barometer** (interact = forecast); kennel (Север starts here); a flag pole; supplies for ~2 days only. Wind gaps: the house is drafty until snow is banked against its walls (heat sim does this naturally — gaps are tiles of PLANK with low insulation; banking snow outside fixes it). |
 | 900–1100 **Beach** | gravel shore (GRAVEL), **driftwood** logs half-buried in snow (WOOD, the main firewood), a **whale skeleton** (WHALEBONE ribs: strong, light structural material), shore ice piled into blocks (ICE), a tide crack. |
@@ -43,7 +43,7 @@ Radio parts (for the icebreaker ending): **#1 лампа-триод** in the shi
 - **Fatigue**: work and cold drain energy; sleep restores; sleeping cold is dangerous (core keeps dropping while asleep — wake-up warning if core < 35.5).
 - **Wetness**: falling into water (instant soak + cold shock: get out within ~20 s; rolling in powder snow afterwards blots water — real technique, works as an action), melting snow on clothes in warm rooms, **sweating**: core > 37.4 while working → sweat → wet. Toggle the parka open/closed (V / button) to vent heat. Dry at a fire/stove or drying rack.
 - **HP** for injuries (bear, falls, collapses, explosion). Regen when fed, hydrated, warm and resting.
-- Death causes named: «замёрз», «обморожение и истощение», «утонул в полынье», «медведь», «угарный газ», «обвал в шахте», «взрыв метана», «упал», «голод», «жажда».
+- Death causes named: «замёрз», «обморожение и истощение», «утонул в полынье», «медведь», «угарный газ», «обвал в шахте», «упал», «голод», «жажда».
 
 ## 4. Snowcraft & building (tools.ts, fixtures.ts)
 - **Probe** (always): the cursor tooltip shows the material and, for snow/ice, **density in kg/m³** (snow aux → density) and ice thickness under the cursor (ice chisel needed for thickness of sea ice). Learning to read snow is the skill.
@@ -166,6 +166,9 @@ Principle: every object is a small system with a state, a visible/audible reacti
 - **Печная заслонка**: stove damper (open = hotter/faster burn, closed = longer burn, risk of CO if closed with a flame and no vent).
 **Extras (designer's pick, scoped small)**
 - **Ship «Заря»**: ship's bell (ring to scare the bear for a while, also attracts the fox), hatch-shelter (enter the hold: wind-proof, cold), cabin stove, the captain's chronometer (a collectible key to a note).
-- **Mine**: coal cart on rails (push along the rail to move coal; can run away downhill — danger), ventilation door (open/close to move methane away; wrong setting = gas builds up in the hut), timber supports (knock out = cave-in).
+- **Mine**: coal cart on rails (push along the rail to move coal; can run away downhill — danger), timber supports (knock out = cave-in).
 - **Nature/ice**: torosy (ice hummocks — chop into ice blocks for walls/water), snow cornices (cut to drop them on purpose or by accident), whale ribs (take bone; the skeleton is an arch shelter with skins), frozen barrels on the beach (chip free, contents: diesel/rope), the fox's den with its cache (reward for tracking).
 Implementation notes: reuse Fixture (state.ts) with `data` for state; add FixtureKind entries (generator, radio_dial, medkit, kettle, sonde, gramophone, hatch, shutter, damper, bell, cart, vent_door, torosa, cornice, barrel, den); art via src/art + draw.ts; behaviour in src/game/fixtures.ts (split big ones into src/game/fixtures_*.ts); sounds through the bus + sfxhooks; place them in locations.ts; self-tests for each.
+
+## 16. Simplification (owner request): NO METHANE
+Methane gas, gas pockets, gas explosions and the mine ventilation door are removed from the game. The mine stays dark and dangerous only through cave-ins (knock out timber supports), cold and the dark. Agents: do not generate METHANE or OIL pockets, do not build the vent door, drop the "взрыв метана" death cause and any methane hints/notes/tests. The engine material may stay in materials.ts (unused). Keep the design simple: when in doubt, cut a feature rather than add a system. Carbon monoxide in closed igloos stays (it is the "make a vent hole" mechanic).
