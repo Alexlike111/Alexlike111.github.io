@@ -5,7 +5,7 @@ import { G } from './state';
 import { worldInfo } from './worldgen';
 import { sites, SEA, LOC } from './locations';
 import { DOOR } from './snowpack';
-import { questState, GOALS, doorFrontSnow } from './quest';
+import { GOALS, doorFrontSnow } from './quest';
 import { W, H, mat, F_TREE, flags } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { computeLight, lt } from '../engine/light';
@@ -76,8 +76,8 @@ registerTest('world', 'глубокий снег: дверь дома под с�
   const topAt = (x: number, y0 = 100) => { let y = y0; while (y < H && mat[y * W + x] === MAT.AIR) y++; return y; };
   const snowDepth = (x: number, y0 = 100) => { let y = topAt(x, y0), n = 0; while ((mat[y * W + x] === MAT.SNOW || mat[y * W + x] === MAT.PACKED) && n < 90) { y++; n++; } return n; };
   t.expect(DOOR.crest >= 28 && DOOR.x0 === wall, 'сугроб у двери: crest ' + DOOR.crest);
-  const dug = questState.ended !== '' || G.time > 12 * 60 + 8 * 60 || doorFrontSnow() <= 14;    // the player may have dug it already
-  t.expect(dug || doorFrontSnow() >= 100, 'дверь на старте заметена: снега перед ней ' + doorFrontSnow());
+  const doorGoal = GOALS.find(g => g.id === 'door');
+  t.expect(!!doorGoal && (doorGoal.done() || doorFrontSnow() >= 100), 'дверь на старте заметена: снега перед ней ' + doorFrontSnow());
   t.expect(GOALS.some(g => g.id === 'door'), 'первая цель «Откопай дверь» есть в цепочке');
   let roof = 0; for (let y = 190; y < pad - 36; y++) for (let x = (LOC.house.L - 1) * 4; x < (LOC.house.R + 2) * 4; x++) if (mat[y * W + x] === MAT.SNOW) roof++;
   t.expect(roof > 500, 'снег на крыше дома: ' + roof + ' клеток');

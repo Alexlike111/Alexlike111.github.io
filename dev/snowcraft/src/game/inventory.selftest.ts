@@ -113,11 +113,12 @@ registerTest('inventory', 'вес: слова о нагрузке, предел 
     const p = scene(); clearInventory();
     t.expect(WEIGHT_SOFT === 60 && WEIGHT_RUN === 80 && WEIGHT_MAX === 100, 'пороги веса 60 / 80 / 100 кг');
     const lv = (kgs: number) => { clearInventory(); inv.slots[P0] = { id: 'stone', n: Math.floor(kgs / 4) }; return loadLevel(); };
-    t.expect(lv(0) === 0 && lv(16) === 1 && lv(28) === 2 && lv(36) === 3 && lv(56) === 4, 'уровни нагрузки: ' + [lv(0), lv(16), lv(28), lv(36), lv(56)].join());
-    t.expect(/тяжело/.test(loadWords(30)) && /не бежать/.test(loadWords(40)) && /не поднять/.test(loadWords(60)), 'слова об эффекте');
-    clearInventory(); add('log', 4); add('log', 3);                            // 42 kg + clothes
-    t.expect(fitByWeight('log', 4) === 2, 'до предела можно поднять ещё: ' + fitByWeight('log', 4));
+    t.expect(lv(0) === 0 && lv(40) === 1 && lv(70) === 2 && lv(90) === 3 && lv(104) === 4, 'уровни нагрузки: ' + [lv(0), lv(40), lv(70), lv(90), lv(104)].join());
+    t.expect(/тяжело/.test(loadWords(70)) && /не бежать/.test(loadWords(90)) && /не поднять/.test(loadWords(110)), 'слова об эффекте');
+    clearInventory(); add('log', 4); add('log', 4); add('log', 4); add('log', 2);           // 14 logs = 84 kg
+    t.expect(fitByWeight('log', 4) === 2, 'до предела (100 кг) можно поднять ещё два: ' + fitByWeight('log', 4));
     t.expect(roomFor('log', 100) > 4, 'места в сумке хватает');
+    clearInventory();
     // speed and running with different loads (walk right for one second on flat ground)
     const dist = (kgs: number, run: boolean) => {
       clearInventory(); if (kgs) inv.slots[P0] = { id: 'stone', n: Math.round(kgs / 4) };
@@ -125,19 +126,19 @@ registerTest('inventory', 'вес: слова о нагрузке, предел 
       const x0 = p.x; sc().key('KeyD', true); if (run) sc().key('ShiftLeft', true); steps(70); sc().key('KeyD', false); sc().key('ShiftLeft', false); steps(5);
       return p.x - x0;
     };
-    const light = dist(0, false), heavy = dist(40, false), runLight = dist(0, true), runHeavy = dist(40, true), runOk = dist(24, true);
+    const light = dist(0, false), heavy = dist(75, false), runLight = dist(0, true), runHeavy = dist(90, true), runOk = dist(56, true);
     t.expect(heavy < light * 0.85, `с грузом медленнее: ${heavy.toFixed(0)} против ${light.toFixed(0)}`);
     t.expect(runLight > light * 1.3, 'налегке бег быстрее шага');
     t.expect(runHeavy < runLight * 0.6, `перегруз: бежать нельзя (${runHeavy.toFixed(0)} против ${runLight.toFixed(0)})`);
     t.expect(runOk > light * 1.3, 'в пределах нормы бег доступен');
-    // running with a load inside the 25..35 kg band drains stamina faster and costs more effort (sweat)
+    // running with a load inside the 60..80 kg band drains stamina faster and costs more effort (sweat)
     const effort = (kgs: number) => {
       clearInventory(); if (kgs) inv.slots[P0] = { id: 'stone', n: Math.round(kgs / 4) };
       p.x = 1000; p.y = 270; p.vx = p.vy = 0; p.stamina = 100; steps(10);
       sc().key('KeyD', true); sc().key('ShiftLeft', true); steps(80); const met = body.met, st = 100 - p.stamina; sc().key('KeyD', false); sc().key('ShiftLeft', false); steps(5);
       return { met, st };
     };
-    const e0 = effort(0), e1 = effort(28);
+    const e0 = effort(0), e1 = effort(72);
     t.expect(e1.st > e0.st * 1.05, `выносливость тратится быстрее: ${e1.st.toFixed(1)} против ${e0.st.toFixed(1)}`);
     t.expect(e1.met > e0.met, `усилие (пот) выше: ${e1.met.toFixed(2)} против ${e0.met.toFixed(2)}`);
     p.x = 1000; p.y = 270; p.vx = 0;
@@ -164,7 +165,7 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
     clearInventory(); for (let i = 0; i < NSLOT; i++) inv.slots[i] = { id: i < BELT ? 'tin' : 'scrap', n: i < BELT ? 8 : 12 };
     G.drops.length = 0; const full = mk('rope', 1, 0); steps(40);
     t.expect(count('rope') === 0 && G.drops.includes(full), 'нет места: не подбирается');
-    clearInventory(); inv.slots[P0] = { id: 'stone', n: 6 };                       // 24 kg
+    clearInventory(); inv.slots[P0] = { id: 'stone', n: 15 };                      // 60 kg: right at the comfortable load
     G.drops.length = 0; const w = mk('can', 4, 0); steps(40);
     t.expect(count('can') === 0 && G.drops.includes(w), 'вес на пределе: лёгкое не подбирается само');
     clearInventory();
@@ -179,10 +180,13 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
     const list2 = nearbyList(); t.expect(list2.length === 2, 'в списке два предмета');
     t.expect(takeNear(list2[1]) && count('log') + count('plank') === 1, 'выбор из списка берёт именно выбранное');
     void near; clearInventory(); G.drops.length = 0;
-    // too heavy to lift: refused with the item staying on the ground
-    clearInventory(); add('log', 4); add('log', 4); add('log', 1); G.drops.length = 0; const hv = mk('log', 4, 6);
+    // too heavy to lift: only what fits under the limit is taken, the rest stays on the ground
+    clearInventory(); for (let i = 0; i < 15; i++) add('log', 1); G.drops.length = 0; const hv = mk('log', 4, 6);       // 90 kg in the pack, 4 logs (24 kg) on the ground
     input.interactPressed = true; steps(3);
-    t.expect(weight() <= WEIGHT_MAX + 0.01 && (G.drops.includes(hv) || count('log') <= 11), 'подъём сверх предела: ' + weight().toFixed(1));
+    t.expect(weight() <= WEIGHT_MAX + 0.01 && count('log') === 16 && G.drops.includes(hv) && hv.n === 3, 'подъём сверх предела берёт только влезающее: ' + weight().toFixed(1) + ' кг, брёвен ' + count('log'));
+    clearInventory(); G.drops.length = 0; for (let i = 0; i < 17; i++) add('log', 1); mk('log', 1, 6);                  // already at the limit: nothing more
+    input.interactPressed = true; steps(3);
+    t.expect(count('log') === 17 && G.drops.length === 1, 'на пределе ничего не поднять');
   });
 });
 

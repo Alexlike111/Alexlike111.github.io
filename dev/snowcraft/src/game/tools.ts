@@ -751,7 +751,7 @@ function interactAction(T: Target, selId: string | null) {
   if (near.length) {
     const aimed = f && isBoxFixture(f) ? near.find(n => n.f === f) : undefined;
     if (aimed || near.length === 1) { takeNear(aimed ?? near[0]); return; }
-    holdE.t = 0; holdE.armed = true; holdE.list = near; return;      // several candidates: a tap takes the nearest, holding opens the list
+    holdE.t = 0; holdE.start = performance.now(); holdE.armed = true; holdE.list = near; return;      // several candidates: a tap takes the nearest, holding opens the list
   }
   if (dogInteract()) return;
   if (sledNear(p.x, p.y - 4)) { hitchSled(p.x, p.y); toast(S.sledUp, 'info'); return; }
@@ -767,14 +767,14 @@ function interactAction(T: Target, selId: string | null) {
   void tryLight;
 }
 /** E pressed with several things in reach: released quickly = take the nearest in front, held = open the «Рядом» list (ui/bag.ts shows it). */
-export const holdE = { armed: false, t: 0, list: [] as Near[] };
+export const holdE = { armed: false, t: 0, start: 0, list: [] as Near[] };
 function stepInteractHold(dt: number) {
   if (!holdE.armed) return;
   holdE.t += dt;
-  const down = isKeyDown('KeyE');
-  if (!down || holdE.t >= 0.4) {
+  const down = isKeyDown('KeyE'), held = Math.max(holdE.t, (performance.now() - holdE.start) / 1000);        // real time too: a slow frame must not stretch the hold
+  if (!down || held >= 0.4) {
     holdE.armed = false;
-    if (down && holdE.t >= 0.4) { nearUi.open = true; return; }
+    if (down && held >= 0.4) { nearUi.open = true; return; }
     const cur = nearbyList(); if (cur.length) takeNear(cur[0]);
   }
 }

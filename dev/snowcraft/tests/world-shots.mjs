@@ -22,6 +22,12 @@ const DEVICES = [
   { id: 'desktop', opts: { viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 } },
   { id: 'phone', opts: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } },
 ];
+// --deep: the deep-snow views (DESIGN §13) and the zoom range (DESIGN §14): the buried station door, the lee field, the cape lee, the iceberg cornices;
+// day 1 noon and night, at the default zoom and at both ends of the zoom range.  Output: shots/world-<device>-deep-<place>-<cond>[-z<i>].png
+const DEEP = [
+  { id: 'door', x: 702, y: 252 }, { id: 'roofs', x: 650, y: 250 }, { id: 'field', x: 524, y: 236 }, { id: 'capelee', x: 190, y: 168 }, { id: 'berg', x: 1380, y: 250 }, { id: 'fastice', x: 1200, y: 282 },
+];
+const DEEP_CONDS = [CONDS[0], CONDS[1]];
 const up = async () => { try { return (await fetch(BASE)).ok; } catch { return false; } };
 let server = null;
 if (!(await up())) {
@@ -29,8 +35,9 @@ if (!(await up())) {
   for (let i = 0; i < 60 && !(await up()); i++) await new Promise(r => setTimeout(r, 500));
 }
 fs.mkdirSync('shots', { recursive: true });
+const deep = argv.includes('--deep');
 // clear our own previous output for the zones about to be shot, so stale frames never get mixed in
-for (const f of fs.readdirSync('shots')) if (/^world-(desktop|phone)-/.test(f) && zones.some(z => f.includes('-' + z + '-'))) fs.unlinkSync('shots/' + f);
+if (!deep) for (const f of fs.readdirSync('shots')) if (/^world-(desktop|phone)-/.test(f) && !f.includes('-deep-') && zones.some(z => f.includes('-' + z + '-'))) fs.unlinkSync('shots/' + f);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const errs = []; let n = 0;
 for (const dev of DEVICES) {
@@ -40,6 +47,29 @@ for (const dev of DEVICES) {
   page.on('pageerror', e => errs.push('PAGEERR ' + e.message));
   await page.goto(BASE);
   await page.waitForFunction(() => window.__view && window.__view.ready, null, { timeout: 90000 });
+  if (deep) {
+    for (const f of fs.readdirSync('shots')) if (new RegExp('^world-' + dev.id + '-deep-').test(f)) fs.unlinkSync('shots/' + f);
+    const zoom = await page.evaluate(() => import('/src/engine/zoom.ts').then(m => ({ n: m.zoomCount() })));
+    for (const place of DEEP) for (const c of DEEP_CONDS) for (const zi of [-1, 0, zoom.n - 1]) {
+      await page.evaluate(async ([place, c, zi]) => {
+        const v = window.__view, z = await import('/src/engine/zoom.ts');
+        v.hud(false); v.clearIgloos && v.clearIgloos(); v.lamp(false);
+        v.setDay(c.day); v.setHour(c.hour); v.setStorm(0);
+        if (v.setAurora) v.setAurora(0); if (v.setMoon) v.setMoon(0.3);
+        if (zi < 0) z.resetZoom(); else z.setZoomIndex(zi);
+        v.teleport(place.x, place.y);
+        if (c.extra) new Function('v', c.extra)(v);
+      }, [place, c, zi]);
+      await page.waitForTimeout(120);
+      await page.evaluate(() => window.__view.step(6));
+      await page.waitForTimeout(250);
+      await page.screenshot({ path: `shots/world-${dev.id}-deep-${place.id}-${c.id}${zi < 0 ? '' : '-z' + zi}.png` });
+      n++;
+    }
+    await page.evaluate(() => import('/src/engine/zoom.ts').then(m => m.resetZoom()));
+    await ctx.close();
+    continue;
+  }
   for (const z of zones) for (const c of CONDS) {
     await page.evaluate(([z, c]) => {
       const v = window.__view;

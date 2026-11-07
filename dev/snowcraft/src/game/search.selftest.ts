@@ -47,19 +47,19 @@ registerTest('search', 'обыск: предметы появляются по �
   await keep(async () => {
     const p = scene(); clearInventory(); void p;
     const f = chestAt();
-    openContainer(f); await showPanel();
+    const f0 = G.frame; openContainer(f); await showPanel();
     t.expect(isOpen() && phase() === 'search', 'контейнер открыт и идёт обыск: ' + phase());
     t.expect(revOf(openBox.box!) === 0 && hiddenCount() === 6, 'вначале ничего не найдено');
     t.expect(moveStack({ z: 'box', i: 0 }, { z: 'inv', i: BELT }) === 0, 'нельзя взять ненайденное');
-    const times: number[] = []; let last = 0, prev = 0;
+    const times: number[] = []; let last = f0, prev = 0;
     for (let tick = 1; tick <= 60 * 14 && revOf(openBox.box!) < 6; tick++) {
       steps(1);
       const r = openBox.box ? revOf(openBox.box) : prev;
-      if (r > prev) { times.push((tick - last) / 60); last = tick; prev = r; if (r < 6) t.expect(hiddenCount() > 0, 'пока не всё найдено, на дне что-то есть'); }
+      if (r > prev) { times.push((G.frame - last) / 60); last = G.frame; prev = r; if (r < 6) t.expect(hiddenCount() > 0, 'пока не всё найдено, на дне что-то есть'); }
     }
     t.expect(times.length === 6, 'найдено 6 предметов: ' + times.length);
     const lo = Math.min(...times), hi = Math.max(...times);
-    t.expect(lo >= 0.55 && hi <= 1.5 * 1.1 + 0.1, `каждый предмет 0,6–1,5 с (×1,1 за размер): ${lo.toFixed(2)}…${hi.toFixed(2)}`);
+    t.expect(lo >= 0.6 && hi <= 1.5 * 1.1 + 0.05, `каждый предмет 0,6–1,5 с (×1,1 за размер): ${lo.toFixed(2)}…${hi.toFixed(2)}`);
     t.expect(new Set(times.map(x => x.toFixed(2))).size >= 3, 'время поиска разное: ' + times.map(x => x.toFixed(2)).join(' '));
     t.expect(phase() === 'done' && hiddenCount() === 0, 'всё найдено: готово');
     // a shelf is quicker than a ship hold; a bigger pile takes longer per item
@@ -190,7 +190,7 @@ registerTest('search', 'положить в ящик: сразу известн�
     t.expect(stashSelected(cache) && cache.items!.length === 1 && count('fat') === 0, 'G кладёт в тайник');
     // weight cap on pulling out
     clearInventory(); const heavy = chestAt([{ id: 'log', n: 4 }, { id: 'log', n: 4 }, { id: 'log', n: 4 }], { known: true });
-    add('log', 4); add('log', 4); add('log', 3);          // 66 kg: over the cap already
+    for (let i = 0; i < 5; i++) add('log', 4);            // 120 kg: over the cap already
     openContainer(heavy); await showPanel(); steps(5);
     const before = count('log'); takeAllFound();
     t.expect(count('log') === before && weight() >= WEIGHT_MAX, 'сверх предела веса ничего не берётся: ' + count('log'));

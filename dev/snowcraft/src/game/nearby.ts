@@ -10,7 +10,7 @@ import { addLayer } from '../engine/render';
 import { inv, add, dropDur, backpacks, weight, unitWeight, fitByWeight, roomFor, thrown, hitchSled, sledNear, WEIGHT_SOFT } from './inventory';
 import { getItem, itemName } from './items';
 import { FIXTURE_DEFS } from './fixtures';
-import { openContainer, openPack } from './search';
+import { openContainer, openPack, boxTitle } from './search';
 
 const S = strings('near', {
   picked: 'Взял: {name}', heavy: 'Не поднять: слишком тяжело', full: 'В сумке нет места', sled: 'Нарты', pack: 'Твой рюкзак', sledUp: 'Запрягся в нарты',
@@ -59,7 +59,7 @@ export function nearbyList(): Near[] {
   out.sort((a, b) => a.dist - b.dist);
   return out;
 }
-const fixtureTitle = (f: Fixture) => ({ chest: 'Сундук', shelf: 'Полка', cache: 'Тайник', cairn: 'Тур', cart: 'Вагонетка' } as Record<string, string>)[f.kind] ?? f.kind;
+const fixtureTitle = (f: Fixture) => boxTitle(f.kind);
 
 /** Take a lying drop into the pack (as much as the slots and the load allow). Returns how many were taken. */
 export function pickDrop(d: Drop, quiet = false): number {

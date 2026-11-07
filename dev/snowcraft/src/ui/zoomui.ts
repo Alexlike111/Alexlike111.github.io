@@ -14,7 +14,7 @@ const CSS = `
 #zoomlab{position:fixed;left:50%;bottom:calc(128px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:46;pointer-events:none;opacity:0;transition:opacity .25s;
   font:700 14px 'Jura',system-ui,sans-serif;color:#e8f4ff;background:rgba(8,16,30,.82);border:1px solid rgba(124,198,238,.5);border-radius:4px;padding:3px 12px;white-space:nowrap;text-shadow:0 1px 0 #05080f}
 #zoomlab.on{opacity:1}
-body.touch-ui #zoomlab{left:calc(60px + env(safe-area-inset-left,0px));bottom:auto;top:calc(88px + env(safe-area-inset-top,0px));transform:none}
+body.touch-ui #zoomlab{left:calc(62px + env(safe-area-inset-left,0px));bottom:auto;top:calc(134px + env(safe-area-inset-top,0px));transform:none}
 #zoompanel{position:fixed;left:50%;top:54%;transform:translateX(-50%);z-index:47;display:none;min-width:min(340px,86vw);box-sizing:border-box;padding:10px 16px 12px;
   background:rgba(8,16,30,.9);border:1px solid rgba(124,198,238,.5);border-radius:6px;font-family:'Jura',system-ui,sans-serif;color:#e8f4ff;text-shadow:0 1px 0 #05080f}
 #zoompanel h4{margin:0 0 6px;font:700 15px 'Jura',system-ui,sans-serif;letter-spacing:.04em;color:#ffc46e}
@@ -29,7 +29,7 @@ body.touch-ui #zoomlab{left:calc(60px + env(safe-area-inset-left,0px));bottom:au
 let lab: HTMLElement | null = null, panel: HTMLElement | null = null, labTimer = 0;
 let hostControl: { sync: () => void }[] = [];
 
-const labelText = () => fmt(S.label, { i: zoomIndex() + 1, n: zoomCount() }) + ' · ' + fmt(S.cells, { c: zoomCells() });
+const labelText = () => fmt(S.label, { i: zoomIndex() + 1, n: zoomCount() }) + (G.mobile ? '' : ' · ' + fmt(S.cells, { c: zoomCells() }));
 
 /** A zoom control (− slider +) inside any container (the settings panel). Returns the element; it keeps itself in sync with zoom changes. */
 export function mountZoomControl(host: HTMLElement): HTMLElement {

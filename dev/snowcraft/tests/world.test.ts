@@ -13,7 +13,7 @@ import { skyState, updateSkyState } from '../src/engine/sky';
 import { updateCamera, clampCamera } from '../src/engine/camera';
 import { initSim, stepSim, snowCfg } from '../src/engine/sim';
 import { initHeat } from '../src/engine/heat';
-import { DOOR, snowpackCfg, tundraSnow, stationSnow, finishSnow } from '../src/game/snowpack';
+import { DOOR, CLIFF, snowpackCfg, tundraSnow, stationSnow, finishSnow } from '../src/game/snowpack';
 import { zoomScales, chooseScale, ZOOM_MIN_CELLS, ZOOM_MAX_CELLS, setZoomIndex, zoomIndex, zoomCells, resetZoom, stepZoom } from '../src/engine/zoom';
 import { rand, setSeed } from '../src/engine/grid';
 
@@ -60,8 +60,8 @@ ok(Math.min(...surfs.slice(0, 1990)) >= 110 && Math.max(...surfs) <= 304, 'surfa
 ok(surfaceAt(LOC.station.x0 + 20) === LOC.station.y && surfaceAt(LOC.station.x1 - 20) === LOC.station.y && surfaceAt(700) === LOC.station.y, 'station plateau is flat and tile-aligned', `(y ${LOC.station.y})`);
 ok(surfaceAt(150) < 200, 'the cape hill rises well above the tundra', `(y ${surfaceAt(150)})`);
 ok(surfaceAt(445) < surfaceAt(520) && surfaceAt(445) < 250, 'cairn hill is a summit', `(y ${surfaceAt(445)})`);
-let maxStep = 0, stepAt = 0; for (let x = 1; x < 1076; x++) { const d = Math.abs(surfaceAt(x) - surfaceAt(x - 1)); if (d > maxStep) { maxStep = d; stepAt = x; } }
-ok(maxStep <= 2, 'land surface has no cliffs (the hill flank is a walkable slope)', `(max step ${maxStep} @${stepAt})`);
+let maxStep = 0, stepAt = 0; for (let x = 1; x < 1076; x++) { if (x >= CLIFF - 3 && x <= CLIFF + 3) continue; const d = Math.abs(surfaceAt(x) - surfaceAt(x - 1)); if (d > maxStep) { maxStep = d; stepAt = x; } }
+ok(maxStep <= 2, 'land surface has no cliffs (the hill flank is a walkable slope), except the one snow cliff of the cape lee drift', `(max step ${maxStep} @${stepAt})`);
 
 // ---- sea level, water, ice sheet ----
 const firstWater = (x: number) => { let y = 200; while (y < H && at(x, y) !== MAT.WATER) y++; return y; };
@@ -179,7 +179,7 @@ ok(sp.spawnX > LOC.house.R * 4 + 4 && LOC.station.y - sp.spawnY >= 12 && LOC.sta
 // ---- deep snow (DESIGN §13): "по крышу в сугробах" ----
 {
   // the deep snow uses its own hash noise: running all its passes again draws nothing from the shared random stream
-  setSeed(123); const rA = rand(); setSeed(123); tundraSnow(terrain, 1); stationSnow(terrain); finishSnow(terrain, LOC.iceberg.x); const rB = rand();
+  setSeed(123); const rA = rand(); setSeed(123); tundraSnow(terrain, 1); stationSnow(terrain); finishSnow(terrain); const rB = rand();
   ok(rA === rB, 'deep snow draws nothing from the shared random stream (own hash noise)');
   snowpackCfg.on = false; generateWorld(1); const hOff = hash(); snowpackCfg.on = true; generateWorld(1);
   ok(hash() !== hOff, 'the deep snow changes the world (switchable off for tests)');
@@ -216,9 +216,11 @@ ok(sp.spawnX > LOC.house.R * 4 + 4 && LOC.station.y - sp.spawnY >= 12 && LOC.sta
   // fast ice keeps 0.3-0.8 m of snow so the seal holes stay findable
   { let a = 0, n = 0; const ds: number[] = []; for (let x = 1120; x < 1440; x += 2) { if (holeX.has(x) || (x > 1325 && x < 1425)) continue; const d = depthAt(x); a += d; n++; ds.push(d); } ds.sort((p, q) => p - q); const mx = ds[Math.floor(ds.length * 0.9)];
     ok(a / n >= 1.5 && a / n <= 8 && mx <= 12, 'fast ice carries 0.3-0.8 m of snow (seal holes stay findable)', `(avg ${(a / n * 0.09).toFixed(2)} m, p90 ${(mx * 0.09).toFixed(2)} m)`); }
-  // cornices: lips of packed snow hanging over a drop on the iceberg (they hold until cut)
-  { let lip = 0; for (let x = LOC.iceberg.x - 50; x < LOC.iceberg.x + 50; x++) for (let y = 200; y < 300; y++) if (at(x, y) === MAT.PACKED && at(x, y + 1) === MAT.AIR && at(x, y + 2) === MAT.AIR && flags[y * W + x] === 0) lip++;
-    ok(lip >= 6, 'snow cornices overhang the iceberg crest', `(${lip} cells with air under them)`); }
+  // cornices: a lip of packed snow hangs out over the wind-cut snow cliff at the east end of the cape's lee drift (it holds until the root is cut)
+  { let lip = 0, cliff = 0; for (let x = CLIFF - 6; x < CLIFF + 14; x++) for (let y = 120; y < 240; y++) if (at(x, y) === MAT.PACKED && at(x, y + 1) === MAT.AIR && at(x, y + 2) === MAT.AIR && at(x, y + 3) === MAT.AIR) lip++;
+    cliff = snowTopAt(CLIFF + 14) - snowTopAt(CLIFF - 8);
+    ok(lip >= 8 && cliff >= 12, 'snow cornice overhangs the wind-cut cliff of the cape lee drift', `(${lip} cells with air under them, cliff ${cliff} cells high)`);
+    ok(!worldInfo.iceField.ridges.some(r => r.x === LOC.iceberg.x && false) && (() => { let blocked = 0; for (let x = LOC.iceberg.x - 50; x < LOC.iceberg.x + 50; x++) { const t = snowTopAt(x); if (at(x, t - 1) === MAT.AIR && at(x, t - 2) === MAT.AIR) for (let k = 3; k <= 14; k++) if (at(x, t - k) === MAT.PACKED) blocked++; } return blocked === 0; })(), 'the iceberg crest carries no snow lip: the way across the fast ice (and the bear) stays open'); }
 }
 
 // ---- mine details ----

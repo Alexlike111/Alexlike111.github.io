@@ -23,6 +23,8 @@ const S = strings('search', {
   chest: 'Сундук', shelf: 'Полка', cairn: 'Тур', cart: 'Вагонетка', cache: 'Тайник', hold: 'Ящик из трюма', bare: 'Голые руки: мёрзнут',
 });
 const TITLE: Record<string, () => string> = { chest: () => S.chest, shelf: () => S.shelf, cairn: () => S.cairn, cart: () => S.cart, cache: () => S.cache };
+/** Player-facing name of a container fixture kind. */
+export const boxTitle = (kind: string) => TITLE[kind]?.() ?? S.chest;
 
 export const REACH_BOX = 44;       // cells: the container closes when the player walks further away
 interface Rec { rev: number; thawed: boolean }

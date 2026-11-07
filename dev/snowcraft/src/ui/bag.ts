@@ -73,8 +73,9 @@ const CSS = `
 #hud .pnl button.mini,#hud .pnl button.ab{font:inherit;font-size:12px;font-weight:700;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:2px 9px;cursor:pointer;min-height:30px}
 #hud .pnl button.mini:active,#hud .pnl button.ab:active{background:#24507a}
 #hud .pnl button.ab.pri{border-color:#8fe3b0;color:#d6ffe6}
+#hud .pnl button.ab:disabled{opacity:.4;cursor:default;border-color:#2c4a6a;color:#9db6cc}
 #hud .pnl button.ab.dng{border-color:#a8604c}
-#hud .pnl .bfoot{position:sticky;bottom:-9px;margin:6px -10px -8px;padding:6px 10px;background:rgba(8,14,26,.98);border-top:1px solid rgba(124,198,238,.28);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#hud .pnl .bfoot{position:sticky;bottom:-9px;margin:6px -10px -8px;padding:6px 10px;background:#080e1a;border-top:1px solid rgba(124,198,238,.28);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 #hud .pnl .bfoot .info{display:flex;align-items:center;gap:6px;min-width:0;flex:1 1 150px;font-size:12px}
 #hud .pnl .bfoot .info .ic{width:24px;height:24px}
 #hud .pnl .bfoot .info span{opacity:.75}
@@ -91,6 +92,7 @@ const CSS = `
 #hud .pnl .boxbtns{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 #hud .pnl .grid.sledg{grid-template-columns:repeat(6,1fr)}
 #hud .pnl .grid.sledg .cell{min-height:34px}
+#hud .pnl .grid.sledg{margin-bottom:6px}
 #hud .pnl h3.sub{margin-top:8px}
 #bagghost{position:fixed;z-index:60;pointer-events:none;width:44px;height:44px;margin:-22px 0 0 -22px;opacity:.92;image-rendering:pixelated}
 #bagghost img{width:40px;height:40px;image-rendering:pixelated}
@@ -168,7 +170,7 @@ function boxHtml(): string {
   if (ph !== 'chip') for (let i = 0; i < spare; i++) h += `<div class="cell empty" data-z="box" data-i="${rev}"></div>`;
   h += `</div>`;
   if (hiddenCount(b) > 0 && ph !== 'chip') h += `<div class="more">${S.more2}</div>`;
-  h += `<div class="boxbtns"><button class="ab pri" data-act="takeall"${rev ? '' : ' disabled'}>${S.takeAll}</button><button class="ab" data-act="closebox">${S.closeBox}</button></div></div>`;
+  h += `<div class="boxbtns"><button class="ab pri" data-act="takeall"${rev && ph !== 'chip' ? '' : ' disabled'}>${S.takeAll}</button><button class="ab" data-act="closebox">${S.closeBox}</button></div></div>`;
   return h;
 }
 /** Where would «Переложить» send the selected stack? (label of the button) */
@@ -212,14 +214,14 @@ export function bagHtml(): string {
   h += `<div class="grid" data-z="inv" data-i="-1">`;
   for (let i = 0; i < NSLOT; i++) h += cellHtml('inv', i);
   h += `</div>`;
-  if (sledOpen()) {
-    h += `<h3 class="sub"><span>${inv.sled!.hitched ? S.sledHere : S.sled}</span></h3><div class="grid sledg" data-z="sled" data-i="-1">`;
+  h += `</div><div class="col">`;
+  if (boxOpen.box) h += boxHtml();
+  if (sledOpen()) {            // the sled (dragged or parked beside you) is a second pack: it sits on top of the right column
+    h += `<h3${boxOpen.box ? ' class="sub"' : ''}><span>${inv.sled!.hitched ? S.sledHere : S.sled}</span></h3><div class="grid sledg" data-z="sled" data-i="-1">`;
     for (let i = 0; i < refSize('sled'); i++) h += cellHtml('sled', i);
     h += `</div>`;
   }
-  h += `</div><div class="col">`;
-  if (boxOpen.box) h += boxHtml();
-  else {
+  if (!boxOpen.box) {
     h += `<h3><span>${S.skills}</span><span class="dim">${fmt(S.known, { n: TECHS.filter(t => knows(t.id)).length, m: TECHS.length })}</span></h3>`;
     const st = p ? stationsAt(p.x, p.y - 8) : { none: true }, hf = p ? handsFrozen() : false;
     for (const [g, name] of GROUPS) {
@@ -419,7 +421,7 @@ export function attachBag(panel: HTMLElement, setOpen: (v: boolean) => void, cra
       listKey = k;
       let h = `<h3><span>${S.near}</span><span class="dim">${cur.length}</span></h3>`;
       cur.slice(0, 8).forEach((n, i) => {
-        const ic = n.item ? img(itemUrl(n.item)) : img(uiUrl('fine_work'));
+        const ic = img(itemUrl(n.item ?? (n.kind === 'sled' ? 'sled' : 'cache')));
         const act = n.kind === 'drop' ? S.takeOne : n.kind === 'sled' ? S.hitch : S.open;
         h += `<button class="nr${i === 0 ? ' first' : ''}${n.heavy ? ' heavy' : ''}" data-i="${i}">${ic}<span class="t">${n.label}<small>${n.kind === 'drop' ? kg(n.w) + (n.heavy ? ' · ' + S.heavyTag : '') : ''}</small></span><b>${act}</b></button>`;
       });

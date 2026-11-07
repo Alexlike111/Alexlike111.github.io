@@ -56,12 +56,32 @@ for (const prof of PROFILES) {
   log(`  worldgen ${info.genMs.toFixed(0)} ms, scale ${info.scale}, mobile ${info.mobile}, touch UI ${info.touchUi}`);
   await shot(page, prof, '01-start');
 
+  // ---- 0. DESIGN §13: the east door of the house is buried under the lee drift; the first objective is to dig it out (a staircase, with the shovel) ----
+  const door0 = await ev(page, () => { const S = window.__sc; S.setDay(1, 12); S.setWeather({ snowfall: 0, wind: 0, storm: 0 }); S.step(20); return { goal: S.mods.quest.objective(), front: S.mods.quest.doorFrontSnow(), tool: S.stats().sel, p: [Math.round(S.G.player.x), Math.round(S.G.player.y)] }; });
+  check('start: on the lee drift, the first objective is digging out the buried door (shovel selected)', /Откопай/.test(door0.goal) && door0.front > 100 && door0.tool === 1, JSON.stringify(door0));
+  await shot(page, prof, '00-buried-door');
+  const dug = await ev(page, () => {
+    const S = window.__sc, G = S.G, held = S.mods.inv.held, t0 = G.realTime;
+    S.selectItem('shovel');
+    let digs = 0, throws = 0;
+    const airTile = (tx, ty) => { let air = 0; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if (S.cell(tx * 4 + i, ty * 4 + j) === 0) air++; return air >= 14; };
+    for (let ty = 61; ty < 68; ty++) for (const tx of [173, 172, 171]) {
+      let guard = 0;
+      while (!airTile(tx, ty) && guard++ < 12) { if (held.load > 26) { S.act('dig', 760, 250, 1.4); throws++; } S.act('dig', tx * 4 + 2, ty * 4 + 2, 0.6); digs++; }
+      if (tx === 171) { S.teleport(692, Math.min(ty * 4 + 6, 271)); S.step(10); }
+    }
+    S.step(40);
+    return { digs, throws, secs: +(G.realTime - t0).toFixed(0), front: S.mods.quest.doorFrontSnow(), goal: S.mods.quest.objective() };
+  });
+  check('the shovel digs the door out in about a minute; the objective moves on to the stove', dug.front <= 14 && /печь/.test(dug.goal) && dug.secs < 150, JSON.stringify(dug));
+  await shot(page, prof, '00-door-dug');
+
   // ---- doors: the 8x20 player must be able to walk through every station / shed door (regression: doors used to be 5 tiles high under a stone lintel) ----
   const doorWalk = await ev(page, () => {
     const S = window.__sc, G = S.G, out = [];
     for (const d of G.fixtures.filter(f => f.kind === 'door')) {
       const west = d.data && d.data.side === 'west';
-      S.teleport(d.tx * 4 + (west ? -14 : 18), 272); S.step(8);
+      S.teleport(d.tx * 4 + (west ? -14 : 10), 272); S.step(8);
       S.act('interact', d.tx * 4 + 2, d.ty * 4 + 12);
       const key = west ? 'KeyD' : 'KeyA';
       S.key(key, true); S.stepFast(70); S.key(key, false);
@@ -70,6 +90,63 @@ for (const prof of PROFILES) {
     return out;
   });
   check('walks through every station / shed door', doorWalk.length >= 3 && doorWalk.every(r => r.passed), JSON.stringify(doorWalk));
+
+
+  // ---- 0b. zoom (DESIGN §14): Ctrl+wheel / +/- keys on the desktop (plain wheel stays the belt), pinch and +/- buttons on the phone; remembered; crisp integer scales ----
+  {
+    const zs = () => ev(page, () => { const S = window.__sc; return { s: S.G.cam.scale, i: S.zoom.index(), n: S.zoom.count(), cells: S.zoom.cells(), sel: S.G.player ? S.stats().sel : -1 }; });
+    await ev(page, () => { window.__sc.zoom.reset(); window.__sc.teleport(692, 252); window.__sc.step(10); });
+    const z0 = await zs();
+    check('zoom: default scale is an integer and 200..700 cells fit the width', Number.isInteger(z0.s) && z0.cells >= 200 && z0.cells <= 700 && z0.n >= 3, JSON.stringify(z0));
+    if (!prof.hasTouch) {
+      await page.mouse.move(800, 300);
+      await page.keyboard.press('Equal'); await page.waitForTimeout(80);
+      const z1 = await zs();
+      await page.keyboard.press('Minus'); await page.keyboard.press('Minus'); await page.waitForTimeout(80);
+      const z2 = await zs();
+      check('zoom: "+" zooms in one step, "-" zooms out', z1.i === z0.i + 1 && z2.i === z0.i - 1, JSON.stringify([z0, z1, z2]));
+      await page.keyboard.down('Control'); await page.mouse.wheel(0, -120); await page.keyboard.up('Control'); await page.waitForTimeout(150);
+      const z3 = await zs();
+      check('zoom: Ctrl+wheel up zooms in', z3.i === z2.i + 1, JSON.stringify([z2, z3]));
+      await page.mouse.wheel(0, 120); await page.waitForTimeout(150);
+      const z4 = await zs();
+      check('zoom: the plain wheel stays the belt (zoom unchanged, belt slot moved)', z4.i === z3.i && z4.sel !== z3.sel, JSON.stringify([z3, z4]));
+      const keep = await page.evaluate(() => localStorage.getItem('sc.zoom'));
+      check('zoom: the choice is remembered in localStorage', !!keep && Number(keep) >= 200 && Number(keep) <= 700, String(keep));
+    } else {
+      const rects = await page.evaluate(() => {
+        const r = (e) => { const b = e.getBoundingClientRect(); return { id: e.id || e.className, x: b.left, y: b.top, w: b.width, h: b.height }; };
+        const zin = r(document.getElementById('tb-zin')), zout = r(document.getElementById('tb-zout'));
+        const others = [...document.querySelectorAll('#touch .tb, #hud .bw, #hud .dial, #hud .stk, #hud .belt, #hud .bname')].filter(e => e.id !== 'tb-zin' && e.id !== 'tb-zout' && getComputedStyle(e).display !== 'none').map(r);
+        const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+        return { zin, zout, clash: others.filter(o => o.w > 0 && (hit(zin, o) || hit(zout, o))).map(o => o.id) };
+      });
+      check('zoom: the phone +/- buttons are >= 44 px and overlap no other button or HUD block', rects.zin.w >= 44 && rects.zin.h >= 44 && rects.zout.w >= 44 && rects.clash.length === 0, JSON.stringify(rects));
+      await page.touchscreen.tap(rects.zin.x + 22, rects.zin.y + 22); await page.waitForTimeout(150);
+      const z1 = await zs();
+      await page.touchscreen.tap(rects.zout.x + 22, rects.zout.y + 22); await page.touchscreen.tap(rects.zout.x + 22, rects.zout.y + 22); await page.waitForTimeout(150);
+      const z2 = await zs();
+      check('zoom: the "+" button zooms in, "-" zooms out', z1.i === z0.i + 1 && z2.i === z0.i - 1, JSON.stringify([z0, z1, z2]));
+      // pinch: two fingers on the right half of the world, spreading apart = closer
+      await ev(page, () => {
+        const stage = document.getElementById('stage');
+        const fire = (el, type, x, y, id) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: id === 31 }));
+        fire(stage, 'pointerdown', 520, 200, 31); fire(stage, 'pointerdown', 580, 200, 32);
+        fire(window, 'pointermove', 640, 200, 32); fire(window, 'pointermove', 740, 200, 32);
+        fire(window, 'pointerup', 740, 200, 32); fire(window, 'pointerup', 520, 200, 31);
+      });
+      await page.waitForTimeout(150);
+      const z3 = await zs();
+      check('zoom: pinch (fingers apart) zooms in', z3.i >= z2.i + 2, JSON.stringify([z2, z3]));
+    }
+    // a look at the extremes and the middle
+    for (const frac of [0, 0.5, 1]) {
+      await ev(page, (f) => { const S = window.__sc; S.zoom.set(Math.round((S.zoom.count() - 1) * f)); S.teleport(692, 252); S.step(12); }, frac);
+      await page.waitForTimeout(200);
+      await page.screenshot({ path: path.join(shots, `zoom-${prof.name}-${Math.round(frac * 100)}.png`) });
+    }
+    await ev(page, () => { window.__sc.zoom.reset(); window.__sc.step(3); });
+  }
 
   // ---- 1. walk, run, jump on open ground ----
   const walk = await ev(page, () => {
@@ -286,12 +363,20 @@ for (const prof of PROFILES) {
     const rect = (sel) => page.evaluate((q) => { const e = document.querySelector(q); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; }, sel);
     const cellSel = (z, i) => `#hud .pnl [data-z="${z}"][data-i="${i}"]`;
     const panelOpen = () => page.evaluate(() => document.querySelector('#hud .pnl').style.display === 'block');
-    const togglePanel = async () => { if (prof.hasTouch) { const r = await rect('#tb-bag'); await page.touchscreen.tap(r.x, r.y); } else await page.keyboard.press('KeyC'); await page.waitForTimeout(350); };
+    const togglePanel = async () => {
+      if (prof.hasTouch) {
+        // the touch buttons hide while the bag is open: the footer «закрыть» button closes it
+        const r = await panelOpen() ? await rect('#hud .pnl [data-act="close"]') : await rect('#tb-bag');
+        await page.touchscreen.tap(r.x, r.y);
+      } else await page.keyboard.press('KeyC');
+      await page.waitForTimeout(400);
+    };
     const tapCell = async (z, i) => { const r = await rect(cellSel(z, i)); if (prof.hasTouch) await page.touchscreen.tap(r.x, r.y); else await page.mouse.click(r.x, r.y); await page.waitForTimeout(250); };
     const setup = await ev(page, () => {
       const S = window.__sc, G = S.G, inv = S.mods.inv;
       S.setWeather({ ambientT: -22, wind: 0, storm: 0, snowfall: 0 });
       S.arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); S.teleport(1000, 272); S.step(10); G.drops.length = 0;
+      for (const q of G.fixtures.filter(q => q.tx * 4 > 900 && q.tx * 4 < 1100 && q.ty * 4 > 200 && q.ty * 4 < 300)) S.mods.fixtures.removeFixture(q);     // leftovers of the earlier steps (bed, lamp, ...)
       inv.clearInventory(); inv.giveStartKit();
       S.give('log', 2); S.give('coal', 8); S.give('biscuit', 7); S.give('rope', 3); S.give('fat', 4); S.give('can', 2);
       const f = S.mods.fixtures.placeFixture('chest', 247, 66, { force: true, items: [{ id: 'coal', n: 5 }, { id: 'rope', n: 2 }, { id: 'fat', n: 3 }, { id: 'tin', n: 2 }, { id: 'matches', n: 6 }, { id: 'flare', n: 2 }], data: { look: 'old' } });
@@ -307,7 +392,7 @@ for (const prof of PROFILES) {
     // select + split + drop with the action bar (touch path) / drag & drop (mouse path)
     const cell = (i) => cellSel('inv', i);
     if (prof.hasTouch) {
-      await tapCell('inv', 6 + 1);                                    // coal
+      await tapCell('inv', 6 + 1);                                    // the cans (start kit)
       await page.waitForSelector('#hud .pnl [data-act="half"]', { timeout: 2000 });
       const b = await rect('#hud .pnl [data-act="half"]'); check('action buttons are big enough to tap', b.h >= 47 && b.w >= 47, JSON.stringify(b));
       await page.touchscreen.tap(b.x, b.y); await page.waitForTimeout(250);
@@ -316,7 +401,7 @@ for (const prof of PROFILES) {
       await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(a.x + 20, a.y + 10, { steps: 3 }); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(250);
     }
     const afterMove = await ev(page, () => window.__sc.G && window.__sc.mods.inv.inv.slots.slice(6).map(s => s && s.id + 'x' + s.n));
-    check(prof.hasTouch ? 'split half works from the panel' : 'mouse drag moves a stack to another cell', prof.hasTouch ? afterMove.filter(x => x && x.startsWith('coal')).length === 2 : afterMove[9] && afterMove[2] === null, JSON.stringify(afterMove));
+    check(prof.hasTouch ? 'split half works from the panel' : 'mouse drag moves a stack to another cell', prof.hasTouch ? afterMove.filter(x => x && x.startsWith('can')).length === 2 : afterMove[9] && afterMove[2] === null, JSON.stringify(afterMove));
     await ishot('02-selected');
     await togglePanel();
     // E on the chest: panel with «Обыскиваю…», items appear one by one
@@ -373,6 +458,20 @@ for (const prof of PROFILES) {
     if (first) { if (prof.hasTouch) await page.touchscreen.tap(first.x, first.y); else await page.mouse.click(first.x, first.y); }
     await page.waitForTimeout(300);
     check('choosing from the list takes that thing', (await ev(page, () => window.__sc.mods.inv.count('coal') + window.__sc.mods.inv.count('log') + window.__sc.mods.inv.count('biscuit'))) >= 1);
+    // the sled is a second container while it is dragged
+    await ev(page, () => {
+      const S = window.__sc, I = S.mods.inv; I.clearInventory(); I.giveStartKit(); S.give('log', 3); S.give('coal', 10); S.hitchSled();
+      I.inv.sled.slots[0] = { id: 'seal_meat', n: 4 }; I.inv.sled.slots[1] = { id: 'stone', n: 6 }; I.inv.sled.slots[2] = { id: 'sealskin', n: 2 };
+    });
+    await togglePanel();
+    check('the dragged sled shows as a second grid', await page.evaluate(() => !!document.querySelector('#hud .pnl [data-z="sled"]')));
+    const logCell = await ev(page, () => window.__sc.mods.inv.inv.slots.findIndex(s => s && s.id === 'log'));
+    await tapCell('inv', logCell);                                      // logs -> sled by the «В нарты» button
+    const toSled = await page.$('#hud .pnl [data-act="move"]');
+    if (toSled) { const r = await rect('#hud .pnl [data-act="move"]'); if (prof.hasTouch) await page.touchscreen.tap(r.x, r.y); else await page.mouse.click(r.x, r.y); await page.waitForTimeout(300); }
+    check('«В нарты» moves the stack onto the sled', await ev(page, () => window.__sc.mods.inv.inv.sled.slots.some(s => s && s.id === 'log')));
+    await ishot('08-sled');
+    await togglePanel();
     void setup;
   }
   await shot(page, prof, '09-final');

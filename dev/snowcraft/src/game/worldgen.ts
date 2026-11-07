@@ -98,7 +98,7 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   if (snowpackCfg.on) stationSnow(T);
   cutSealHoles();
   sastrugi();
-  if (snowpackCfg.on) finishSnow(T, LOC.iceberg.x);
+  if (snowpackCfg.on) finishSnow(T);
   finalize();
 
   const sp = makeSpawn();              // a flat terrace on the lee drift, a few cells east of the buried station door
@@ -241,9 +241,9 @@ function buildSea() {
     const slab = clamp(0.2 + 0.9 * l + (fbm1(X / 41 + 13, 2) - 0.4) * 1.3, 0, 1);
     const loose = Math.round(clamp(2 + 3 * fbm1(X / 23 + 4, 2) - slab * 2, 0, 5));
     fillSnow(x, top - dep, top, Math.min(loose, dep), slab);
-    // DESIGN §13: the sea ice keeps only 0.3-0.8 m of snow (fast ice) / a bit more on the pack, so the seal holes stay findable.
+    // DESIGN §13: the fast ice keeps only 0.3-0.8 m of snow, so the seal holes stay findable (the pack ice keeps its cover: ridges, floes and the ship sit in it).
     // The thick cover above is generated first (the rand() draws stay exactly as they were) and the top of it is shovelled off again.
-    const want = Math.round(clamp(dep * (x < FAST1 ? 0.36 : 0.5), 0, 9));
+    const want = x < FAST1 ? Math.round(clamp(dep * 0.36, 0, 9)) : dep;
     if (dep > want) {
       for (let y = top - dep; y < top - want; y++) { const i = y * W + x; mat[i] = AIR; aux[i] = 0; flags[i] = 0; }
       for (let k = 0; k < Math.min(2, want); k++) { const i = (top - want + k) * W + x; mat[i] = SNOW; aux[i] = 8 + ((((x * 31 + k * 17) % 29)) | 0); }     // a thin loose crown again
