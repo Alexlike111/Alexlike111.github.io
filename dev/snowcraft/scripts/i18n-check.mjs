@@ -8,7 +8,7 @@ let bad = 0;
 for (const c of codes) {
   const f = path.join(dir, c + '.json'); if (!fs.existsSync(f)) { console.log(c, 'MISSING FILE'); bad++; continue; }
   let t; try { t = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { console.log(c, 'INVALID JSON', e.message); bad++; continue; }
-  const miss = Object.keys(src).filter(k => !(k in t) || typeof t[k] !== 'string' || !t[k].trim());
+  const miss = Object.keys(src).filter(k => src[k].trim() && (!(k in t) || typeof t[k] !== 'string' || !t[k].trim()));   // keys whose Russian source is empty may stay empty
   const extra = Object.keys(t).filter(k => !(k in src));
   const phBad = Object.keys(src).filter(k => typeof t[k] === 'string' && ph(t[k]) !== ph(src[k]));
   const same = Object.keys(src).filter(k => t[k] === src[k] && /[А-Яа-я]/.test(src[k])).length;

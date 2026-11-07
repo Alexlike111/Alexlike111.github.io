@@ -399,8 +399,11 @@ window.__sc = sc;
 
 // ---------------------------------------------------------------------------------------------------------------------
 async function boot() {
-  { let L: string | null = null; try { L = localStorage.getItem('sc.lang'); } catch { /* no storage */ }       // language: the stored choice, else the browser's (packs missing -> Russian)
-    i18nMod.setLang(((i18nMod.LANGS as readonly string[]).includes(L ?? '') ? L : i18nMod.detectLang()) as i18nMod.Lang); }
+  { // language: ?lang=xx, else the stored choice, else Russian for the automated tests (navigator.webdriver) and for #selftest (the checks read the Russian wording), else the browser's
+    let L: string | null = params.get('lang'); const ok = (x: string | null) => (i18nMod.LANGS as readonly string[]).includes(x ?? '');
+    if (!ok(L)) { try { L = localStorage.getItem('sc.lang'); } catch { L = null; } }
+    if (!ok(L)) L = (navigator as Navigator & { webdriver?: boolean }).webdriver || location.hash.includes('selftest') ? 'ru' : i18nMod.detectLang();
+    i18nMod.setLang(L as i18nMod.Lang); }
   initRender(canvas);
   initInput(canvas);
   initHud(uiRoot);

@@ -4,6 +4,7 @@
 // Tests drive the real game through window.__sc (main.ts) and may also import modules directly.
 // The runner shows live progress over the game, then a report with a "copy" button the player pastes to the developer.
 import { G } from './state';
+import { getLang, setLang } from '../content/i18n';
 
 export interface TestCtx {
   sc: any;                                            // window.__sc dev API
@@ -45,6 +46,7 @@ function deviceInfo(): string[] {
 /** Run all (or a group of) tests with a live overlay. Resolves with the report text. */
 export async function runSelfTest(filter?: string): Promise<string> {
   const sc = (window as any).__sc;
+  const prevLang = getLang(); if (prevLang !== 'ru') setLang('ru');          // the checks read the Russian wording; the player's language comes back at the end
   const box = document.createElement('div');
   box.id = 'selftest';
   box.style.cssText = 'position:fixed;inset:auto 8px 8px 8px;max-height:46vh;overflow:auto;z-index:9999;background:rgba(8,14,24,.92);color:#dbe6f0;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;border:1px solid #24364c;border-radius:6px;padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))';
@@ -102,5 +104,6 @@ export async function runSelfTest(filter?: string): Promise<string> {
   btn('Закрыть', () => box.remove());
   box.appendChild(ta); box.appendChild(bar);
   (window as any).__selftestReport = report;
+  if (prevLang !== 'ru') setLang(prevLang);
   return report;
 }

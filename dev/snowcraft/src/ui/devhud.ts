@@ -106,7 +106,7 @@ const CSS = `
 #hud .stk{position:absolute;left:50%;top:8px;transform:translateX(-50%);max-width:calc(100vw - 2*(150px + 16px));display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none}
 #hud .stk .p{position:static;text-align:center;max-width:100%}
 #hud .obj{font-size:14px;color:#e8f4ff;border-color:rgba(255,196,110,.5);pointer-events:auto;cursor:pointer;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
-#hud .obj b{color:#ffc46e;font-weight:600;margin-right:6px}
+#hud .obj b{color:#ffc46e;font-weight:600;margin-inline-end:6px}
 #hud .obj.col{padding-top:1px;padding-bottom:1px}
 #hud .obj.col .ot{display:none}
 #hud .chip{display:none;font-size:13px;padding:3px 8px}

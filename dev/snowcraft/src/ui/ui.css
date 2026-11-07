@@ -103,3 +103,9 @@ html body #ov .sub{font-weight:600}
 
 /* small Cyrillic in Pixelify Sans elsewhere (journal tabs / headings, quick-slot numbers) -> Jura */
 html body #hud .jr .tab,html body #hud .jr .paper h4,html body #hud .jr .q b,html body #hud .pnl .qrow b,html body #hud .pnl .cell small,html body #hud .pnl .grp{font-family:var(--f-ui)}
+
+/* Arabic (dir=rtl): the game layout (belt order = key order, panels, buttons) stays left-to-right; only the text inside is set right-to-left */
+html[dir=rtl] #hud, html[dir=rtl] #touch, html[dir=rtl] #ov { direction: ltr; }
+html[dir=rtl] #hud :is(.obj,.tip,.toast,.chip,.bname,.sub,.hint,.v,.dim,h3,h4,small,.cue,.nr,.t),
+html[dir=rtl] #ov :is(.cue,.card,.sub),
+html[dir=rtl] #touch :is(.ghost,.cap) { direction: rtl; unicode-bidi: plaintext; }
