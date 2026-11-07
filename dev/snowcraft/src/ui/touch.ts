@@ -45,9 +45,10 @@ const CSS = `
 #touch #tb-bag{width:64px;height:50px;right:calc(152px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-jour{width:64px;height:50px;right:calc(82px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-parka{width:64px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-zin,#touch #tb-zout{width:44px;height:44px;left:calc(10px + env(safe-area-inset-left,0px));font-size:24px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
-#touch #tb-zin{top:calc(74px + env(safe-area-inset-top,0px))}
-#touch #tb-zout{top:calc(124px + env(safe-area-inset-top,0px))}
+#touch #tb-zin,#touch #tb-zout{width:44px;height:44px;right:calc(76px + env(safe-area-inset-right,0px));font-size:24px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
+/* right side, between Журнал and Чутьё: away from the cue column on the left edge (overlay.ts) and the stick */
+#touch #tb-zin{top:calc(60px + env(safe-area-inset-top,0px))}
+#touch #tb-zout{top:calc(104px + env(safe-area-inset-top,0px))}
 #touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
 #touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
 #touch .ghost i{width:34px;height:34px;border-radius:50%;background:rgba(190,226,250,.22);border:2px solid rgba(190,226,250,.45)}

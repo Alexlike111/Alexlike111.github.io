@@ -95,6 +95,9 @@ registerTest('seasons', 'HUD: «День N · Ночь/Сумерки · кру�
     await t.frames(4);
     const el = document.querySelector('#hud .dial .day') as HTMLElement | null;
     t.expect(!!el && el.textContent.replace(/\u00a0/g, ' ') === 'День 20 · Ночь · круг 2' && !/\/\s*12/.test(el.textContent), 'HUD: ' + el?.textContent);
+    // the HUD keeps the day only until the second ring (night and the ring appear from ring 2 on, twilight shows its word)
+    setDay(5, 10); t.sc.step(14); await t.wait(80);
+    t.expect(el!.textContent.replace(/\u00a0/g, ' ') === 'День 5', 'в первом круге HUD показывает только день: ' + el!.textContent);
   });
 });
 

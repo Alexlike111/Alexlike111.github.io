@@ -51,11 +51,11 @@ registerTest('tools', 'установка: луч от головы — свой
     // natural wall (not the player's): the sight line from the head is cut
     tileBlock(253, 62, 1, 6, MAT.PACKED, 0, 0);     // rows 62..67 stand on the packed ground (row 68): a floating wall would slump under the support solver
     aimAt(s, 256 * 4 + 2, 66 * 4 + 2);
-    if (!/мешает стена/.test(target().reason ?? '')) throw new Error('чужая стена должна мешать: ' + JSON.stringify(target().reason));
+    if (!/мешает стена/i.test(target().reason ?? '')) throw new Error('чужая стена должна мешать: ' + JSON.stringify(target().reason));
     // the player's own block in the same place: one of them may stand in the line
     tileBlock(253, 62, 1, 6, MAT.SNOWBLOCK, auxOfDensity(300), F_PLACED);
     aimAt(s, 256 * 4 + 2, 66 * 4 + 2);
-    if (/мешает стена/.test(target().reason ?? '')) throw new Error('свой блок на пути не должен мешать: ' + JSON.stringify(target().reason));
+    if (/мешает стена/i.test(target().reason ?? '')) throw new Error('свой блок на пути не должен мешать: ' + JSON.stringify(target().reason));
   });
 });
 

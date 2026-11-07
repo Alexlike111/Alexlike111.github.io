@@ -1,5 +1,5 @@
-// HUD (DESIGN §10): body figure with per-extremity frost tint + thermometer / hydration / food / energy / wet / CO, sun-clock semicircle with
-// moon phase and barometer arrow, wind arrow, one top-centre stack (objective line, shelter chip, toasts: they can never overlap), belt with icons
+// HUD (DESIGN §10): body figure with per-extremity frost tint + core thermometer; vitals appear only inside their warning band, with a plain word;
+// sun-clock semicircle (day, clock; ring and night only from ring 2); wind and barometer rows only when they matter; one top-centre stack (objective line, shelter chip, toasts: they can never overlap), belt with icons
 // (count badge top-right, name only for the active slot), bag + crafting panel (icon grid, clothing slots, weight bar, recipes grouped by DESIGN
 // categories), death card, ending card. One pixel font (Pixelify Sans) shared with the touch controls. `?devhud` adds the old numeric readout.
 // File name kept for main.ts; the old developer list lives behind the flag.
@@ -12,10 +12,10 @@ import '@fontsource/jura/cyrillic-400.css';
 import '@fontsource/jura/latin-600.css';
 import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
-import { input } from '../engine/input';
+import { input, isKeyDown } from '../engine/input';
 import { strings, fmt } from '../content/i18n';
 import { inv, BELT, select, equip, unequip, beltCells } from '../game/inventory';
-import { getItem, itemName, stackIcon } from '../game/items';
+import { getItem, itemName, stackIcon, snowClass, snowClassName } from '../game/items';
 import { RECIPES, craft, craftedText } from '../game/recipes';
 import { stationsAt } from '../game/fixtures';
 import { target } from '../game/tools';
@@ -28,32 +28,32 @@ import { on } from '../game/bus';
 import { objective, objectiveTarget, initQuest, prog, journal } from '../game/quest';
 import { worldToScreen } from '../engine/render';
 import { renderBag, attachBag, bagWantsOpen } from './bag';
-import { seasonLabel } from '../game/seasons';
+import { phaseName } from '../game/seasons';
 import { renderJournalInto, journalClick, setJournalTab } from './journal';
 
 const S = strings('hud', {
-  core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', co: 'CO',
-  feels: 'ощущается {t}°', air: 'воздух {t}°',
-  sunDeep: 'солнце {e}°', moon: 'луна',
-  shelter: 'Укрытие', noShelter: 'нет укрытия', vent: 'отдушина ✓', noVentTxt: 'отдушины нет', temp: '{t}°',
+  core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', coWarn: 'Угар!',
+  feels: 'ощущается {t}°',
+  day: 'День {d}', night: 'Ночь', twilight: 'Сумерки', ring: 'круг {c}',
+  noShelter: 'нет укрытия', cold: 'Холодно', warm: 'Тепло', openVent: 'Откройте отдушину',
   dead: 'Ты погиб: {c}', deadHard: 'Хардкор: забег окончен',
   pause: 'ПАУЗА', free: 'свободная камера (F2)',
   bag: 'Сумка', craft: 'Мастерская', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть', pack: 'Пояс и сумка',
   slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь',
-  forecast: 'прогноз: {t}', noForecast: 'барометр: E у столба', baroUp: 'давление растёт', baroDown: 'давление падает',
-  storm: 'ПУРГА', wind: '{w} м/с', calm: 'штиль',
-  dens: 'плотность {d}', fine: 'тонкая работа: голые руки', needs: 'нужно: {s}', variant: 'вариант',
+  stormSoon: 'Пурга скоро', calmSky: 'Погода тихая',
+  storm: 'ПУРГА', windUp: 'Ветер усилился',
+  fine: 'тонкая работа: голые руки', needs: 'нужно: {s}', variant: 'вариант',
   gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
   stNone: '', stTable: 'стол', stFire: 'огонь', stDrum: 'бочка', stAntenna: 'мачта',
-  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс', hintJournal: 'журнал',
+  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс', hintJournal: 'журнал', hintSense: 'чутьё', hintHelp: 'подсказки', hintPause: 'пауза', hintMore: 'Все клавиши',
   jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
   lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
-  wThirst: 'хочется пить', wThirst2: 'жажда мучит', wHunger: 'сосёт под ложечкой', wHunger2: 'живот сводит', wTired: 'устал', wTired2: 'валишься с ног', wHurt: 'ранен', wHurt2: 'при смерти',
+  wThirst: 'Хочется пить', wHunger: 'Голодно', wTired: 'Устал', wHurt: 'Плохо', wWet: 'Мокро',
 });
 
 let root: HTMLElement, bw: HTMLElement, dial: HTMLElement, stack: HTMLElement, objEl: HTMLElement, chip: HTMLElement, toastBox: HTMLElement, beltEl: HTMLElement, bname: HTMLElement;
 let arrowEl: HTMLElement, arrowKey = '', arrowT = 0, arrowDir = NaN, arrowM = -1;
-let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement;
+let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, fullEl: HTMLElement, mainEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement;
 let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
 let beltKey = '', toastKey = '';
@@ -81,7 +81,7 @@ const CSS = `
 #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
 #hud .bw .rows{display:flex;flex-direction:column;gap:3px;min-width:104px}
 #hud .bw .r{display:flex;align-items:center;gap:5px;height:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
-#hud .bw .bar{display:flex;gap:1px;flex:1}
+#hud .bw .bar{display:flex;gap:1px;flex:1;min-width:30px}
 #hud .bw .bar i{flex:1;height:7px;background:#16273d;border-radius:1px}
 #hud .bw .bar i.on{background:#8fe3b0}#hud .bw .bar.warn i.on{background:#ffc46e}#hud .bw .bar.bad i.on{background:#ff7a68}
 #hud .bw .v{min-width:44px;text-align:right}
@@ -153,8 +153,11 @@ body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area
 #hud .pnl button.cl{font:inherit;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:3px 10px;cursor:pointer;min-height:30px}
 /* hints */
 #hud .hint{left:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));font-size:13px;display:none;max-width:calc(50vw - 230px);line-height:1.7}
-#hud .hint kbd{font:inherit;font-size:12px;background:#1b2f48;border:1px solid #4b7aa0;border-bottom-width:2px;border-radius:3px;padding:0 4px;margin-right:3px;color:#fff}
-#hud .hint span{margin-right:9px;white-space:nowrap;display:inline-block}
+#hud .hint kbd,#hud .hfull kbd{font:inherit;font-size:12px;background:#1b2f48;border:1px solid #4b7aa0;border-bottom-width:2px;border-radius:3px;padding:0 4px;margin-right:3px;color:#fff}
+#hud .hint span,#hud .hfull span{margin-right:9px;white-space:nowrap;display:inline-block}
+#hud .hint .q{pointer-events:auto;font:inherit;font-size:13px;color:#dff0ff;background:#13243a;border:1px solid #4b7aa0;border-radius:3px;min-width:24px;padding:0 5px;margin-left:2px;cursor:pointer;line-height:1.35}
+#hud .hint .hfull{display:none;font-size:12px;line-height:1.9;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid rgba(124,198,238,.25);pointer-events:none}
+#hud .hint .hfull.on{display:block}
 #hud .dev{left:8px;bottom:70px;font-size:11px;font-family:system-ui,sans-serif;display:block;white-space:pre}
 @media (max-width:1100px){#hud .hint{max-width:calc(50vw - 20px);bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
 /* phone: compact HUD (belt collapses to the active slot, the Пояс radial replaces it) */
@@ -162,7 +165,9 @@ body.touch-ui #hud{font-size:14px}
 body.touch-ui #hud .bw{padding:3px 5px;gap:5px}body.touch-ui #hud .bw canvas{width:24px;height:48px}
 body.touch-ui #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
 #hud .bw .rows{min-width:84px;gap:1px}body.touch-ui #hud .bw .r{height:13px;gap:3px}body.touch-ui #hud .bw .ic{width:12px;height:12px}
-body.touch-ui #hud .bw .bar i{height:5px}body.touch-ui #hud .bw .v{min-width:34px}body.touch-ui #hud .bw .sub{display:none}
+body.touch-ui #hud .bw .bar i{height:5px}body.touch-ui #hud .bw .v{min-width:34px}body.touch-ui #hud .bw .sub{font-size:11px;margin-top:0;white-space:nowrap}
+/* phone: a vital shows as its word only (the bar is squeezed out by the word, the words carry the warning) */
+body.touch-ui #hud .bw .bar{display:none}body.touch-ui #hud .bw .rows{min-width:0}body.touch-ui #hud .bw .r{white-space:nowrap}body.touch-ui #hud .bw .v{min-width:0;text-align:left;font-size:11px}
 body.touch-ui #hud .dial{left:150px;right:auto;top:8px;width:84px;padding:2px 3px}
 body.touch-ui #hud .dial canvas{width:78px;height:47px}
 body.touch-ui #hud .dial .day{font-size:11px;line-height:1.15}
@@ -262,13 +267,20 @@ export function initHud(host: HTMLElement) {
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
   objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.className = 'tbox'; toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
   beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
+  fullEl = document.createElement('div'); fullEl.className = 'hfull'; mainEl = document.createElement('div'); mainEl.className = 'hmain';
+  hintEl.appendChild(fullEl); hintEl.appendChild(mainEl);       // the full list sits above the row: the panel grows upward
   arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
-  hintEl.innerHTML = k('Space', S.hintJump) + k('WASD', S.hintMove) + k('Shift', S.hintRun) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('J', S.hintJournal) + k('1–9', S.hintBelt) + k('R', S.hintDome) + k('G', S.hintDrop);
+  // key hints: four keys at first (WASD, Space, ЛКМ, E); F / C / J join when first needed; the rest is behind «?» (H toggles it too)
+  try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); if (r && Array.isArray(r.learned)) hintMem.learned = r.learned.filter((x: unknown) => typeof x === 'string').slice(0, 12); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
+  hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
   if (!G.mobile) hintEl.style.display = 'block';
   if (DEV) { devEl = mk('dev'); }
-  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); });
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); shownKeys.clear(); playSec = 0; });
+  on('picked', () => reveal('C')); on('crafted', () => reveal('C'));                  // the first thing in the bag: the bag key
+  on('goal_done', () => reveal('J')); on('note_read', () => reveal('J'));                // the first goal or note: the journal key
+  on('tech_learned', (d: { how: string }) => { if (d.how !== 'start') reveal('J'); });
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
@@ -277,6 +289,34 @@ export function initHud(host: HTMLElement) {
   attachBag(panel, setPanelOpen, craftIdx);         // §12: drag & drop, tap-select, container panel, «Рядом» list (ui/bag.ts)
 }
 const shortcut = (key: string) => key;
+
+// ---- key hints (see initHud): what is shown, what the player has learned (kept in localStorage, never throws) ----
+const HKEY = 'sc.hints';
+const hintMem = { learned: [] as string[], full: false };
+const shownKeys = new Set<string>();      // progressive keys shown in this game
+const hkPrev = new Set<string>();         // F / C / J held last frame
+let hPrev = false, playSec = 0, hintKey = '';
+function saveHints() { try { localStorage.setItem(HKEY, JSON.stringify(hintMem)); } catch { /* storage blocked: the hints simply come back next time */ } }
+function reveal(k: string) { if (!shownKeys.has(k) && !hintMem.learned.includes(k)) shownKeys.add(k); }
+function learn(k: string) { shownKeys.delete(k); if (!hintMem.learned.includes(k)) { hintMem.learned.push(k); saveHints(); } }
+function toggleFull() { hintMem.full = !hintMem.full; saveHints(); hintKey = ''; }
+function renderHints() {
+  // «Чутьё» (sensesui.ts) appends its Q / X chips to the box: they belong to the «?» list, so they are taken out here
+  for (const n of Array.from(hintEl.children)) if (n !== fullEl && n !== mainEl) n.remove();
+  const extra = ['F', 'C', 'J'].filter(k => shownKeys.has(k) && !hintMem.learned.includes(k));
+  const key = extra.join('') + '|' + hintMem.full + '|' + !!G.mobile;
+  if (key === hintKey) return;
+  hintKey = key;
+  const k = (kb: string, label: string) => `<span><kbd>${kb}</kbd>${label}</span>`;
+  const labels: Record<string, string> = { F: S.hintEat, C: S.hintBag, J: S.hintJournal };
+  mainEl.innerHTML = k('WASD', S.hintMove) + k('Space', S.hintJump) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + extra.map(x => k(x, labels[x])).join('') +
+    `<button class="q" data-h="more" title="${S.hintMore}">?</button>`;
+  // the «?» list: every key that is not already in the row above it
+  const rest: [string, string][] = [['F', S.hintEat], ['C', S.hintBag], ['J', S.hintJournal], ['Shift', S.hintRun], ['V', S.hintParka], ['R', S.hintDome], ['G', S.hintDrop], ['Q', S.hintBelt], ['X', S.hintSense], ['1–9', S.hintBelt], ['H', S.hintHelp], ['Esc', S.hintPause]];
+  const row = ['WASD', 'Space', S.lmb, 'E', ...extra];
+  fullEl.innerHTML = rest.filter(([kb]) => !row.includes(kb)).map(([kb, label]) => k(kb, label)).join('');
+  fullEl.classList.toggle('on', hintMem.full && !G.mobile);
+}
 
 /** Put the probe tooltip next to the cursor but out of the HUD (body figure, dial, belt) and the touch buttons: try right/below, left/below, right/above, left/above, then clamp. */
 function placeTip(sx: number, sy: number) {
@@ -326,6 +366,10 @@ export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
   const titleOn = document.body.classList.contains('title-open');
+  if (p?.alive && !G.paused && !titleOn) playSec += realDt;
+  if (playSec >= 180) { reveal('F'); reveal('C'); reveal('J'); }                    // after 3 minutes of play the three keys show
+  for (const k of ['F', 'C', 'J']) { const d = isKeyDown('Key' + k); if (d && !hkPrev.has(k)) learn(k); if (d) hkPrev.add(k); else hkPrev.delete(k); }
+  const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) toggleFull(); hPrev = hDown;
   if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
   if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
@@ -336,7 +380,7 @@ export function updateHud(dt: number, realDt: number) {
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
   for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
-  const shown = pickToasts(document.body.classList.contains('touch-ui') ? 2 : 3);
+  const shown = pickToasts(2);                                          // at most two at once
   const tk = shown.map(t => t.text + t.kind).join('|');
   if (tk !== toastKey) {
     toastKey = tk; toastBox.innerHTML = '';
@@ -372,20 +416,29 @@ export function updateHud(dt: number, realDt: number) {
   setRow('core', p.core.toFixed(1) + '°', cls(p.core < 34, p.core < 36));
   setBar(rows.water, p.water, 15, 35); setBar(rows.food, p.food, 15, 35); setBar(rows.energy, p.energy, 12, 30); setBar(rows.hp, p.hp, 30, 60);
   // the body figure + core thermometer carry the state; a vital shows up (bar + words) only inside its warning band (?devhud keeps every number)
-  const vital = (k: string, v: number, bad: number, warn: number, w1: string, w2: string) => { const r = rows[k]; r.row.style.display = DEV || v < warn ? 'flex' : 'none'; if (!DEV) r.v.textContent = v < bad ? w2 : w1; };
-  vital('water', p.water, 15, 35, S.wThirst, S.wThirst2); vital('food', p.food, 15, 35, S.wHunger, S.wHunger2); vital('energy', p.energy, 12, 30, S.wTired, S.wTired2); vital('hp', p.hp, 30, 60, S.wHurt, S.wHurt2);
-  wetEl.style.display = p.wet > 0.12 ? 'flex' : 'none'; rows.wet.v.textContent = Math.round(p.wet * 100) + '%'; rows.wet.v.className = 'v ' + cls(p.wet > 0.6, p.wet > 0.25);
-  if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.co + ' ' + Math.round(p.co); } else alertEl.style.display = 'none';
-  subEl.textContent = fmt(S.air, { t: p.airT.toFixed(0) }) + ' · ' + fmt(S.feels, { t: p.feelT.toFixed(0) });
-  // ---- sun clock ----
+  const vital = (k: string, v: number, warn: number, word: string) => { const r = rows[k]; r.row.style.display = DEV || v < warn ? 'flex' : 'none'; if (!DEV) r.v.textContent = word; };
+  vital('water', p.water, 35, S.wThirst); vital('food', p.food, 35, S.wHunger); vital('energy', p.energy, 30, S.wTired); vital('hp', p.hp, 60, S.wHurt);
+  if (p.food < 35) reveal('F');                                                       // first hunger: the eat key appears
+  wetEl.style.display = DEV || p.wet > 0.25 ? 'flex' : 'none'; rows.wet.v.textContent = DEV ? Math.round(p.wet * 100) + '%' : S.wWet; rows.wet.v.className = 'v ' + cls(p.wet > 0.6, p.wet > 0.25);
+  if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.coWarn; } else alertEl.style.display = 'none';
+  subEl.textContent = fmt(S.feels, { t: p.feelT.toFixed(0) });
+  renderHints();
+  // ---- sun clock: the day and the clock; the night and the ring from ring 2 on (or at twilight) ----
   drawDial();
-  dayEl.textContent = seasonLabel().split(' · ').map(x => x.replace(/ /g, '\u00a0')).join(' · ');       // wrap only between the parts
+  const twi = phaseName() !== 'night';
+  let dayLabel = fmt(S.day, { d: G.day });
+  if (G.cycle >= 1 || twi) dayLabel += ' · ' + (twi ? S.twilight : S.night) + (G.cycle >= 1 ? ' · ' + fmt(S.ring, { c: G.cycle + 1 }) : '');
+  dayEl.textContent = dayLabel;
   clkEl.textContent = fmtClock();
   const know = knowsForecast();
-  const wdir = G.wind >= 0 ? 90 : -90, ws = Math.abs(G.wind);
-  windRow.innerHTML = ws < 1 ? S.calm : img(uiUrl('wind_arrow'), 'wa').replace('class="ic wa"', `class="ic wa" style="transform:rotate(${wdir}deg)"`) + fmt(S.wind, { w: ws.toFixed(0) });
+  // wind: a row only when it is strong (12 m/s and more) or in a storm; a word, no numbers
+  const wdir = G.wind >= 0 ? 90 : -90, windy = Math.abs(G.wind) >= 12 || G.storm > 0.2;
+  windRow.innerHTML = windy ? img(uiUrl('wind_arrow'), 'wa').replace('class="ic wa"', `class="ic wa" style="transform:rotate(${wdir}deg)"`) + S.windUp : '';
+  windRow.style.display = windy ? '' : 'none';
+  // barometer: a row only after the player has read it (knowsForecast); one word instead of the forecast sentence
   const falling = G.storm > 0.05 || (know && G.forecast.stormAt > 0 && G.forecast.stormAt - G.time < 12 * 60);
-  baroRow.innerHTML = know ? img(uiUrl(falling ? 'baro_down' : 'baro_up')) + `<span class="${falling ? 'warn' : ''}">${G.forecast.text}</span>` : `<span class="dim">${S.noForecast}</span>`;
+  baroRow.innerHTML = know && G.storm <= 0.2 ? img(uiUrl(falling ? 'baro_down' : 'baro_up')) + `<span class="${falling ? 'warn' : ''}">${falling ? S.stormSoon : S.calmSky}</span>` : '';
+  baroRow.style.display = baroRow.innerHTML ? '' : 'none';
   stormRow.innerHTML = G.storm > 0.2 ? img(uiUrl('storm')) + `<span class="bad">${S.storm}</span>` : (G.timeScale > 1 ? `<span class="warn">Zzz ×${G.timeScale}</span>` : '') + (freeCam ? `<span class="warn">${S.free}</span>` : '');
   stormRow.style.display = stormRow.innerHTML ? 'flex' : 'none';
   // ---- objective + shelter chip ----
@@ -394,7 +447,8 @@ export function updateHud(dt: number, realDt: number) {
   if (sh) {
     chip.style.display = 'block';
     const stars = '★'.repeat(sh.stars) + '☆'.repeat(4 - sh.stars);
-    chip.innerHTML = sh.closed ? `${S.shelter} ${stars} · ${fmt(S.temp, { t: sh.temp.toFixed(0) })} · ${sh.vent ? S.vent : S.noVentTxt}${sh.co > 8 ? ' · <span class="bad">CO ' + Math.round(sh.co) + '</span>' : ''}` : `<span class="warn">${sh.notes[0] ?? S.noShelter}</span>`;
+    // a closed shelter: stars and one phrase; CO only as «Откройте отдушину» when it is dangerous (> 8); warm = inside not below -6° (shelter.ts)
+    chip.innerHTML = sh.closed ? `${stars} ${sh.co > 8 ? `<span class="bad">${S.openVent}</span>` : sh.temp >= -6 ? S.warm : `<span class="warn">${S.cold}</span>`}` : `${stars} <span class="warn">${sh.notes[0] ?? S.noShelter}</span>`;
   } else chip.style.display = 'none';
   // ---- belt ----
   const cells = beltCells();
@@ -416,7 +470,7 @@ export function updateHud(dt: number, realDt: number) {
     });
     beltEl.innerHTML = h;
     const sel = inv.slots[inv.sel];
-    if (sel) { bname.style.display = 'block'; bname.textContent = itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + fmt(S.dens, { d: Math.round(sel.dur) }) : ''); } else bname.style.display = 'none';
+    if (sel) { bname.style.display = 'block'; bname.textContent = itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + snowClassName(snowClass(sel.dur)) : ''); } else bname.style.display = 'none';
   }
   if (panelOpen && panelAcc > 0.35) { panelAcc = 0; renderPanel(); }
   if (devEl) devEl.textContent = `core ${p.core.toFixed(2)} hands ${p.frost.hands | 0} feet ${p.frost.feet | 0} face ${p.frost.face | 0}\nwater ${p.water | 0} food ${p.food | 0} energy ${p.energy | 0} wet ${(p.wet * 100) | 0}% hp ${p.hp | 0} co ${p.co | 0}\nsun ${G.sunElev.toFixed(1)}° wind ${G.wind.toFixed(1)} storm ${G.storm.toFixed(2)}`;
@@ -430,4 +484,6 @@ function renderPanel() {
 }
 function renderJournal() { renderJournalInto(jEl); }      // tabs Цели · Знания · Записки · Карта · Вещества live in ui/journal.ts
 export const panelIsOpen = () => panelOpen || jOpen;
+/** Tests: a fresh first minute for the key hints (nothing revealed, the full list closed). */
+export function resetHintsForTest() { shownKeys.clear(); hintMem.learned = []; hintMem.full = false; playSec = 0; hintKey = ''; }
 void itemName;

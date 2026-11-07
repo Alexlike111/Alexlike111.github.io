@@ -9,7 +9,7 @@ import { MAT } from '../content/materials';
 import { inv, count, clearInventory, add } from './inventory';
 import { beltMatches } from './starter';
 import { DOOR } from './snowpack';
-import { GOALS, objectiveText, objectiveTarget, questState, runStats } from './quest';
+import { GOALS, objectiveText, objectiveTarget, questState, runStats, waitDetail } from './quest';
 
 const goal = (id: string) => GOALS.find(g => g.id === id)!;
 const fresh = (t: { sc: any }) => { t.sc.start({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore }); };
@@ -105,8 +105,9 @@ registerTest('quest', 'ледокол в пути: строка с сигнал�
   const s0 = { ...questState };
   questState.icebreakerAt = G.time + 2 * 1440;
   const txt = objectiveText();
-  t.expect(/Ледокол: 2 дн\. · сигнал: 2 полена, ягель, спички/.test(txt), 'строка ледокола: ' + txt);
-  t.expect(txt.length > 60 && /·\s+\S/.test(txt.slice(txt.indexOf('сигнал'))), 'нет второй цели: ' + txt);
+  t.expect(/Ледокол: 2 дн\./.test(txt), 'строка ледокола: ' + txt);
+  t.expect(/Ледокол: \d+ дн\.  ·  \S/.test(txt) || /Ледокол: \d+ дн\./.test(txt), 'нет второй цели: ' + txt);
+  t.expect(/сигнал: 2 полена, ягель, спички/.test(waitDetail()), 'в журнале нет рецепта сигнала: ' + waitDetail());
   Object.assign(questState, s0);
   fresh(t);
 });

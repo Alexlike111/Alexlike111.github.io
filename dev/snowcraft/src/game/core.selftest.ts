@@ -726,7 +726,7 @@ registerTest('input', 'сенсорное управление: кнопки ≥
   } else t.log('сенсорный слой скрыт (десктоп) — размеры не проверялись');
   touch.x = 1; poll(); ok(t, input.moveX === 1, 'стик → moveX'); touch.x = 0; poll();
 });
-registerTest('input', 'мир: подсказка под курсором содержит материал и плотность снега', async () => {
+registerTest('input', 'мир: подсказка под курсором содержит материал и слово о плотности снега', async () => {
   await sandbox(() => {
     const p = scene({ dens: 280, loose: 0 });
     const s = sc(); s.selectItem('shovel'); s.render(0);
@@ -735,7 +735,7 @@ registerTest('input', 'мир: подсказка под курсором сод
     if (!T.lines.length) throw new Error('пусто');
     s.aim(1006, 274); steps(2);
     const l = target().lines.join(' ');
-    if (!/наст/.test(l) || !/кг\/м³/.test(l)) throw new Error('нет плотности: ' + l);
+    if (!/наст/.test(l) || !/рыхлый|хороший|плотный/.test(l)) throw new Error('нет слова о плотности: ' + l);
   });
 });
 void TS; void MATS; void BELT; void equip; void pickupFixture; void planFixture; void sinterMinutes; void stepTools; void stepDrops; void TUNE; void wake; void aux;

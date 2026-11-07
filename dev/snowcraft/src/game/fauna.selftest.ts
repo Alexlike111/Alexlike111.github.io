@@ -234,13 +234,13 @@ registerTest('quest', 'цепочка первого дня и ледокол: �
   emit('door_dug', {}); t.expect(/печь/i.test(objective()), 'третья цель — печь: ' + objective());
   emit('fire_lit', { kind: 'stove' }); t.expect(/барометр/i.test(objective()), 'четвёртая цель: ' + objective());
   emit('barometer', {}); t.expect(/журнал смотрителя/i.test(objective()), 'третья цель — прочесть журнал: ' + objective());
-  readNote('s1'); t.expect(/★★|Утепли/.test(objective()), 'четвёртая цель: ' + objective());
-  emit('shelter', { stars: 1, closed: true, vent: true }); t.expect(/Утепли/.test(objective()), 'одна звезда не засчитана');
-  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/Утепли/.test(objective()), 'укрытие без своих блоков не засчитано (станция не в счёт)');
+  readNote('s1'); t.expect(/★★|иглу/.test(objective()), 'четвёртая цель: ' + objective());
+  emit('shelter', { stars: 1, closed: true, vent: true }); t.expect(/иглу/.test(objective()), 'одна звезда не засчитана');
+  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/иглу/.test(objective()), 'укрытие без своих блоков не засчитано (станция не в счёт)');
   const px0 = G.player.x; G.player.x = 1000; runStats.placed = 3;
   emit('shelter', { stars: 2, closed: true, vent: true }); G.player.x = px0;
   t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
-  readNote('n1'); t.expect(!/дневник доктора|Утепли|барометр/i.test(objective()) && objective().length > 8, 'после цепочки — «следующее разумное дело»: ' + objective());
+  readNote('n1'); t.expect(!/дневник доктора|иглу|барометр/i.test(objective()) && objective().length > 8, 'после цепочки — «следующее разумное дело»: ' + objective());
   const sp = suppliesNow(); t.expect(Number.isFinite(sp.fuelH) && Number.isFinite(sp.foodDays), 'запасы не посчитаны');
   // the radio call -> icebreaker two days later -> signal fire on the cape hill -> it passes, drops a crate and leaves (no ending)
   const t0 = G.time, day = G.day;

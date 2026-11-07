@@ -7,7 +7,7 @@
 // devhud.ts owns the panel element and the open/close keys; it calls renderJournalInto(el) and forwards clicks to journalClick(e).
 import { G } from '../game/state';
 import { strings, fmt } from '../content/i18n';
-import { objective, GOALS, journal } from '../game/quest';
+import { objective, GOALS, journal, goalDetail, waitDetail } from '../game/quest';
 import { seasonLabel } from '../game/seasons';
 import { TECHS, NOTES, lore, knows, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, factNone } from '../game/lore';
 import { sites } from '../game/locations';
@@ -54,18 +54,20 @@ const CSS = `
 #hud .jr .paper h4{margin:0 0 4px;font:600 14px 'Pixelify Sans','Jura',sans-serif;color:#ffc46e}
 #hud .jr canvas.map{width:100%;image-rendering:pixelated;border:1px solid rgba(124,198,238,.38);border-radius:4px;background:#05080f;display:block}
 #hud .jr .sub{font-size:11px;opacity:.7}
+#hud .jr .row .how{font-size:11px;opacity:.7;line-height:1.35;margin-top:1px}
 `;
 let styled = false;
 function ensureStyle() { if (styled || typeof document === 'undefined') return; styled = true; const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st); }
 
 // ---------------------------------------------------------------------------------------------------------------------
 function goalsTab(): string {
-  let h = `<div class="now">${S.now}: ${objective()}</div><div class="cols"><div class="col"><div class="grp">${S.list}</div>`;
+  let h = `<div class="now">${S.now}: ${objective()}${waitDetail() ? `<div class="how">${waitDetail()}</div>` : ''}</div><div class="cols"><div class="col"><div class="grp">${S.list}</div>`;
   let seenCurrent = false;
   for (const g of GOALS) {
     const d = g.done();
+    // the HUD line is one short sentence; the detail (where, how) is written here
     if (d) h += `<div class="row">${img(uiUrl('check'))}<span class="good">${g.text()}</span></div>`;
-    else { h += `<div class="row">${img(uiUrl(seenCurrent ? 'cross' : 'warn'))}<span class="${seenCurrent ? 'dim' : ''}">${g.text()}</span></div>`; seenCurrent = true; }
+    else { h += `<div class="row">${img(uiUrl(seenCurrent ? 'cross' : 'warn'))}<div><span class="${seenCurrent ? 'dim' : ''}">${g.text()}</span><div class="how">${goalDetail(g.id)}</div></div></div>`; seenCurrent = true; }
   }
   const storms = journal.filter(e => e.kind === 'storm');
   h += `<div class="grp">${S.storms}</div>`;

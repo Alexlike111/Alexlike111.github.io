@@ -31,28 +31,29 @@ import { thrown } from './inventory';
 import { isKeyDown } from '../engine/input';
 
 const S = strings('tools', {
-  far: 'далеко', blocked: 'не достать: мешает стена', needPick: 'нужна кирка', needAxe: 'нужен топор', needChisel: 'нужна пешня или кирка', needShovel: 'нужна лопата',
-  wrongTool: 'этим не взять', bedrock: 'не пробить',
-  thin: 'слой слишком тонкий для блока', cutNeedSnow: 'Нужен плотный наст', crumble: 'рассыпется: слишком рыхло ({d})', cutOk: 'Вырезать блок ({d}, {c})',
+  // tooltip and refusal words: a verb or 2–4 plain words, no numbers
+  far: 'Слишком далеко', blocked: 'Мешает стена', needPick: 'Нужна кирка', needAxe: 'Нужен топор', needChisel: 'Нужна пешня', needShovel: 'Нужна лопата',
+  wrongTool: 'Этим не взять', bedrock: 'Не пробить',
+  thin: 'Слой тонкий', cutNeedSnow: 'Нужен плотный наст', crumble: 'Рассыпется: рыхло', cutOk: 'Режь блок',
   looseSnow: 'рыхлый снег: бери лопатой', packed: 'наст', block: 'снежный блок',
-  density: '{d} кг/м³ · {c}', iceThick: 'лёд {cm} см',
+  density: '{c}', iceThick: 'лёд толстый', iceThin: 'лёд тонкий',
   shovelFull: 'лопата полна: вывали снег',
-  scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Вырезать блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Использовать', feedLight: 'E: подбросить топливо / зажечь (спички)', feed: 'E: подбросить топливо',
-  noSupport: 'нет опоры', span: 'слишком длинный пролёт', ok: 'держится', digLooseFirst: 'сначала откопай снег (лопатой)',
-  occupied: 'занято', inYou: 'мешает тебе',
-  gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…',
+  scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Режь блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Применить', open: 'Открыть',
+  feedLight: 'Зажечь', feed: 'Подкинуть',
+  noSupport: 'Нет опоры', span: 'Пролёт длинный', ok: 'держится', digLooseFirst: 'Сначала откопай снег',
+  occupied: 'Занято', inYou: 'Ты мешаешь',
+  gotBlock: 'Блок: {c}', crumbled: 'Рассыпался', looseHint: '· ищи плотный наст',
   torchLit: 'Факел горит', torchOut: 'Факел погас', noFlame: 'Нечем зажечь факел',
   lanternOn: 'Фонарь горит', lanternOff: 'Фонарь погашен', lanternEmpty: 'В фонаре нет солярки',
-  flareNone: 'Нет ракет', flareShot: 'Ракета в небо!', lanternWind: 'Ветер задул фонарь!', lanternNoMatch: 'Фонарь погас: чтобы зажечь, нужны спички',
-  fishCast: 'Забросил леску…', fishBite: 'Клюёт! Тяни!', fishLost: 'Сорвалась', fishGot: 'Поймал: {name}', fishNeedHole: 'Нужна лунка или полынья', fishColdHands: 'Руки стынут: ловля — тонкая работа',
+  flareNone: 'Нет ракет', flareShot: 'Ракета в небо!', lanternWind: 'Ветер задул фонарь!', lanternNoMatch: 'Фонарь погас: нужны спички',
+  fishCast: 'Забросил леску…', fishBite: 'Клюёт! Тяни!', fishLost: 'Сорвалась', fishGot: 'Поймал: {name}', fishNeedHole: 'Нужна лунка', fishColdHands: 'Руки стынут',
   harpoon: 'Гарпун!', noAmmo: 'Нечем',
   bagged: 'Снег в сумке: {n}', barometer: 'Барометр: {t}',
-  equipped: 'Надето: {name}', sled: 'Запрягся в нарты (G с инструментом или пустой рукой — оставить)', cantEat: 'Не хочется',
+  equipped: 'Надето: {name}', sled: 'Запрячься в нарты', cantEat: 'Не хочется',
   handsFrozen: 'Руки не слушаются',
-  domeOn: 'Режим купола: блоки наклоняются внутрь', domeOff: 'Обычная укладка', smartOn: 'Умный курсор', smartOff: 'Свободный курсор',
-  picked: 'Взял: {name}', backpack: 'Ты вернул свои вещи',
-  sledDown: 'Нарты оставлены: E рядом — снова запрячься', sledUp: 'Запрягся в нарты',
-  looseHint: 'Снег рыхлый — ищи плотный наст в затишье, под сугробом или у гряды',
+  domeOn: 'Купол: блоки внутрь', domeOff: 'Обычная укладка', smartOn: 'Умный курсор', smartOff: 'Свободный курсор',
+  picked: 'Взял: {name}', backpack: 'Вещи вернулись',
+  sledDown: 'Нарты оставлены', sledUp: 'Запрягся в нарты',
   denseGood: 'годится для блоков', denseBad: 'слишком рыхлый',
 });
 
@@ -306,7 +307,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
       while (up < 120 && mat[(Y0 - up - 1) * W + X] === MAT.ICE) up++;
       while (dn < 120 && mat[(Y0 + dn + 1) * W + X] === MAT.ICE) dn++;
       T.iceCm = (up + dn + 1) * 9;
-      if (tk === 'chisel') L(lines, fmt(S.iceThick, { cm: T.iceCm }));
+      if (tk === 'chisel') L(lines, T.iceCm < 40 ? S.iceThin : S.iceThick);      // 40 cm: the thin-ice line of lore.ts
     }
   }
   if (!sel || !T.inReach) { if (!T.inReach) T.reason = S.far; }
@@ -326,7 +327,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
     T.tx = pl.tx; T.ty = pl.ty; T.tw = pl.tw; T.th = pl.th; T.ok = pl.ok; T.reason = pl.reason; T.margin = 1; T.verb = S.place;
     return finishTarget(T);
   }
-  if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = FIXTURE_DEFS[T.fixture.kind]?.fuel && T.fixture.kind !== 'torch' ? (T.fixture.lit ? S.feed : S.feedLight) : S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
+  if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = FIXTURE_DEFS[T.fixture.kind]?.fuel && T.fixture.kind !== 'torch' ? (T.fixture.lit ? S.feed : S.feedLight) : T.fixture.kind === 'chest' || T.fixture.kind === 'door' ? S.open : S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
 
   if ((tk === 'knife' || tk === 'saw') && m !== 0 && (m === MAT.PACKED || m === MAT.SNOWBLOCK)) { evalCut(T, tx, ty); return finishTarget(T); }
   if (id === 'shovel' && held.load > 0 && m === 0) {
@@ -420,7 +421,7 @@ function evalBlock(T: Target, sel: ItemDef, tx: number, ty: number) {
   const r = previewCells(cells, `b${tx0},${ty},${lean}`);
   T.margin = r.margin; T.ok = r.ok;
   T.reason = r.ok ? undefined : r.reason === 'слишком длинный пролёт' ? S.span : S.noSupport;
-  if (r.ok) T.verb = `${S.place} · ${S.ok} ${Math.round(r.margin * 100)}%`;
+  if (r.ok) T.verb = `${S.place} · ${S.ok}`;      // no margin percent in the tooltip
 }
 function evalFish(T: Target, tx: number, ty: number) {
   const water = mat[(ty * TS + 1) * W + tx * TS + 1] === MAT.WATER && !tileSolid(tx, ty - 1);

@@ -16,7 +16,7 @@ const S = strings('ov', {
   wind: 'Ветер ревёт', storm: 'Пурга: не видно ни зги', shiver: 'Дрожь: тело сдаёт', sealUp: 'Тюлень всплыл у лунки', icebreaker: 'Гудок ледокола',
   scent: 'Ветер несёт твой запах', thin: 'Тонкий лёд!',
   deadH: 'Ты погиб', cause: 'Причина: {c}',
-  statDay: 'Дней продержался', statRing: 'Круг', statBest: 'Рекорд', newBest: 'новый рекорд!', statBuilt: 'Построено (блоков, вещей)', statHunted: 'Добыто (зверей, рыб)', statFound: 'Найдено (мест, записок)',
+  statDay: 'Дней продержался', statRing: 'Круг', statBest: 'Рекорд', newBest: 'новый рекорд!', statBuilt: 'Построено', statHunted: 'Добыто', statFound: 'Найдено',
   statStorms: 'Пург пережито', statStars: 'Лучшее укрытие',
   unitDays: '{n} дн.',
   again: 'Новая игра', same: 'Заново тот же мир', back: 'Вернуться на станцию', newRun: 'Новый забег', hardDead: 'Хардкор: забег окончен',

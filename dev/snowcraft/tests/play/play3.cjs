@@ -59,7 +59,7 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     for (let i = 0; i < 40 && (await ev(() => /Обыскиваю/.test(document.body.innerText))); i++) await step(30);
     const all = p.getByText('Взять всё'); if (await all.count()) { await all.first().click(); await step(10); }
     const close = p.getByText('Закрыть ящик'); if (await close.count()) { await close.first().click(); await step(10); }
-    ok(/★|Утепли/.test(await obj()), 'keeper log read (E on the box + take all), next: ' + await obj()); }
+    ok(/★|иглу/.test(await obj()), 'keeper log read (E on the box + take all), next: ' + await obj()); }
   if (await ev(() => document.body.classList.contains('panel-open'))) { await tap('c', 10); await step(10); }          // «Закрыть ящик» leaves the bag itself open: C closes it
   // 6. blocks: in a pit of the lee snow field west of the station shovel the crown, knife-cut blocks, place them on the ground
   { await tp(528, 236); await step(40);

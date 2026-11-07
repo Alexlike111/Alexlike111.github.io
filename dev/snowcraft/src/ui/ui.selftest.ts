@@ -15,6 +15,7 @@ import { input } from '../engine/input';
 import { setEnabled, touchEnabled } from './touch';
 import { emit } from '../game/bus';
 import { objectiveTarget } from '../game/quest';
+import { resetHintsForTest } from './devhud';
 
 registerTest('ui', 'двери дома и дизельной проходимы пешком (игрок 8×20)', async t => {
   const sc = t.sc;
@@ -118,9 +119,12 @@ registerTest('ui', 'ночью силуэт скалы читается на ф�
 });
 
 // ---- playability wave (G5): hints, phone touch, toasts, sound hooks. Each test restores the touch / panel state it changes.
-registerTest('ui', 'подсказки: Space, Shift, 1–6 и J написаны в строке подсказок', t => {
+registerTest('ui', 'подсказки: в строке первые четыре клавиши, полный список (за «?») содержит Shift, J и 1–9', async t => {
+  resetHintsForTest(); t.sc.step(12); await t.wait(60);                 // the box is redrawn by the HUD tick
   const hint = document.querySelector('#hud .hint')?.textContent ?? '';
-  for (const k of ['Space', 'WASD', 'Shift', 'J', '1–9']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
+  for (const k of ['WASD', 'Space', 'ЛКМ', 'E']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
+  const full = document.querySelector('#hud .hfull') as HTMLElement | null;
+  t.expect(!!full && /Shift/.test(full.textContent ?? '') && /J/.test(full.textContent ?? '') && /1–9/.test(full.textContent ?? ''), 'в полном списке нет Shift, J или 1–9');
 });
 
 registerTest('ui', 'телефон: прицел касанием смещён вверх от пальца на 48 px', async t => {
@@ -157,6 +161,13 @@ registerTest('ui', 'телефон: все 6 слотов пояса видны,
   t.expect(getComputedStyle(hud).fontSize === '14px', 'шрифт HUD: ' + getComputedStyle(hud).fontSize);
   const stk = document.querySelector('#hud .stk') as HTMLElement;
   t.expect(getComputedStyle(stk).right === '220px', 'полоса цели right: ' + getComputedStyle(stk).right);
+  // nothing overlaps the objective strip: the body panel, the dial and the top-right touch buttons stay clear of it
+  const box = (sel: string) => (document.querySelector(sel) as HTMLElement | null)?.getBoundingClientRect();
+  const hit = (a?: DOMRect, b?: DOMRect) => !!a && !!b && a.width > 0 && b.width > 0 && !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
+  const obj = box('#hud .stk .obj'), bw = box('#hud .bw'), dial = box('#hud .dial'), bag = box('#tb-bag'), jour = box('#tb-jour'), par = box('#tb-parka');
+  t.expect(!hit(obj, bw) && !hit(obj, dial), 'полоса цели налезает на тело или часы');
+  t.expect(!hit(obj, bag) && !hit(obj, jour) && !hit(obj, par), 'полоса цели налезает на кнопки Сумка/Журнал/Парка');
+  t.expect(!hit(bw, dial), 'тело налезает на часы');
   setEnabled(prevOn);
 });
 
@@ -183,13 +194,13 @@ registerTest('ui', 'телефон: при открытом журнале ви�
   setEnabled(prevOn);
 });
 
-registerTest('ui', 'тосты: до трёх, предупреждения первыми, одинаковые тексты схлопнуты', async t => {
+registerTest('ui', 'тосты: до двух, предупреждения первыми, одинаковые тексты схлопнуты', async t => {
   const sc = t.sc; const prevOn = touchEnabled();
   setEnabled(false); G.toasts.length = 0;
   toast('инфо A', 'info'); toast('Предупреждение', 'warn'); toast('инфо B', 'info'); toast('инфо A', 'info'); toast('инфо C', 'info');
   sc.step(14); await t.wait(60);
   const shown = [...document.querySelectorAll('#hud .toast')].map(e => e.textContent);
-  t.expect(shown.length === 3, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
+  t.expect(shown.length === 2, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
   t.expect(shown.includes('Предупреждение'), 'предупреждение вытеснено: ' + shown.join(' | '));
   t.expect(shown.filter(x => x === 'инфо A').length <= 1, 'дубль «инфо A» не схлопнут');
   G.toasts.length = 0; sc.step(6);

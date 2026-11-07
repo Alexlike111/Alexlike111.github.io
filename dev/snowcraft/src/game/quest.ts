@@ -26,58 +26,53 @@ import { stepMine, resetMine } from './mine';
 export { knows, learn, learnAll, forgetAll, lore, readNote, TECHS, NOTES, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, probe, seenCount, markSeen } from './lore';
 
 const S = strings('quest', {
-  coal: 'Подбери уголь у дизельной (E)',
-  buried: ' · под снегом: копай лопатой (ЛКМ)',
-  door: 'Откопай дверь дома: лопата (слот 2), копай вниз у стены — ступенями, чтобы выбраться',
-  doorHint: 'Дверь занесло: выбери лопату (слот 2) и копай у стены дома вниз. Делай ступени, а не колодец: из колодца не выпрыгнуть.',
-  stove: 'Растопи печь спичками: войди в дом, подойди вплотную, E',
-  baro: 'Проверь барометр: E у столба, он стоит западнее дома',
-  keeper: 'Прочти журнал смотрителя: сундук-полка в доме',
-  shelter: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — снежное поле к западу, у холма)',
-  diary: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
-  supplies: 'Запасы: топливо {fuel} ч · еда {food} дн. (цель: 72 ч и 8 дн.)',
-  seal: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
-  sealLearn: 'Узнай, как вязать гарпун: журнал смотрителя в доме',
-  wood: 'Собери плавник на пляже: брёвна {n}/{m}',
-  ship: 'Найди шхуну «Заря» среди дрейфующих льдов',
-  radio: 'Вставь детали в рацию: {n}/3 (E у рации)',
-  mast: 'Подними мачту и запусти рацию',
-  mastLearn: 'Узнай про мачту: записи смотрителя в доме, у стола',
-  fur: 'Сшей меховую одежду (шкуры, жилы)',
-  furLearn: 'Узнай, как шить мех: ищи записи на берегу, у костей кита',
-  radioOk: 'Рация починена: ледокол придёт через двое суток',
-  wait: 'Ледокол: {d} · сигнал: 2 полена, ягель, спички',
-  light: 'Ледокол на горизонте! Зажги сигнальный костёр на холме мыса или выстрели ракетой',
-  rescued: 'Огонь замечен. Ледокол идёт к берегу…',
-  missed: 'Ледокол прошёл мимо: огня не было. Он вернётся.',
-  low: 'Запасы на исходе: топливо {fuel} ч · еда {food} дн.',
-  gauge: '  ·  топливо {fuel} ч · еда {food} дн.',
-  nxFuel: 'Запаси топливо к пурге (через {h} ч, ~{need} ч огня): есть {fuel} ч',
-  nxFuelLow: 'Топлива мало ({fuel} ч): добудь уголь, плавник, жир',
-  nxFood: 'Еды на {d} дн.: поохоться, порыбачь, поставь силки',
-  nxShelter: 'Построй укрытие получше: ★★★ с отдушиной и печью',
-  nxSites: 'Исследуй мир: найдено мест {n}/{m}',
-  nxNotes: 'Найди записки экспедиции: прочитано {n}/{m}',
-  nxCraft: 'Сделай что-нибудь новое: {name}',
-  nxIdle: 'Выживай: {phase}, день {d}',
-  nxCrate: 'Ледокол оставил ящик у мыса: забери припасы',
+  // HUD line (one short sentence); the long text (…D) is for the journal's «Цели» tab (goalDetail)
+  coal: 'Подбери уголь у дизельной', coalD: 'Подбери уголь у дизельной (E)',
+  buried: ' · копай снег', buriedD: ' · уголь под снегом: копай лопатой (ЛКМ)',
+  door: 'Откопай дверь дома лопатой', doorD: 'Откопай дверь дома: лопата (слот 2), копай вниз у стены — ступенями, чтобы выбраться',
+  stove: 'Растопи печь спичками', stoveD: 'Растопи печь спичками: войди в дом, подойди вплотную, E',
+  baro: 'Проверь барометр у столба', baroD: 'Проверь барометр: E у столба, он стоит западнее дома',
+  keeper: 'Прочти журнал смотрителя', keeperD: 'Прочти журнал смотрителя: сундук-полка в доме',
+  shelter: 'Построй иглу из снежных блоков', shelterD: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — снежное поле к западу, у холма)',
+  diary: 'Найди дневник доктора', diaryD: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
+  supplies: 'Запаси топливо и еду', suppliesD: 'Запасы: топливо {fuel} ч · еда {food} дн. (цель: 72 ч и 8 дн.)',
+  seal: 'Добудь жир: тюлень у лунки', sealD: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
+  sealLearn: 'Узнай, как вязать гарпун', sealLearnD: 'Узнай, как вязать гарпун: журнал смотрителя в доме',
+  wood: 'Собери плавник: {n}/{m}', woodD: 'Собери плавник на пляже: брёвна {n}/{m}',
+  ship: 'Найди шхуну «Заря»', shipD: 'Найди шхуну «Заря» среди дрейфующих льдов',
+  radio: 'Почини рацию: деталей {n}/3', radioD: 'Вставь детали в рацию: {n}/3 (E у рации)',
+  mast: 'Подними мачту, запусти рацию', mastD: 'Подними мачту и запусти рацию',
+  mastLearn: 'Узнай, как ставить мачту', mastLearnD: 'Узнай про мачту: записи смотрителя в доме, у стола',
+  fur: 'Сшей меховую одежду', furD: 'Сшей меховую одежду (шкуры, жилы)',
+  furLearn: 'Узнай, как шить мех', furLearnD: 'Узнай, как шить мех: ищи записи на берегу, у костей кита',
+  radioOk: 'Рация готова: жди ледокол',
+  wait: 'Ледокол: {d}', waitD: 'Ледокол: {d} · сигнал: 2 полена, ягель, спички',
+  light: 'Зажги сигнальный костёр!',
+  rescued: 'Огонь замечен: ледокол идёт',
+  missed: 'Ледокол прошёл мимо',
+  low: 'Запасы на исходе',
+  nxFuel: 'Запаси топлива к пурге',
+  nxFuelLow: 'Топлива мало: добудь уголь',
+  nxFood: 'Добудь еды: охота или рыба',
+  nxShelter: 'Укрытие получше: ★★★',
+  nxSites: 'Исследуй мир',
+  nxNotes: 'Найди записки экспедиции',
+  nxCraft: 'Сделай: {name}',
+  nxIdle: 'Выживай: {phase}',
+  nxCrate: 'Забери ящик у мыса',
   phNight: 'ночь', phTwi: 'сумерки',
-  msDays: 'Дней выжил: {n}. Мир не стал мягче',
-  msRing: 'Круг {c} пройден: ночь вернётся. Запасайся',
-  msTwilight: 'Первые сумерки: над горизонтом светлая полоса. Вылазки безопаснее, но берегись бликов',
-  crateT: 'Ледокол прошёл мимо и сбросил ящик у мыса',
-  crateNote: 'Записка на ящике: «Держитесь. Вернёмся с тем же курсом».',
-  storm: 'Переживи пургу: укрытие ★★ во время шторма',
-  parka: 'Сшей меховую парку (тюлень ×3, песец ×2, жилы ×2)',
-  seals3: 'Добудь тюленя ×3: {n}/3 (у лунок стой тихо, бей гарпуном)',
-  storm2: 'Переживи большую пургу ★★★ (укрытие с отдушиной)',
-  next: 'Сделано. Дальше: {t}', done: 'Сделано!',
-  milestoneBlock: 'Первый снежный блок вырезан: из таких строят укрытие',
-  milestoneCraft: 'Первая вещь сделана своими руками',
+  msDays: 'Выжил {n} дн.', msRing: 'Круг {c} пройден', msTwilight: 'Первые сумерки: светлеет',
+  crateT: 'Ледокол сбросил ящик у мыса', crateNote: 'Записка на ящике: «Держитесь. Вернёмся с тем же курсом».',
+  storm: 'Переживи пургу в укрытии', stormD: 'Переживи пургу: укрытие ★★ во время шторма',
+  parka: 'Сшей меховую парку', parkaD: 'Сшей меховую парку (тюлень ×3, песец ×2, жилы ×2)',
+  seals3: 'Добудь тюленя: {n}/3', seals3D: 'Добудь тюленя ×3: {n}/3 (у лунок стой тихо, бей гарпуном)',
+  storm2: 'Переживи большую пургу', storm2D: 'Переживи большую пургу ★★★ (укрытие с отдушиной)',
+  done: 'Сделано!',
+  milestoneBlock: 'Первый блок вырезан', milestoneCraft: 'Первая вещь сделана',
   days: '{n} дн.', hours: '{n} ч', soon: 'меньше часа',
-  found: 'Место найдено: {name}',
+  found: 'Найдено: {name}',
   jKnow: 'Новый приём: {name}', jRead: 'Записка: {title}',
-  arrival: 'На горизонте шарит прожектор — ледокол!',
+  arrival: 'Ледокол на горизонте!',
 });
 
 export interface Goal { id: string; text: () => string; done: () => boolean }
@@ -145,7 +140,7 @@ export const GOALS: Goal[] = [
   { id: 'keeper', text: () => S.keeper, done: () => lore.read.has('s1') },
   { id: 'shelter', text: () => S.shelter, done: () => flags.has('shelter') },
   { id: 'diary', text: () => S.diary, done: () => lore.read.has('n1') },
-  { id: 'supplies', text: () => { const s = suppliesNow(); return fmt(S.supplies, { fuel: s.fuelH, food: s.foodDays }); }, done: () => suppliesOk() },
+  { id: 'supplies', text: () => S.supplies, done: () => suppliesOk() },
   { id: 'seal', text: () => (knows('harpoon') ? S.seal : S.sealLearn), done: () => runStats.seals > 0 },
   { id: 'wood', text: () => fmt(S.wood, { n: Math.min(6, count('log')), m: 6 }), done: () => count('log') >= 6 || flags.has('wood') },
   { id: 'ship', text: () => S.ship, done: () => flags.has('ship') },
@@ -159,7 +154,6 @@ export const GOALS: Goal[] = [
 ];
 
 type Step = { id: string; text: string; goal?: string };
-const nextOpen = (): Goal | undefined => GOALS.find(g => g.id !== 'supplies' && !g.done());
 const CHAIN = GOALS.findIndex(g => g.id === 'supplies');          // goals before this index form the day-1 onboarding chain
 const ROTATE_MIN = 240;                                             // game minutes between rotations of the «next sensible thing» line
 
@@ -168,7 +162,7 @@ const craftedIds = new Set<string>();
 /** The rotating «next sensible thing» candidates, most urgent first (urgent ones pin the line). */
 function suggestions(): { step: Step; urgent: boolean }[] {
   const out: { step: Step; urgent: boolean }[] = [];
-  const sp = suppliesNow(), gauge = fmt(S.gauge, { fuel: sp.fuelH, food: sp.foodDays });
+  const sp = suppliesNow();
   if (sp.fuelH < 12 || sp.foodDays < 1) out.push({ step: { id: 'low', text: fmt(S.low, { fuel: sp.fuelH, food: sp.foodDays }) }, urgent: true });
   // fuel for the next storm: it burns about its length in hours
   const ns = nextStormFn();
@@ -181,14 +175,14 @@ function suggestions(): { step: Step; urgent: boolean }[] {
   const crate = crateDrops();
   if (crate) out.push({ step: { id: 'crate', text: S.nxCrate }, urgent: false });
   // the old open goals (seal, driftwood, ship, radio, mast, fur, storms, parka ...)
-  for (let k = CHAIN + 1; k < GOALS.length; k++) { const g = GOALS[k]; if (!g.done()) { out.push({ step: { id: g.id, text: g.text() + gauge }, urgent: false }); break; } }
+  for (let k = CHAIN + 1; k < GOALS.length; k++) { const g = GOALS[k]; if (!g.done()) { out.push({ step: { id: g.id, text: g.text() }, urgent: false }); break; } }
   if (runStats.bestStars < 3) out.push({ step: { id: 'nxshelter', text: S.nxShelter }, urgent: false });
   const found = sites.filter(x => x.found).length;
   if (found < sites.length) out.push({ step: { id: 'nxsites', text: fmt(S.nxSites, { n: found, m: sites.length }) }, urgent: false });
   if (lore.read.size < NOTES.length) out.push({ step: { id: 'nxnotes', text: fmt(S.nxNotes, { n: lore.read.size, m: NOTES.length }) }, urgent: false });
   const rec = RECIPES.find(r => knows(r.tech) && !craftedIds.has(r.result));
   if (rec) out.push({ step: { id: 'nxcraft', text: fmt(S.nxCraft, { name: itemNameFn(rec.result) }) }, urgent: false });
-  if (!out.length) out.push({ step: { id: 'free', text: fmt(S.nxIdle, { phase: phaseName() === 'night' ? S.phNight : S.phTwi, d: G.day }) + gauge }, urgent: false });
+  if (!out.length) out.push({ step: { id: 'free', text: fmt(S.nxIdle, { phase: phaseName() === 'night' ? S.phNight : S.phTwi, d: G.day }) }, urgent: false });
   return out;
 }
 /** Supply drops of the icebreaker still lying near the cape. */
@@ -221,6 +215,23 @@ function activeStep(): Step | null {
   return { ...pick.step, text };
 }
 export function objectiveText(): string { return activeStep()?.text ?? ''; }
+/** The long text of a goal (journal «Цели» tab): where it is, what to do in detail. The HUD line stays one short sentence. */
+const DETAIL: Record<string, () => string> = {
+  coal: () => S.coalD + (nearestCoal() && buriedAt(nearestCoal()!.x, nearestCoal()!.y) ? S.buriedD : ''),
+  door: () => S.doorD, stove: () => S.stoveD, baro: () => S.baroD, keeper: () => S.keeperD, shelter: () => S.shelterD, diary: () => S.diaryD,
+  supplies: () => { const s = suppliesNow(); return fmt(S.suppliesD, { fuel: s.fuelH, food: s.foodDays }); },
+  seal: () => (knows('harpoon') ? S.sealD : S.sealLearnD), wood: () => fmt(S.woodD, { n: Math.min(6, count('log')), m: 6 }), ship: () => S.shipD,
+  radio: () => fmt(S.radioD, { n: radioParts() }), mast: () => (knows('mast') ? S.mastD : S.mastLearnD), fur: () => (knows('sewing') ? S.furD : S.furLearnD),
+  storm: () => S.stormD, parka: () => S.parkaD, seals3: () => fmt(S.seals3D, { n: Math.min(3, runStats.seals) }), storm2: () => S.storm2D,
+};
+export function goalDetail(id: string): string { return DETAIL[id]?.() ?? ''; }
+/** The icebreaker's wait with the signal recipe (journal), or '' when no ship is called. */
+export function waitDetail(): string {
+  const q = questState; if (!(q.icebreakerAt > 0)) return '';
+  const left = q.icebreakerAt - G.time;
+  const d = left > 1440 ? fmt(S.days, { n: Math.ceil(left / 1440) }) : left > 60 ? fmt(S.hours, { n: Math.ceil(left / 60) }) : S.soon;
+  return fmt(S.waitD, { d });
+}
 export function currentGoalId(): string { for (const g of GOALS) if (!g.done()) return g.id; return 'free'; }
 /** Steps of the rotating line right now (tests). */
 export function suggestionList(): string[] { return suggestions().map(x => x.step.id); }
@@ -358,7 +369,7 @@ function doorWatch(dt: number) {
   const p = G.player;
   const inside = !!p && p.x > LOC.house.L * 4 + 4 && p.x < LOC.house.R * 4 && p.y > LOC.station.y - 30 && p.y <= LOC.station.y + 2;
   if (inside || doorFrontSnow() <= 14) { emit('door_dug', { inside }); return; }
-  if (!doorHinted && doorT > 45) { doorHinted = true; toast(S.doorHint, 'info'); }
+  if (!doorHinted && doorT > 45) doorHinted = true;      // the goal line already says it: no extra toast
 }
 let siteAcc = 0;
 function siteWatch(dt: number) {
@@ -380,7 +391,7 @@ function goalWatch(dt: number) {
     for (const g of GOALS) {
       if (!now.get(g.id) || lastDone.get(g.id)) continue;
       emit('goal_done', { id: g.id });
-      if (first) { first = false; const nx = nextOpen(); toast(nx ? fmt(S.next, { t: nx.text() }) : S.done, 'good'); }
+      if (first) { first = false; toast(S.done, 'good'); }      // the goal line shows what is next: no repeat in a toast
     }
   }
   lastDone = now;
