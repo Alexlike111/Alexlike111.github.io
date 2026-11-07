@@ -130,6 +130,7 @@ registerTest('search', 'голые руки на морозе: обыск = то
     };
     const cold = await run(-25, 'chest'), warm = await run(5, 'chest'), own = await run(-25, 'cache');
     t.expect(cold >= 2, 'на морозе сигналы тонкой работы: ' + cold);
+    if (cold < 2) t.log('диагностика: ' + JSON.stringify({ paused: G.paused, alive: G.player.alive, ts: G.timeScale, open: isOpen(), ph: phase(), sh: G.shelter && G.shelter.closed, psh: G.player.shelter, amb: G.ambientT, title: document.body.classList.contains('title-open'), panel: (document.querySelector('#hud .pnl') as HTMLElement).style.display, hands: G.player.frost.hands, sleeping: G.player.sleeping }));
     t.expect(warm === 0, 'в тепле руки не мёрзнут: ' + warm);
     t.expect(own === 0, 'свой тайник не обыскивается: ' + own);
     // frozen hands cannot search
