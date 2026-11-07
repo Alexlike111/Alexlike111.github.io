@@ -1,5 +1,5 @@
 // Plays the first day of SNOWCRAFT like a player: real keyboard and mouse events (Playwright), time advanced synchronously with window.__sc.step(n).
-//   node tests/play/play3.cjs <abs path to a built index.html> [out dir for screenshots]       (NODE_PATH=/opt/node-tools/node_modules if playwright is global)
+//   node tests/play/play3.cjs <abs path to a built index.html> [out dir]   (NODE_PATH=/opt/node-tools/node_modules if playwright is global; SHOTS=1 saves the screenshots, DBG=1 prints the probes)
 // Steps: coal (E) -> dig the buried door with the shovel -> light the stove (matches) -> barometer -> keeper's log in the shelf chest (search panel, take all)
 //        -> shovel + knife: cut snow blocks out of the drift -> place blocks (the blocks must land on the BELT) -> C bag -> Ctrl+wheel zoom.
 // Long walks are shortened with teleport() (walking itself is proven by shots/play/play2.cjs); everything that matters (E, LMB, keys, panels) is real input.
@@ -29,7 +29,8 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
   const st = () => ev(() => { const s = window.__sc.stats(); return { x: +s.x.toFixed(1), y: +s.y.toFixed(1), sel: s.sel, belt: s.belt.map(b => b && b.id + ':' + b.n).join(',') }; });
   const obj = () => ev(() => window.__sc.mods.quest.objectiveText()), tgt = () => ev(() => { const t = window.__sc.mods.quest.objectiveTarget(); return t ? [Math.round(t.x), Math.round(t.y)] : null; });
   const inv = id => ev(id => window.__sc.mods.inv.count(id), id), cell = (x, y) => ev(([x, y]) => window.__sc.cell(Math.round(x), Math.round(y)), [x, y]);
-  const shot = n => p.screenshot({ path: path.join(OUT, 'play3-' + n + '.png') });
+  // screenshots are taken only with SHOTS=1: a screenshot is a page event, and the run must not depend on it
+  const shot = n => (process.env.SHOTS ? p.screenshot({ path: path.join(OUT, 'play3-' + n + '.png') }) : null);
   const w2s = (x, y) => ev(([x, y]) => window.__sc.worldToScreen(x, y), [x, y]);
   const tap = async (k, f = 4) => { if (k === 'e') { await p.keyboard.press(k); await step(2 + f); return; } await p.keyboard.down(k); await step(2); await p.keyboard.up(k); await step(f); };
   const hover = async (x, y) => { const [sx, sy] = await w2s(x, y); await p.mouse.move(sx, sy); await step(2); };
@@ -85,8 +86,12 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     let waited = 0; while (waited < 6000 && !(await cutTarget())) { await step(20); waited += 20; }
     if (process.env.DBG) console.log('   crown ready after', waited, 'steps');
     if (process.env.DBG) console.log('   pit', JSON.stringify(s), 'sel', (await st()).sel, '\n' + await ev(([a, b, c, d]) => window.__sc.ascii(a, b, c, d, 1), [ptx * 4 - 16, fty * 4 - 4, ptx * 4 + 20, fty * 4 + 12]));
-    for (const dx of [-2, -1, 0, 1]) { const tx = ptx + dx, ty = fty + 1; await hover(tx * 4 + 2, ty * 4 + 2); const t = await T(); if (process.env.DBG) console.log('   cut probe', dx, JSON.stringify(t), JSON.stringify(s));
-      if (t.ok && t.mode === 'cut') { const before = await inv('snow_block'); let f = 0; await p.mouse.down(); for (let k = 0; k < 40 && (await inv('snow_block')) === before; k++) { await step(4); f += 4; } await p.mouse.up(); await step(3); frames.push(f); } }
+    // cut what is cuttable now; the crown settles between the passes (a block cut takes the cell away from its neighbours' support)
+    for (let pass = 0; pass < 4 && (await inv('snow_block')) < 2; pass++) {
+      for (const dx of [-2, -1, 0, 1]) { const tx = ptx + dx, ty = fty + 1; await hover(tx * 4 + 2, ty * 4 + 2); const t = await T(); if (process.env.DBG) console.log('   cut probe', pass, dx, JSON.stringify(t), JSON.stringify(s));
+        if (t.ok && t.mode === 'cut') { const before = await inv('snow_block'); let f = 0; await p.mouse.down(); for (let k = 0; k < 40 && (await inv('snow_block')) === before; k++) { await step(4); f += 4; } await p.mouse.up(); await step(3); frames.push(f); } }
+      await step(20);
+    }
     const blocks = await inv('snow_block'), beltHas = (await st()).belt.includes('snow_block');
     ok(blocks >= 2 && beltHas, `cut ${blocks} blocks (${frames.join('/')} frames each), they lie on the belt: ${(await st()).belt}`); ok(frames.every(f => f <= 70), 'each block cut in about half a second');
     // climb out and place on the ground

@@ -212,6 +212,8 @@ registerTest('tools', 'лопата: зачерпнуть, бросить куч
     if (snowAfter < snowBefore - 2) throw new Error(`снег пропал ${snowBefore} → ${snowAfter}`);
     // tamp: raise compaction until the sim turns it packed
     for (let x = 1010; x < 1022; x++) for (let y = 266; y < 272; y++) { const i = y * W + x; if (mat[i] === MAT.AIR) { mat[i] = MAT.SNOW; aux[i] = 100; } }
+    // the secondary button is E: with a load of 8+ on the shovel it bags the snow instead of patting it down, so the load is emptied first
+    hl.load = 0;
     s.mouse(2, true, 0, 0); s.render(0); s.aim(1016, 268); s.mouse(2, true);
     steps(70); s.mouse(2, false);
     if (!(cellCount(MAT.PACKED, 1000, 262, 1030, 271) > 0)) throw new Error('утрамбовка не дала наст');

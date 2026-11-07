@@ -39,12 +39,15 @@ function scene(T = -20) {
 }
 const chestAt = (items = ITEMS(), data: Record<string, unknown> = {}) => placeFixture('chest', 247, 66, { force: true, items, data })!;
 // The box panel counts as «on screen» only while its DOM is shown (the bag UI sets it from a timer); a box whose panel is not shown after 0.6 s of
-// game ticks closes. The real game loop runs during the awaits of these checks, so the timer and the ticks race: the checks keep the panel «shown».
+// game ticks closes. The real game loop runs during the awaits of these checks, so the timer and the ticks race: the checks keep the panel «shown»,
+// and only the check that closes the panel itself (C) asks for the DOM (domPanelCheck).
+let panelDom = false;
 const keep = async <T>(fn: () => Promise<T> | T) => {
-  const saved = searchSave(), l0 = loreSave(), shown = boxPanel.visible;
-  boxPanel.visible = () => true;
-  try { return await sandbox(fn); } finally { boxPanel.visible = shown; closeBox(); searchLoad(saved); loreLoad(l0); }
+  const saved = searchSave(), l0 = loreSave(), dom = boxPanel.visible;
+  boxPanel.visible = () => (panelDom ? dom() : true);
+  try { return await sandbox(fn); } finally { boxPanel.visible = dom; panelDom = false; closeBox(); searchLoad(saved); loreLoad(l0); }
 };
+const domPanelCheck = (on: boolean) => { panelDom = on; };
 /** Show the panel (a container's panel stays open only while it is on screen). */
 async function showPanel() { steps(3); await wait(80); }
 
@@ -90,6 +93,7 @@ registerTest('search', 'обыск: уход от ящика и закрытие
     openContainer(f); await showPanel();
     t.expect(revOf(openBox.box!) === rev, 'найденное не теряется при повторном открытии: ' + revOf(openBox.box!));
     // closing the panel closes the box
+    domPanelCheck(true);                                        // the panel is judged by its DOM from here: C hides it
     sc().tap('KeyC'); steps(3); await wait(120); steps(60);
     t.expect(!isOpen(), 'панель закрыта — ящик закрыт');
   });
