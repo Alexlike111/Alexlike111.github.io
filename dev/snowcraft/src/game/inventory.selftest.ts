@@ -29,6 +29,8 @@ function scene() {
   giveStartKit();
   const p = G.player;
   p.core = 37; p.food = 90; p.water = 90; p.energy = 90; p.hp = 100; p.wet = 0; p.co = 0; p.frost.hands = p.frost.feet = p.frost.face = 0; p.alive = true; p.sleeping = false;
+  // an earlier test that reaches day 12 makes the ending card appear a few seconds later and pauses the game: these tests need the clock running
+  if (G.paused && !document.body.classList.contains('title-open')) { G.paused = false; document.querySelectorAll('#ov .card').forEach(e => { (e as HTMLElement).style.display = 'none'; }); }
   steps(5);
   return p;
 }
