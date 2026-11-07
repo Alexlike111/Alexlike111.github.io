@@ -17,7 +17,7 @@ import { openContainer, stashSelected } from './search';
 import { stationInteract, stationStep, stationLights, stationLabel, stationRadio, burnMult, heatMult } from './fixtures_station';
 
 const S = strings('fix', {
-  noFuel: 'Нечем топить: нужны дрова, уголь или жир',
+  noFuelW5: 'Нечем топить: дрова, уголь, жир',
   fed: 'Подкинул: {name}',
   full: 'Топливник полон',
   noFire: 'Нечем зажечь: нужны спички или огниво',
@@ -27,15 +27,15 @@ const S = strings('fix', {
   flintFail: 'Искры не берут. Ещё раз',
   lit: 'Зажёг: {name}',
   burnedOut: '{name} прогорел',
-  noIndoor: 'Костёр в снежном доме нельзя: топит стены и душит дымом',
+  noIndoorW5: 'В доме костёр душит дымом',
   doorOpen: 'Открыл', doorClosed: 'Закрыл',
   chestEmpty: 'Пусто',
   took: 'Взял: {list}',
   stashed: 'Убрал: {name}',
   potAdded: 'В котелок: {name}',
-  potWater: 'Вода готова: {n}',
-  potTook: 'Набрал воды: {n}',
-  potEmpty: 'Котелок пуст. Закинь снег или лёд и поставь над огнём',
+  potWaterW5: 'Вода готова',
+  potTookW5: 'Набрал воды',
+  potEmptyW5: 'Котелок пуст: нужен снег или лёд',
   potCold: 'Котелку нужен огонь рядом',
   rackNote: 'Сушилка: у огня одежда сохнет быстрее',
   snareSet: 'Силок взведён',
@@ -43,25 +43,28 @@ const S = strings('fix', {
   snareEmpty: 'Силок пуст',
   radioPart: 'Вставил в рацию: {name}',
   radioNeed: 'В рации не хватает: {list}',
-  radioMast: 'Рация готова, но нет антенны: подними мачту',
+  radioMastW5: 'Нет антенны: подними мачту',
   radioOk: 'Рация починена! Ледокол выходит',
   radioFixed: 'Рация работает. Ждём ледокол',
   drumBrazier: 'Бочка стала жаровней',
-  drumDiesel: 'Налил солярки: {n}',
+  drumDieselW5: 'Налил солярки',
   drumEmpty: 'В бочке пусто',
-  drumFull: 'В бочке ещё солярка: слей её (E), потом руби в жаровню',
+  drumFullW5: 'Сначала слей солярку (E)',
   potFull: 'Котелок полон',
   fuelBack: 'Топливо вернулось в сумку',
   mastUp: 'Мачта стоит',
-  mastNeed: 'Для мачты нужно 3 доски (или кости) и 2 верёвки',
+  mastNeedW5: 'Для мачты нужны доски и верёвки',
   bedSleep: 'Ложишься спать…',
   pickup: 'Подобрал: {name}',
   cannotPlace: 'Здесь не поставить',
   blocked: 'Мешает {what}',
   noSupport: 'Нужна опора под ногами',
   sign: '{text}',
-  fuelLeft: 'топлива {h} ч',
-  burning: 'горит', out: 'погас', waterIn: 'вода {n}',
+  // state words (tooltips and the E toast): no numbers, the exact hours and litres are in the bag and the journal
+  fuelState: '{name}: {state}',
+  stBurning: 'Горит', stSoon: 'Скоро погаснет', stOut: 'Потухла', stUnlit: 'Не горит', stNoFuel: 'Нет топлива',
+  stEmpty: 'Пусто', stFull: 'Полный', stSnowMelt: 'Снег тает', stSnowCold: 'Холодный снег',
+  stHotWater: 'Горячая вода', stColdWater: 'Холодная вода',
 });
 
 export type FuelClass = 'campfire' | 'stove' | 'lamp' | 'brazier';
@@ -305,11 +308,11 @@ export function tryLight(f: Fixture, quiet = false): boolean {
   const d = D[f.kind]; if (!d) return false;
   if (f.lit) return true;
   const say = (t: string, k: 'info' | 'warn' | 'bad' | 'good' = 'warn') => { if (!quiet) toast(t, k); };
-  if ((f.fuel ?? 0) <= 0) { say(S.noFuel); return false; }
+  if ((f.fuel ?? 0) <= 0) { say(S.noFuelW5); return false; }
   const [cx, cy] = center(f);
   if (f.kind === 'campfire' || f.kind === 'brazier') {
     const e = floodEnclosure(cx >> 2, (cy >> 2) - 0);
-    if (!e.open && e.tiles < 400 && f.kind === 'campfire') { say(S.noIndoor); return false; }
+    if (!e.open && e.tiles < 400 && f.kind === 'campfire') { say(S.noIndoorW5); return false; }
   }
   if (!sourceNear(f)) {
     if (d.tinder && count('lichen') + count('canvas') <= 0) { say(S.noTinder); return false; }
@@ -330,6 +333,22 @@ export function tryLight(f: Fixture, quiet = false): boolean {
   return true;
 }
 function fuelClassOf(f: Fixture): FuelClass | null { return D[f.kind]?.fuel ?? null; }
+const SOON_MIN = 20;              // a lit fire with less fuel than this (game minutes) reads «Скоро погаснет»
+/** State word of a fuel fixture: burning, about to go out, out (fuel left), never lit, no fuel. The hours stay in the bag / journal. */
+export function fuelWord(f: Fixture): string {
+  if ((f.fuel ?? 0) <= 0) return S.stNoFuel;
+  if (!f.lit) return f.data?.age !== undefined ? S.stOut : S.stUnlit;
+  return (f.fuel ?? 0) < SOON_MIN ? S.stSoon : S.stBurning;
+}
+/** State word of the pot: hot water, warm snow (melting), cold snow, full, empty. */
+export function potWord(f: Fixture): string {
+  const dd = f.data ?? {};
+  const water = Number(dd.water ?? 0), load = Number(dd.snow ?? 0) + Number(dd.ice ?? 0);
+  if (water > 0) return heated(f) ? S.stHotWater : S.stColdWater;
+  if (load <= 0) return S.stEmpty;
+  if (load >= POT_CAP) return S.stFull;
+  return heated(f) ? S.stSnowMelt : S.stSnowCold;
+}
 /** Best fuel item in the inventory for a class (selected item first). */
 function pickFuel(cls: FuelClass): string | null {
   const sel = inv.slots[inv.sel];
@@ -366,7 +385,7 @@ export function interact(f: Fixture): boolean {
     if (!f.lit && (f.fuel ?? 0) > 0) return tryLight(f);
     if ((f.fuel ?? 0) < d.cap * 0.5) { const u = addFuel(f); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); if (!f.lit && (count('matches') > 0 || count('flint') > 0 || sourceNear(f))) tryLight(f); return true; } }
     if (!f.lit && d.portable) return pickupFixture(f);
-    toast(fmt(S.fuelLeft, { h: Math.round(((f.fuel ?? 0) / 60) * 10) / 10 }), 'info');
+    toast(fmt(S.fuelState, { name: fixtureName(k), state: fuelWord(f) }), 'info');
     return true;
   }
   switch (k) {
@@ -403,7 +422,7 @@ export function interact(f: Fixture): boolean {
     case 'drum': return interactDrum(f);
     case 'mast': {
       if (mastUp(f)) { toast(S.mastUp, 'info'); return true; }
-      toast(S.mastNeed, 'info'); return true;
+      toast(S.mastNeedW5, 'info'); return true;
     }
     case 'sign': { const t = String(f.data?.text ?? ''); if (t) toast(fmt(S.sign, { text: t }), 'info'); return true; }
     case 'generator': case 'heater': case 'medkit': case 'kettle': case 'sonde': case 'gramophone': case 'hatch': case 'shutter': case 'damper': case 'bell':
@@ -440,16 +459,16 @@ function interactPot(f: Fixture): boolean {
     if (fi >= 0) { const fl = inv.slots[fi]!; const room = 4 - (fl.dur ?? 0); const k = Math.min(room, w); if (k > 0) { fl.dur = (fl.dur ?? 0) + k; taken += k; } }
     if (taken < w) { const k = w - taken; const left = add('water', k); taken += k - left; }
     dd.water = w - taken;
-    if (taken > 0) { toast(fmt(S.potTook, { n: taken }), 'good'); return true; }
+    if (taken > 0) { toast(S.potTookW5, 'good'); return true; }
   }
   const load = Number(dd.snow ?? 0) + Number(dd.ice ?? 0);
   if (load < POT_CAP) {
     if (count('ice') > 0) { remove('ice', 1); return put('ice'); }
     if (count('snow') > 0) { remove('snow', 1); return put('snow'); }
   }
-  if (load > 0) { toast(heated(f) ? S.potEmpty : S.potCold, 'info'); return true; }
+  if (load > 0) { toast(heated(f) ? S.potEmptyW5 : S.potCold, 'info'); return true; }
   if (!heated(f)) { pickupFixture(f); return true; }
-  toast(S.potEmpty, 'info'); return true;
+  toast(S.potEmptyW5, 'info'); return true;
 }
 export function heated(f: Fixture): Fixture | null {
   const [cx, cy] = center(f);
@@ -474,23 +493,23 @@ function interactRadioRepair(f: Fixture): boolean {
     const need = ['radio_triode', 'radio_coil', 'battery'].filter(i => !have.includes(i)).map(itemName);
     toast(fmt(S.radioNeed, { list: need.join(', ') }), 'info'); return true;
   }
-  if (!G.fixtures.some(m => m.kind === 'mast' && mastUp(m))) { toast(S.radioMast, 'info'); return true; }
+  if (!G.fixtures.some(m => m.kind === 'mast' && mastUp(m))) { toast(S.radioMastW5, 'info'); return true; }
   dd.fixed = true; toast(S.radioOk, 'good'); emit('radio_fixed', {}); return true;
 }
 function interactDrum(f: Fixture): boolean {
   const sel = inv.slots[inv.sel];
   const dd = f.data ?? (f.data = {});
   if (sel && (sel.id === 'axe' || sel.id === 'pick')) {
-    if (Number(dd.diesel ?? dd.n ?? 0) > 0) { toast(S.drumFull, 'warn'); return true; }
+    if (Number(dd.diesel ?? dd.n ?? 0) > 0) { toast(S.drumFullW5, 'warn'); return true; }
     f.kind = 'brazier'; f.fuel = 0; f.lit = false; f.tw = 2; f.th = 2;
     toast(S.drumBrazier, 'good'); emit('drum_brazier', { fixture: f }); return true;
   }
   const dl = Number(dd.diesel ?? dd.n ?? 0);
   if (dl <= 0) { toast(S.drumEmpty, 'info'); return true; }
   const li = find(s => s.id === 'lantern');
-  if (li >= 0 && (inv.slots[li]!.dur ?? 0) < 60) { inv.slots[li]!.dur = 360; dd.diesel = dd.n = dl - 1; toast(fmt(S.drumDiesel, { n: 1 }), 'good'); return true; }
+  if (li >= 0 && (inv.slots[li]!.dur ?? 0) < 60) { inv.slots[li]!.dur = 360; dd.diesel = dd.n = dl - 1; toast(S.drumDieselW5, 'good'); return true; }
   const left = add('diesel', 1);
-  if (left === 0) { dd.diesel = dd.n = dl - 1; toast(fmt(S.drumDiesel, { n: 1 }), 'good'); }
+  if (left === 0) { dd.diesel = dd.n = dl - 1; toast(S.drumDieselW5, 'good'); }
   return true;
 }
 /** Craft 'mast' at a fallen antenna: raises the nearest one. */
@@ -585,7 +604,7 @@ function stepPot(f: Fixture, dt: number, gm: number) {
     const [cx, cy] = center(f);
     burstFx('steam', cx, cy - 4, 4, 6, 1.2, undefined, 6);
     emit('pot_water', { fixture: f, n: dd.water });
-    const p = G.player; if (p && Math.hypot(p.x - cx, p.y - cy) < 80) toast(fmt(S.potWater, { n: Number(dd.water) }), 'good');
+    const p = G.player; if (p && Math.hypot(p.x - cx, p.y - cy) < 80) toast(S.potWaterW5, 'good');
   }
   if (Math.random() < dt * 2) { const [cx, cy] = center(f); spawnFx('steam', cx + (Math.random() - 0.5) * 3, cy - 5, 0, -6, 1.4); }
 }
@@ -616,9 +635,8 @@ export function collectLights(out: Light[]): number {
 export function fixtureLabel(f: Fixture): string {
   const d = D[f.kind];
   let s = fixtureName(f.kind);
-  if (d?.fuel) s += ' · ' + (f.lit ? S.burning : S.out);
-  if (d?.fuel) s += ' · ' + fmt(S.fuelLeft, { h: Math.round(((f.fuel ?? 0) / 60) * 10) / 10 });
-  if (f.kind === 'pot') s += ' · ' + fmt(S.waterIn, { n: Number(f.data?.water ?? 0) });
+  if (d?.fuel) s += ' · ' + fuelWord(f);
+  if (f.kind === 'pot') s += ' · ' + potWord(f);
   const x = stationLabel(f); if (x) s += ' · ' + x;
   return s;
 }

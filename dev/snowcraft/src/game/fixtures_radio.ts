@@ -12,20 +12,21 @@ import { itemName } from './items';
 import { wxHooks, nextStorm } from './weather';
 import { bridge } from './stationbridge';
 import { addLayer } from '../engine/render';
-import { cen, dd, num, clamp, hintOnce, logJournal, playerDist, clockText } from './stationkit';
+import { cen, dd, num, clamp, logJournal, playerDist, clockText } from './stationkit';
 import { showDial, dialInput, type DialView } from './stationui';
-import { isPowered } from './fixtures_station';
+import { isPowered, hintTip } from './fixtures_station';
 
 const S = strings('rad', {
-  noPower: 'Приёмник молчит: нет тока. Запусти генератор в дизельной',
+  noPowerW5: 'Нет тока: запусти генератор',
   tune: 'Настройка: ←/→ (Shift — точно) · E или ✕ — выключить',
   tuneTouch: 'Настройка: ◀ ▶ или стик · ✕ — выключить',
-  title: 'Рация · {f} МГц',
+  titleW5: 'Рация',
   off: 'Приёмник выключен',
   lostPower: 'Ток пропал: приёмник стих',
   noise: '…шипение, треск…',
   stWx: 'Метео', stNum: 'Числа', stEcho: 'Эхо', stIce: 'Диспетчер',
   hint: 'Три станции отмечены на шкале. Держи стрелку на метке, пока не поймаешь.',
+  hintRadioT: 'Рация: приёмник от генератора',
   hintNight: 'Днём эфир глух: одни помехи. Лучше ловить ночью.',
   wx: 'Метео: {text}',
   wxCalm: 'Метео: в ближайшие сутки штормов не ждут. Давление ровное.',
@@ -53,8 +54,10 @@ const S = strings('rad', {
   jIce: 'Радио: диспетчер ледокола на связи. Передатчик станции пока не отвечает.',
   hintRadio: 'Рация: приёмник работает от генератора. Метео даёт точный прогноз на сутки; ночью в эфире есть и другие голоса.',
   sondeNeed: 'Для зонда нужны: {list}',
-  sondeBuilt: 'Зонд собран: шар, зонд на верёвке. Ещё раз E — выпустить',
-  sondeGo: 'Зонд ушёл в небо. Скоро будет точный прогноз, а лёд на сутки станет «прозрачным»',
+  sondeBuiltW5: 'Зонд собран. E — выпустить',
+  sondeGoW5: 'Зонд ушёл в небо',
+  sondeDataT: 'Зонд передал данные',
+  sondeCracks: 'Трещины льда отмечены',
   sondeFlying: 'Зонд ещё поднимается…',
   sondeData: 'Зонд передал данные: {text}',
   sondeCalm: 'Зонд передал данные: штормов в ближайшее время нет',
@@ -62,8 +65,9 @@ const S = strings('rad', {
   sondeEmpty: 'Площадка метеозонда: шар и зонд ещё не собраны',
   sondeReady: 'Зонд собран. E — выпустить',
   hintSonde: 'Метеозонд: шар + радиозонд + верёвка. Выпусти зонд — получишь точный прогноз и увидишь трещины льда на сутки.',
-  lbSonde: 'ждёт сборки', lbReady: 'собран', lbFly: 'в полёте', lbActive: 'данные на {h} ч',
-  lbRadioOn: 'E: слушать эфир', lbRadioOff: 'нужен ток',
+  hintSondeT: 'Метеозонд: шар, радиозонд, верёвка',
+  lbSondeW5: 'Ждёт сборки', lbReadyW5: 'Собран', lbFlyW5: 'В полёте', lbActiveW5: 'Данные есть',
+  lbRadioOn: 'E: слушать эфир', lbRadioOffW5: 'Нужен ток',
 });
 
 export const STATIONS = [
@@ -120,7 +124,7 @@ function applyForecast(t: number) {
 export function stationRadio(f: Fixture): boolean {
   installRadioHooks();
   if (radio.on && radio.f === f) { closeRadio(); return true; }
-  if (!isPowered()) { toast(S.noPower, 'info'); return !!f.data?.fixed; }
+  if (!isPowered()) { toast(S.noPowerW5, 'info'); return !!f.data?.fixed; }
   openRadio(f); return true;
 }
 export function openRadio(f: Fixture) {
@@ -128,7 +132,7 @@ export function openRadio(f: Fixture) {
   radio.on = true; radio.f = f; radio.lock = 0; radio.locked = -1; radio.msg = []; radio.lineI = 0; radio.lineT = 0; radio.cool = 0; radio.line = ''; radio.px = p.x;
   if (radio.freq <= 0 || radio.freq >= 1) radio.freq = 0.5;
   dd(f).live = true;
-  hintOnce(f, 'radio', S.hintRadio, 'info');
+  hintTip(f, 'radio', S.hintRadioT, S.hintRadio);
   emit('radio_on', { fixture: f });
 }
 export function closeRadio() {
@@ -223,11 +227,10 @@ export function radioStep(dt: number) {
   radio.noiseT -= dt;
   if (radio.noiseT <= 0) { radio.noiseT = 1.3; emit('radio_noise', { vol: 0.1 + 0.3 * (1 - q) * (radio.msg.length ? 0.3 : 1), x: p.x }); }
   if (Math.abs(radio.freq - old) > 0.0004 && Math.random() < dt * 5) emit('radio_tune', { f: radio.freq });
-  const mhz = (3 + 9 * radio.freq).toFixed(2);
   const view: DialView = {
     freq: radio.freq, quality: q, lock: radio.lock, locked: radio.locked, noise: 1 - q * (radio.msg.length ? 0.7 : 0.35),
     stations: STATIONS.map(s => ({ c: s.c, w: s.w, name: stName(s.id), heard: ((f.data?.heard as string[] | undefined) ?? []).includes(s.id) })),
-    title: fmt(S.title, { f: mhz }) + (radio.best >= 0 && q > 0.5 ? ' · ' + stName(STATIONS[radio.best].id) : ''), line: radio.line,
+    title: S.titleW5 + (radio.best >= 0 && q > 0.5 ? ' · ' + stName(STATIONS[radio.best].id) : ''), line: radio.line,
     hint: G.mobile ? S.tuneTouch : S.tune, fine,
   };
   showDial(view);
@@ -242,9 +245,9 @@ export function sondeInteract(f: Fixture): boolean {
   if (st === 2) { toast(S.sondeFlying, 'info'); return true; }
   if (st === 0) {
     const need = (['sonde_balloon', 'sonde_probe', 'rope'] as const).filter(i => count(i) <= 0);
-    if (need.length) { toast(fmt(S.sondeNeed, { list: need.map(itemName).join(', ') }), 'info'); hintOnce(f, 'sonde', S.hintSonde, 'info'); return true; }
+    if (need.length) { toast(fmt(S.sondeNeed, { list: need.map(itemName).join(', ') }), 'info'); hintTip(f, 'sonde', S.hintSondeT, S.hintSonde); return true; }
     remove('sonde_balloon', 1); remove('sonde_probe', 1); remove('rope', 1);
-    d.st = 1; toast(S.sondeBuilt, 'good'); emit('sonde_built', { fixture: f }); return true;
+    d.st = 1; toast(S.sondeBuiltW5, 'good'); emit('sonde_built', { fixture: f }); return true;
   }
   // release
   release(f); return true;
@@ -253,7 +256,7 @@ export function release(f: Fixture) {
   const d = dd(f);
   d.st = 2; d.fly = 0; d.until = G.time + 24 * 60;
   const txt = preciseForecast(G.time, true);
-  toast(S.sondeGo, 'good'); emit('sonde_release', { fixture: f, x: cen(f)[0] });
+  toast(S.sondeGoW5, 'good'); emit('sonde_release', { fixture: f, x: cen(f)[0] });
   d.pend = 1;                    // the data message follows when the balloon is up (stationStep -> sondeStep)
   void txt;
 }
@@ -267,21 +270,21 @@ export function sondeStep(dt: number) {
     if (d.pend && Number(d.fly) > 6) {
       d.pend = 0;
       const txt = preciseForecast(G.time, true);
-      toast(txt ? fmt(S.sondeData, { text: txt }) : S.sondeCalm, 'good'); logJournal(txt ? fmt(S.sondeData, { text: txt }) : S.sondeCalm);
+      toast(S.sondeDataT, 'good'); logJournal(txt ? fmt(S.sondeData, { text: txt }) : S.sondeCalm);
       const left = (bridge.drift?.nextAt ?? 0) - G.time;
-      if (bridge.drift && left > 0) toast(fmt(S.sondeDrift, { h: Math.max(1, Math.round(left / 60)) }), 'info');
+      if (bridge.drift && left > 0) { logJournal(fmt(S.sondeDrift, { h: Math.max(1, Math.round(left / 60)) })); toast(S.sondeCracks, 'info'); }
     }
     if (Number(d.fly) > 24) { d.st = 0; d.fly = 0; }
   }
 }
 export function radioLabel(f: Fixture): string {
-  return isPowered() ? S.lbRadioOn : S.lbRadioOff;
+  return isPowered() ? S.lbRadioOn : S.lbRadioOffW5;
 }
 export function sondeLabel(f: Fixture): string {
   const st = num(f, 'st', 0), until = num(f, 'until', -1);
-  if (st === 2) return S.lbFly;
-  if (until > G.time) return fmt(S.lbActive, { h: Math.max(1, Math.round((until - G.time) / 60)) });
-  return st === 1 ? S.lbReady : S.lbSonde;
+  if (st === 2) return S.lbFlyW5;
+  if (until > G.time) return S.lbActiveW5;
+  return st === 1 ? S.lbReadyW5 : S.lbSondeW5;
 }
 
 // the cracks of the pack ice, marked while a balloon has looked at them (unlit, on top of the world)

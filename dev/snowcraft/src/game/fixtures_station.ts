@@ -25,7 +25,7 @@ import { body } from './player';
 import { bridge } from './stationbridge';
 import { fixtureNear, heated } from './fixtures';
 import { LOC } from './locations';
-import { cen, dd, num, clamp, hintOnce, playerDist } from './stationkit';
+import { cen, dd, num, clamp, hintOnce, logJournal, playerDist } from './stationkit';
 import { stationRadio as _sr, radioStep, sondeStep, sondeInteract, sondeLabel, radioLabel, installRadioHooks, initRevealLayer, radio, closeRadio } from './fixtures_radio';
 import { bellRing, worldStep, cartLabel, bellLabel } from './fixtures_world';
 import { renderPull } from './stationpull';
@@ -34,42 +34,43 @@ export { stationRadio } from './fixtures_radio';
 void _sr;
 
 const S = strings('stn', {
-  // generator
-  genNoFuel: 'В баке пусто: залей солярку (выбери её и нажми E)',
-  genFueled: 'Залил солярку: хода хватит ещё на {h} ч',
+  // generator (the state words are the tooltip; the fuel in hours is only in the bag / journal)
+  genNoFuelW5: 'Бак пуст: выбери солярку, нажми E',
+  genFueledW5: 'Залил солярку',
   genFull: 'Бак полон',
-  genCough: 'Чихнул и заглох. На морозе солярка густая: погрей агрегат лампой или печью',
+  genCoughW5: 'Не схватило: погрей лампой или печью',
   genCoughWarm: 'Не схватило. Ещё рывок',
   genStart: 'Дизель завёлся. В доме загорелся свет',
   genStop: 'Заглушил дизель',
   genOut: 'Солярка кончилась: дизель встал',
-  genStall: 'Дизель захлебнулся: выхлоп завален снегом. Откопай трубу на крыше',
-  genBuried: 'Выхлопную трубу занесло. Подымись по лестнице на крышу и откопай её лопатой',
+  genStallW5: 'Выхлоп завален: откопай трубу',
+  genBuriedW5: 'Труба занесена: откопай на крыше',
   genPulling: 'Тяни шнур: держи E или жми E',
   hintGen: 'Дизель-генератор: тяни шнур (держи E). На морозе не схватит без тепла рядом. Даёт свет, ток рации и обогревателю без угара. Шумит — слышно далеко. Трубу выхлопа заносит снегом.',
-  lbGenOn: 'работает', lbGenOff: 'стоит', lbFuel: 'солярки {h} ч', lbPull: 'держи E: завести', lbWarm: 'тёплый', lbCold: 'холодный', lbBury: 'труба занесена!',
+  hintGenT: 'Дизель: держи E, чтобы завести',
+  lbGenOnW5: 'Работает', lbGenOffW5: 'Стоит', lbWarmW5: 'Тёплый', lbColdW5: 'Холодный', lbLow: 'Мало солярки', lbNoFuel: 'Нет топлива', lbBuryW5: 'Труба занесена',
   // heater / lamps
   heaterOn: 'Обогреватель включён', heaterOff: 'Обогреватель выключен', heaterNoPower: 'Обогреватель не греет: нет тока',
-  lbHeaterOn: 'греет', lbHeaterOff: 'выключен', lbHeaterNo: 'нет тока',
+  lbHeaterOnW5: 'Греет', lbHeaterOffW5: 'Выключен', lbHeaterNoW5: 'Нет тока',
   // medkit
-  medNone: 'Лечить нечего. В аптечке: бинты {b}, спирт {s}',
+  medNoneW5: 'Лечить нечего',
   medEmpty: 'Бинты кончились',
-  medTreat: 'Перевязал: {part}. Бинтов осталось {b}',
-  medTreatSp: 'Обработал спиртом и перевязал: {part}. Бинтов {b}, спирта {s}',
+  medTreatW5: 'Перевязал: {part}',
+  medTreatSpW5: 'Перевязал спиртом: {part}',
   partHands: 'руки', partFeet: 'ноги', partFace: 'лицо',
   hintMed: 'Аптечка: бинты и спирт для обмороженных рук, ног и лица. Заряды ограничены.',
-  lbMed: 'бинты {b} · спирт {s}',
+  hintMedT: 'Аптечка: бинты и спирт',
+  lbMedAll: 'Бинты и спирт', lbMedBand: 'Бинты', lbMedNone: 'Бинтов нет',
   // kettle
-  kPour: 'Налил воды в чайник: {n}',
+  kPourW5: 'Налил воды в чайник',
   kTea: 'Засыпал чай',
   kFull: 'Чайник полон',
-  kTake: 'Налил горячего чая: {n}',
+  kTakeW5: 'Налил горячего чая',
   kReady: 'Чай заварился',
-  kStatus: 'В чайнике: вода {w}, {tea}',
-  kTeaYes: 'чай есть', kTeaNo: 'чая нет',
-  kNeed: 'Налей воды (из котелка) и положи чай',
+  kNeedW5: 'Налей воды и положи чай',
   hintKettle: 'Чайник на печи: вода и сухой чай дают горячий чай. Он греет изнутри и не даёт мёрзнуть.',
-  lbKettle: 'вода {w} · горячих {c}',
+  hintKettleT: 'Чайник: вода и чай',
+  lbKHot: 'Горячий чай', lbKFull: 'Полный', lbKWarm: 'Греется', lbKCold: 'Холодная вода', lbKNoWater: 'Нет воды', lbKEmpty: 'Пусто',
   // gramophone
   gWind: 'Завёл пружину: играет «{name}»',
   gNext: 'Сменил пластинку: «{name}»',
@@ -77,25 +78,36 @@ const S = strings('stn', {
   gDown: 'Пружина кончилась, пластинка затихла',
   gDog: 'Север лёг у патефона',
   hintGram: 'Патефон: три пластинки. Пока играет, в тепле быстрее отдыхаешь и спишь, а Север ложится рядом.',
+  hintGramT: 'Патефон: E — завести',
   rec1: 'Вальс «Метель»', rec2: 'Колыбельная для льдов', rec3: 'Полька «Огни мыса»',
-  lbGramOn: 'играет · {name}', lbGramOff: 'E: завести',
+  lbGramOnW5: 'Играет', lbGramOff: 'E: завести',
   // shutters
   shOpen: 'Ставни открыты', shClosed: 'Ставни закрыты: окно не тянет тепло',
   hintShutter: 'Ставни: на ночь закрывай — стекло теряет много тепла. Верёвка внизу.',
-  lbShOpen: 'открыты', lbShClosed: 'закрыты',
+  hintShutterT: 'Ставни: на ночь закрывай',
+  lbShOpenW5: 'Открыты', lbShClosedW5: 'Закрыты',
   // hatch
   hUp: 'Поднялся на крышу', hDown: 'Спустился вниз',
   hintHatch: 'Крыша: расчисти снег лопатой, пока не продавил; откапывай трубу дизеля. Спуск: лестница или просто шагни с края.',
+  hintHatchT: 'Крыша: расчисти снег лопатой',
   lbHatchUp: 'E: на крышу', lbHatchDown: 'E: вниз',
-  roofLoad: 'Крыша скрипит под снегом: подымись и расчисти её',
+  roofLoadW5: 'Крыша скрипит: расчисти снег',
   // damper
-  dOpen: 'Заслонка открыта: жарче, но дрова горят быстро',
+  dOpenW5: 'Заслонка открыта: жарче',
   dHalf: 'Заслонка приоткрыта: обычный ход',
-  dClosed: 'Заслонка закрыта: огонь тлеет дольше, но дым идёт в комнату!',
-  dSmoke: 'Дым из печи в комнату: открой заслонку или сделай отдушину',
+  dClosedW5: 'Заслонка закрыта: дым в комнату!',
+  dSmokeW5: 'Дым в комнату: открой заслонку',
   hintDamper: 'Заслонка в трубе: открыта — жарче и быстрее горит, закрыта — тихо тлеет долго, но без отдушины это угар.',
-  lbD0: 'закрыта', lbD1: 'приоткрыта', lbD2: 'открыта',
+  hintDamperT: 'Заслонка: жарче или тише',
+  lbD0W5: 'Закрыта', lbD1W5: 'Приоткрыта', lbD2W5: 'Открыта',
 });
+
+/** First use of an object: a SHORT toast, and the full explanation in the journal (once per object, saved in its data). */
+export function hintTip(f: Fixture, key: string, short: string, long: string) {
+  const h = (dd(f).h as Record<string, number> | undefined) ?? (dd(f).h = {});
+  if (h[key]) return;
+  h[key] = 1; toast(short, 'info'); logJournal(long);
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // power
@@ -105,7 +117,6 @@ export const isPowered = () => powerOn;
 export const GEN = { cap: 480, unit: 120 };
 const WARM_KINDS = new Set(['campfire', 'brazier', 'stove', 'fat_lamp', 'signal_fire', 'lantern']);
 
-export function genFuelHours(f: Fixture) { return Math.round(((f.fuel ?? 0) / 60) * 10) / 10; }
 /** Is the exhaust outlet of a generator covered by snow? (the pipe top is recorded at placement: data.exX / data.exY) */
 export function exhaustBuried(f: Fixture): boolean {
   const x = num(f, 'exX', -1), y = num(f, 'exY', -1); if (x < 0) return false;
@@ -136,25 +147,25 @@ export function stopGenerator(f: Fixture, why: 'user' | 'fuel' | 'stall' = 'user
   f.lit = false;
   if (why === 'user') toast(S.genStop, 'info');
   else if (why === 'fuel') { f.fuel = 0; toast(S.genOut, 'warn'); }
-  else { dd(f).stalled = true; toast(S.genStall, 'bad'); }
+  else { dd(f).stalled = true; toast(S.genStallW5, 'bad'); }
   emit('gen_stop', { fixture: f, why, x: cen(f)[0] });
 }
 export function refuelGenerator(f: Fixture): boolean {
   if (count('diesel') <= 0) return false;
   if ((f.fuel ?? 0) + GEN.unit > GEN.cap + 20) { toast(S.genFull, 'info'); return true; }
   remove('diesel', 1); f.fuel = (f.fuel ?? 0) + GEN.unit;
-  toast(fmt(S.genFueled, { h: genFuelHours(f) }), 'good'); emit('gen_fuel', { fixture: f });
+  toast(S.genFueledW5, 'good'); emit('gen_fuel', { fixture: f });
   return true;
 }
 // the cord: tap E to add a pull, hold E to keep pulling; at 1.0 the engine tries to catch
 export const pull = { f: null as Fixture | null, v: 0, t: 0, fails: 0 };
 function genInteract(f: Fixture): boolean {
-  hintOnce(f, 'gen', S.hintGen, 'info');
+  hintTip(f, 'gen', S.hintGenT, S.hintGen);
   const sel = inv.slots[inv.sel];
   if (sel && sel.id === 'diesel') return refuelGenerator(f) || true;
   if (f.lit) { stopGenerator(f, 'user'); return true; }
-  if ((f.fuel ?? 0) <= 0) { if (refuelGenerator(f)) return true; toast(S.genNoFuel, 'info'); return true; }
-  if (exhaustBuried(f)) { toast(S.genBuried, 'warn'); return true; }
+  if ((f.fuel ?? 0) <= 0) { if (refuelGenerator(f)) return true; toast(S.genNoFuelW5, 'info'); return true; }
+  if (exhaustBuried(f)) { toast(S.genBuriedW5, 'warn'); return true; }
   if (pull.f !== f) { pull.f = f; pull.v = 0; pull.t = 0; }
   pull.v += 0.34; pull.t = 0;
   emit('gen_pull', { x: cen(f)[0] });
@@ -173,11 +184,11 @@ function pullStep(dt: number) {
 }
 /** One catch attempt (also used by the tests with a forced roll). */
 export function attemptStart(f: Fixture, roll = Math.random()): boolean {
-  if (exhaustBuried(f)) { toast(S.genBuried, 'warn'); return false; }
+  if (exhaustBuried(f)) { toast(S.genBuriedW5, 'warn'); return false; }
   const ch = startChance(f);
   if (roll < ch) { pull.f = null; startGenerator(f); return true; }
   dd(f).fail = num(f, 'fail', 0) + 1; pull.fails++;
-  toast(num(f, 'warm', 0) > 0.5 ? S.genCoughWarm : S.genCough, 'warn'); emit('gen_cough', { x: cen(f)[0] });
+  toast(num(f, 'warm', 0) > 0.5 ? S.genCoughWarm : S.genCoughW5, 'warn'); emit('gen_cough', { x: cen(f)[0] });
   return false;
 }
 
@@ -220,14 +231,14 @@ const partName = (k: string) => (k === 'hands' ? S.partHands : k === 'feet' ? S.
 function medkitUse(f: Fixture): boolean {
   const d = dd(f), p = G.player;
   if (d.bandage === undefined) d.bandage = 4; if (d.spirit === undefined) d.spirit = 2;
-  hintOnce(f, 'med', S.hintMed, 'info');
+  hintTip(f, 'med', S.hintMedT, S.hintMed);
   let best: (typeof PARTS)[number] | null = null, score = 0;
   for (const k of PARTS) {
     if (p.frost[k] < 40 && body.scar[k] <= 0) continue;
     const s = p.frost[k] + body.scar[k] * 1.6;
     if (s > score) { score = s; best = k; }
   }
-  if (!best) { toast(fmt(S.medNone, { b: d.bandage as number, s: d.spirit as number }), 'info'); return true; }
+  if (!best) { toast(S.medNoneW5, 'info'); return true; }
   if (Number(d.bandage) <= 0) { toast(S.medEmpty, 'warn'); return true; }
   d.bandage = Number(d.bandage) - 1;
   const bitten = p.frost[best] >= 80 || body.scar[best] >= 14;
@@ -236,7 +247,7 @@ function medkitUse(f: Fixture): boolean {
   const eff = spirit ? 1 : 0.6;
   body.scar[best] = Math.max(0, body.scar[best] - 16 * eff);
   p.frost[best] = Math.max(body.scar[best], p.frost[best] - 38 * eff);
-  toast(spirit ? fmt(S.medTreatSp, { part: partName(best), b: d.bandage as number, s: d.spirit as number }) : fmt(S.medTreat, { part: partName(best), b: d.bandage as number }), 'good');
+  toast(fmt(spirit ? S.medTreatSpW5 : S.medTreatW5, { part: partName(best) }), 'good');
   d.openT = 0.7;
   emit('medkit', { part: best, spirit });
   return true;
@@ -247,22 +258,22 @@ function medkitUse(f: Fixture): boolean {
 const KETTLE_CAP = 3;
 function kettleUse(f: Fixture): boolean {
   const d = dd(f);
-  hintOnce(f, 'kettle', S.hintKettle, 'info');
+  hintTip(f, 'kettle', S.hintKettleT, S.hintKettle);
   const hot = num(f, 'hot', 0), w = num(f, 'water', 0), tea = num(f, 'tea', 0);
   if (hot > 0) {
     // a cup goes straight into the pack (hot_tea stack 2); what does not fit stays in the kettle
     const give = Math.min(hot, 2), left = add('hot_tea', give), ok = give - left;
-    d.hot = hot - ok; if (ok > 0) { toast(fmt(S.kTake, { n: ok }), 'good'); emit('kettle_take', {}); }
+    d.hot = hot - ok; if (ok > 0) { toast(S.kTakeW5, 'good'); emit('kettle_take', {}); }
     return true;
   }
   let did = false;
   if (w < KETTLE_CAP && count('water') > 0) {
-    const n = Math.min(KETTLE_CAP - w, count('water')); remove('water', n); d.water = w + n; toast(fmt(S.kPour, { n: w + n }), 'good'); did = true;
+    const n = Math.min(KETTLE_CAP - w, count('water')); remove('water', n); d.water = w + n; toast(S.kPourW5, 'good'); did = true;
   }
   if (tea <= 0 && count('tea') > 0 && (num(f, 'water', 0) > 0)) { remove('tea', 1); d.tea = 3; toast(S.kTea, 'good'); did = true; }
   if (did) { emit('kettle_fill', {}); return true; }
   if (w >= KETTLE_CAP && tea > 0) { toast(S.kFull, 'info'); return true; }
-  toast(w > 0 || tea > 0 ? fmt(S.kStatus, { w, tea: tea > 0 ? S.kTeaYes : S.kTeaNo }) : S.kNeed, 'info');
+  toast(w > 0 || tea > 0 ? kettleWord(f) : S.kNeedW5, 'info');
   return true;
 }
 function kettleStep(f: Fixture, gm: number, dt: number) {
@@ -289,7 +300,7 @@ export const gramPlaying = (f: Fixture) => !!f.data?.play;
 const SPRING = 150;                    // seconds of play per winding
 function gramUse(f: Fixture): boolean {
   const d = dd(f);
-  hintOnce(f, 'gram', S.hintGram, 'info');
+  hintTip(f, 'gram', S.hintGramT, S.hintGram);
   const rec = num(f, 'rec', 0);
   if (!d.play) { const r = rec >= 1 && rec <= 3 ? rec : 1; d.rec = r; d.play = true; d.left = SPRING; d.pos = 0; toast(fmt(S.gWind, { name: recName(r) }), 'good'); emit('record', { x: cen(f)[0], rec: r, fixture: f }); return true; }
   const next = rec % 3 + 1;
@@ -332,7 +343,7 @@ export function setShutter(f: Fixture, closed: boolean) {
   edited(wx * TS, wy * TS, wx * TS + TS, wy * TS + TS);
 }
 function shutterToggle(f: Fixture): boolean {
-  hintOnce(f, 'shut', S.hintShutter, 'info');
+  hintTip(f, 'shut', S.hintShutterT, S.hintShutter);
   const closed = !f.data?.closed;
   setShutter(f, closed);
   toast(closed ? S.shClosed : S.shOpen, 'info'); emit('shutter', { fixture: f, closed });
@@ -353,7 +364,7 @@ export function roofSpot(f: Fixture): { x: number; y: number } {
 }
 function climb(f: Fixture): boolean {
   const p = G.player;
-  hintOnce(f, 'hatch', S.hintHatch, 'info');
+  hintTip(f, 'hatch', S.hintHatchT, S.hintHatch);
   const top = f.ty * TS, bot = (f.ty + f.th) * TS;
   if (p.y < top + 6) { p.x = f.tx * TS; p.y = bot - 1; p.vx = p.vy = 0; toast(S.hDown, 'info'); emit('ladder', { x: p.x, up: false }); return true; }
   const s = roofSpot(f);
@@ -373,10 +384,10 @@ export function heatMult(f: Fixture): number {
   const k = dampLevel(f); return k === 0 ? 0.55 : k >= 2 ? 1.3 : 1;
 }
 function damperTurn(f: Fixture): boolean {
-  hintOnce(f, 'damp', S.hintDamper, 'info');
+  hintTip(f, 'damp', S.hintDamperT, S.hintDamper);
   const k = (num(f, 'd', 1) + 1) % 3;       // 1 (half) -> 2 (open) -> 0 (closed) -> 1
   dd(f).d = k;
-  toast(k === 2 ? S.dOpen : k === 1 ? S.dHalf : S.dClosed, k === 0 ? 'warn' : 'info'); emit('damper', { fixture: f, level: k });
+  toast(k === 2 ? S.dOpenW5 : k === 1 ? S.dHalf : S.dClosedW5, k === 0 ? 'warn' : 'info'); emit('damper', { fixture: f, level: k });
   return true;
 }
 let smokeT = 0;
@@ -388,7 +399,7 @@ function stoveStep(f: Fixture, dt: number) {
     d.chimney = false;                                     // shelter.ts counts a stove without a draught as an open flame (CO)
     smokeT -= dt;
     if (smokeT <= 0) { smokeT = 0.3; const [cx] = cen(f); spawnFx('smoke', cx + (Math.random() - 0.5) * 6, f.ty * TS - 1, (Math.random() - 0.5) * 5, -5, 2.2); }
-    if (!d.smokeSaid && playerDist(f) < 60) { d.smokeSaid = 1; toast(S.dSmoke, 'warn'); }
+    if (!d.smokeSaid && playerDist(f) < 60) { d.smokeSaid = 1; toast(S.dSmokeW5, 'warn'); }
   } else if (d.chimney === false) delete d.chimney;
 }
 
@@ -410,7 +421,7 @@ function roofStep(dt: number) {
   roofT -= dt; roofWarn -= dt; if (roofT > 0) return; roofT = 2;
   const p = G.player;
   if (roofWarn > 0 || !p || G.storm < 0.3 || Math.abs(p.x - ((LOC.house.L + LOC.house.R) * TS) / 2) > 120) return;
-  if (roofSnowDepth() > 24) { roofWarn = 90; toast(S.roofLoad, 'warn'); emit('roof_creak', { x: p.x }); }
+  if (roofSnowDepth() > 24) { roofWarn = 90; toast(S.roofLoadW5, 'warn'); emit('roof_creak', { x: p.x }); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -473,16 +484,38 @@ export function stationLights(take: (x: number, y: number, r: number, g: number,
   }
 }
 /** Prompt line of a fixture (appended to the tooltip). */
+/** Generator state words: buried exhaust, no fuel, running / standing (warm or cold), low fuel. */
+function genWord(f: Fixture): string {
+  if (exhaustBuried(f)) return S.lbBuryW5;
+  if ((f.fuel ?? 0) <= 0) return S.lbNoFuel;
+  const low = (f.fuel ?? 0) < GEN.unit;
+  if (f.lit) return low ? S.lbGenOnW5 + ' · ' + S.lbLow : S.lbGenOnW5;
+  if (low) return S.lbGenOffW5 + ' · ' + S.lbLow;
+  return S.lbGenOffW5 + ' · ' + (num(f, 'warm', 0) > 0.5 ? S.lbWarmW5 : S.lbColdW5);
+}
+/** Medkit state word: bandage and spirit left, bandage only, no bandage. */
+function medWord(f: Fixture): string {
+  if (num(f, 'bandage', 4) <= 0) return S.lbMedNone;
+  return num(f, 'spirit', 2) > 0 ? S.lbMedAll : S.lbMedBand;
+}
+/** Kettle state word: hot tea, full, warming, cold water, no water, empty. */
+export function kettleWord(f: Fixture): string {
+  const w = num(f, 'water', 0), tea = num(f, 'tea', 0), hot = num(f, 'hot', 0);
+  if (hot > 0) return S.lbKHot;
+  if (w >= KETTLE_CAP) return S.lbKFull;
+  if (w > 0) return heated(f) ? S.lbKWarm : S.lbKCold;
+  return tea > 0 ? S.lbKNoWater : S.lbKEmpty;
+}
 export function stationLabel(f: Fixture): string {
   switch (f.kind) {
-    case 'generator': return (f.lit ? S.lbGenOn : S.lbGenOff) + ' · ' + fmt(S.lbFuel, { h: genFuelHours(f) }) + (f.lit ? '' : ' · ' + (num(f, 'warm', 0) > 0.5 ? S.lbWarm : S.lbCold) + ' · ' + S.lbPull) + (exhaustBuried(f) ? ' · ' + S.lbBury : '');
-    case 'heater': return !powerOn ? S.lbHeaterNo : f.data?.off ? S.lbHeaterOff : S.lbHeaterOn;
-    case 'medkit': return fmt(S.lbMed, { b: num(f, 'bandage', 4), s: num(f, 'spirit', 2) });
-    case 'kettle': return fmt(S.lbKettle, { w: num(f, 'water', 0), c: num(f, 'hot', 0) });
-    case 'gramophone': return f.data?.play ? fmt(S.lbGramOn, { name: recName(num(f, 'rec', 1)) }) : S.lbGramOff;
-    case 'shutter': return f.data?.closed ? S.lbShClosed : S.lbShOpen;
+    case 'generator': return genWord(f);
+    case 'heater': return !powerOn ? S.lbHeaterNoW5 : f.data?.off ? S.lbHeaterOffW5 : S.lbHeaterOnW5;
+    case 'medkit': return medWord(f);
+    case 'kettle': return kettleWord(f);
+    case 'gramophone': return f.data?.play ? S.lbGramOnW5 : S.lbGramOff;
+    case 'shutter': return f.data?.closed ? S.lbShClosedW5 : S.lbShOpenW5;
     case 'hatch': return G.player && G.player.y < f.ty * TS + 6 ? S.lbHatchDown : S.lbHatchUp;
-    case 'damper': return [S.lbD0, S.lbD1, S.lbD2][num(f, 'd', 1)] ?? '';
+    case 'damper': return [S.lbD0W5, S.lbD1W5, S.lbD2W5][num(f, 'd', 1)] ?? '';
     case 'sonde': return sondeLabel(f);
     case 'radio': return radioLabel(f);
     case 'bell': return bellLabel(f);

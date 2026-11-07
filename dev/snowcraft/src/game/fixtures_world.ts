@@ -8,25 +8,28 @@ import { spawnDrop } from './inventory';
 import { damage } from './player';
 import { bridge } from './stationbridge';
 import { LOC } from './locations';
-import { cen, dd, num, hintOnce, playerDist, clamp } from './stationkit';
+import { cen, dd, num, playerDist, clamp } from './stationkit';
+import { hintTip } from './fixtures_station';
 import { addShake } from '../engine/camera';
 import { burstFx } from '../engine/particles';
 
 const S = strings('stw', {
-  bellRing: 'Ударил в колокол: звон идёт над льдом',
+  bellRingW5: 'Ударил в колокол',
   bellBear: 'Медведь уходит от звона',
   bellFar: 'Звон ушёл в темноту. Никто не ответил',
   bellWait: 'Колокол ещё гудит',
   bellFox: 'Лиса подбирается на звук',
   hintBell: 'Колокол: звон пугает медведя на минуту-другую, но на него идёт и лиса: не оставляй еду на виду.',
+  hintBellT: 'Колокол: звон пугает медведя',
   lbBell: 'E: ударить',
-  lbBellWait: 'гудит',
-  cartCrash: 'Вагонетка сорвалась вниз по спуску и разбилась с грохотом',
+  lbBellWaitW5: 'Гудит',
+  cartCrashW5: 'Вагонетка разбилась внизу',
   cartHit: 'Вагонетка сбила тебя с ног!',
   cartPush: 'Толкни вагонетку плечом: пойдёт по рельсам. Под уклон она убегает',
   hintCart: 'Вагонетка на рельсах: толкай, идя в неё. К западу рельсы идут под уклон: разогнавшаяся вагонетка улетит вниз по спуску и собьёт всё на пути.',
-  lbCart: 'толкай плечом',
-  lbCartRun: 'катится!',
+  hintCartT: 'Вагонетка: толкай плечом',
+  lbCartW5: 'Толкай плечом',
+  lbCartRunW5: 'Катится!',
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -34,11 +37,11 @@ const S = strings('stw', {
 const BELL_CD = 6;
 export function bellRing(f: Fixture): boolean {
   const d = dd(f);
-  hintOnce(f, 'bell', S.hintBell, 'info');
+  hintTip(f, 'bell', S.hintBellT, S.hintBell);
   if (num(f, 'cd', 0) > 0) { toast(S.bellWait, 'info'); return true; }
   d.cd = BELL_CD;
   const [cx, cy] = cen(f);
-  toast(S.bellRing, 'good'); emit('bell_ring', { x: cx, y: cy, fixture: f });
+  toast(S.bellRingW5, 'good'); emit('bell_ring', { x: cx, y: cy, fixture: f });
   addShake(0.6);
   // the bear leaves for a while when it is within earshot (a gale carries the sound less far)
   const b = bridge.fauna?.bear;
@@ -51,7 +54,7 @@ export function bellRing(f: Fixture): boolean {
   d.foxT = 60;
   return true;
 }
-export function bellLabel(f: Fixture): string { return num(f, 'cd', 0) > 0 ? S.lbBellWait : S.lbBell; }
+export function bellLabel(f: Fixture): string { return num(f, 'cd', 0) > 0 ? S.lbBellWaitW5 : S.lbBell; }
 function bellStep(f: Fixture, dt: number) {
   const d = dd(f);
   if (num(f, 'cd', 0) > 0) d.cd = Math.max(0, num(f, 'cd', 0) - dt);
@@ -78,7 +81,7 @@ function floorAt(x: number): number {
   const { floorA, rampTop } = LOC.mine;
   return x >= rampTop ? floorA : floorA + 4 * Math.floor((rampTop - x) / 5);
 }
-export function cartLabel(f: Fixture): string { return Math.abs(num(f, 'v', 0)) > 3 ? S.lbCartRun : S.lbCart; }
+export function cartLabel(f: Fixture): string { return Math.abs(num(f, 'v', 0)) > 3 ? S.lbCartRunW5 : S.lbCartW5; }
 function setCartX(f: Fixture, x: number) {
   const tx = Math.floor(x / TS); f.tx = tx; dd(f).ox = x - tx * TS;
 }
@@ -97,7 +100,7 @@ function cartStep(f: Fixture, dt: number, gm: number) {
       if (Math.abs(rel) < half && Math.abs(p.vx) > 3 && Math.sign(p.vx) === -Math.sign(rel)) {
         const dir = Math.sign(p.vx);
         v = dir * Math.max(Math.abs(p.vx) * 0.92, Math.abs(v)); p.x = x + CART_W / 2 - dir * half; d.moved = 1;
-        hintOnce(f, 'cart', S.hintCart, 'info');
+        hintTip(f, 'cart', S.hintCartT, S.hintCart);
       } else if (Math.abs(rel) < half - 1 && Math.abs(v) > 6 && rolling) {
         // a rolling cart hits a player standing in its way
         damage(18 + Math.min(20, Math.abs(v) * 0.4), 'collapse'); toast(S.cartHit, 'bad');
@@ -130,7 +133,7 @@ function cartStep(f: Fixture, dt: number, gm: number) {
     burstFx('debris', cx, cy, 14, 60, 0.9); burstFx('dust', cx, cy, 10, 40, 1.1, 0xb8bcc8, 8);
     spawnDrop('coal', 4, cx, cy - 4, 12, -30); spawnDrop('scrap', 2, cx, cy - 4, -10, -30);
     emit('cart_crash', { x: cx, y: cy }); addShake(Math.max(0, 6 - playerDist(f) / 60));
-    if (playerDist(f) < 500) toast(S.cartCrash, 'warn');
+    if (playerDist(f) < 500) toast(S.cartCrashW5, 'warn');
     d.loaded = '';
   }
   setCartX(f, x);

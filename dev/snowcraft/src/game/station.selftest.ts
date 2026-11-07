@@ -96,7 +96,7 @@ registerTest('station', 'генератор: заправка, шанс запу
     stationInteract(heater);
     g.fuel = 0.3; steps(40); t.expect(!g.lit && !isPowered(), 'солярка кончилась: дизель встал, света нет');
     t.expect(all('ceiling_lamp').every(l => !l.lit), 'лампы погасли');
-    t.expect(/солярки/.test(fixtureLabel(g)), 'подсказка показывает запас');
+    t.expect(/Нет топлива/.test(fixtureLabel(g)), 'подсказка: пустой бак');
   });
 });
 
@@ -172,7 +172,7 @@ registerTest('station', 'аптечка: перевязка снижает об�
     t.expect(Number(m.data!.bandage) === 3 && Number(m.data!.spirit) === 1, 'бинт и спирт списаны');
     p.frost.feet = 50; stationInteract(m); t.expect(Number(m.data!.bandage) === 2 && Number(m.data!.spirit) === 1, 'лёгкое обморожение: только бинт');
     m.data!.bandage = 0; p.frost.face = 60; const f0 = p.frost.face; stationInteract(m); t.expect(p.frost.face === f0, 'бинтов нет: лечения нет');
-    t.expect(/бинты 0/.test(fixtureLabel(m)), 'подсказка: бинты 0');
+    t.expect(/Бинтов нет/.test(fixtureLabel(m)), 'подсказка: бинтов нет');
   });
 });
 
