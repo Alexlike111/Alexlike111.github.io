@@ -246,12 +246,12 @@ function cabin(L: number, R: number, F: number, n: number, openEast = false) {
     if (lo > hi) break;
     boxT(lo, top - 1 - k, hi, top - 1 - k, M.PLANK); kmax = k;
   }
-  // snow on the roof: loose snow on a 1:2 slope through the outer step corners (it may slide off, like real roof snow)
+  // snow on the roof: a loose crown over packed snow on a 1:2 slope above the outer step corners
   const cx = ((L - 1) * 4 + (R + 2) * 4) / 2, topY = (top - 1 - kmax) * 4;
   for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) {
-    const sy = Math.round(topY - 3 + Math.abs(x + 0.5 - cx) * 0.5);
+    const sy = Math.round(topY - 9 + Math.abs(x + 0.5 - cx) * 0.5);                 // DESIGN §13: a real snow load on the roof (0.8 m over the step corners)
     let y = sy; while (y < H && mat[y * W + x] === AIR) y++;
-    for (let yy = sy; yy < y; yy++) { const i = yy * W + x; mat[i] = M.SNOW; aux[i] = yy === sy ? 14 : 40 + ((yy - sy) * 6); flags[i] = 0; }
+    for (let yy = sy; yy < y; yy++) { const i = yy * W + x, d = yy - sy; if (d < 3) { mat[i] = M.SNOW; aux[i] = 14 + d * 12; } else { mat[i] = M.PACKED; aux[i] = Math.min(165, 100 + d * 4 + (x * 7 % 9)); } flags[i] = 0; }
   }
   return { top, roofTop: topY - 3 };
 }
@@ -538,10 +538,11 @@ function stampStation(T: Terrain) {
   const stove = addFixture('stove', L + 14, F - 2, 2, 2, { fuel: 0, lit: false });
   const pTop = pipe(L + 14, top, (F - 2) * 4);
   stove.data = { smokeX: (L + 14) * 4 + 2, smokeY: pTop };
-  // outside: barometer post east of the door, kennel and flag pole on the west side
-  const bx = (R + 5) * 4;
-  bgT(R + 5, F - 8, R + 5, F - 1, 5);                                        // the post is a wooden strip behind the player (a solid pole would block the way)
-  addFixture('barometer', R + 5, F - 10, 2, 2, {});
+  // outside: barometer post west of the house, kennel and flag pole on the west side
+  // (the barometer stands on the windward, scoured side by the west door: the east side of the house is the deep lee drift that buries the east door, DESIGN §13)
+  const bx = (L - 3) * 4;
+  bgT(L - 3, F - 8, L - 3, F - 1, 5);                                        // the post is a wooden strip behind the player (a solid pole would block the way)
+  addFixture('barometer', L - 3, F - 10, 2, 2, {});
   worldInfo.spots.barometer = { x: bx + 4, y: F * 4 - 32 };
   addFixture('kennel', L - 11, F - 3, 5, 3, { data: { dog: 'Север' } });
   worldInfo.spots.kennel = { x: (L - 11) * 4 + 10, y: F * 4 };

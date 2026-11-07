@@ -14,7 +14,9 @@ import { initStructure, stepStructure } from './engine/structure';
 import { stepBodies, clearBodies, drawBodies, clusterHitsBox } from './engine/bodies';
 import { stepParticles, clearParticles, drawParticles } from './engine/particles';
 import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from './engine/input';
+import { stepZoom, setZoomIndex, zoomIndex, zoomCount, zoomCells, zoomScales, resetZoom } from './engine/zoom';
 import { initTouch } from './ui/touch';
+import { initZoomUi, updateZoomUi } from './ui/zoomui';
 import { initSenses, toggleSenses } from './engine/senses';
 import { initSensesUi } from './ui/sensesui';
 import { initHud, updateHud, setFreeCamLabel } from './ui/devhud';
@@ -65,7 +67,8 @@ const free = { x: 0, y: 0 };
 
 // ---------------------------------------------------------------------------------------------------------------------
 function updateWindow() {
-  const c = G.cam, m = G.quality === 2 ? 0.28 : G.quality === 1 ? 0.2 : 0.1;
+  // margin around the view; shrinks when zoomed out so the simulated area (and its cost) stays near what a default view needs (DESIGN §14)
+  const c = G.cam, m = (G.quality === 2 ? 0.28 : G.quality === 1 ? 0.2 : 0.1) * Math.max(0.3, Math.min(1, 420 / Math.max(1, c.viewW)));
   const hw = c.viewW / 2, hh = c.viewH / 2;
   G.win.x0 = Math.max(0, Math.floor(c.x - hw - c.viewW * m)); G.win.x1 = Math.min(W - 1, Math.ceil(c.x + hw + c.viewW * m));
   G.win.y0 = Math.max(0, Math.floor(c.y - hh - c.viewH * m)); G.win.y1 = Math.min(H - 1, Math.ceil(c.y + hh + c.viewH * m));
@@ -247,7 +250,7 @@ function frame(now: number) {
   if (input.freeCamPressed) { input.freeCamPressed = false; toggleFreeCam(); }
   if (input.sensesPressed) { input.sensesPressed = false; if (ready && !document.body.classList.contains('title-open')) toggleSenses(); }
   const ticks = advance(dt, dt);
-  updateOverlay(dt);
+  updateOverlay(dt); updateZoomUi();
   void ticks;
   if (ready) {
     const p = G.player;
@@ -377,6 +380,7 @@ const sc = {
   senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
   setQuality(q: 0 | 1 | 2) { G.quality = q; resize(); },
+  zoom: { step: stepZoom, set: setZoomIndex, index: zoomIndex, count: zoomCount, cells: zoomCells, scales: () => zoomScales(), reset: resetZoom },
   viewerLight() { /* kept for old harnesses */ },
 };
 declare global { interface Window { __sc: typeof sc } }
@@ -388,6 +392,7 @@ async function boot() {
   initInput(canvas);
   initHud(uiRoot);
   initTouch(uiRoot);
+  initZoomUi(uiRoot);
   initOverlay(uiRoot, { start: (o) => { newGame(o); }, restart: () => { newGame({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore }); } });
   initSfxHooks();
   initLayers();

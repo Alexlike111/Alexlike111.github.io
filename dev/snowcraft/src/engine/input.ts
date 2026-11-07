@@ -1,5 +1,7 @@
 // Input (SPEC §1 InputState). Desktop: keyboard + mouse. Phone: ui/touch.ts writes into `touch` (held) and sets one-shot flags on `input`.
 // Frame protocol: main calls poll() at the start of a frame (merges sources) and endFrame() at the end (clears one-shots).
+import { stepZoom } from './zoom';
+
 export interface InputState {
   moveX: number; moveY: number; run: boolean;
   jumpHeld: boolean; jumpPressed: boolean;
@@ -49,15 +51,21 @@ function press(code: string) {
     case 'KeyG': input.dropPressed = true; break;
     case 'KeyX': input.sensesPressed = true; break;
     case 'F2': input.freeCamPressed = true; break;
+    case 'Equal': case 'NumpadAdd': zoomKey(1); break;           // zoom (DESIGN §14): + / − keys, Ctrl+wheel; plain wheel stays the belt
+    case 'Minus': case 'NumpadSubtract': zoomKey(-1); break;
   }
 }
+const ZOOM_CODES = new Set(['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'Digit0', 'Numpad0']);
+const titleUp = () => document.body.classList.contains('title-open');
+function zoomKey(dir: number) { if (!titleUp()) stepZoom(dir); }
+let zoomAcc = 0, zoomT = 0;
 
 export function initInput(canvas: HTMLElement) {
   if (inited) return;
   inited = true; canvasEl = canvas;
   addEventListener('keydown', (e) => {
-    if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
-    if (BLOCK.has(e.code) || e.code === 'F2') e.preventDefault();
+    if (((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') && e.code !== 'Escape') return;       // Esc still reaches the game (the zoom slider in the pause settings keeps focus)
+    if (BLOCK.has(e.code) || e.code === 'F2' || ((e.ctrlKey || e.metaKey) && ZOOM_CODES.has(e.code))) e.preventDefault();     // Ctrl +/- must zoom the game, not the page
     if (e.repeat) return;
     keys.add(e.code); press(e.code);
   });
@@ -82,7 +90,17 @@ export function initInput(canvas: HTMLElement) {
     if (e.pointerType === 'touch') return;
     input.aimX = e.clientX; input.aimY = e.clientY; input.hasAim = true; input.aimMode = 'mouse'; input.touchActive = false;
   });
-  target.addEventListener('wheel', (ev) => { const e = ev as WheelEvent; e.preventDefault(); wheelAcc += e.deltaY; }, { passive: false });
+  target.addEventListener('wheel', (ev) => {
+    const e = ev as WheelEvent; e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {                          // Ctrl+wheel (also a trackpad pinch, which arrives as ctrl+wheel): one zoom step per notch
+      if (titleUp()) return;
+      zoomAcc += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      const now = performance.now();
+      if (Math.abs(zoomAcc) >= 50 && now - zoomT > 90) { stepZoom(zoomAcc < 0 ? 1 : -1); zoomAcc = 0; zoomT = now; }
+      return;
+    }
+    wheelAcc += e.deltaY;
+  }, { passive: false });
 }
 
 /** Merge keyboard / mouse / touch into `input`. Call once at the start of a frame. */

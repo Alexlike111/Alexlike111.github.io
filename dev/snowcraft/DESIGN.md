@@ -172,3 +172,29 @@ Implementation notes: reuse Fixture (state.ts) with `data` for state; add Fixtur
 
 ## 16. Simplification (owner request): NO METHANE
 Methane gas, gas pockets, gas explosions and the mine ventilation door are removed from the game. The mine stays dark and dangerous only through cave-ins (knock out timber supports), cold and the dark. Agents: do not generate METHANE or OIL pockets, do not build the vent door, drop the "взрыв метана" death cause and any methane hints/notes/tests. The engine material may stay in materials.ts (unused). Keep the design simple: when in doubt, cut a feature rather than add a system. Carbon monoxide in closed igloos stays (it is the "make a vent hole" mechanic).
+
+## 17. Usable and carried items (owner request, v2.4) — all four groups chosen
+Rule: every item is a real thing, not filler: ItemDef with weight (kg) and stack size, an icon (16×16), a name/description (i18n), a "Использовать" action (tap/hold on the belt or from the bag panel) with a visible effect and a sound cue, a source (start kit / station shelf, cabinet, shed / mine hut / ship chests / beach / craft via a technique from notes or experience), a self-test, and a first-use journal hint. Keep the list small and solid (~18 items); if one cannot be made meaningful, cut it. Items must work with the pack weight system and container search (§12).
+**Тепло и здоровье**
+- Термос (thermos): fill with hot water/tea at a fire or kettle; drink in 3 sips: warmth +1 °C over a minute and hydration; stays hot ~6 game h, then cools.
+- Фляга (flask): carries water; freezes after ~25 real min outside at −25 °C unless kept inside the parka (stowed in the pack's "inside pocket" = body slot; shown with a frost overlay on the icon).
+- Грелка (hand_warmer): a tin with a live coal; held in the hands slot it slows hand/face frost gain and warms hands for ~4 h; needs a coal and a lit fire to start; burns out.
+- Бинт (bandage) + Спирт (spirit) from the cabinet/shelves: use on a frostnipped/frostbitten part in the body panel (treatment; frostbite scar heals in hours of warmth instead of days). Spirit only disinfects: drinking it feels warm but actually drops core temperature (hint in the item text, lore note).
+- Жир-мазь (frost_balm): rub on hands and face before going out: frost gain −40 % for ~2 game h; costs a little fat (scarce).
+- Очки (snow_goggles): needed against snow blindness in the bright twilight of days 10–12 and cut blowing-snow visibility loss in storms; worn in the new "face" wear slot (the only new slot; keep it simple).
+**Ориентиры и безопасность**
+- Компас (compass): HUD arrow/bearing to station, ship and marked spots; in whiteout it is the only way to know where you are going.
+- Бинокль (binoculars): hold to look far ahead (camera look-ahead ×2); animals appear as markers within a larger radius when there is some light (moon/aurora/twilight).
+- Шест-щуп (probe_pole): shows ice thickness and hidden voids/thin snow bridges 6 tiles ahead on use; fast to craft (log + rope).
+- Ледоступы (ice_cleats): wear (gear slot with goggles? no — separate toggle on boots): no slipping on bare ice, faster on glare ice; slower on soft snow.
+- Страховочная верёвка (safety_line): optional, only if cheap: tie to an anchor (door frame, mast, ship rail); if you fall in a lead within its length you climb out faster.
+**Свет и сигналы**
+- Фонарь «летучая мышь» (lantern): diesel, held light radius bigger than the torch, wind can blow it out in the open (relight).
+- Ракетница (flare_gun) + Ракета (flare, 3 found: ship chest, station, mine hut): fired into the sky: lights the area 30 s, scares the bear for ~60 s, counts as a signal for the icebreaker finale.
+- Дымовая шашка (smoke_flare): daytime marker visible from far; alternative way to guide the icebreaker.
+- Свисток (whistle): calls Север; he comes, follows or stays (hold = stay).
+**Хранение и переноска**
+- Поясной подсумок (belt_pouch): +3 quick slots usable from the belt wheel.
+- Усиленный рюкзак (big_pack): +6 pack slots and +10 kg limit, but +20 % sweat (sewn from sealskin/canvas, technique from a note).
+- Мешок (sack): holds one bulk material (snow/ice/coal/lichen) up to 12 per slot at half weight; carrying wet snow makes your clothes wet.
+Placement/wiring: new ItemDefs and recipes live in items.ts/recipes.ts (or items_extra.ts), found items are added to station/ship/mine chests in locations.ts, the use actions live in tools.ts (use-item handler) and the body/vitals hooks in player.ts, fixtures (kettle/cabinet) supply some sources.

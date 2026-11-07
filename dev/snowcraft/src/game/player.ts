@@ -11,7 +11,7 @@ import { tempAt, windAt, shelterAt, addHeat } from '../engine/heat';
 import { spawnFx, burstFx } from '../engine/particles';
 import { addShake } from '../engine/camera';
 import { MAT, FRIC } from '../content/materials';
-import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, removeFromSlot, takeAll, giveStartKit, spawnDrop, backpacks, add, remove, count, held, clearInventory, find, select } from './inventory';
+import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, WEIGHT_RUN, overload, removeFromSlot, takeAll, giveStartKit, spawnDrop, backpacks, add, remove, count, held, clearInventory, find, select } from './inventory';
 import { getItem, itemName, type WearSlot } from './items';
 import { radiantWarmth, dryBoost, nearStation } from './fixtures';
 import { H, W } from '../engine/grid';
@@ -290,7 +290,7 @@ function stepMove(dt: number) {
   const swim = inw > 0.45;
   // carry weight
   p.carry = weight();
-  const heavy = Math.max(0, Math.min(1, (p.carry - WEIGHT_SOFT) / (WEIGHT_MAX - WEIGHT_SOFT)));
+  const heavy = overload(p.carry);       // DESIGN §12: 0 up to the comfortable load (25 kg), 1 at WEIGHT_MAX
   let mult = 1 - heavy * 0.55;
   if (p.frost.feet >= 80) mult *= 0.7;
   if (p.core < 35) mult *= 0.9; if (p.core < 32.5) mult *= 0.75;
@@ -299,7 +299,7 @@ function stepMove(dt: number) {
   if (body.sink > 1) mult *= 0.88;
   const fric = FRIC[body.feetMat] || 1;
   const ix = Math.abs(input.moveX) < 0.12 ? 0 : input.moveX;
-  const run = input.run && !swim && p.energy > 5;
+  const run = input.run && !swim && p.energy > 5 && p.carry <= WEIGHT_RUN;       // above 140 % of the load nobody runs
   let target = ix * (run ? TUNE.run : TUNE.walk) * mult;
   if (swim) target = ix * TUNE.swimV;
   if (p.core < 32 && Math.random() < 0.02) target *= -0.5;   // stumbles
@@ -395,7 +395,7 @@ export function stepBody(bdt: number) {
     if (swimming) met = 5;
     else if (p.onGround && Math.abs(p.vx) > 3) met = 1 + 3.2 * speedFrac + (Math.abs(p.vx) > TUNE.walk * 1.2 ? 0.6 : 0);
     else met = 1 + 3.5 * body.working;
-    met += Math.min(1.5, p.carry * 0.03);
+    met += Math.min(1.5, p.carry * 0.03) + overload(p.carry) * 1.2;      // heavy load: more effort -> more sweat
     met += 0.09 * rad;            // radiant heat from fires warms the body directly
   }
   if (body.warmT > 0) { met += body.warmPow; body.warmT -= bdt; if (body.warmT <= 0) body.warmPow = 0; }
@@ -465,7 +465,7 @@ export function stepBody(bdt: number) {
   } else {
     p.energy = Math.max(0, p.energy - TUNE.energyDrain * (0.7 + 0.5 * body.working + (p.core < 35.5 ? 0.4 : 0)) * bdt);
   }
-  p.stamina = Math.min(100, Math.max(0, p.stamina + (input.run && Math.abs(p.vx) > 20 ? -12 : 14) * bdt));
+  p.stamina = Math.min(100, Math.max(0, p.stamina + (input.run && Math.abs(p.vx) > 20 ? -12 * (1 + overload(p.carry)) : 14 * (1 - 0.4 * overload(p.carry))) * bdt));
   // carbon monoxide follows the enclosure
   const coT = G.shelter ? G.shelter.co : 0;
   p.co += (coT - p.co) * (coT > p.co ? 0.18 : 0.07) * Math.min(bdt, 1.5);

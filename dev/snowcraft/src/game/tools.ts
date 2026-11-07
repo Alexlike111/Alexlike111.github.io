@@ -24,6 +24,10 @@ import { body, eatSlot, eatBest, toggleParka, aimSway, handsFactor, openBackpack
 import { extra as shelterExtra } from './shelter';
 import { MIN_PER_SEC } from './weather';
 import { dogInteract } from './fauna';
+import { stepSearch } from './search';
+import { nearbyList, takeNear, autoPickable, stepNearby, isBoxFixture, nearUi, type Near } from './nearby';
+import { thrown } from './inventory';
+import { isKeyDown } from '../engine/input';
 
 const S = strings('tools', {
   far: 'далеко', blocked: 'не достать: мешает стена', needPick: 'нужна кирка', needAxe: 'нужен топор', needChisel: 'нужна пешня или кирка', needShovel: 'нужна лопата',
@@ -736,7 +740,18 @@ function interactAction(T: Target, selId: string | null) {
   let f: Fixture | null = null;
   if (T.fixture && Math.hypot(T.fixture.tx * TS + T.fixture.tw * 2 - p.x, T.fixture.ty * TS + T.fixture.th * 2 - (p.y - 8)) < 56) f = T.fixture;
   if (!f) f = fixtureNear(p.x, p.y - 8, 18, (o) => !!FIXTURE_DEFS[o.kind] && o.kind !== 'table' && o.kind !== 'workbench' && !(o.kind === 'hide_door' && false));
-  if (f && fxInteract(f)) return;
+  // DESIGN §12: containers, lying things, a backpack and a parked sled are chosen through the nearby list (E = the nearest one in front, E held = the list)
+  const near = nearbyList();
+  if (f && !isBoxFixture(f)) {
+    // a stove / door / bed wins when the cursor points at it or it is nearer than the nearest lying thing
+    const fd = Math.hypot(f.tx * TS + f.tw * 2 - p.x, f.ty * TS + f.th * 2 - (p.y - 8));
+    if ((input.aimMode === 'mouse' && T.fixture === f) || !near.length || fd < near[0].dist - 2) { if (fxInteract(f)) return; }
+  }
+  if (near.length) {
+    const aimed = f && isBoxFixture(f) ? near.find(n => n.f === f) : undefined;
+    if (aimed || near.length === 1) { takeNear(aimed ?? near[0]); return; }
+    holdE.t = 0; holdE.armed = true; holdE.list = near; return;      // several candidates: a tap takes the nearest, holding opens the list
+  }
   if (dogInteract()) return;
   if (sledNear(p.x, p.y - 4)) { hitchSled(p.x, p.y); toast(S.sledUp, 'info'); return; }
   // shovel load -> bag it
@@ -749,6 +764,18 @@ function interactAction(T: Target, selId: string | null) {
   if (selId === 'torch') return;
   // eat when nothing else
   void tryLight;
+}
+/** E pressed with several things in reach: released quickly = take the nearest in front, held = open the «Рядом» list (ui/bag.ts shows it). */
+export const holdE = { armed: false, t: 0, list: [] as Near[] };
+function stepInteractHold(dt: number) {
+  if (!holdE.armed) return;
+  holdE.t += dt;
+  const down = isKeyDown('KeyE');
+  if (!down || holdE.t >= 0.4) {
+    holdE.armed = false;
+    if (down && holdE.t >= 0.4) { nearUi.open = true; return; }
+    const cur = nearbyList(); if (cur.length) takeNear(cur[0]);
+  }
 }
 function dropAction(T: Target) {
   const p = G.player;
@@ -763,7 +790,7 @@ function dropAction(T: Target) {
   if (!s) return;
   const out = removeFromSlot(inv.sel, getItem(s.id).stack > 1 ? s.n : 1); if (!out) return;
   const d = spawnDrop(out.id, out.n, p.x + p.face * 8, p.y - 12, p.face * 40, -30, out.dur);
-  if (d) d.age = -1.4;
+  if (d) { d.age = -1.4; thrown.add(d.id); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -772,20 +799,22 @@ const box = { x: 0, y: 0, vx: 0, vy: 0, w: 3, h: 3, onGround: false };
 export function stepDrops(dt: number) {
   const p = G.player;
   const arr = G.drops;
+  stepSearch(dt); stepNearby(dt); stepInteractHold(dt);
   for (let i = arr.length - 1; i >= 0; i--) {
     const d = arr[i];
     d.age += dt;
+    if (d.item === 'backpack' && d.age > 5 && !backpacks.has(d.id)) { arr.splice(i, 1); continue; }       // an emptied / orphaned backpack vanishes
     box.x = d.x; box.y = d.y; box.vx = d.vx; box.vy = d.vy + 300 * dt; box.onGround = false;
     if (box.vy > 200) box.vy = 200;
     // magnet
     let picked = false;
-    if (p && p.alive && d.age > 0.35) {
+    // DESIGN §12: only small light things are picked up by walking over them (and only if there is room and weight); the rest waits for E
+    if (p && p.alive && d.age > 0.35 && autoPickable(d)) {
       const dx = p.x - d.x, dy = p.y - 8 - d.y, dist = Math.hypot(dx, dy);
       if (dist < 5.5) picked = true;
       else if (dist < 20) { const k = (20 - dist) * 14; box.vx += (dx / dist) * k * dt * 3; box.vy += (dy / dist) * k * dt * 3 - 300 * dt * 0.7; }
     }
     if (picked) {
-      if (d.item === 'backpack') { if (openBackpack(d.id)) { arr.splice(i, 1); toast(S.backpack, 'good'); emit('respawn_pack', {}); continue; } else { if (!backpacks.has(d.id)) { arr.splice(i, 1); } continue; } }
       const dur = dropDur.get(d.id);
       const left = add(d.item, d.n, dur);
       if (left < d.n) { emit('picked', { item: d.item, n: d.n - left }); if (left === 0) { toast(fmt(S.picked, { name: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : '') }), 'info'); } }

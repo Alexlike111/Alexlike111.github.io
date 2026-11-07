@@ -8,11 +8,12 @@ import { inv, select, BELT } from '../game/inventory';
 import { getItem, itemName } from '../game/items';
 import { icon } from '../engine/sprites';
 import { worldToScreen } from '../engine/render';
+import { stepZoom } from '../engine/zoom';
 
 const S = strings('touch', {
   action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка',
   senses: 'Чутьё', rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
-  moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
+  zoomIn: 'Ближе', zoomOut: 'Дальше', moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
 });
 
 let root: HTMLElement | null = null;
@@ -43,6 +44,9 @@ const CSS = `
 #touch #tb-bag{width:64px;height:50px;right:calc(152px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-jour{width:64px;height:50px;right:calc(82px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-parka{width:64px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-zin,#touch #tb-zout{width:44px;height:44px;left:calc(10px + env(safe-area-inset-left,0px));font-size:24px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
+#touch #tb-zin{top:calc(74px + env(safe-area-inset-top,0px))}
+#touch #tb-zout{top:calc(124px + env(safe-area-inset-top,0px))}
 #touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
 #touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
 #touch .ghost i{width:34px;height:34px;border-radius:50%;background:rgba(190,226,250,.22);border:2px solid rgba(190,226,250,.45)}
@@ -101,6 +105,9 @@ export function initTouch(uiRoot: HTMLElement) {
   hold(jour, () => { input.journalPressed = true; }, () => {});
   const parka = btn('tb-parka', S.parka, true);
   hold(parka, () => { input.ventPressed = true; }, () => {});
+  const zin = btn('tb-zin', '+'), zout = btn('tb-zout', '−');                  // zoom (DESIGN §14): small buttons on the free left edge, under the body panel
+  zin.setAttribute('aria-label', S.zoomIn); zout.setAttribute('aria-label', S.zoomOut);
+  hold(zin, () => { stepZoom(1); }, () => {}); hold(zout, () => { stepZoom(-1); }, () => {});
   const sens = btn('tb-senses', S.senses);                      // «Чутьё»: the senses overlay (engine/senses.ts, ui/sensesui.ts keeps the .act state)
   hold(sens, () => { input.sensesPressed = true; }, () => {});
 
@@ -116,6 +123,18 @@ export function initTouch(uiRoot: HTMLElement) {
   const stage = document.getElementById('stage') ?? document.body;
   let stickId = -1, sx = 0, sy = 0, aimId = -1;
   const wasUp = { v: false };
+  // pinch (DESIGN §14): a second finger landing in the zone of a finger that is already steering (the stick on the left, the aim on the right)
+  // turns both into a zoom gesture; every PINCH_STEP px of change in their distance is one zoom step
+  const PINCH_STEP = 64;
+  const pos = new Map<number, { x: number; y: number }>();
+  let pinchA = -1, pinchB = -1, pinchRef = 0;
+  const pdist = () => { const a = pos.get(pinchA), b = pos.get(pinchB); return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0; };
+  const releaseStick = () => { stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false; stickBase!.style.display = stickKnob!.style.display = 'none'; };
+  const releaseAim = () => { aimId = -1; touch.aimed = false; touch.primary = actHeld; };
+  const startPinch = (first: number, second: number) => {
+    if (first === stickId) releaseStick(); else if (first === aimId) releaseAim();
+    pinchA = first; pinchB = second; pinchRef = pdist();
+  };
   stage.addEventListener('pointerdown', (ev) => {
     const e = ev as PointerEvent;
     if (e.pointerType !== 'touch') return;
@@ -123,6 +142,9 @@ export function initTouch(uiRoot: HTMLElement) {
     setEnabled(true);
     input.touchActive = true; input.anyKey = true;
     const left = e.clientX < window.innerWidth * 0.4;
+    pos.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchA < 0 && (left ? stickId >= 0 : aimId >= 0)) { startPinch(left ? stickId : aimId, e.pointerId); return; }
+    if (pinchA >= 0) return;                                  // a third finger during a pinch: ignored
     if (left && stickId < 0) {
       stickId = e.pointerId; sx = e.clientX; sy = e.clientY;
       if (ghost && ghost.style.display !== 'none') { ghost.style.display = 'none'; try { localStorage.setItem('sc.stickHint', '1'); } catch { /* ignore */ } }
@@ -135,6 +157,15 @@ export function initTouch(uiRoot: HTMLElement) {
   addEventListener('pointermove', (ev) => {
     const e = ev as PointerEvent;
     if (e.pointerType !== 'touch') return;
+    const pp = pos.get(e.pointerId); if (pp) { pp.x = e.clientX; pp.y = e.clientY; }
+    if (pinchA >= 0) {
+      if (e.pointerId === pinchA || e.pointerId === pinchB) {
+        const d = pdist();
+        while (d - pinchRef >= PINCH_STEP) { stepZoom(1); pinchRef += PINCH_STEP; }            // fingers apart = closer
+        while (pinchRef - d >= PINCH_STEP) { stepZoom(-1); pinchRef -= PINCH_STEP; }
+      }
+      return;
+    }
     if (e.pointerId === stickId) {
       let dx = e.clientX - sx, dy = e.clientY - sy;
       const len = Math.hypot(dx, dy);
@@ -154,6 +185,8 @@ export function initTouch(uiRoot: HTMLElement) {
   const end = (ev: Event) => {
     const e = ev as PointerEvent;
     if (e.pointerType !== 'touch') return;
+    pos.delete(e.pointerId);
+    if (e.pointerId === pinchA || e.pointerId === pinchB) { pinchA = pinchB = -1; return; }       // a pinch ends with the first finger up; the other one stays idle until lifted
     if (e.pointerId === stickId) {
       stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false;
       stickBase!.style.display = stickKnob!.style.display = 'none';

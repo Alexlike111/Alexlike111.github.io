@@ -13,6 +13,7 @@ import { getItem, fuelMinutes, itemName } from './items';
 import { MIN_PER_SEC, readBarometer } from './weather';
 import { floodEnclosure } from './shelter';
 import type { Stations } from './recipes';
+import { openContainer, stashSelected } from './search';
 
 const S = strings('fix', {
   noFuel: 'Нечем топить: нужны дрова, уголь или жир',
@@ -364,19 +365,10 @@ export function interact(f: Fixture): boolean {
       return true;
     }
     case 'chest': case 'shelf': case 'cache': case 'cairn': {
-      const items = f.items ?? [];
-      if (!items.length) { if (d.portable && pickupFixture(f)) return true; toast(S.chestEmpty, 'info'); return true; }
-      const names: string[] = [];
-      for (let i = items.length - 1; i >= 0; i--) {
-        const s = items[i];
-        const left = add(s.id, s.n, s.dur);
-        if (left < s.n) names.push(`${itemName(s.id)}${s.n - left > 1 ? ' ×' + (s.n - left) : ''}`);
-        if (/^note/.test(s.id) && left === 0) emit('note_found', { id: s.id });
-        if (left <= 0) items.splice(i, 1); else s.n = left;
-      }
-      if (names.length) toast(fmt(S.took, { list: names.join(', ') }), 'good');
+      // DESIGN §12: opens the container panel; the contents are SEARCHED with time (search.ts). An empty portable stash is picked up as before.
+      if (!(f.items ?? []).length && d.portable) { if (pickupFixture(f)) return true; toast(S.chestEmpty, 'info'); return true; }
       emit('chest_opened', { fixture: f });
-      return true;
+      return openContainer(f);
     }
     case 'bed': case 'skin_bed': emit('sleep_request', { fixture: f }); return true;
     case 'pot': return interactPot(f);
@@ -390,8 +382,8 @@ export function interact(f: Fixture): boolean {
     case 'barometer': readBarometer(); return true;
     case 'cart': {
       const dd = f.data ?? (f.data = {});
-      if (dd.loaded) { const id = String(dd.loaded); dd.loaded = ''; addOrDrop(id, 4, p.x, p.y - 6); toast(fmt(S.took, { list: itemName(id) + ' ×4' }), 'good'); return true; }
-      toast(S.chestEmpty, 'info'); return true;
+      if (!dd.loaded && !(f.items ?? []).length) { toast(S.chestEmpty, 'info'); return true; }
+      return openContainer(f);          // the cargo (data.loaded) turns into f.items on the first opening
     }
     case 'radio': return interactRadio(f);
     case 'drum': return interactDrum(f);
@@ -409,13 +401,7 @@ export function interact(f: Fixture): boolean {
 export function stash(f: Fixture): boolean {
   const d = D[f.kind]; if (!d?.storage) return false;
   const sel = inv.slots[inv.sel]; if (!sel) return false;
-  const items = f.items ?? (f.items = []);
-  if (items.length >= d.storage && !items.some(s => s.id === sel.id)) return false;
-  const ex = items.find(s => s.id === sel.id && s.dur === sel.dur);
-  if (ex) ex.n += sel.n; else items.push({ ...sel });
-  inv.slots[inv.sel] = null; changed();
-  toast(fmt(S.stashed, { name: itemName(sel.id) }), 'info');
-  return true;
+  return stashSelected(f);          // search.ts: what the player puts in is known at once (not hidden behind the unsearched part)
 }
 
 const POT_CAP = 6;

@@ -11,6 +11,7 @@ import { setClock } from './weather';
 import { sites } from './locations';
 import { questSave, questLoad } from './quest';
 import { resetShelter } from './shelter';
+import { searchSave, searchLoad } from './search';
 
 export const SAVE_VERSION = 1;
 const DB = 'snowcraft', STORE = 'save';
@@ -31,6 +32,7 @@ export function captureState() {
     backpacks: [...backpacks].map(([id, slots]) => [id, JSON.parse(JSON.stringify(slots))]),
     fixtures: JSON.parse(JSON.stringify(G.fixtures)), drops: JSON.parse(JSON.stringify(G.drops)),
     sites: sites.map(s => s.found),
+    search: searchSave(),      // DESIGN §12: which containers have been searched how far / chipped free
     quest: questSave(),
   };
 }
@@ -54,6 +56,7 @@ export function applySave(d: SaveData) {
   G.nextId = Math.max(G.nextId, s.nextId);
   sites.forEach((x, i) => { x.found = !!s.sites?.[i]; });
   questLoad(s.quest);
+  searchLoad(s.search);
   setClock(s.time);
   resetShelter();
 }

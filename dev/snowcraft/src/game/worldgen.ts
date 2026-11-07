@@ -7,6 +7,7 @@
 import { W, H, TW, TH, mat, aux, flags, shade, bg, awake, clearWorld, setSeed, rand, randInt, noise1, fbm1, fbm2 } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { G } from './state';
+import { tundraSnow, stationSnow, finishSnow, makeSpawn } from './snowpack';
 import { LOC, SEA, stampLocations, resetLocations, worldInfo, Terrain, put, box, pileBlocks, snowBank, topSolid } from './locations';
 
 export { worldInfo, LOC };
@@ -92,13 +93,18 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   edgesAndBedrock();
   buildBackgrounds();
   rockFeatures();
+  tundraSnow(T, seed);                 // DESIGN §13 deep snow: own hash noise, no rand() draws (the random stream below is unchanged)
   stampLocations(T);
+  stationSnow(T);
   cutSealHoles();
   sastrugi();
+  finishSnow(T, LOC.iceberg.x);
   finalize();
 
-  const sx = LOC.spawn.x;
-  let sy = 0; while (sy < H - 1 && (mat[sy * W + sx] === AIR || mat[sy * W + sx] === M.FIXTURE)) sy++;
+  const sp = makeSpawn();              // a flat terrace on the lee drift, a few cells east of the buried station door
+  const sx = sp.x, sy = sp.y;
+  LOC.spawn.x = sx;
+  worldInfo.spots.spawn = { x: sx, y: sy };
   return { spawnX: sx, spawnY: sy };
 }
 

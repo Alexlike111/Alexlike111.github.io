@@ -26,7 +26,7 @@ import { knowsForecast, sunElevAt } from '../game/weather';
 import { toast } from '../game/state';
 import { on } from '../game/bus';
 import { objective, initQuest, prog, journal } from '../game/quest';
-import { bagHtml } from './bag';
+import { renderBag, attachBag, bagWantsOpen } from './bag';
 import { renderJournalInto, journalClick, setJournalTab } from './journal';
 
 const S = strings('hud', {
@@ -256,7 +256,7 @@ export function initHud(host: HTMLElement) {
     if (document.body.classList.contains('touch-ui')) { window.dispatchEvent(new Event('sc:radial')); return; }
     select(+el.dataset.i!);
   });
-  panel.addEventListener('click', onPanelClick);
+  attachBag(panel, setPanelOpen, craftIdx);         // §12: drag & drop, tap-select, container panel, «Рядом» list (ui/bag.ts)
 }
 const shortcut = (key: string) => key;
 
@@ -274,21 +274,10 @@ function placeTip(sx: number, sy: number) {
   tip.style.left = best[0] + 'px'; tip.style.top = best[1] + 'px';
 }
 
-function onPanelClick(e: Event) {
-  const t = (e.target as HTMLElement).closest('[data-a]') as HTMLElement | null; if (!t) return;
-  const p = G.player, a = t.dataset.a;
-  if (a === 'close') { panelOpen = false; panel.style.display = 'none'; return; }
-  if (a === 'un') unequip(t.dataset.s as never);
-  else if (a === 'slot') {
-    const i = +t.dataset.i!; const s = inv.slots[i]; if (!s) return;
-    const d = getItem(s.id);
-    if (d.wear) equip(i); else if (d.food) eatSlot(i);
-    else if (i >= BELT) { const j = inv.slots.findIndex((x, k) => !x && k < BELT); if (j >= 0) { inv.slots[j] = s; inv.slots[i] = null; inv.sel = j; } }
-    else select(i);
-  } else if (a === 'rec') {
-    const r = RECIPES[+t.dataset.r!];
-    if (craft(r, stationsAt(p.x, p.y - 8), handsFrozen())) toast(craftedText(r), 'good');
-  }
+function setPanelOpen(v: boolean) { panelOpen = v; panel.style.display = v ? 'block' : 'none'; panelAcc = 9; }
+function craftIdx(idx: number) {
+  const p = G.player, r = RECIPES[idx];
+  if (r && craft(r, stationsAt(p.x, p.y - 8), handsFrozen())) toast(craftedText(r), 'good');
   panelAcc = 9;
 }
 
@@ -302,6 +291,7 @@ export function updateHud(dt: number, realDt: number) {
   if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
   if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
+  if (bagWantsOpen() && !titleOn) { jOpen = false; jEl.style.display = 'none'; if (!panelOpen) setPanelOpen(true); }      // a container was opened: show its panel
   if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
   if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
   if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
@@ -394,7 +384,7 @@ function setRow(k: string, text: string, c: string) { const r = rows[k]; r.v.tex
 
 // ---- bag + crafting panel ----------------------------------------------------------------------------------------------------
 function renderPanel() {
-  const sy = panel.scrollTop; panel.innerHTML = bagHtml(); panel.scrollTop = sy;      // the bag + «Что умею» panel lives in ui/bag.ts
+  renderBag(panel);      // the bag + container + «Что умею» panel lives in ui/bag.ts
 }
 function renderJournal() { renderJournalInto(jEl); }      // tabs Цели · Знания · Записки · Карта · Вещества live in ui/journal.ts
 export const panelIsOpen = () => panelOpen || jOpen;

@@ -9,6 +9,7 @@ import { initTextures, TEX, BGTEX } from './tex';
 import { drawSky, updateSkyState, horizonRGB, skyState } from './sky';
 import { computeLight, lt, lightR, lightG, lightB, lightRGBA, glowRGBA, skyTint, indoor } from './light';
 import { clampCamera } from './camera';
+import { chooseScale, onZoomChange, setZoomForcedDefault } from './zoom';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // per-material render tables
@@ -91,6 +92,7 @@ export function initRender(canvas: HTMLCanvasElement) {
   tc = document.createElement('canvas'); sc = document.createElement('canvas'); lm = document.createElement('canvas');
   tctx = tc.getContext('2d')!; sctx = sc.getContext('2d')!; lmctx = lm.getContext('2d')!;
   window.addEventListener('resize', resize);
+  onZoomChange(resize);
   resize();
 }
 
@@ -98,9 +100,7 @@ export function initRender(canvas: HTMLCanvasElement) {
 export function resize() {
   dpr = window.devicePixelRatio || 1;
   const devW = Math.max(1, Math.round(window.innerWidth * dpr)), devH = Math.max(1, Math.round(window.innerHeight * dpr));
-  let best = 3, bd = 1e9;
-  for (let s = 2; s <= 6; s++) { const d = Math.abs(devW / s - 410); if (d < bd) { bd = d; best = s; } }
-  scale = best;
+  scale = chooseScale(devW);        // integer device px per cell: the player's zoom (zoom.ts), 200..700 cells across the width
   G.cam.scale = scale; G.cam.viewW = devW / scale; G.cam.viewH = devH / scale;
   const nw = Math.ceil(G.cam.viewW) + 2, nh = Math.ceil(G.cam.viewH) + 2;
   if (nw !== cw || nh !== ch) {
@@ -390,6 +390,7 @@ export function render(dt: number) {
   const tStart = performance.now();
   tAcc += dt; const t = tAcc; G.frame++;
   if (!cv) return;
+  if (setZoomForcedDefault(document.body.classList.contains('title-open'))) resize();       // the title screen keeps the default framing
   const cam = G.cam;
   // camera -> view (shake is a pseudo-random sub-cell offset)
   let cx = cam.x, cy = cam.y;

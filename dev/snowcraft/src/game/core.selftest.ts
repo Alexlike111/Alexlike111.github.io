@@ -20,6 +20,7 @@ import { digTime, cutRegion, target, toolState, stepTools, stepDrops, sinterMinu
 import { gradeShelter, floodEnclosure, evalShelterNow, finishStormReport, coNow } from './shelter';
 import { initWeather, setDay, setClock, wx, STORMS, sunElevAt, noonElevAt, stormIntensity, applyClock, stepWeather, knowsForecast, readBarometer, MIN_PER_SEC, nextStorm } from './weather';
 import { sandbox, arena, igloo, tileBlock, count as cellCount, put } from './testkit';
+import { takeAllFound, closeBox, isOpen as searchOpen } from './search';
 
 const sc = () => (window as unknown as { __sc: any }).__sc;
 const ok = (t: TestCtx, c: boolean, m: string) => t.expect(c, m);
@@ -263,15 +264,23 @@ registerTest('tools', 'гарпун, удочка, факел, фонарь, р�
 registerTest('tools', 'выпавшие предметы притягиваются, рюкзак возвращает вещи', async () => {
   await sandbox(() => {
     const p = scene();
-    clearInventory(); spawnDrop('coal', 3, p.x + 10, p.y - 4, 0, 0);
+    clearInventory(); spawnDrop('biscuit', 3, p.x + 10, p.y - 4, 0, 0);
     steps(120);
-    if (count('coal') !== 3) throw new Error('магнит: ' + count('coal'));
+    if (count('biscuit') !== 3) throw new Error('магнит: ' + count('biscuit'));
+    // DESIGN §12: heavy things (a sack of coal) are never picked up by walking over them: they wait for E
+    spawnDrop('coal', 3, p.x + 4, p.y - 4, 0, 0); steps(120);
+    if (count('coal') !== 0) throw new Error('тяжёлое подобралось само: ' + count('coal'));
+    input.interactPressed = true; steps(3);
+    if (count('coal') !== 3) throw new Error('E не взяло уголь: ' + count('coal'));
+    clearInventory();
     add('axe', 1); add('rope', 2);
     die('тест'); steps(5);
     if (G.drops.every(d => d.item !== 'backpack')) throw new Error('нет рюкзака');
     G.diff.hardcore = false; respawn();
     for (const d of G.drops) if (d.item === 'backpack') { d.x = p.x + 3; d.y = p.y - 3; d.age = 1; d.vx = d.vy = 0; }
-    steps(30);
+    input.interactPressed = true; steps(3);                  // E opens the backpack: its contents are searched (a few seconds), then taken
+    if (!searchOpen()) throw new Error('рюкзак не открылся по E');
+    steps(240); takeAllFound(); closeBox();
     if (count('axe') !== 1 || count('rope') !== 2) throw new Error('рюкзак не вернул вещи');
     void backpacks;
   });
@@ -364,7 +373,7 @@ registerTest('fixtures', 'полог/дверь, тайник/сундук, си
     // cache
     const cache = placeFixture('cache', 240, 66, { force: true })!;
     clearInventory(); inv.slots[0] = { id: 'fat', n: 2 }; s.select(0); if (!stash(cache) || count('fat') !== 0) throw new Error('stash');
-    interact(cache); if (count('fat') !== 2) throw new Error('тайник не отдал');
+    interact(cache); takeAllFound(); closeBox(); if (count('fat') !== 2) throw new Error('тайник не отдал');
     // snare
     const snare = placeFixture('snare', 244, 67, { force: true })!; interact(snare); if (!snare.data!.set) throw new Error('силок не взведён');
     let caught = 0; const off = on('snare_caught', () => caught++);
