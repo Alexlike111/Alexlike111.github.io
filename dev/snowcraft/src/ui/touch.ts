@@ -21,14 +21,16 @@ let layer: HTMLElement | null = null;
 let radial: HTMLElement | null = null;
 let rotateEl: HTMLElement | null = null;
 let stickBase: HTMLElement | null = null, stickKnob: HTMLElement | null = null;
+let syncStick: () => void = () => {};
 let enabled = false;
 let jumpBtn = false, jumpStick = false, actHeld = false, rotatePaused = false;
 let ghost: HTMLElement | null = null;
 let radialTimer = 0;
-const R = 56;                                   // stick radius px
+let R = 56;                                     // stick radius px (follows the screen height: --R in the CSS, kept in sync by syncStick())
 const AIM_LIFT = 48;                            // the aim cursor sits this many CSS px above the finger (the finger hides the spot it aims at)
 
 const CSS = `
+:root{--u:clamp(40px,13vh,60px);--tw:max(58px,calc(var(--u)*1.2));--th:max(34px,calc(var(--u)*.85));--zs:max(34px,calc(var(--u)*.75));--R:clamp(34px,15vh,56px)}
 #touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;
   padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0)}
 #touch .tb{box-sizing:border-box;position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;text-align:center;color:#dff0ff;
@@ -36,25 +38,24 @@ const CSS = `
   backdrop-filter:blur(2px);-webkit-tap-highlight-color:transparent}
 #touch .tb.sq{border-radius:12px;font-size:13px;padding:0 2px}
 #touch .tb:active,#touch .tb.on{background:rgba(124,198,238,.45);border-color:#cfeaff}
-#touch #tb-act{width:92px;height:92px;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));font-size:15px;border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55)}
-#touch #tb-jump{width:68px;height:68px;right:calc(124px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
-#touch #tb-take{width:60px;height:60px;right:calc(30px + env(safe-area-inset-right,0px));bottom:calc(120px + env(safe-area-inset-bottom,0px))}
-#touch #tb-belt{width:58px;height:58px;right:calc(126px + env(safe-area-inset-right,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px))}
-#touch #tb-senses{width:58px;height:58px;right:calc(112px + env(safe-area-inset-right,0px));bottom:calc(184px + env(safe-area-inset-bottom,0px));font-size:13px}
+#touch #tb-act{width:calc(var(--u)*1.6);height:calc(var(--u)*1.6);right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));font-size:15px;border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55)}
+#touch #tb-jump{width:calc(var(--u)*1.15);height:calc(var(--u)*1.15);right:calc(12px + var(--u)*1.6 + 6px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+#touch #tb-take{width:var(--u);height:var(--u);right:calc(12px + var(--u)*.3 + env(safe-area-inset-right,0px));bottom:calc(18px + var(--u)*1.6 + env(safe-area-inset-bottom,0px))}
+#touch #tb-belt{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(18px + var(--u)*1.15 + env(safe-area-inset-bottom,0px))}
+#touch #tb-senses{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.15 + env(safe-area-inset-bottom,0px));font-size:12px}
 #touch #tb-senses.act{background:rgba(40,120,96,.62);border-color:#8cf5cf;color:#eafff7}
-#touch #tb-bag{width:64px;height:50px;right:calc(152px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-jour{width:64px;height:50px;right:calc(82px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-parka{width:64px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-zin,#touch #tb-zout{width:44px;height:44px;right:calc(76px + env(safe-area-inset-right,0px));font-size:24px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
-/* right side, between Журнал and Чутьё: away from the cue column on the left edge (overlay.ts) and the stick */
-#touch #tb-zin{top:calc(60px + env(safe-area-inset-top,0px))}
-#touch #tb-zout{top:calc(104px + env(safe-area-inset-top,0px))}
-#touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
-#touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
-#touch .ghost i{width:34px;height:34px;border-radius:50%;background:rgba(190,226,250,.22);border:2px solid rgba(190,226,250,.45)}
-#touch .ghost span{position:absolute;top:-22px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;color:#cfeaff;text-shadow:0 1px 0 #05080f}
-@keyframes scghost{0%,100%{opacity:.55}50%{opacity:1}}
-#touch .knob{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(190,226,250,.5);border:2px solid #cfeaff;display:none}
+#touch #tb-bag,#touch #tb-jour,#touch #tb-parka{width:var(--tw);height:var(--th);top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-parka{right:calc(12px + env(safe-area-inset-right,0px))}
+#touch #tb-jour{right:calc(18px + var(--tw) + env(safe-area-inset-right,0px))}
+#touch #tb-bag{right:calc(24px + var(--tw)*2 + env(safe-area-inset-right,0px))}
+/* zoom: two small buttons under the top row on the right edge: clear of the stick, the cue column on the left and the action cluster */
+#touch #tb-zin,#touch #tb-zout{width:var(--zs);height:var(--zs);right:calc(12px + env(safe-area-inset-right,0px));font-size:22px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
+#touch #tb-zin{top:calc(14px + var(--th) + env(safe-area-inset-top,0px))}
+#touch #tb-zout{top:calc(20px + var(--th) + var(--zs) + env(safe-area-inset-top,0px))}
+/* the walking stick is FIXED in the bottom-left corner and always visible; the knob follows the thumb */
+#touch .stick{position:absolute;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));width:calc(var(--R)*2);height:calc(var(--R)*2);box-sizing:border-box;border-radius:50%;border:2px solid rgba(190,226,250,.55);background:rgba(14,26,44,.35)}
+#touch .knob{position:absolute;width:calc(var(--R)*.95);height:calc(var(--R)*.95);margin:calc(var(--R)*-.475) 0 0 calc(var(--R)*-.475);border-radius:50%;background:rgba(190,226,250,.45);border:2px solid #cfeaff;box-sizing:border-box}
+#touch .ghost{position:absolute;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(14px + var(--R)*2 + 4px + env(safe-area-inset-bottom,0px));display:none;font-size:12px;color:#cfeaff;text-shadow:0 1px 0 #05080f;white-space:nowrap}
 #touch .rad{position:absolute;inset:0;pointer-events:auto;display:none;background:linear-gradient(0deg,rgba(5,9,16,.5),rgba(5,9,16,0) 45%)}
 #touch .rad .cap{position:absolute;width:max-content;max-width:62vw;box-sizing:border-box;text-align:right;font:700 13px 'Jura',system-ui,sans-serif;color:#e8f4ff;text-shadow:0 1px 0 #05080f;background:rgba(8,16,30,.88);border:1px solid rgba(124,198,238,.4);border-radius:4px;padding:4px 10px}
 #touch .rad .slot{position:absolute;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
@@ -86,9 +87,9 @@ export function initTouch(uiRoot: HTMLElement) {
   layer = document.createElement('div'); layer.id = 'touch'; root.appendChild(layer);
   stickBase = document.createElement('div'); stickBase.className = 'stick'; layer.appendChild(stickBase);
   stickKnob = document.createElement('div'); stickKnob.className = 'knob'; layer.appendChild(stickKnob);
-  ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.innerHTML = '<i></i><span>' + S.moveHint + '</span>'; layer.appendChild(ghost);
+  ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.textContent = S.moveHint; layer.appendChild(ghost);
   let seenStick = false; try { seenStick = localStorage.getItem('sc.stickHint') === '1'; } catch { /* no storage */ }
-  if (!seenStick) ghost.style.display = 'flex';
+  if (!seenStick) ghost.style.display = 'block';
 
   const act = btn('tb-act', S.action);
   let actTimer = 0;
@@ -125,7 +126,7 @@ export function initTouch(uiRoot: HTMLElement) {
 
   // stick + world aim on the stage
   const stage = document.getElementById('stage') ?? document.body;
-  let stickId = -1, sx = 0, sy = 0, aimId = -1;
+  let stickId = -1, aimId = -1;
   const wasUp = { v: false };
   // pinch (DESIGN §14): a second finger landing in the zone of a finger that is already steering (the stick on the left, the aim on the right)
   // turns both into a zoom gesture; every PINCH_STEP px of change in their distance is one zoom step
@@ -133,7 +134,29 @@ export function initTouch(uiRoot: HTMLElement) {
   const pos = new Map<number, { x: number; y: number }>();
   let pinchA = -1, pinchB = -1, pinchRef = 0;
   const pdist = () => { const a = pos.get(pinchA), b = pos.get(pinchB); return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0; };
-  const releaseStick = () => { stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false; stickBase!.style.display = stickKnob!.style.display = 'none'; };
+  // the stick is fixed in the bottom-left corner (CSS .stick); its centre is read from the element so safe areas and resizes just work
+  const stickCenter = () => {
+    const r = stickBase!.getBoundingClientRect();
+    if (r.width > 0) return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, r: r.width / 2 };
+    return { cx: 18 + R, cy: window.innerHeight - 14 - R, r: R };
+  };
+  const parkKnob = () => { const c = stickCenter(); stickKnob!.style.left = c.cx + 'px'; stickKnob!.style.top = c.cy + 'px'; };
+  syncStick = () => { R = Math.max(34, Math.min(56, window.innerHeight * 0.15)); parkKnob(); };
+  const moveStick = (x: number, y: number) => {
+    const c = stickCenter(); R = c.r;
+    let dx = x - c.cx, dy = y - c.cy;
+    const len = Math.hypot(dx, dy);
+    if (len > R) { dx = dx / len * R; dy = dy / len * R; }
+    stickKnob!.style.left = c.cx + dx + 'px'; stickKnob!.style.top = c.cy + dy + 'px';
+    const nx = dx / R, ny = dy / R;
+    touch.x = Math.abs(nx) < 0.18 ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - 0.18) / 0.62);
+    touch.run = Math.abs(nx) > 0.92;
+    const up = ny < -0.55;
+    if (up && !wasUp.v) input.jumpPressed = true;
+    wasUp.v = up; jumpStick = up; touch.jumpHeld = up || jumpBtn;
+    touch.down = ny > 0.6;
+  };
+  const releaseStick = () => { stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false; parkKnob(); };
   const releaseAim = () => { aimId = -1; touch.aimed = false; touch.primary = actHeld; };
   const startPinch = (first: number, second: number) => {
     if (first === stickId) releaseStick(); else if (first === aimId) releaseAim();
@@ -145,14 +168,14 @@ export function initTouch(uiRoot: HTMLElement) {
     e.preventDefault();
     setEnabled(true);
     input.touchActive = true; input.anyKey = true;
-    const left = e.clientX < window.innerWidth * 0.4;
+    const sc = stickCenter(), left = e.clientX < sc.cx + sc.r * 1.9 && e.clientY > sc.cy - sc.r * 1.9;     // the stick zone: the bottom-left corner around the fixed stick; everything else aims
     pos.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinchA < 0 && (left ? stickId >= 0 : aimId >= 0)) { startPinch(left ? stickId : aimId, e.pointerId); return; }
     if (pinchA >= 0) return;                                  // a third finger during a pinch: ignored
     if (left && stickId < 0) {
-      stickId = e.pointerId; sx = e.clientX; sy = e.clientY;
+      stickId = e.pointerId;
       if (ghost && ghost.style.display !== 'none') { ghost.style.display = 'none'; try { localStorage.setItem('sc.stickHint', '1'); } catch { /* ignore */ } }
-      for (const el of [stickBase!, stickKnob!]) { el.style.display = 'block'; el.style.left = sx + 'px'; el.style.top = sy + 'px'; }
+      moveStick(e.clientX, e.clientY);
     } else if (!left && aimId < 0) {
       aimId = e.pointerId; touch.aimed = true; touch.primary = true;
       input.aimX = e.clientX; input.aimY = e.clientY - AIM_LIFT; input.hasAim = true; input.aimMode = 'touch'; input.primaryPressed = true;
@@ -171,17 +194,7 @@ export function initTouch(uiRoot: HTMLElement) {
       return;
     }
     if (e.pointerId === stickId) {
-      let dx = e.clientX - sx, dy = e.clientY - sy;
-      const len = Math.hypot(dx, dy);
-      if (len > R) { dx = dx / len * R; dy = dy / len * R; }
-      stickKnob!.style.left = sx + dx + 'px'; stickKnob!.style.top = sy + dy + 'px';
-      const nx = dx / R, ny = dy / R;
-      touch.x = Math.abs(nx) < 0.18 ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - 0.18) / 0.62);
-      touch.run = Math.abs(nx) > 0.92;
-      const up = ny < -0.55;
-      if (up && !wasUp.v) input.jumpPressed = true;
-      wasUp.v = up; jumpStick = up; touch.jumpHeld = up || jumpBtn;
-      touch.down = ny > 0.6;
+      moveStick(e.clientX, e.clientY);
     } else if (e.pointerId === aimId) {
       input.aimX = e.clientX; input.aimY = e.clientY - AIM_LIFT;
     }
@@ -193,7 +206,7 @@ export function initTouch(uiRoot: HTMLElement) {
     if (e.pointerId === pinchA || e.pointerId === pinchB) { pinchA = pinchB = -1; return; }       // a pinch ends with the first finger up; the other one stays idle until lifted
     if (e.pointerId === stickId) {
       stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false;
-      stickBase!.style.display = stickKnob!.style.display = 'none';
+      parkKnob();
     } else if (e.pointerId === aimId) { aimId = -1; touch.aimed = false; touch.primary = actHeld; }
   };
   addEventListener('pointerup', end); addEventListener('pointercancel', end);
@@ -207,12 +220,12 @@ export function initTouch(uiRoot: HTMLElement) {
     else if (!portrait && rotatePaused) { G.paused = false; rotatePaused = false; }
   };
   mq.addEventListener?.('change', upd);
-  addEventListener('resize', upd);
+  addEventListener('resize', () => { upd(); syncStick(); });
   initWheel(uiRoot);
   setEnabled(G.mobile);
   // a first touch anywhere enables the controls on hybrid devices
   addEventListener('touchstart', () => setEnabled(true), { once: true, passive: true });
-  upd();
+  upd(); syncStick();
 }
 
 export function setEnabled(on: boolean) {
@@ -220,6 +233,7 @@ export function setEnabled(on: boolean) {
   if (layer) layer.style.display = on ? 'block' : 'none';
   if (rotateEl && !on) rotateEl.style.display = 'none';
   document.body.classList.toggle('touch-ui', on);
+  if (on) requestAnimationFrame(() => syncStick());
   if (on && matchMedia('(orientation: portrait)').matches && rotateEl) { rotateEl.style.display = 'flex'; if (!G.paused) { G.paused = true; rotatePaused = true; } }
 }
 export const touchEnabled = () => enabled;

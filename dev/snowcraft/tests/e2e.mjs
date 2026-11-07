@@ -338,13 +338,14 @@ for (const prof of PROFILES) {
       const stage = document.getElementById('stage');
       const fire = (el, type, x, y, id = 7) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: true }));
       const x0 = S.G.player.x;
-      fire(stage, 'pointerdown', 120, 300); fire(window, 'pointermove', 190, 300);
+      const rc = document.querySelector('#touch .stick').getBoundingClientRect(), cx = rc.left + rc.width / 2, cy = rc.top + rc.height / 2, rr = rc.width / 2;   // the stick is fixed in the bottom-left corner
+      fire(stage, 'pointerdown', cx, cy); fire(window, 'pointermove', cx + rr, cy);
       S.stepFast(40); const moved = S.G.player.x - x0;
-      fire(window, 'pointerup', 190, 300); S.stepFast(10);
+      fire(window, 'pointerup', cx + rr, cy); S.stepFast(10);
       // up on the stick = jump
-      fire(stage, 'pointerdown', 120, 300, 8); fire(window, 'pointermove', 120, 240, 8);
+      fire(stage, 'pointerdown', cx, cy, 8); fire(window, 'pointermove', cx, cy - rr, 8);
       let hi = 0; const y0 = S.G.player.y; for (let i = 0; i < 30; i++) { S.stepFast(1); hi = Math.max(hi, y0 - S.G.player.y); }
-      fire(window, 'pointerup', 120, 240, 8); S.stepFast(30);
+      fire(window, 'pointerup', cx, cy - rr, 8); S.stepFast(30);
       // Действие button with the smart cursor digs the snow in front
       S.selectItem('shovel'); S.mods.inv.held.load = 0;
       const act = document.getElementById('tb-act');
@@ -352,7 +353,7 @@ for (const prof of PROFILES) {
       fire(act, 'pointerdown', 700, 330, 9); S.stepFast(60); fire(act, 'pointerup', 700, 330, 9); S.stepFast(5);
       return { moved, hi, load: S.mods.inv.held.load, tgt: S.mods.tools.target().mode };
     });
-    check('floating stick walks the player', st.moved > 15, JSON.stringify(st));
+    check('fixed stick walks the player', st.moved > 15, JSON.stringify(st));
     check('stick up = jump', st.hi > 6, JSON.stringify(st));
     await shot(page, prof, '07-touch');
     // belt radial

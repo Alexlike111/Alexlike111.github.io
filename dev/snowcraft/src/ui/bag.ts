@@ -110,7 +110,7 @@ const CSS = `
 #hud .nearl .nr .t{flex:1;min-width:0}#hud .nearl .nr small{display:block;opacity:.7;font-weight:600;font-size:11px}
 #hud .nearl .nr b{color:#8fe3b0;font-size:13px}
 #hud .nearl .nr.heavy b{color:#ffc46e}
-#nearbtn{position:fixed;z-index:31;display:none;width:60px;height:60px;border-radius:50%;box-sizing:border-box;right:calc(30px + env(safe-area-inset-right,0px));bottom:calc(190px + env(safe-area-inset-bottom,0px));
+#nearbtn{position:fixed;z-index:31;display:none;width:var(--u,60px);height:var(--u,60px);border-radius:50%;box-sizing:border-box;right:calc(18px + var(--u,60px)*1.675 + env(safe-area-inset-right,0px));bottom:calc(30px + var(--u,60px)*3.15 + env(safe-area-inset-bottom,0px));
   background:rgba(60,34,12,.7);border:2px solid rgba(255,196,110,.85);color:#ffe7bd;font:700 13px 'Jura',system-ui,sans-serif;align-items:center;justify-content:center;text-align:center;line-height:1.05;touch-action:none;-webkit-tap-highlight-color:transparent}
 #nearbtn:active{background:rgba(124,198,238,.45)}
 body.touch-ui #hud .pnl{max-height:calc(100vh - 12px - env(safe-area-inset-bottom,0px));padding:6px 8px}
