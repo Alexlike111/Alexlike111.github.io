@@ -47,6 +47,8 @@ function scene(near: Fixture, T = -22) {
 const keep = async <T>(fn: () => Promise<T> | T) => { try { return await sandbox(fn); } finally { closeRadio(); resetStation(); } };
 
 registerTest('station', 'размещение: все объекты на месте, генератор твёрдый, труба открыта, лестницы достижимы', (t: TestCtx) => {
+  // a fresh world (the game's own seed): the checks of the earlier groups change G.fixtures (arena, placed chests); the placement is the world's
+  sc().start({ seed: 1, diff: 1, hardcore: false });
   const want: [Fixture['kind'], number][] = [['generator', 1], ['ceiling_lamp', 3], ['heater', 1], ['medkit', 1], ['kettle', 1], ['damper', 1], ['gramophone', 1], ['shutter', 2], ['hatch', 2], ['sonde', 1], ['bell', 2]];
   for (const [k, n] of want) t.expect(all(k).length >= n, `${k}: ${all(k).length} (нужно ≥${n})`);
   t.expect(all('drum').length >= 5, 'бочек с соляркой не меньше пяти: ' + all('drum').length);

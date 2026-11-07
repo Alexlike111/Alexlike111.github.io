@@ -227,7 +227,9 @@ registerTest('tools', 'лопата: зачерпнуть, бросить куч
       arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); s.teleport(1000, 272);
       tileBlock(Math.floor(tx / 4), 67, 1, 1, (MAT as Record<string, number>)[key], 0, 0);
       add(tool, 1); s.selectItem(tool);
-      const c0 = count(item); calm(); s.act('dig', Math.floor(tx / 4) * 4 + 2, 270, 2.5);
+      // the dig speed follows the player's energy and frost left by the checks before (dig speed × 0.8 when energy < 15, × 0.6-0.85 with frost
+      // in the hands): a tile of metal (1.8 s with the pick) must not depend on them
+      const c0 = count(item); calm(); pl.energy = 90; pl.frost.hands = 0; s.act('dig', Math.floor(tx / 4) * 4 + 2, 270, 2.5);
       if (count(item) <= c0 && !G.drops.some(d => d.item === item)) throw new Error(`${tool} по ${key} не дал ${item}`);
     }
   });

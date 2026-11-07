@@ -3,6 +3,13 @@
 // Steps: coal (E) -> dig the buried door with the shovel -> light the stove (matches) -> barometer -> keeper's log in the shelf chest (search panel, take all)
 //        -> shovel + knife: cut snow blocks out of the drift -> place blocks (the blocks must land on the BELT) -> C bag -> Ctrl+wheel zoom.
 // Long walks are shortened with teleport() (walking itself is proven by shots/play/play2.cjs); everything that matters (E, LMB, keys, panels) is real input.
+// Determinism (the run must not depend on the machine's load):
+//   - E is a quick press (keyboard.press): a held E is a «hold» in the game (3+ things in reach open the «Рядом» list after 0.4 s of real time), and
+//     the length of a Playwright down/up pair depends on the load, so a slow pair turned a tap into a hold;
+//   - the page's clock is paused after the start (Playwright clock API): the game's own loop (requestAnimationFrame, real time) would otherwise run
+//     between the steps, and the weather, storms, drift, fauna, snow and the aim (camera follow) would move with the wall clock. From here only
+//     window.__sc.step moves the game, so the run is the same on every machine;
+//   - Math.random is seeded before the game starts.
 const path = require('path');
 let chromium; try { ({ chromium } = require('playwright')); } catch { ({ chromium } = require('/opt/node-tools/node_modules/playwright')); }
 const INDEX = process.argv[2], OUT = process.argv[3] || '.';
@@ -12,14 +19,19 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
 (async () => {
   const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
   const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
-  await p.goto('file://' + INDEX + '?title=0'); await p.waitForTimeout(2500);
-  const ev = (f, a) => p.evaluate(f, a), step = n => ev(n => window.__sc.step(n), n);
+  await p.clock.install({ time: new Date('2026-07-11T10:00:00Z') });           // the page's timers and requestAnimationFrame run on this clock
+  await p.clock.pauseAt(new Date('2026-07-11T10:00:01Z'));                    // paused from the start: the game loop does not run until the steps below
+  // no audio device in the test: the audio engine schedules its sounds and its random bells by the audio clock (real time), and its random draws would
+  // change the game's own random sequence (the seeded Math.random below)
+  await p.addInitScript(() => { let k = 20260711; Math.random = () => { k = (k * 1664525 + 1013904223) >>> 0; return k / 4294967296; }; delete window.AudioContext; delete window.webkitAudioContext; });
+  await p.goto('file://' + INDEX + '?title=0'); await p.waitForFunction(() => window.__sc && window.__sc.ready, null, { timeout: 20000 });
+  const ev = (f, a) => p.evaluate(f, a), step = async n => { await ev(n => window.__sc.step(n), n); await p.clock.runFor(Math.round(n * 1000 / 60)); };   // the game's own frames run in step with the steps: every frame is one game tick
   const st = () => ev(() => { const s = window.__sc.stats(); return { x: +s.x.toFixed(1), y: +s.y.toFixed(1), sel: s.sel, belt: s.belt.map(b => b && b.id + ':' + b.n).join(',') }; });
   const obj = () => ev(() => window.__sc.mods.quest.objectiveText()), tgt = () => ev(() => { const t = window.__sc.mods.quest.objectiveTarget(); return t ? [Math.round(t.x), Math.round(t.y)] : null; });
   const inv = id => ev(id => window.__sc.mods.inv.count(id), id), cell = (x, y) => ev(([x, y]) => window.__sc.cell(Math.round(x), Math.round(y)), [x, y]);
   const shot = n => p.screenshot({ path: path.join(OUT, 'play3-' + n + '.png') });
   const w2s = (x, y) => ev(([x, y]) => window.__sc.worldToScreen(x, y), [x, y]);
-  const tap = async (k, f = 4) => { await p.keyboard.down(k); await step(2); await p.keyboard.up(k); await step(f); };
+  const tap = async (k, f = 4) => { if (k === 'e') { await p.keyboard.press(k); await step(2 + f); return; } await p.keyboard.down(k); await step(2); await p.keyboard.up(k); await step(f); };
   const hover = async (x, y) => { const [sx, sy] = await w2s(x, y); await p.mouse.move(sx, sy); await step(2); };
   const T = () => ev(() => { const t = window.__sc.mods.tools.target(); return { ok: t.ok, mode: t.mode, verb: t.verb, reason: t.reason }; });
   const solid = async (tx, ty) => { let n = 0; for (const [i, j] of [[1, 1], [2, 2], [1, 3], [3, 1]]) { const m = await cell(tx * 4 + i, ty * 4 + j); if (m >= 1 && m <= 3) n++; } return n >= 2; };
@@ -68,6 +80,10 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     await tap('2', 3); await dig(ptx - 1, fty + 1); await dig(ptx, fty + 1); await step(20);
     s = await st(); ptx = Math.floor(s.x / 4); fty = Math.floor((s.y - 1) / 4);
     await tap('1', 3); let frames = [];
+    // the crown of the pit has to harden into packed snow first (the snow settles with the game's own steps): wait for the first cut target
+    const cutTarget = async () => { for (const dx of [-2, -1, 0, 1]) { await hover((ptx + dx) * 4 + 2, (fty + 1) * 4 + 2); const t = await T(); if (t.ok && t.mode === 'cut') return true; } return false; };
+    let waited = 0; while (waited < 6000 && !(await cutTarget())) { await step(20); waited += 20; }
+    if (process.env.DBG) console.log('   crown ready after', waited, 'steps');
     if (process.env.DBG) console.log('   pit', JSON.stringify(s), 'sel', (await st()).sel, '\n' + await ev(([a, b, c, d]) => window.__sc.ascii(a, b, c, d, 1), [ptx * 4 - 16, fty * 4 - 4, ptx * 4 + 20, fty * 4 + 12]));
     for (const dx of [-2, -1, 0, 1]) { const tx = ptx + dx, ty = fty + 1; await hover(tx * 4 + 2, ty * 4 + 2); const t = await T(); if (process.env.DBG) console.log('   cut probe', dx, JSON.stringify(t), JSON.stringify(s));
       if (t.ok && t.mode === 'cut') { const before = await inv('snow_block'); let f = 0; await p.mouse.down(); for (let k = 0; k < 40 && (await inv('snow_block')) === before; k++) { await step(4); f += 4; } await p.mouse.up(); await step(3); frames.push(f); } }

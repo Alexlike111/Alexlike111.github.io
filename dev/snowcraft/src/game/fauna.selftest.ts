@@ -3,7 +3,7 @@
 import { registerTest } from './selftest';
 import { G } from './state';
 import { on, emit } from './bus';
-import { W, mat, aux } from '../engine/grid';
+import { W, TS, mat, aux } from '../engine/grid';
 import { boxFree } from '../engine/phys';
 import { MAT } from '../content/materials';
 import { SEA } from './locations';
@@ -17,6 +17,7 @@ import { stepDrops } from './tools';
 import { wx } from './weather';
 import { placeFixture, removeFixture, interact, pickupFixture } from './fixtures';
 import { held } from './inventory';
+import { temp } from '../engine/heat';
 
 registerTest('fauna', 'есть тюлени у лунок, пёс, песец и один медведь', t => {
   const k: Record<string, number> = {};
@@ -131,8 +132,11 @@ registerTest('fauna', 'Север: кормится, греет во сне, н�
   p.alive = keep.alive; p.sleeping = keep.sleeping; aiOf(d)!.stay = keep.stay;
 });
 
+// The real game loop keeps running between the checks (the game clock moves with it), so a drift event can be under way when a check starts: it is
+// cancelled here (a creeping event would move the floe and the snow bridge under the test). The schedule itself is set by each check.
 registerTest('ice', 'льдина едет вместе со снегом, вещами и игроком; открывается полынья', t => {
   const sc = (window as any).__sc;
+  driftState.pending = null;
   const fl0 = driftState.floes;
   const k = fl0.findIndex((f, i) => !f.grounded && f.x1 - f.x0 > 20 && f.x1 - f.x0 < 70 && i + 1 < fl0.length && fl0[i + 1].x0 - f.x1 - 1 >= 8 && i > 0 && f.x0 - fl0[i - 1].x1 - 1 >= 1);
   t.expect(k >= 0, 'нет подходящей льдины');
@@ -163,6 +167,7 @@ registerTest('ice', 'льдина едет вместе со снегом, ве�
 registerTest('ice', 'тонкий лёд трещит и проламывается; толстый держит', t => {
   const sc = (window as any).__sc;
   const p = G.player, save = { px: p.x, py: p.y }, nextAt0 = driftState.nextAt;
+  driftState.pending = null;                             // an event under way from the real-time gap before the check would move the bridge
   driftState.nextAt = Infinity;                          // no pack shift while we stand on the ice
   sc.setWeather({ ambientT: -6, wind: 0, storm: 0, snowfall: 0 });     // fixed mild frost: in a hard frost (left by an earlier test, or the polar night) the lead under the bridge thickens to 3 cells within the test
   // thick pack: 3+ cells of ice -> no hole after a long stand
@@ -177,11 +182,15 @@ registerTest('ice', 'тонкий лёд трещит и проламывает�
     const i = y * W + x;
     if (y < SEA - 3) { mat[i] = MAT.AIR; aux[i] = 0; } else if (y < SEA) { mat[i] = MAT.PACKED; aux[i] = 140; } else if (y < SEA + 2) { mat[i] = MAT.ICE; aux[i] = 0; } else { mat[i] = MAT.WATER; aux[i] = 0; }
   }
-  sc.teleport(xc, SEA - 12); sc.stepFast(50);
+  // the lead under the bridge must stay open: water freezes below -1.9 °C (sim: slowCell), and the temperature field still holds the cold of
+  // earlier checks, so those cells are held at -0.5 °C (above the freezing point, below the melting point of the snow and the ice) while the bridge
+  // is tested: the freezing itself is checked in the sim tests
+  const warmLead = () => { for (let ty = (SEA - 16) >> 2; ty <= (SEA + 34) >> 2; ty++) for (let tx = (xc - 9) >> 2; tx <= (xc + 9) >> 2; tx++) temp[ty * (W / TS) + tx] = -0.5; };
+  sc.teleport(xc, SEA - 12); for (let i = 0; i < 50; i++) { warmLead(); sc.stepFast(1); }
   const th = iceUnder(p.x, p.y);
   let broke = false;
   const off = on('ice_break', () => { broke = true; });
-  for (let i = 0; i < 60 * 4 && !broke; i++) sc.stepFast(1);
+  for (let i = 0; i < 60 * 4 && !broke; i++) { warmLead(); sc.stepFast(1); }
   off();
   t.expect(th >= 1 && th <= 2, `под ногами не тонкий лёд: ${th} (${p.x.toFixed(0)},${p.y.toFixed(0)} ground ${p.onGround})`);
   t.expect(broke, 'тонкий лёд под снежным мостом не проломился');
@@ -196,6 +205,7 @@ registerTest('ice', 'событие дрейфа: предупреждение, 
   const heard: number[] = [];
   const off = on('drift_warn', () => heard.push(1));
   const t0 = G.time, e0 = driftState.events;
+  driftState.pending = null;                             // a warning already shown in the real-time gap would not be shown again: start clean
   driftState.nextAt = G.time - 1;
   let warnedAt = -1, movedAt = -1;
   const xs0 = driftState.floes.map(f => f.x0).join(',');

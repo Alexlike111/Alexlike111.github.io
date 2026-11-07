@@ -15,7 +15,7 @@ import { lore, loreSave, loreLoad } from './lore';
 import { captureState } from './save';
 import {
   openContainer, openPack, closeBox, isOpen, phase, revOf, hiddenCount, takeAllFound, searchSave, searchLoad, resetSearch, isFrozen, foundCount, open as openBox, boxStateOf,
-  itemTime, makeBox, stashSelected,
+  itemTime, makeBox, stashSelected, panel as boxPanel,
 } from './search';
 
 const sc = () => (window as unknown as { __sc: any }).__sc;
@@ -38,9 +38,12 @@ function scene(T = -20) {
   return p;
 }
 const chestAt = (items = ITEMS(), data: Record<string, unknown> = {}) => placeFixture('chest', 247, 66, { force: true, items, data })!;
+// The box panel counts as «on screen» only while its DOM is shown (the bag UI sets it from a timer); a box whose panel is not shown after 0.6 s of
+// game ticks closes. The real game loop runs during the awaits of these checks, so the timer and the ticks race: the checks keep the panel «shown».
 const keep = async <T>(fn: () => Promise<T> | T) => {
-  const saved = searchSave(), l0 = loreSave();
-  try { return await sandbox(fn); } finally { closeBox(); searchLoad(saved); loreLoad(l0); }
+  const saved = searchSave(), l0 = loreSave(), shown = boxPanel.visible;
+  boxPanel.visible = () => true;
+  try { return await sandbox(fn); } finally { boxPanel.visible = shown; closeBox(); searchLoad(saved); loreLoad(l0); }
 };
 /** Show the panel (a container's panel stays open only while it is on screen). */
 async function showPanel() { steps(3); await wait(80); }

@@ -23,8 +23,7 @@ const DEFAULTS = {
   eatAt: 40, drinkAt: 40, sleepAt: 30,       // thresholds from the task brief
   stoveFeedBelow: 240, stoveFillTo: 420,     // minutes of stove burn
   fuelReserveH: 24, tripCooldownMin: 360,    // fuel stock target (stove + pack) in hours
-  damperCloseH: 12, damperOpenH: 18,         // damper closed (saves fuel) below 12 h of fuel, half open above 18 h
-  foodReserveDays: 3,                        // suppliesNow().foodDays below this -> food trip
+  foodReservePts: 60,                        // food points carried (about two days) below this -> food trip (the pack, not the chests: the bot must carry it)
   stormSkipMin: 90,                          // no trips when a storm is forecast within 90 min
   logStockPerRing: 24, logsPerTrip: 6, logMin: 12,   // MODEL driftwood: 24 logs per ring, 12 game min per log
   fishTripMin: 60, fishMin: 30,              // MODEL fishing at the hole: 1 fish per 30 game min while standing there
@@ -39,7 +38,7 @@ function installBot(cfg) {
   const B = {
     cfg, outbox: [], dead: false, finished: false, inStorm: false, survived: 0, stormsStarted: 0, sleeps: 0, sleepRefused: 0, slept: 0,
     trips: { fuel: 0, food: 0 }, lastFuelTrip: -1e9, lastFoodTrip: -1e9, logStock: cfg.logStockPerRing, logRing: -1,
-    fedN: 0, drankN: 0, ateN: 0, cookN: 0, chain: {}, ids: {}, cur: null, death: null, errors: [],
+    fedN: 0, drankN: 0, ateN: 0, cookN: 0, chain: {}, ids: {}, cur: null, death: null, errors: [], lastMaint: -1e9, inMaint: false,
   };
   const round = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
   const fx = id => G.fixtures.find(f => f.id === id) || null;
@@ -103,7 +102,10 @@ function installBot(cfg) {
   // ---- stepping ----
   function stepMin(m) {
     const t1 = G.time + m; let guard = 0;
-    while (G.time < t1 && alive() && guard++ < 200000) { sc.stepFast(G.timeScale > 1 ? 5 : 10); track(); }
+    while (G.time < t1 && alive() && guard++ < 200000) {
+      sc.stepFast(G.timeScale > 1 ? 5 : 10); track();
+      if (G.timeScale <= 1 && G.time - B.lastMaint >= 30) maintainStove(cfg.stoveFeedBelow);
+    }
   }
   function go(x, y) {                       // teleport = walking. The walk time is charged BEFORE the jump, at the origin: a walking body makes
     const p = G.player; const d = Math.hypot(p.x - x, p.y - y);   // heat (the game's metabolism), so it is not charged as standing in the cold
@@ -137,6 +139,7 @@ function installBot(cfg) {
     return got;
   }
   const FOOD = ['cooked_meat', 'fish_cooked', 'can', 'biscuit', 'fat', 'ptarmigan', 'fish', 'seal_meat'];
+  const FOODPTS = { cooked_meat: 32, fish_cooked: 22, can: 30, biscuit: 12, fat: 14, ptarmigan: 12, fish: 10, seal_meat: 16 };
   const isFood = id => FOOD.includes(id);
   const isFuel = id => id === 'coal' || id === 'log' || id === 'plank';
 
@@ -157,25 +160,30 @@ function installBot(cfg) {
   }
 
   // ---- routine pieces ----
-  function maintainStove() {
-    const s = stoveObj(); if (!s) return;
-    if ((s.fuel || 0) < cfg.stoveFeedBelow) {
+  function maintainStove(below = cfg.stoveFeedBelow) {
+    const s = stoveObj(); if (!s || B.inMaint) return;
+    B.inMaint = true; B.lastMaint = G.time;
+    if ((s.fuel || 0) < below) {
       for (const id of ['coal', 'log', 'plank']) {
         let guard = 0;
-        while (INV.count(id) > 0 && (s.fuel || 0) < cfg.stoveFillTo && guard++ < 20) { if (!FX.addFuel(s, id)) break; B.fedN++; }
+        while (INV.count(id) > 0 && (s.fuel || 0) < (below > cfg.stoveFeedBelow ? 540 : cfg.stoveFillTo) && guard++ < 20) { if (!FX.addFuel(s, id)) break; B.fedN++; }
       }
     }
     if (!s.lit && (s.fuel || 0) > 0) {
       if (INV.count('matches') === 0) { const hc = fx(B.ids.houseChest); if (hc) lootChest(hc, id => id === 'matches'); }
       FX.tryLight(s, true);
     }
+    B.inMaint = false;
   }
+  // the damper stays half open. A closed damper lets CO build up in the sealed house (measured: 0.6 -> 3.1 in 6 game min, no decay);
+  // a novice who closes it to save fuel dies of CO. Open (2) when the shelter reports CO, back to half when it clears.
   function damperPolicy() {
     const dmp = fx(B.ids.damper); if (!dmp) return;
-    const h = totalFuelH();
-    const want = h < cfg.damperCloseH ? 0 : h > cfg.damperOpenH ? 1 : ((dmp.data && dmp.data.d) ?? 1);
+    const co = G.shelter ? G.shelter.co : 0;
+    const want = co > 5 || G.player.co > 2 ? 2 : 1;
     let k = 0; while (((dmp.data && dmp.data.d) ?? 1) !== want && k++ < 3) FX.interact(dmp);
   }
+  const foodInPack = () => { let n = 0; for (const id of FOOD) n += INV.count(id) * FOODPTS[id]; return n; };
   const COOK = { fish: 'fish_cooked', ptarmigan: 'cooked_meat', seal_meat: 'cooked_meat' };
   function cookRaw() {
     const s = stoveObj(); if (!s || !s.lit) return;
@@ -209,10 +217,13 @@ function installBot(cfg) {
   }
   function eat() {
     for (const id of FOOD) { const i = slotOf(s => s.id === id); if (i >= 0 && PL.eatSlot(i)) { B.ateN++; return true; } }
+    const hc = fx(B.ids.houseChest);
+    if (hc && hc.items && hc.items.some(s => isFood(s.id))) { go(...floorSpot(hc)); lootChest(hc, isFood); goHouse(); return eat(); }
     return false;
   }
   function sleepNow() {
     const bed = fx(B.ids.bed); if (!bed) return false;
+    maintainStove(cfg.stoveFillTo);                       // the stove burns through the night: fill it first
     go(B.bedSpot[0], B.bedSpot[1]);
     FX.interact(bed);                         // sleep_request -> player.startSleep() (the game's own conditions)
     const p = G.player;
@@ -225,6 +236,7 @@ function installBot(cfg) {
   }
   function fuelTrip() {
     B.lastFuelTrip = G.time; B.trips.fuel++;
+    maintainStove(cfg.stoveFillTo);
     const targets = [];
     for (const id of B.chestIds) { const c = fx(id); if (c && c.items && c.items.some(s => isFuel(s.id))) targets.push({ x: floorSpot(c)[0], y: floorSpot(c)[1], fn: () => lootChest(c, isFuel) }); }
     for (const id of B.cartIds) { const c = fx(id); if (c && ((c.data && c.data.loaded) || (c.items && c.items.length))) { const [x, y] = floorSpot(c); targets.push({ x, y, fn: () => lootChest(c, isFuel) }); } }
@@ -247,7 +259,8 @@ function installBot(cfg) {
     const fa = G.forecast && G.forecast.stormAt;
     if (G.storm > 0.1 || (fa > G.time && fa - G.time < cfg.stormSkipMin)) return;
     if (totalFuelH() < cfg.fuelReserveH && G.time - B.lastFuelTrip >= cfg.tripCooldownMin) fuelTrip();
-    if (Q.suppliesNow().foodDays < cfg.foodReserveDays && G.time - B.lastFoodTrip >= cfg.tripCooldownMin) foodTrip();
+    const hungryNoFood = G.player.food < cfg.eatAt && foodInPack() < 10;
+    if ((foodInPack() < cfg.foodReservePts && G.time - B.lastFoodTrip >= cfg.tripCooldownMin) || (hungryNoFood && G.time - B.lastFoodTrip >= 30)) foodTrip();
   }
   // one decision cycle (cfg.chunk game minutes)
   function cycle() {
