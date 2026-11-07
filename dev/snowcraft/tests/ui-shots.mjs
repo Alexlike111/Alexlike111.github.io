@@ -80,10 +80,15 @@ for (const prof of PROFILES) {
     s.stepFast(60 * 40);
   });
   await pair('igloo-hut');
-  const bad = await page.evaluate(async () => { await window.__sc.selftest('senses'); const a = window.__selftestReport; await window.__sc.selftest('ui'); return [a, window.__selftestReport]; });
-  for (const rep of bad) { log(rep.split('\n')[0]); for (const l of rep.split('\n')) if (l.startsWith('FAIL')) { failures++; log('  ' + l); } }
   if (errors.length) { failures++; log('  console errors:', errors.slice(0, 5)); }
   await ctx.close();
+
+  // the self-test groups run on a fresh page (the scenes above freeze and rebuild the world)
+  const st = await open(prof);
+  const reps = await st.page.evaluate(async () => { await window.__sc.selftest('senses'); const a = window.__selftestReport; await window.__sc.selftest('ui'); return [a, window.__selftestReport]; });
+  for (const rep of reps) { log(rep.split('\n')[0]); for (const l of rep.split('\n')) if (l.startsWith('FAIL')) { failures++; log('  ' + l); } }
+  if (st.errors.length) { failures++; log('  self-test console errors:', st.errors.slice(0, 5)); }
+  await st.ctx.close();
 
   // title: composed scene (igloo + Север), main and new-game views
   const t = await open(prof, '&title=1');

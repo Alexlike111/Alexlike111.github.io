@@ -212,7 +212,7 @@ function stepScent(dt: number, v: View) {
   const p = G.player;
   if (p && p.alive) {
     spawnAcc += dt * 7 * playerStrength();
-    while (spawnAcc >= 1) { spawnAcc -= 1; emit(p.x, p.y - 12, false, 6); }
+    while (spawnAcc >= 1) { spawnAcc -= 1; emit(p.x, p.y - 12, p.hp < 60, 6); }       // wounded: the blood scent is warmer red
   }
   foodAcc += dt * 3; lampAcc += dt * 2;
   if (foodAcc >= 1) {
