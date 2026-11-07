@@ -195,6 +195,8 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
 registerTest('inventory', 'панель: перетаскивание мышью, выбор + место (телефон), кнопки, сортировка', async (t: TestCtx) => {
   const s = sc();
   const saved = searchSave();
+  const runnerBox = document.getElementById('selftest');            // the runner's report box covers the lower half of a phone screen: move it out of the way
+  if (runnerBox) runnerBox.style.visibility = 'hidden';
   await sandbox(async () => {
     scene(); clearInventory();
     inv.slots[P0] = { id: 'biscuit', n: 8 }; inv.slots[P0 + 1] = { id: 'coal', n: 6 }; inv.slots[P0 + 2] = { id: 'wool_hat', n: 1 };
@@ -209,6 +211,7 @@ registerTest('inventory', 'панель: перетаскивание мышью
     let [x0, y0] = centre(cell('inv', P0)), [x1, y1] = centre(cell('inv', P0 + 10));
     ev('pointerdown', cell('inv', P0), x0, y0); ev('pointermove', window, x0 + 14, y0 + 4); ev('pointermove', window, x1, y1); ev('pointerup', window, x1, y1); await refresh();
     t.expect(!inv.slots[P0] && inv.slots[P0 + 10]?.id === 'biscuit', 'перетащил сухари на другую ячейку');
+    if (inv.slots[P0] || inv.slots[P0 + 10]?.id !== 'biscuit') t.log('диагностика: ' + JSON.stringify({ slots: inv.slots.slice(P0, P0 + 12).map(s => s && s.id + s.n), a: [x0, y0], b: [x1, y1], vp: [innerWidth, innerHeight], under: (document.elementFromPoint(x1, y1) as HTMLElement | null)?.className, paused: G.paused, drag: !!document.getElementById('bagghost') }));
     // 2) drag onto a clothing slot (hat) and back off
     [x0, y0] = centre(cell('inv', P0 + 2)); [x1, y1] = centre(cell('wear', 0));
     ev('pointerdown', cell('inv', P0 + 2), x0, y0); ev('pointermove', window, x0 + 12, y0 + 12); ev('pointermove', window, x1, y1); ev('pointerup', window, x1, y1); await refresh();
@@ -241,5 +244,6 @@ registerTest('inventory', 'панель: перетаскивание мышью
     t.expect(panel.style.display !== 'block', 'C закрывает панель');
   });
   closeBox(); resetSearch(); searchLoad(saved);
+  if (runnerBox) runnerBox.style.visibility = '';
 });
 void boxZone; void placeFixture; void openContainer; void takeAllFound; void phase;
