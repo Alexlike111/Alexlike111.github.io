@@ -226,7 +226,7 @@ registerTest('ice', 'событие дрейфа: предупреждение, 
   sc.start({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore });
 });
 
-registerTest('quest', 'цепочка первого дня и концовка «Ледокол»', t => {
+registerTest('quest', 'цепочка первого дня и ледокол: ящик с припасами, без концовки', t => {
   const s0 = { ...questState }, l0 = loreSave();
   resetQuest();
   t.expect(GOALS[0].id === 'coal' && /уголь/i.test(objective()), 'первая цель: ' + objective());
@@ -240,12 +240,13 @@ registerTest('quest', 'цепочка первого дня и концовка 
   const px0 = G.player.x; G.player.x = 1000; runStats.placed = 3;
   emit('shelter', { stars: 2, closed: true, vent: true }); G.player.x = px0;
   t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
-  readNote('n1'); t.expect(/жир|Запасы/.test(objective()), 'шестая цель: ' + objective());
+  readNote('n1'); t.expect(!/дневник доктора|Утепли|барометр/i.test(objective()) && objective().length > 8, 'после цепочки — «следующее разумное дело»: ' + objective());
   const sp = suppliesNow(); t.expect(Number.isFinite(sp.fuelH) && Number.isFinite(sp.foodDays), 'запасы не посчитаны');
-  // the radio call -> icebreaker two days later -> signal fire on the cape hill -> ending
+  // the radio call -> icebreaker two days later -> signal fire on the cape hill -> it passes, drops a crate and leaves (no ending)
   const t0 = G.time, day = G.day;
   let ended = '';
   const off = on('ending', (d: { kind: string }) => { ended = d.kind; });
+  const drops0 = G.drops.length;
   emit('radio_fixed', {});
   t.expect(Math.abs(questState.icebreakerAt - (G.time + 2880)) < 2, 'ледокол не назначен на +2 суток');
   const sf = G.fixtures.find(f => f.kind === 'signal_fire');
@@ -255,10 +256,11 @@ registerTest('quest', 'цепочка первого дня и концовка 
   if (sf) { sf.lit = true; sf.fuel = 200; }
   stepQuest(0.1); t.expect(questState.lit, 'огонь не замечен');
   G.time += 100; stepQuest(0.1);
-  t.expect(ended === 'icebreaker', 'концовка не наступила: ' + ended);
+  t.expect(ended === '' && questState.ended === '', 'концовок больше нет: ' + ended);
+  t.expect(questState.iceArrivedAt < 0 && questState.crateRing === G.cycle && G.drops.length > drops0 && G.drops.some(d => d.item === 'flare'), 'ледокол не сбросил ящик');
   off();
   if (sf) { sf.lit = false; sf.fuel = 0; }
-  G.time = t0; G.day = day; resetQuest(); Object.assign(questState, s0); loreLoad(l0);
+  G.drops.length = drops0; G.time = t0; G.day = day; resetQuest(); Object.assign(questState, s0); loreLoad(l0);
 });
 
 registerTest('core', 'рюкзак не затирается второй смертью и не исчезает; нарты можно оставить', t => {

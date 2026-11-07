@@ -14,12 +14,12 @@ import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
 import { input } from '../engine/input';
 import { strings, fmt } from '../content/i18n';
-import { inv, BELT, select, equip, unequip } from '../game/inventory';
-import { getItem, itemName } from '../game/items';
+import { inv, BELT, select, equip, unequip, beltCells } from '../game/inventory';
+import { getItem, itemName, stackIcon } from '../game/items';
 import { RECIPES, craft, craftedText } from '../game/recipes';
 import { stationsAt } from '../game/fixtures';
 import { target } from '../game/tools';
-import { body, handsFrozen, eatSlot, respawn } from '../game/player';
+import { body, handsFrozen, eatSlot } from '../game/player';
 import { icon } from '../engine/sprites';
 import { uiIcon, moonIcon } from '../art/icons';
 import { knowsForecast, sunElevAt } from '../game/weather';
@@ -28,16 +28,16 @@ import { on } from '../game/bus';
 import { objective, objectiveTarget, initQuest, prog, journal } from '../game/quest';
 import { worldToScreen } from '../engine/render';
 import { renderBag, attachBag, bagWantsOpen } from './bag';
+import { seasonLabel } from '../game/seasons';
 import { renderJournalInto, journalClick, setJournalTab } from './journal';
 
 const S = strings('hud', {
   core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', co: 'CO',
   feels: 'ощущается {t}°', air: 'воздух {t}°',
-  day: 'День {d}/{n}', sunDeep: 'солнце {e}°', moon: 'луна',
+  sunDeep: 'солнце {e}°', moon: 'луна',
   shelter: 'Укрытие', noShelter: 'нет укрытия', vent: 'отдушина ✓', noVentTxt: 'отдушины нет', temp: '{t}°',
-  dead: 'Ты погиб: {c}', deadHint: 'Нажми любую клавишу — вернуться на станцию', deadHard: 'Хардкор: забег окончен',
+  dead: 'Ты погиб: {c}', deadHard: 'Хардкор: забег окончен',
   pause: 'ПАУЗА', free: 'свободная камера (F2)',
-  ending: 'Рассвет. Солнце вернулось.',
   bag: 'Сумка', craft: 'Мастерская', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть', pack: 'Пояс и сумка',
   slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь',
   forecast: 'прогноз: {t}', noForecast: 'барометр: E у столба', baroUp: 'давление растёт', baroDown: 'давление падает',
@@ -65,7 +65,7 @@ const DEV = new URLSearchParams(location.search).has('devhud');
 
 // ---- icon helpers (data URLs so innerHTML templates can use them) -------------------------------------------------------------------
 const urlCache = new Map<string, string>();
-const itemUrl = (id: string) => { let u = urlCache.get(id); if (!u) { u = icon(getItem(id).icon).toDataURL(); urlCache.set(id, u); } return u; };
+const itemUrl = (id: string, dur?: number) => { const ik = stackIcon(id, dur); let u = urlCache.get(ik); if (!u) { u = icon(ik).toDataURL(); urlCache.set(ik, u); } return u; };
 const uiUrl = (key: string, tint?: string) => { const k = 'ui.' + key + '|' + (tint ?? ''); let u = urlCache.get(k); if (!u) { u = uiIcon(key, tint).toDataURL(); urlCache.set(k, u); } return u; };
 const img = (src: string, cls = '') => `<img class="ic ${cls}" src="${src}" alt="" draggable="false">`;
 
@@ -88,7 +88,7 @@ const CSS = `
 #hud .bw .sub{font-size:12px;opacity:.78;margin-top:1px}
 #hud .bw .alert{display:none;align-items:center;gap:4px;color:#ff9a88}
 /* sun clock + wind */
-#hud .dial{right:8px;top:8px;width:116px;padding:4px 5px;text-align:center}
+#hud .dial{right:8px;top:8px;width:130px;padding:4px 5px;text-align:center}
 #hud .dial canvas{width:112px;height:68px;image-rendering:pixelated;display:block}
 #hud .dial .day{font-weight:400;letter-spacing:.2px;font-variant-numeric:tabular-nums}
 #hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
@@ -106,6 +106,7 @@ const CSS = `
 /* belt */
 #hud .belt{position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;gap:4px;padding:4px;pointer-events:auto}
 #hud .belt .sl{position:relative;width:56px;height:56px;border:2px solid rgba(124,198,238,.3);border-radius:4px;background:rgba(10,18,32,.6);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#hud .belt .sl.frz{border-color:#9fd6ff}
 #hud .belt .sl.sel{border-color:#ffc46e;background:rgba(60,34,12,.72)}
 #hud .belt .sl .ic{width:32px;height:32px}
 #hud .belt .sl .k{position:absolute;left:3px;top:1px;font-size:11px;color:#8ab0c8;font-weight:400}
@@ -164,6 +165,7 @@ body.touch-ui #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,
 body.touch-ui #hud .bw .bar i{height:5px}body.touch-ui #hud .bw .v{min-width:34px}body.touch-ui #hud .bw .sub{display:none}
 body.touch-ui #hud .dial{left:150px;right:auto;top:8px;width:84px;padding:2px 3px}
 body.touch-ui #hud .dial canvas{width:78px;height:47px}
+body.touch-ui #hud .dial .day{font-size:11px;line-height:1.15}
 body.touch-ui #hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
 #hud .dial .line{font-size:11px}body.touch-ui #hud .dial .line.mid{display:none}
 body.touch-ui #hud .stk{left:244px;right:220px;transform:none;max-width:none}
@@ -267,8 +269,6 @@ export function initHud(host: HTMLElement) {
   if (!G.mobile) hintEl.style.display = 'block';
   if (DEV) { devEl = mk('dev'); }
   on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); });
-  deadEl.addEventListener('pointerdown', () => { if (!G.player.alive) respawn(); });
-  on('ending', () => { endEl.textContent = S.ending; endEl.style.display = 'flex'; setTimeout(() => { endEl.style.display = 'none'; }, 9000); });
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
@@ -348,9 +348,9 @@ export function updateHud(dt: number, realDt: number) {
   }
   // death card
   if (p && !p.alive) {
-    deadEl.style.display = 'flex';
-    deadEl.innerHTML = `<div>${fmt(S.dead, { c: p.cause })}</div><div style="font-size:15px;margin-top:8px">${G.diff.hardcore ? S.deadHard : S.deadHint}</div>`;
-    if (body.deadT > 1.8 && (input.anyKey || input.primaryPressed) && !G.diff.hardcore) respawn();
+    // first moments of the death: just the cause; then overlay.ts shows the death card (stats, «Новая игра» / «Заново тот же мир» / back to the station)
+    deadEl.style.display = body.deadT < 1.3 ? 'flex' : 'none';
+    deadEl.innerHTML = `<div>${fmt(S.dead, { c: p.cause })}</div>`;
   } else deadEl.style.display = 'none';
   pauseEl.style.display = G.paused && !document.getElementById('rotate')?.style.display?.includes('flex') && !document.body.classList.contains('title-open') ? 'block' : 'none';
   if (pauseEl.style.display === 'block') pauseEl.textContent = S.pause;
@@ -379,7 +379,8 @@ export function updateHud(dt: number, realDt: number) {
   subEl.textContent = fmt(S.air, { t: p.airT.toFixed(0) }) + ' · ' + fmt(S.feels, { t: p.feelT.toFixed(0) });
   // ---- sun clock ----
   drawDial();
-  dayEl.textContent = fmt(S.day, { d: G.day, n: G.endDay }); clkEl.textContent = fmtClock();
+  dayEl.textContent = seasonLabel().split(' · ').map(x => x.replace(/ /g, '\u00a0')).join(' · ');       // wrap only between the parts
+  clkEl.textContent = fmtClock();
   const know = knowsForecast();
   const wdir = G.wind >= 0 ? 90 : -90, ws = Math.abs(G.wind);
   windRow.innerHTML = ws < 1 ? S.calm : img(uiUrl('wind_arrow'), 'wa').replace('class="ic wa"', `class="ic wa" style="transform:rotate(${wdir}deg)"`) + fmt(S.wind, { w: ws.toFixed(0) });
@@ -396,21 +397,23 @@ export function updateHud(dt: number, realDt: number) {
     chip.innerHTML = sh.closed ? `${S.shelter} ${stars} · ${fmt(S.temp, { t: sh.temp.toFixed(0) })} · ${sh.vent ? S.vent : S.noVentTxt}${sh.co > 8 ? ' · <span class="bad">CO ' + Math.round(sh.co) + '</span>' : ''}` : `<span class="warn">${sh.notes[0] ?? S.noShelter}</span>`;
   } else chip.style.display = 'none';
   // ---- belt ----
-  let key = inv.sel + '|';
-  for (let i = 0; i < BELT; i++) { const s = inv.slots[i]; key += s ? s.id + s.n + (s.dur !== undefined ? Math.round(s.dur / 5) : '') + ',' : ','; }
+  const cells = beltCells();
+  let key = inv.sel + '|' + cells.length + '|';
+  for (const i of cells) { const s = inv.slots[i]; key += s ? s.id + s.n + (s.dur !== undefined ? Math.round(s.dur / (s.id === 'thermos' || s.id === 'sack' ? 1 : 5)) : '') + ',' : ','; }
   if (key !== beltKey) {
     beltKey = key;
     let h = '';
-    for (let i = 0; i < BELT; i++) {
+    cells.forEach((i, ci) => {
       const s = inv.slots[i]; const d = s ? getItem(s.id) : null;
-      h += `<div class="sl${i === inv.sel ? ' sel' : ''}" data-i="${i}"><span class="k">${i + 1}</span>`;
+      h += `<div class="sl${i === inv.sel ? ' sel' : ''}${s && s.id === 'flask' && (s.dur ?? 0) >= 50 ? ' frz' : ''}" data-i="${i}"><span class="k">${ci + 1}</span>`;
       if (s && d) {
-        h += img(itemUrl(s.id));
+        h += img(itemUrl(s.id, s.dur));
         if (s.n > 1) h += `<i class="n">${s.n}</i>`;
         if (d.tool && isFinite(d.tool.dur) && s.dur !== undefined) h += `<div class="bar"><i style="width:${Math.max(0, Math.min(100, s.dur / d.tool.dur * 100))}%"></i></div>`;
+        else if (s.id === 'thermos' || s.id === 'hand_warmer' || s.id === 'frost_balm') { const f = s.id === 'thermos' ? Math.floor((s.dur ?? 0) / 1000) / 3 : s.id === 'hand_warmer' ? (s.dur ?? 0) / 240 : (s.dur ?? 0) / 4; h += `<div class="bar"><i style="width:${Math.max(0, Math.min(100, f * 100))}%"></i></div>`; }
       }
       h += '</div>';
-    }
+    });
     beltEl.innerHTML = h;
     const sel = inv.slots[inv.sel];
     if (sel) { bname.style.display = 'block'; bname.textContent = itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + fmt(S.dens, { d: Math.round(sel.dur) }) : ''); } else bname.style.display = 'none';

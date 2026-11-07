@@ -1001,3 +1001,4 @@ export function uiIcon(key: string, tint?: string): HTMLCanvasElement {
 /** Moon icon for a phase in 0..1 (0 new, 0.5 full). */
 export function moonIcon(phase: number, tint?: string): HTMLCanvasElement { return uiIcon('moon' + (((Math.round(phase * MOON_PHASES) % MOON_PHASES) + MOON_PHASES) % MOON_PHASES), tint); }
 export const hasIcon = (id: string) => hasSprite(id);
+import './icons_use';

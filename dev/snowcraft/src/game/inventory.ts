@@ -6,13 +6,16 @@ import { getItem, snowClass, type WearSlot } from './items';
 import { strings } from '../content/i18n';
 
 export const BELT = 6, PACK = 18, NSLOT = BELT + PACK, SLED_SLOTS = 30;
-export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'hands', 'feet'];
+/** DESIGN §17: a belt pouch adds 3 quick slots (cells 24..26, keys 7-9), a big pack adds 6 pack slots (cells 27..32) and +20 kg. They exist only while that item is carried. */
+export const POUCH0 = NSLOT, POUCH_N = 3, BIG0 = POUCH0 + POUCH_N, BIG_N = 6, TOTAL = BIG0 + BIG_N;
+export const BIG_PACK_KG = 20;
+export const WEAR_SLOTS: WearSlot[] = ['head', 'body', 'hands', 'feet', 'face'];
 
 export interface Sled { x: number; y: number; slots: (Slot | null)[]; hitched: boolean }
 export const inv = {
-  slots: new Array<Slot | null>(NSLOT).fill(null),
+  slots: new Array<Slot | null>(TOTAL).fill(null),
   sel: 0,
-  wear: { head: null, body: null, hands: null, feet: null } as Record<WearSlot, string | null>,
+  wear: { head: null, body: null, hands: null, feet: null, face: null } as Record<WearSlot, string | null>,
   sled: null as Sled | null,
 };
 /** Backpacks left by dead players: drop id -> contents (not persisted by save.ts yet). */
@@ -27,7 +30,35 @@ function defaultDur(id: string): number | undefined {
   const d = getItem(id);
   if (d.tool && isFinite(d.tool.dur)) return d.tool.dur;
   if (id === 'flask') return 0;
-  return undefined;
+  return d.dur0;
+}
+/** Extra cells that exist right now: the pouch / big pack must be carried (belt or pack cells, never inside the extra cells themselves). */
+export function extras(): { pouch: boolean; big: boolean } {
+  let pouch = false, big = false;
+  for (let i = 0; i < NSLOT; i++) { const s = inv.slots[i]; if (!s) continue; if (s.id === 'belt_pouch') pouch = true; else if (s.id === 'big_pack') big = true; }
+  return { pouch, big };
+}
+export const hasPouch = () => extras().pouch;
+export const hasBigPack = () => extras().big;
+/** Is cell i of inv.slots in use? */
+export function slotUsable(i: number, e = extras()): boolean { return i < NSLOT || (i < BIG0 ? e.pouch : i < TOTAL && e.big); }
+/** Physical cells of the belt in wheel order: the six belt cells, then the pouch cells. */
+export function beltCells(): number[] { const a = [0, 1, 2, 3, 4, 5]; if (hasPouch()) for (let k = 0; k < POUCH_N; k++) a.push(POUCH0 + k); return a; }
+export function isBeltCell(i: number): boolean { return i < BELT || (i >= POUCH0 && i < BIG0 && hasPouch()); }
+/** Cells in use, in the order add() fills them after the six belt and eighteen pack cells. */
+function* extraCells(): Generator<number> { const e = extras(); if (e.pouch) for (let i = POUCH0; i < BIG0; i++) yield i; if (e.big) for (let i = BIG0; i < TOTAL; i++) yield i; }
+/** Pull things out of cells whose pouch / big pack is gone: into free base cells, else onto the ground. */
+export function settleExtras() {
+  const e = extras(); let moved = false;
+  for (let i = POUCH0; i < TOTAL; i++) {
+    if (slotUsable(i, e)) continue;
+    const s = inv.slots[i]; if (!s) continue;
+    inv.slots[i] = null; moved = true;
+    const left = add(s.id, s.n, s.dur);
+    if (left > 0 && G.player) spawnDrop(s.id, left, G.player.x, G.player.y - 10, (Math.random() - 0.5) * 20, -26, s.dur);
+  }
+  if (!isBeltCell(inv.sel)) { inv.sel = 0; moved = true; }
+  if (moved) changed();
 }
 function sameStack(a: Slot, id: string, dur?: number): boolean {
   if (a.id !== id) return false;
@@ -36,11 +67,12 @@ function sameStack(a: Slot, id: string, dur?: number): boolean {
 }
 /** Tools go to the belt first; so do snow blocks: a freshly cut block must be placeable at once, not after a trip into the bag panel (the builder's loop is
  *  cut - place - cut). Everything else stackable goes to the pack first and only then to the belt. */
-export function beltFirst(id: string): boolean { const d = getItem(id); return d.kind === 'tool' || d.kind === 'block' || (d.stack === 1 && d.kind !== 'misc'); }
+export function beltFirst(id: string): boolean { const d = getItem(id); return d.kind === 'tool' || d.kind === 'block' || !!d.quick || (d.stack === 1 && d.kind !== 'misc'); }
 function* order(id: string): Generator<number> {
   const tooly = beltFirst(id);
   if (tooly) { for (let i = 0; i < NSLOT; i++) yield i; }
   else { for (let i = BELT; i < NSLOT; i++) yield i; for (let i = 0; i < BELT; i++) yield i; }
+  if (id !== 'belt_pouch' && id !== 'big_pack') yield* extraCells();
 }
 
 /** Add n items; returns how many did NOT fit. `dur` sets the snow-block density / torch minutes / lantern fuel / flask water. */
@@ -99,19 +131,30 @@ export function removeFromSlot(i: number, n = 1): Slot | null {
   changed(); return out;
 }
 export function selected(): Slot | null { return inv.slots[inv.sel] ?? null; }
-export function select(i: number) { const k = ((i % BELT) + BELT) % BELT; if (k !== inv.sel) { inv.sel = k; changed(); } }
+/** Select a belt cell: 0..5 are the belt keys, 6..8 the pouch keys (7-9), 24..26 the pouch cells themselves. */
+export function select(i: number) {
+  const k = i >= BELT && i < BELT + POUCH_N ? POUCH0 + i - BELT : i;
+  if (!isBeltCell(k)) return;
+  if (k !== inv.sel) { inv.sel = k; changed(); }
+}
+/** Mouse wheel: step along the belt (and the pouch cells), wrapping. */
+export function selectStep(d: number) {
+  const b = beltCells(); let j = b.indexOf(inv.sel); if (j < 0) j = 0;
+  const k = b[(((j + d) % b.length) + b.length) % b.length];
+  if (k !== inv.sel) { inv.sel = k; changed(); }
+}
 export function swap(a: number, b: number) { const t = inv.slots[a]; inv.slots[a] = inv.slots[b]; inv.slots[b] = t; changed(); }
 /** First slot index holding an item satisfying pred. */
 export function find(pred: (s: Slot) => boolean): number {
-  for (let i = 0; i < NSLOT; i++) { const s = inv.slots[i]; if (s && pred(s)) return i; }
+  for (let i = 0; i < TOTAL; i++) { const s = inv.slots[i]; if (s && pred(s)) return i; }
   return -1;
 }
-export function freeSlots(): number { let c = 0; for (const s of inv.slots) if (!s) c++; return c; }
+export function freeSlots(): number { let c = 0; for (let i = 0; i < NSLOT; i++) if (!inv.slots[i]) c++; for (const i of extraCells()) if (!inv.slots[i]) c++; return c; }
 
 /** Carried weight in kg (sled contents count at 35 %, the dragged sled itself is free). */
 export function weight(): number {
   let w = 0;
-  const sum = (arr: (Slot | null)[], k: number) => { for (const s of arr) if (s) { const d = getItem(s.id); w += (s.id === 'snow_block' ? (s.dur ?? 300) / 60 : d.w) * s.n * k; } };
+  const sum = (arr: (Slot | null)[], k: number) => { for (const s of arr) if (s) w += unitWeight(s.id, s.dur) * s.n * k; };
   sum(inv.slots, 1);
   for (const p of WEAR_SLOTS) { const id = inv.wear[p]; if (id) w += getItem(id).w * 0.6; }
   if (inv.sled?.hitched) sum(inv.sled.slots, 0.35);
@@ -121,29 +164,43 @@ export function weight(): number {
 export const WEIGHT_SOFT = 60;      // kg: the comfortable load, slowdown starts above
 export const WEIGHT_RUN = 80;       // kg: cannot run any more
 export const WEIGHT_MAX = 100;       // kg: crawling, nothing more can be picked up
+/** A sack (DESIGN §17) holds one bulk material: dur = kind * 100 + n (kind 1 snow, 2 ice, 3 coal, 4 lichen), at half weight. */
+export const SACK_KINDS = ['', 'snow', 'ice', 'coal', 'lichen'] as const;
+export const SACK_MAX = 12;
+export const sackKind = (dur?: number) => Math.floor((dur ?? 0) / 100);
+export const sackN = (dur?: number) => Math.round((dur ?? 0) % 100);
+export const sackDur = (kind: number, n: number) => (n > 0 ? kind * 100 + n : 0);
 const LS = strings('inv', {
   l0: 'налегке', l1: 'нормально', l2: 'тяжело: медленнее, потеешь', l3: 'перегруз: не бежать, быстро выдыхаешься', l4: 'не поднять: брось что-нибудь',
 });
 export type LoadLevel = 0 | 1 | 2 | 3 | 4;
 /** 0 light · 1 normal · 2 heavy (slower, sweat) · 3 overloaded (no running) · 4 cannot lift more. */
-export function loadLevel(w = weight()): LoadLevel { return w >= WEIGHT_MAX ? 4 : w > WEIGHT_RUN ? 3 : w > WEIGHT_SOFT ? 2 : w > WEIGHT_SOFT * 0.45 ? 1 : 0; }
+export function loadLevel(w = weight()): LoadLevel { const b = bonusKg(); return w >= WEIGHT_MAX + b ? 4 : w > WEIGHT_RUN + b ? 3 : w > WEIGHT_SOFT + b ? 2 : w > (WEIGHT_SOFT + b) * 0.45 ? 1 : 0; }
+/** +20 kg of every limit while a big pack is carried. */
+export const bonusKg = () => (hasBigPack() ? BIG_PACK_KG : 0);
+export const weightMax = () => WEIGHT_MAX + bonusKg();
+export const runLimit = () => WEIGHT_RUN + bonusKg();
 /** The effect of the current load in words (weight bar caption). */
 export function loadWords(w = weight()): string { return [LS.l0, LS.l1, LS.l2, LS.l3, LS.l4][loadLevel(w)]; }
 /** Walk-speed / sweat / stamina factor 0..1 above the comfortable load (0 at WEIGHT_SOFT, 1 at WEIGHT_MAX). */
-export function overload(w = weight()): number { return Math.max(0, Math.min(1, (w - WEIGHT_SOFT) / (WEIGHT_MAX - WEIGHT_SOFT))); }
+export function overload(w = weight()): number { const b = bonusKg(); return Math.max(0, Math.min(1, (w - WEIGHT_SOFT - b) / (WEIGHT_MAX - WEIGHT_SOFT))); }
 /** Weight of one unit of an item (snow blocks weigh by density). */
-export function unitWeight(id: string, dur?: number): number { return id === 'snow_block' ? (dur ?? 300) / 60 : getItem(id).w; }
+export function unitWeight(id: string, dur?: number): number {
+  if (id === 'snow_block') return (dur ?? 300) / 60;
+  if (id === 'sack') { const k = sackKind(dur); return getItem('sack').w + (k > 0 ? getItem(SACK_KINDS[k]).w * sackN(dur) * 0.5 : 0); }
+  return getItem(id).w;
+}
 /** How many of n units can still be lifted before WEIGHT_MAX. */
 export function fitByWeight(id: string, n: number, dur?: number): number {
   const u = unitWeight(id, dur); if (u <= 0) return n;
-  return Math.max(0, Math.min(n, Math.floor((WEIGHT_MAX - weight()) / u + 1e-6)));
+  return Math.max(0, Math.min(n, Math.floor((weightMax() - weight()) / u + 1e-6)));
 }
 /** How many of n units fit into the belt + pack (+ hitched sled) by SLOTS only (no mutation). */
 export function roomFor(id: string, n: number, dur?: number): number {
   const max = getItem(id).stack, nd = dur ?? defaultDur(id);
   let room = 0;
-  const scan = (arr: (Slot | null)[]) => { for (const s of arr) { if (!s) room += max; else if (max > 1 && sameStack(s, id, nd)) room += Math.max(0, max - s.n); } };
-  scan(inv.slots); if (inv.sled?.hitched) scan(inv.sled.slots);
+  const scan = (arr: (Slot | null)[], all = false) => { const e = extras(); for (let i = 0; i < arr.length; i++) { if (!all && !slotUsable(i, e)) continue; const s = arr[i]; if (!s) room += max; else if (max > 1 && sameStack(s, id, nd)) room += Math.max(0, max - s.n); } };
+  scan(inv.slots); if (inv.sled?.hitched) scan(inv.sled.slots, true);
   return Math.min(n, room);
 }
 
@@ -162,7 +219,7 @@ export function unequip(part: WearSlot): boolean {
   if (add(id, 1) > 0) return false;
   inv.wear[part] = null; changed(); return true;
 }
-export function wearing(id: string) { return inv.wear.head === id || inv.wear.body === id || inv.wear.hands === id || inv.wear.feet === id; }
+export function wearing(id: string) { return WEAR_SLOTS.some(s => inv.wear[s] === id); }
 
 // ---- sled ----
 export function hitchSled(x: number, y: number) {
@@ -177,7 +234,7 @@ export function sledNear(x: number, y: number, r = 26): boolean { const s = inv.
 // ---- lifecycle ----
 export function clearInventory(keepParkedSled = false) {
   inv.slots.fill(null); inv.sel = 0;
-  inv.wear.head = inv.wear.body = inv.wear.hands = inv.wear.feet = null;
+  inv.wear.head = inv.wear.body = inv.wear.hands = inv.wear.feet = inv.wear.face = null;
   if (!(keepParkedSled && inv.sled && !inv.sled.hitched)) inv.sled = null;
   changed();
 }
@@ -193,7 +250,7 @@ export function giveStartKit() {
 /** Pull everything out of the inventory (death): returns the slots. */
 export function takeAll(): Slot[] {
   const out: Slot[] = [];
-  for (let i = 0; i < NSLOT; i++) { const s = inv.slots[i]; if (s) { out.push(s); inv.slots[i] = null; } }
+  for (let i = 0; i < TOTAL; i++) { const s = inv.slots[i]; if (s) { out.push(s); inv.slots[i] = null; } }
   for (const p of WEAR_SLOTS) { const id = inv.wear[p]; if (id) { out.push({ id, n: 1 }); inv.wear[p] = null; } }
   // a dragged sled goes down with its owner: its load and the sled itself end up in the backpack (a parked sled stays where it is)
   if (inv.sled?.hitched) {
@@ -253,7 +310,7 @@ export function sledOpen(): boolean {
   const p = G.player; return !!p && sledNear(p.x, p.y - 4, 34);
 }
 export const refEq = (a: Ref | null, b: Ref | null) => !!a && !!b && a.z === b.z && a.i === b.i;
-export function refSize(z: ZoneId): number { return z === 'inv' ? NSLOT : z === 'wear' ? WEAR_SLOTS.length : z === 'sled' ? (sledOpen() ? SLED_SLOTS : 0) : (boxZone.cur?.size() ?? 0); }
+export function refSize(z: ZoneId): number { return z === 'inv' ? TOTAL : z === 'wear' ? WEAR_SLOTS.length : z === 'sled' ? (sledOpen() ? SLED_SLOTS : 0) : (boxZone.cur?.size() ?? 0); }
 export function refGet(r: Ref): Slot | null {
   switch (r.z) {
     case 'inv': return inv.slots[r.i] ?? null;
@@ -273,7 +330,7 @@ export function refSet(r: Ref, s: Slot | null) {
 /** May this stack sit in that cell? (clothes only in their own slot, nothing into a sled that is not here, the box checks its capacity.) */
 export function refAccepts(r: Ref, s: Slot): boolean {
   switch (r.z) {
-    case 'inv': return true;
+    case 'inv': return slotUsable(r.i) && !(r.i >= NSLOT && (s.id === 'belt_pouch' || s.id === 'big_pack'));
     case 'sled': return sledOpen();
     case 'wear': return s.n === 1 && getItem(s.id).wear?.slot === WEAR_SLOTS[r.i];
     case 'box': return !!boxZone.cur && boxZone.cur.canPut(s);
@@ -316,7 +373,7 @@ function moveRaw(from: Ref, to: Ref, want?: number): number {
   // swap whole stacks
   if (n !== a.n) return 0;
   if (!refAccepts(from, cp(b))) return 0;
-  if (from.z === 'box' && carriedZone(to.z) && weight() - unitWeight(b.id, b.dur) * b.n + unitWeight(a.id, a.dur) * a.n > WEIGHT_MAX) return 0;
+  if (from.z === 'box' && carriedZone(to.z) && weight() - unitWeight(b.id, b.dur) * b.n + unitWeight(a.id, a.dur) * a.n > weightMax()) return 0;
   const bb = cp(b), aa = cp(a);
   refSet(to, aa); refSet(from, bb);
   changed(); return n;
@@ -325,7 +382,7 @@ function moveRaw(from: Ref, to: Ref, want?: number): number {
 /** First free cell of a zone (for inv: the pack first, then the belt). */
 export function freeCell(z: ZoneId, preferBelt = false): Ref | null {
   const n = refSize(z);
-  const idx = z === 'inv' ? (preferBelt ? [...Array(NSLOT).keys()] : [...Array(NSLOT - BELT).keys()].map(i => i + BELT).concat([...Array(BELT).keys()])) : [...Array(n).keys()];
+  const idx = z === 'inv' ? (preferBelt ? [...Array(NSLOT).keys()] : [...Array(NSLOT - BELT).keys()].map(i => i + BELT).concat([...Array(BELT).keys()])).concat([...extraCells()]) : [...Array(n).keys()];
   for (const i of idx) if (!refGet({ z, i })) return { z, i };
   if (z === 'box') { const s = boxZone.cur; if (s && s.canPut({ id: '', n: 1 })) return { z, i: s.size() }; }
   return null;
@@ -350,12 +407,12 @@ const KIND_ORDER: Record<string, number> = { tool: 0, wear: 1, food: 2, material
 /** Merge partial stacks and order a zone's cells: `kind` = tools, clothes, food, materials … (heavier stacks first), `weight` = heaviest stack first. The belt stays as is. */
 export function sortZone(z: 'inv' | 'sled', mode: 'kind' | 'weight' = 'kind') {
   const arr = z === 'inv' ? inv.slots : sledOpen() ? inv.sled!.slots : null; if (!arr) return;
-  const from = z === 'inv' ? BELT : 0;
-  const part = arr.slice(from); mergeArr(part);
+  const cells = z === 'inv' ? [...Array(NSLOT - BELT).keys()].map(i => i + BELT).concat(hasBigPack() ? [...Array(BIG_N).keys()].map(i => i + BIG0) : []) : [...Array(arr.length).keys()];
+  const part = cells.map(i => arr[i]); mergeArr(part);
   const items = part.filter((s): s is Slot => !!s);
   const tw = (s: Slot) => unitWeight(s.id, s.dur) * s.n;
   items.sort((p, q) => mode === 'weight' ? tw(q) - tw(p) || p.id.localeCompare(q.id) : (KIND_ORDER[getItem(p.id).kind] ?? 9) - (KIND_ORDER[getItem(q.id).kind] ?? 9) || tw(q) - tw(p) || p.id.localeCompare(q.id));
-  for (let i = from; i < arr.length; i++) arr[i] = items[i - from] ?? null;
+  cells.forEach((c, k) => { arr[c] = items[k] ?? null; });
   changed();
 }
 /** Shift+click / long-press: send a stack to the «other side». Box open: pack <-> box. Else sled near: pack <-> sled. Else belt <-> pack. Clothes: wear / take off. */
@@ -380,11 +437,12 @@ export function quickMove(r: Ref): boolean {
 export function placeInto(z: ZoneId, s: Slot, belt?: boolean): Ref | null {
   const n = refSize(z), max = getItem(s.id).stack;
   const lo = z === 'inv' && belt === true ? 0 : z === 'inv' && belt === false ? BELT : 0, hi = z === 'inv' && belt === true ? BELT : z === 'inv' && belt === false ? NSLOT : n;
-  if (max > 1) for (let i = lo; i < hi; i++) { const c = refGet({ z, i }); if (c && sameStack(c, s.id, s.dur) && c.n < max) return { z, i }; }
+  const e = extras(), skip = (i: number) => z === 'inv' && !slotUsable(i, e);
+  if (max > 1) for (let i = lo; i < hi; i++) { if (skip(i)) continue; const c = refGet({ z, i }); if (c && sameStack(c, s.id, s.dur) && c.n < max) return { z, i }; }
   // anywhere in the inventory (belt not asked for): the same order as add(): tools and snow blocks fill the belt first, other stacks the pack first,
   // so «Взять всё» from a chest does not fill the six belt slots with ropes and flares
   if (z === 'inv' && belt === undefined && !beltFirst(s.id)) { const pk = placeInto('inv', s, false); if (pk) return pk; }
-  for (let i = lo; i < hi; i++) if (!refGet({ z, i })) return { z, i };
+  for (let i = lo; i < hi; i++) if (!skip(i) && !refGet({ z, i })) return { z, i };
   if (z === 'box' && boxZone.cur && boxZone.cur.canPut(s)) return { z, i: n };
   return null;
 }

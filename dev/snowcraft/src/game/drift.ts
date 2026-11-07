@@ -15,6 +15,7 @@ import { MIN_PER_SEC } from './weather';
 import { addShake } from '../engine/camera';
 import { burstFx } from '../engine/particles';
 import { inv, backpacks } from './inventory';
+import { ramp } from './seasons';
 
 const S = strings('drift', {
   warn: 'Лёд трещит под ногами — льдина пойдёт!',
@@ -178,7 +179,7 @@ function plan(): { k0: number; k1: number; dir: 1 | -1; blocked: boolean; x: num
 
 function startEvent() {
   const pl = plan();
-  driftState.nextAt = G.time + (G.storm > 0.4 ? 3 + rnd() * 2 : 8 + rnd() * 8) * 60;
+  driftState.nextAt = G.time + (G.storm > 0.4 ? 3 + rnd() * 2 : 8 + rnd() * 8) * 60 / ramp.drift;      // DESIGN §18: more frequent every ring
   if (!pl) return;
   if (pl.blocked) {                                      // the pack is jammed: a ridge rises with the same warning
     driftState.pending = { k0: pl.k0, k1: pl.k1, dir: pl.dir, steps: 0, t: 0, creep: 0, warned: false, x: pl.x };
@@ -252,7 +253,7 @@ export function freezeLeads(gm: number) {
     for (let x = fl[i].x1 + 1; x < fl[i + 1].x0; x++) {
       // the first and last column stay open a little longer (the crack line)
       if (x === fl[i].x1 + 1 || x === fl[i + 1].x0 - 1) { if (Math.random() > 0.15) continue; }
-      if (Math.random() > gm / 120 * (0.5 + 0.5 * Math.min(1, (-G.ambientT - 8) / 20))) continue;
+      if (Math.random() > gm / 120 * (0.5 + 0.5 * Math.min(1, (-G.ambientT - 8) / 20)) / ramp.thinIce) continue;      // §18: leads stay thin longer every ring
       let y = SEA; while (y < H - 2 && mat[y * W + x] === MAT.ICE) y++;
       if (mat[y * W + x] !== MAT.WATER || y - SEA >= 14) continue;
       mat[y * W + x] = MAT.ICE; aux[y * W + x] = 0; flags[y * W + x] = 0; shade[y * W + x] = (Math.random() * 256) | 0;

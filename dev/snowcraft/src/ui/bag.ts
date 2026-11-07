@@ -7,16 +7,17 @@
 // The «Рядом» list (E held, or the phone button) is a separate overlay: lying things, containers, a backpack and a parked sled that are within reach.
 // devhud.ts owns the panel element and calls attachBag(panel) once; bagHtml() builds the whole panel (kept for tests).
 import { G } from '../game/state';
-import { strings, fmt } from '../content/i18n';
+import { strings, fmt, tr } from '../content/i18n';
 import { on } from '../game/bus';
 import {
-  inv, weight, BELT, NSLOT, WEAR_SLOTS, WEIGHT_MAX, WEIGHT_SOFT, loadLevel, loadWords, unitWeight, sledOpen,
+  inv, weight, BELT, NSLOT, TOTAL, POUCH0, WEAR_SLOTS, weightMax, isBeltCell, slotUsable, WEIGHT_SOFT, loadLevel, loadWords, unitWeight, sledOpen,
   moveStack, splitStack, sortZone, quickMove, dropRef, refGet, refEq, refSize, placeInto, select, boxZone, type Ref, type ZoneId,
 } from '../game/inventory';
-import { getItem, itemName } from '../game/items';
+import { getItem, itemName, stackIcon } from '../game/items';
 import { RECIPES, canCraft, placeLabel, fineLabel, unknownRecipeTechs, type Recipe, type RecipeGroup } from '../game/recipes';
 import { stationsAt } from '../game/fixtures';
 import { handsFrozen, eatSlot } from '../game/player';
+import { usable, useLabel, useSlot, useTip, useNote } from '../game/useitems';
 import { knows, TECHS, techHint } from '../game/lore';
 import { open as boxOpen, phase, searchProgress, hiddenCount, revOf, takeAllFound, closeBox, panel as boxPanel, barehanded, isOpen } from '../game/search';
 import { nearbyList, takeNear, nearUi, hi } from '../game/nearby';
@@ -28,7 +29,7 @@ import { uiIcon } from '../art/icons';
 
 const S = strings('bag', {
   pack: 'Пояс и сумка', skills: 'Что умею', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть',
-  slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь',
+  slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь', slotFace: 'очки',
   gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
   dens: 'плотность {d}', known: 'Приёмов: {n} из {m}', more: 'Ещё есть чему учиться. Читай записки, смотри и пробуй.',
   q: '?', qExp: 'Приходит только с опытом.', qNote: 'Подсказка',
@@ -41,10 +42,10 @@ const S = strings('bag', {
   chipping: 'Скалываю лёд…', cap: '{n}/{m}',
 });
 const GROUPS: [RecipeGroup, () => string][] = [['fire', () => S.gFire], ['food', () => S.gFood], ['wear', () => S.gWear], ['hunt', () => S.gHunt], ['build', () => S.gBuild]];
-const SLOT_LABEL: Record<string, () => string> = { head: () => S.slotHead, body: () => S.slotBody, hands: () => S.slotHands, feet: () => S.slotFeet };
+const SLOT_LABEL: Record<string, () => string> = { head: () => S.slotHead, body: () => S.slotBody, hands: () => S.slotHands, feet: () => S.slotFeet, face: () => S.slotFace };
 
 const urlCache = new Map<string, string>();
-const itemUrl = (id: string) => { let u = urlCache.get(id); if (!u) { u = icon(getItem(id).icon).toDataURL(); urlCache.set(id, u); } return u; };
+const itemUrl = (id: string, dur?: number) => { const ik = stackIcon(id, dur); let u = urlCache.get(ik); if (!u) { u = icon(ik).toDataURL(); urlCache.set(ik, u); } return u; };
 const uiUrl = (key: string) => { const k = 'ui.' + key; let u = urlCache.get(k); if (!u) { u = uiIcon(key).toDataURL(); urlCache.set(k, u); } return u; };
 const img = (src: string, cls = '') => `<img class="ic ${cls}" src="${src}" alt="" draggable="false">`;
 
@@ -76,6 +77,8 @@ const CSS = `
 #hud .pnl button.ab:disabled{opacity:.4;cursor:default;border-color:#2c4a6a;color:#9db6cc}
 #hud .pnl button.ab.dng{border-color:#a8604c}
 #hud .pnl .bfoot{position:sticky;bottom:-9px;margin:6px -10px -8px;padding:6px 10px;background:#080e1a;border-top:1px solid rgba(124,198,238,.28);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#hud .pnl .cell.frz{border-color:#9fd6ff;box-shadow:0 0 6px rgba(159,214,255,.55) inset}
+#hud .pnl .bfoot .tip{flex:1 1 100%;font-size:11px;color:#9ec3da;line-height:1.25}
 #hud .pnl .bfoot .info{display:flex;align-items:center;gap:6px;min-width:0;flex:1 1 150px;font-size:12px}
 #hud .pnl .bfoot .info .ic{width:24px;height:24px}
 #hud .pnl .bfoot .info span{opacity:.75}
@@ -144,13 +147,13 @@ export function bagWantsOpen(): boolean { const w = ui.want; ui.want = false; re
 const kg = (w: number) => fmt(S.kg, { w: (Math.round(w * 10) / 10).toString().replace('.', ',') });
 function cellHtml(z: ZoneId, i: number): string {
   const s = refGet({ z, i });
-  const belt = z === 'inv' && i < BELT, act = belt && i === inv.sel;
+  const belt = z === 'inv' && isBeltCell(i), act = belt && i === inv.sel;
   const here = ui.sel && ui.sel.z === z && ui.sel.i === i;
-  const cls = `cell${belt ? ' bl' : ''}${act ? ' act' : ''}${here ? ' sel' : ''}${s ? '' : ' empty'}`;
-  const key = belt ? `<span class="k">${i + 1}</span>` : '';
+  const cls = `cell${belt ? ' bl' : ''}${act ? ' act' : ''}${here ? ' sel' : ''}${s ? '' : ' empty'}${s && s.id === 'flask' && (s.dur ?? 0) >= 50 ? ' frz' : ''}`;
+  const key = belt ? `<span class="k">${i < BELT ? i + 1 : i - POUCH0 + BELT + 1}</span>` : '';
   if (!s) return `<div class="${cls}" data-z="${z}" data-i="${i}">${key}</div>`;
-  const dens = s.id === 'snow_block' && s.dur ? ' · ' + fmt(S.dens, { d: Math.round(s.dur) }) : '';
-  return `<div class="${cls}" data-z="${z}" data-i="${i}" title="${itemName(s.id)}${dens}">${key}${img(itemUrl(s.id))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</div>`;
+  const nt = useNote(s), dens = (s.id === 'snow_block' && s.dur ? ' · ' + fmt(S.dens, { d: Math.round(s.dur) }) : '') + (nt ? ' · ' + nt : '');
+  return `<div class="${cls}" data-z="${z}" data-i="${i}" title="${itemName(s.id)}${dens}">${key}${img(itemUrl(s.id, s.dur))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</div>`;
 }
 function ingHtml(rec: Recipe): string {
   return rec.variants.map(v => '<span>' + v.map(g => img(itemUrl(g.id)) + itemName(g.id) + (g.n > 1 ? ' ×' + g.n : '')).join(', ') + '</span>').join('<span class="dim">/</span>');
@@ -179,7 +182,7 @@ function quickLabel(r: Ref, s: { id: string }): string {
   if (r.z === 'box') return S.take;
   if (boxZone.cur) return S.toBox;
   if (sledOpen()) return r.z === 'sled' ? S.toPack : S.toSled;
-  return r.i < BELT ? S.toPack : S.toBelt;
+  return isBeltCell(r.i) ? S.toPack : S.toBelt;
 }
 function footHtml(): string {
   const r = ui.sel, s = r ? refGet(r) : null;
@@ -187,9 +190,13 @@ function footHtml(): string {
   if (!r || !s) h += `<span class="bh">${touchy() ? S.hintTap : S.hintMouse}</span>`;
   else {
     const d = getItem(s.id), w = unitWeight(s.id, s.dur) * s.n;
-    h += `<div class="info">${img(itemUrl(s.id))}<b>${itemName(s.id)}${s.n > 1 ? ' ×' + s.n : ''}</b><span>${kg(w)}</span></div>`;
+    h += `<div class="info">${img(itemUrl(s.id, s.dur))}<b>${itemName(s.id)}${s.n > 1 ? ' ×' + s.n : ''}</b><span>${kg(w)}</span></div>`;
+    if (usable(s.id) && useNote(s)) h += `<div class="tip"><b>${useNote(s)}</b></div>`;
+    if (usable(s.id) && useTip(s.id)) h += `<div class="tip">${useTip(s.id)}</div>`;
+    else if (d.desc) h += `<div class="tip">${tr('itemdesc.' + s.id, d.desc)}</div>`;
     const btn = (a: string, label: string, c = '') => `<button class="ab ${c}" data-act="${a}">${label}</button>`;
     if (r.z === 'inv' && d.food) h += btn('use', (d.food.drink || s.id === 'flask') ? S.drink : S.eat, 'pri');
+    else if (r.z === 'inv' && usable(s.id) && !boxZone.cur) h += btn('use', useLabel(s.id), 'pri');
     else if (d.wear && r.z !== 'wear' && !boxZone.cur) h += btn('use', S.wear, 'pri');
     h += btn('move', quickLabel(r, s), (r.z === 'box' || (boxZone.cur && r.z !== 'wear')) ? 'pri' : '');
     if (s.n > 1 && r.z !== 'wear') h += btn('half', S.half) + btn('one', S.one);
@@ -203,8 +210,8 @@ export function bagHtml(): string {
   ensureStyle();
   const p = G.player;
   const wt = weight(), lv = loadLevel(wt);
-  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
-  h += `<div class="wt"><i style="width:${Math.min(100, wt / WEIGHT_MAX * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
+  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
+  h += `<div class="wt"><i style="width:${Math.min(100, wt / weightMax() * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
   h += `<div class="top"><div class="wear">`;
   for (let k = 0; k < WEAR_SLOTS.length; k++) {
     const sl = WEAR_SLOTS[k], id = inv.wear[sl], here = ui.sel && ui.sel.z === 'wear' && ui.sel.i === k;
@@ -213,6 +220,7 @@ export function bagHtml(): string {
   h += `</div><div class="sorts"><button class="mini" data-act="sort" data-m="kind" title="${S.sortTitle}">${S.sortKind}</button><button class="mini" data-act="sort" data-m="weight" title="${S.sortTitle}">${S.sortWeight}</button></div></div>`;
   h += `<div class="grid" data-z="inv" data-i="-1">`;
   for (let i = 0; i < NSLOT; i++) h += cellHtml('inv', i);
+  for (let i = NSLOT; i < TOTAL; i++) if (slotUsable(i)) h += cellHtml('inv', i);
   h += `</div>`;
   h += `</div><div class="col">`;
   if (boxOpen.box) h += boxHtml();
@@ -274,23 +282,24 @@ function move(from: Ref, to: Ref, n?: number) {
 }
 function afterMove(from: Ref) {
   if (ui.sel && !refGet(ui.sel)) ui.sel = null;
-  if (from.z === 'inv' && from.i < BELT && inv.slots[inv.sel] === undefined) inv.sel = 0;
+  if (from.z === 'inv' && isBeltCell(from.i) && inv.slots[inv.sel] === undefined) inv.sel = 0;
 }
 function primary(r: Ref) {
   const s = refGet(r); if (!s) return;
   const d = getItem(s.id);
   if (r.z === 'inv' && d.food) { eatSlot(r.i); }
+  else if (r.z === 'inv' && usable(s.id) && !boxZone.cur) { useSlot(r.i); }
   else if (d.wear && r.z !== 'wear' && !boxZone.cur) quickMove(r);
   else quickMove(r);
 }
 function tapCell(r: Ref) {
   const s = refGet(r);
-  if (!ui.sel) { if (s) { ui.sel = r; if (r.z === 'inv' && r.i < BELT) select(r.i); } return; }
+  if (!ui.sel) { if (s) { ui.sel = r; if (r.z === 'inv' && isBeltCell(r.i)) select(r.i); } return; }
   if (refEq(ui.sel, r)) { ui.sel = null; return; }
   const from = ui.sel;
   const k = move(from, r);
   if (k > 0) { afterMove(from); if (!refGet(from)) ui.sel = null; else if (refGet(r)) ui.sel = from; }
-  else if (s) { ui.sel = r; if (r.z === 'inv' && r.i < BELT) select(r.i); }
+  else if (s) { ui.sel = r; if (r.z === 'inv' && isBeltCell(r.i)) select(r.i); }
 }
 function act(a: string, el?: HTMLElement) {
   const r = ui.sel;

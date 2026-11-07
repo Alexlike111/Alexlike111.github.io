@@ -7,7 +7,7 @@ import { G } from './state';
 import { mat, aux, flags, bg } from '../engine/grid';
 import { inv, dropDur, backpacks } from './inventory';
 import { body } from './player';
-import { setClock } from './weather';
+import { setClock, resyncWeather } from './weather';
 import { sites } from './locations';
 import { questSave, questLoad } from './quest';
 import { resetShelter } from './shelter';
@@ -17,14 +17,14 @@ export const SAVE_VERSION = 1;
 const DB = 'snowcraft', STORE = 'save';
 const KEY = 'main';        // default slot; the self-test uses its own slot so it never touches the player's save
 
-export interface SaveMeta { v: number; savedAt: number; seed: number; diff: 0 | 1 | 2; hardcore: boolean; day: number; time: number; core: number }
+export interface SaveMeta { v: number; savedAt: number; seed: number; diff: 0 | 1 | 2; hardcore: boolean; day: number; time: number; core: number; cycle?: number /* seasons ring (absent in old saves: derived from day) */ }
 export interface SaveData { meta: SaveMeta; state: any; grid: { mat: Uint8Array; aux: Uint8Array; flags: Uint8Array; bg: Uint8Array } }
 
 // ---- capture / apply ------------------------------------------------------------------------------------------------------------
 export function captureState() {
   const p = G.player;
   return {
-    seed: G.seed, diff: { ...G.diff }, time: G.time, nextId: G.nextId,
+    seed: G.seed, cycle: G.cycle, diff: { ...G.diff }, time: G.time, nextId: G.nextId,
     player: JSON.parse(JSON.stringify(p)),
     body: { respawnX: body.respawnX, respawnY: body.respawnY, scar: { ...body.scar }, stats: { ...body.stats } },
     inv: JSON.parse(JSON.stringify({ slots: inv.slots, sel: inv.sel, wear: inv.wear, sled: inv.sled })),
@@ -38,7 +38,7 @@ export function captureState() {
 }
 export function capture(): SaveData {
   const p = G.player;
-  const meta: SaveMeta = { v: SAVE_VERSION, savedAt: Date.now(), seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore, day: G.day, time: G.time, core: p.core };
+  const meta: SaveMeta = { v: SAVE_VERSION, savedAt: Date.now(), seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore, day: G.day, time: G.time, core: p.core, cycle: G.cycle };
   return { meta, state: captureState(), grid: { mat: mat.slice(), aux: aux.slice(), flags: flags.slice(), bg: bg.slice() } };
 }
 /** Lay a loaded save over a freshly generated world (call between generateWorld/initPlayer and initSim). */
@@ -57,7 +57,7 @@ export function applySave(d: SaveData) {
   sites.forEach((x, i) => { x.found = !!s.sites?.[i]; });
   questLoad(s.quest);
   searchLoad(s.search);
-  setClock(s.time);
+  setClock(s.time); resyncWeather();           // day, ring (G.cycle) and the ramp are derived from the clock: old saves (with endDay) load as endless
   resetShelter();
 }
 

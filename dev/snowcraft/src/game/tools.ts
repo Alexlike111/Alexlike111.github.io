@@ -14,7 +14,7 @@ import { throwCell, spawnFx, burstFx } from '../engine/particles';
 import { tempAt } from '../engine/heat';
 import { setCameraLook, addShake } from '../engine/camera';
 import {
-  inv, add, count, remove, selected, select, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
+  inv, add, count, remove, selected, select, selectStep, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
 } from './inventory';
 import { getItem, itemName, densityOf, auxOfDensity, snowClass, snowClassName, blockWeight, type ItemDef } from './items';
 import {
@@ -25,6 +25,7 @@ import { extra as shelterExtra } from './shelter';
 import { MIN_PER_SEC } from './weather';
 import { dogInteract } from './fauna';
 import { stepSearch } from './search';
+import { stepUseItems, useSlot, holdSlot, usable, holdable } from './useitems';
 import { nearbyList, takeNear, autoPickable, stepNearby, isBoxFixture, nearUi, aim, PICK_R, NOTE_R, isNote, type Near } from './nearby';
 import { thrown } from './inventory';
 import { isKeyDown } from '../engine/input';
@@ -333,7 +334,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
   }
   if (id === 'fishing_line') { T.mode = 'use'; T.verb = S.use; evalFish(T, tx, ty); return finishTarget(T); }
   if (id === 'harpoon' || id === 'flare_gun') { T.mode = 'attack'; T.ok = true; T.verb = id === 'harpoon' ? S.harpoon : S.use; return finishTarget(T); }
-  if (def && (def.food || def.kind === 'wear' || id === 'torch' || id === 'lantern' || id === 'barometer' || id === 'sled' || id === 'flask')) { T.mode = 'use'; T.ok = true; T.verb = S.use; return finishTarget(T); }
+  if (def && (def.food || def.kind === 'wear' || id === 'torch' || id === 'lantern' || id === 'barometer' || id === 'sled' || id === 'flask' || (id && usable(id)))) { T.mode = 'use'; T.ok = true; T.verb = S.use; return finishTarget(T); }
   // digging
   if (m !== 0) {
     const t = digTime(m, tk);
@@ -698,10 +699,11 @@ export function stepTools(dt: number) {
   if (G.paused) { held.using = false; return; }
   stepSinter(dt * MIN_PER_SEC * G.timeScale);
   if (!p.alive) { held.using = false; return; }
+  stepUseItems(dt);
   if (p.sleeping) { return; }
   // hotbar / wheel / toggles
-  if (input.hotbar >= 0 && input.hotbar < BELT) select(input.hotbar);
-  if (input.scroll !== 0) select(inv.sel + input.scroll);
+  if (input.hotbar >= 0) select(input.hotbar);
+  if (input.scroll !== 0) selectStep(input.scroll);
   const sel0 = selected();
   if (input.smartToggle) {
     if (sel0 && (sel0.id === 'snow_block')) { toolState.dome = !toolState.dome; toast(toolState.dome ? S.domeOn : S.domeOff, 'info'); }
@@ -727,6 +729,7 @@ export function stepTools(dt: number) {
     else if (pressed && sel.id === 'barometer') toast(fmt(S.barometer, { t: G.forecast.text }), 'info');
     else if (pressed && sel.id === 'sled') { hitchSled(p.x, p.y); remove('sled', 1); toast(S.sled, 'info'); }
     else if (pressed && sel.id === 'flask') eatSlot(inv.sel);
+    else if (usable(sel.id)) { if (pressed) useSlot(inv.sel); if (down && holdable(sel.id)) { holdSlot(inv.sel, dt); held.using = true; } }
   } else toolState.eatP = 0;
   if (sel?.id === 'flare_gun' && pressed) {
     if (remove('flare', 1)) {
@@ -912,3 +915,7 @@ export function heldInfo(out: { item: string | null; aim: number; swing: number;
 }
 export { backpacks };
 void count; void boxFree; void fixtureName; void tempAt; void F_FIXTURE; void shade;
+
+// usable items (DESIGN §17): group 1 here, group 2 (orientation, light/signals) in useitems_b.ts
+import './useitems_a';
+import './useitems_b';

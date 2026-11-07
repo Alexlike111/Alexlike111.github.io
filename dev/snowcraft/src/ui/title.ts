@@ -17,6 +17,7 @@ import { strings, fmt } from '../content/i18n';
 import { on } from '../game/bus';
 import { peekSave, loadGame, saveGame, deleteSave, type SaveMeta, type SaveData } from '../game/save';
 import { wx, setDay } from '../game/weather';
+import { cycleOf, loadBest } from '../game/seasons';
 import { placeFixture } from '../game/fixtures';
 import { fauna, groundY } from '../game/fauna';
 import { W, mat, aux, flags, shade, edited, wakeRect } from '../engine/grid';
@@ -29,9 +30,9 @@ import type { View } from '../game/state';
 
 const S = strings('title', {
   name: 'SNOWCRAFT', sub: 'Полярная ночь', cont: 'Продолжить', newGame: 'Новая игра', start: 'Начать', back: 'Назад', selftest: 'Самотест',
-  contInfo: 'День {d} из {n} · {t}', diff: 'Сложность', hard: 'Хардкор: одна жизнь, без возврата',
+  contInfo: 'День {d} · круг {c} · {t}', record: 'Рекорд: {d} дн. · круг {c}', diff: 'Сложность', hard: 'Хардкор: одна жизнь, без возврата',
   d0: 'Мягкая', d1: 'Обычная', d2: 'Суровая', d0t: 'теплее, меньше голода', d1t: 'как задумано', d2t: 'холод кусает, запасы редки',
-  hint: '12 дней полярной ночи. Станция «Мыс Безмолвия». Рация молчит.', loading: 'Загрузка…', saved: 'Сохранено',
+  hint: 'Полярная ночь не кончается: 12 суток тьмы, 6 суток сумерек, и снова ночь. Станция «Мыс Безмолвия». Живи, пока можешь.', loading: 'Загрузка…', saved: 'Сохранено',
 });
 export interface StartOpts { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean; save?: SaveData }
 
@@ -79,8 +80,9 @@ function view(mode: 'main' | 'new') {
   const wrap = (h: string, hint = true) => `${top}<div class="bot">${h}${hint ? `<div class="hint">${S.hint}</div>` : ''}</div>`;
   if (mode === 'main') {
     let h = '<div class="row">';
-    if (meta) h += `<button class="pri" data-a="cont">${S.cont}<small>${fmt(S.contInfo, { d: meta.day, n: G.endDay, t: new Date(meta.savedAt).toLocaleString() })}</small></button>`;
+    if (meta) h += `<button class="pri" data-a="cont">${S.cont}<small>${fmt(S.contInfo, { d: meta.day, c: (meta.cycle ?? cycleOf(meta.day)) + 1, t: new Date(meta.savedAt).toLocaleString() })}</small></button>`;
     h += `<button data-a="new"${meta ? '' : ' class="pri"'}>${S.newGame}</button></div><div class="row"><button class="lnk" data-a="test">${S.selftest}</button></div>`;
+    const bst = loadBest(); if (bst) h += `<div class="dim">${fmt(S.record, { d: bst.day, c: bst.cycle + 1 })}</div>`;
     el.innerHTML = wrap(h);
   } else {
     const dn = [[S.d0, S.d0t], [S.d1, S.d1t], [S.d2, S.d2t]];

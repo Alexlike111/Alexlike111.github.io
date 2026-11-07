@@ -7,7 +7,8 @@
 // devhud.ts owns the panel element and the open/close keys; it calls renderJournalInto(el) and forwards clicks to journalClick(e).
 import { G } from '../game/state';
 import { strings, fmt } from '../content/i18n';
-import { objective, GOALS, journal, prog } from '../game/quest';
+import { objective, GOALS, journal } from '../game/quest';
+import { seasonLabel } from '../game/seasons';
 import { TECHS, NOTES, lore, knows, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, factNone } from '../game/lore';
 import { sites } from '../game/locations';
 import { seen, TW, TH, TS, W, mat, bg } from '../engine/grid';
@@ -21,8 +22,7 @@ const S = strings('jr', {
   now: 'Сейчас', list: 'Путь', storms: 'Пурга: отчёты', noStorms: 'Ни одной бури ещё не было.', learnedLog: 'Что узнано', none: 'пока пусто',
   known: 'Знаю', learnMore: 'Чему ещё учиться', how: 'как узнал: {h}', qExp: 'Приходит только с опытом.', recipes: 'Приёмы', tips: 'Опыт и советы',
   notesCount: 'Найдено записок: {n} из {m}', pickNote: 'Выбери записку слева.', noNotes: 'Записок пока нет. Загляни к туру на мысу, в дом и в шахту.',
-  mapSeen: 'Исследовано {p}%', sitesFound: 'Найденные места', day: 'День {d}/{n}', you: 'ты',
-  ending: 'Концовка пройдена',
+  mapSeen: 'Исследовано {p}%', sitesFound: 'Найденные места', you: 'ты',
 });
 type Tab = 'goals' | 'know' | 'notes' | 'map' | 'stuff';
 const TABS: [Tab, () => string][] = [['goals', () => S.tGoals], ['know', () => S.tKnow], ['notes', () => S.tNotes], ['map', () => S.tMap], ['stuff', () => S.tStuff]];
@@ -60,7 +60,7 @@ function ensureStyle() { if (styled || typeof document === 'undefined') return; 
 
 // ---------------------------------------------------------------------------------------------------------------------
 function goalsTab(): string {
-  let h = `<div class="now">${S.now}: ${objective() || (prog.ending ? S.ending : '')}</div><div class="cols"><div class="col"><div class="grp">${S.list}</div>`;
+  let h = `<div class="now">${S.now}: ${objective()}</div><div class="cols"><div class="col"><div class="grp">${S.list}</div>`;
   let seenCurrent = false;
   for (const g of GOALS) {
     const d = g.done();
@@ -162,7 +162,7 @@ export function renderJournalInto(el: HTMLElement) {
   host = el;
   if (!el.classList.contains('jr')) el.classList.add('jr');
   const sy = el.scrollTop;
-  let h = `<h3><span>${S.title}</span><span class="dim">${fmt(S.day, { d: G.day, n: G.endDay })}</span></h3><div class="tabs">`;
+  let h = `<h3><span>${S.title}</span><span class="dim">${seasonLabel()}</span></h3><div class="tabs">`;
   for (const [t, name] of TABS) h += `<button class="tab${t === tab ? ' on' : ''}" data-j="tab" data-t="${t}">${name()}</button>`;
   h += `</div>`;
   h += tab === 'goals' ? goalsTab() : tab === 'know' ? knowTab() : tab === 'notes' ? notesTab() : tab === 'map' ? mapTab() : stuffTab();

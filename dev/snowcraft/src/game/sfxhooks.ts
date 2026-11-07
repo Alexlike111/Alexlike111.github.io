@@ -46,6 +46,10 @@ export function initSfxHooks() {
   on('bear_growl', (d: { x: number }) => call('play', 'growl_bear', { vol: 0.8 * near(d.x, 80, 600) }));
   on('seal_surface', (d: { x: number }) => call('play', 'seal_breath', { vol: 0.6 * near(d.x, 30, 260) }));
   on('seal_dive', (d: { x: number }) => call('play', 'seal_splash', { vol: 0.7 * near(d.x, 30, 260) }));
+  // live hunting (game/hunt.ts): the bite under the ice, a flock lifting off, a bird shot or caught
+  on('fish_bite', () => call('play', 'fish_bite', { vol: 0.8 }));
+  on('bird_flush', (d: { x: number }) => call('play', 'bird_flap', { vol: 0.8 * near(d.x, 30, 300) }));
+  on('bird_caught', (d: { x: number }) => call('play', 'bird_flap', { vol: 0.35 * near(d.x, 30, 200), pitch: 1.3 }));
   on('ice_crack', (d: { vol?: number }) => call('play', 'crack_ice', { vol: d.vol ?? 0.6, pitch: 0.85 + Math.random() * 0.3 }));
   on('ice_break', () => call('play', 'splash', { vol: 1 }));
   on('icebreaker_arrived', () => call('play', 'radio_static', { vol: 0.7 }));

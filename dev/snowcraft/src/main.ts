@@ -28,6 +28,7 @@ import * as questMod from './game/quest';
 import { initDrift, stepDrift, drawDrift } from './game/drift';
 import { stepQuest, takeLoaded } from './game/quest';
 import { initOverlay, updateOverlay } from './game/overlay';
+import * as overlayMod from './game/overlay';
 import { resetRun } from './game/runreset';
 import { seedStarterDrift } from './game/starter';
 import { purgeMethane } from './game/mine';
@@ -50,6 +51,7 @@ import * as shelter from './game/shelter';
 import * as playerMod from './game/player';
 import * as toolsMod from './game/tools';
 import * as weatherMod from './game/weather';
+import * as seasonsMod from './game/seasons';
 import * as invMod from './game/inventory';
 
 import.meta.glob('./**/*.selftest.ts', { eager: true });
@@ -359,7 +361,7 @@ const sc = {
   stats() {
     const p = G.player;
     return {
-      time: G.time, day: G.day, hour: +(((G.time % 1440) / 60).toFixed(2)), sunElev: G.sunElev, daylight: G.daylight, ambientT: G.ambientT, wind: G.wind, storm: G.storm,
+      time: G.time, day: G.day, cycle: G.cycle, hour: +(((G.time % 1440) / 60).toFixed(2)), sunElev: G.sunElev, daylight: G.daylight, ambientT: G.ambientT, wind: G.wind, storm: G.storm,
       x: p.x, y: p.y, hp: p.hp, core: p.core, water: p.water, food: p.food, energy: p.energy, wet: p.wet, co: p.co, frost: { ...p.frost }, airT: p.airT, feelT: p.feelT, alive: p.alive, cause: p.cause,
       sleeping: p.sleeping, shelter: G.shelter ? { ...G.shelter } : null, weight: invMod.weight(), met: body.met, loss: body.loss, net: body.net,
       belt: inv.slots.slice(0, 6).map(s => s && { id: s.id, n: s.n, dur: s.dur }), sel: inv.sel, fixtures: G.fixtures.length, drops: G.drops.length, quality: G.quality,
@@ -379,7 +381,7 @@ const sc = {
   },
   selftest: (filter?: string) => runSelfTest(filter),
   cutRegion, selected,
-  mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
+  mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, seasons: seasonsMod, overlay: overlayMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
   screenToWorld, worldToScreen,
   senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },

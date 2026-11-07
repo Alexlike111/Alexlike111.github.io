@@ -41,6 +41,7 @@ r('fat_lamp', 1, [i('soapstone'), i('fat'), i('lichen')], 'table', 'fire', 'lamp
 r('fat_lamp', 1, [i('tin'), i('canvas'), i('fat')], 'table', 'fire', 'lamp', true, 'fat_lamp_tin');
 r('torch', 2, [[i('log'), i('fat'), i('canvas')], [i('log'), i('diesel'), i('canvas')]], 'none', 'fire', 'torch');
 r('pot', 1, [i('tin', 2)], 'table', 'fire', 'pot');
+r('hand_warmer', 1, [i('tin', 2)], 'table', 'fire', 'pot', true);
 // food & water
 r('cooked_meat', 1, [[i('seal_meat')], [i('ptarmigan')]], 'fire', 'food', 'cooking', false, 'cooked_meat');
 r('fish_cooked', 1, [i('fish')], 'fire', 'food', 'cooking');
@@ -57,6 +58,11 @@ r('fur_mittens', 1, [[i('fox_fur')], [i('sealskin'), i('sinew')]], 'table', 'wea
 r('kamiks', 1, [i('sealskin', 2), i('sinew')], 'table', 'wear', 'sewing', true);
 r('fur_hood', 1, [i('fox_fur', 2), i('sinew')], 'table', 'wear', 'sewing', true);
 r('fur_parka', 1, [[i('sealskin', 3), i('fox_fur', 2), i('sinew', 2)], [i('bear_fur'), i('sinew', 2)]], 'table', 'wear', 'parka', true);
+r('snow_goggles', 1, [i('tin'), i('canvas'), i('sinew')], 'table', 'wear', 'sewing', true);
+r('belt_pouch', 1, [[i('sealskin'), i('sinew')], [i('canvas', 2), i('sinew')]], 'table', 'wear', 'sewing', true);
+r('big_pack', 1, [[i('sealskin', 3), i('canvas', 2), i('sinew', 2)], [i('bear_fur'), i('canvas', 2), i('sinew', 2)]], 'table', 'wear', 'parka', true);
+r('sack', 1, [[i('canvas', 2), i('sinew')], [i('sealskin'), i('sinew')]], 'none', 'wear', 'rope', true);
+r('frost_balm', 1, [i('fat', 2), i('lichen')], 'none', 'food', 'cooking', true);
 // building
 r('drying_rack', 1, [i('log', 2), i('rope')], 'none', 'build', 'drying');
 r('skin_bed', 1, [[i('sealskin', 2), i('lichen', 2)], [i('fox_fur', 2), i('lichen', 2)]], 'none', 'build', 'hides');

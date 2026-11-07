@@ -60,7 +60,7 @@ registerTest('items', 'предметы-фикстуры, одежда и инс
   for (const d of Object.values(ITEMS)) {
     if (d.fixture && !FIXTURE_DEFS[d.fixture]) throw new Error('нет def фикстуры ' + d.fixture + ' для ' + d.id);
     if (d.place && !(d.place in MAT)) throw new Error('place материал ' + d.place);
-    if (d.wear && !['head', 'body', 'hands', 'feet'].includes(d.wear.slot)) throw new Error('слот ' + d.id);
+    if (d.wear && !['head', 'body', 'hands', 'feet', 'face'].includes(d.wear.slot)) throw new Error('слот ' + d.id);
     if (d.kind === 'tool' && !d.tool) throw new Error('tool def ' + d.id);
   }
 });
@@ -641,18 +641,22 @@ registerTest('shelter', 'экзамен пурги: отчёт со звёзда
 
 // =====================================================================================================================
 // weather
-registerTest('weather', 'календарь полярной ночи: солнце −9° → +0.5°, сумерки растут, рассвет на 12 день', async () => {
+registerTest('weather', 'календарь кольца сезонов: ночь −9° (12 дн.) → сумерки до +0.6° (6 дн.) → ночь; солнце не выходит из ночи', async () => {
   await sandbox(() => {
-    if (Math.abs(noonElevAt(12 * 60) + 8.9) > 0.5) throw new Error('день 1: ' + noonElevAt(12 * 60));
-    if (Math.abs(noonElevAt(11 * 1440 + 720) - 0.5) > 0.15) throw new Error('день 12: ' + noonElevAt(11 * 1440 + 720));
+    if (Math.abs(noonElevAt(12 * 60) + 8) > 1) throw new Error('день 1: ' + noonElevAt(12 * 60));
+    // twilight «day» of the ring: the noon sun rises just above the horizon (DESIGN §18), the night days never reach it
+    let peak = -99; for (let d = 13; d <= 18; d++) peak = Math.max(peak, noonElevAt((d - 1) * 1440 + 720));
+    if (!(peak > 0.3 && peak < 1.2)) throw new Error('сумерки: полдень ' + peak);
+    for (let d = 1; d <= 12; d++) if (!(noonElevAt((d - 1) * 1440 + 720) < -6)) throw new Error('ночь, день ' + d + ': ' + noonElevAt((d - 1) * 1440 + 720));
     let prev = -1;
-    for (let d = 1; d <= 12; d++) { setDay(d, 12); if (!(G.daylight >= prev - 1e-6) || Math.abs(G.noonElev - noonElevAt((d - 1) * 1440 + 720)) > 1e-6) throw new Error('день ' + d); prev = G.daylight; }
-    setDay(1, 12); if (!(G.daylight > 0.05 && G.daylight < 0.4)) throw new Error('день 1: тусклый синий полдень: ' + G.daylight);
+    for (let d = 1; d <= 18; d++) { setDay(d, 12); if ((d >= 11 && d <= 15 && !(G.daylight >= prev - 1e-6)) || Math.abs(G.noonElev - noonElevAt((d - 1) * 1440 + 720)) > 1e-6) throw new Error('день ' + d); prev = G.daylight; }
+    setDay(1, 12); if (!(G.daylight > 0.05 && G.daylight < 0.45)) throw new Error('день 1: тусклый синий полдень: ' + G.daylight);
     setDay(1, 0); if (G.daylight > 0.001) throw new Error('полночь = ночь');
-    setDay(12, 12); if (!(G.daylight > 0.9)) throw new Error('день 12 светло');
-    let ending = 0; const off = on('ending', (d: any) => { if (d.kind === 'dawn') ending++; });
+    setDay(15, 12); if (!(G.daylight > 0.9)) throw new Error('день 15 (сумерки) светло');
+    setDay(19, 12); if (!(G.daylight < 0.4)) throw new Error('день 19: снова ночь: ' + G.daylight);
+    let ending = 0; const off = on('ending', () => { ending++; });
     setDay(12, 9); for (let i = 0; i < 60 * 20; i++) stepWeather(0.1); off();
-    if (ending !== 1) throw new Error('ending dawn ×' + ending);
+    if (ending !== 0) throw new Error('концовок быть не должно: ' + ending);
     setDay(1, 22); let days = 0; const o2 = on('day', () => days++); for (let i = 0; i < 400; i++) stepWeather(0.5); o2();
     if (days < 1) throw new Error('событие day');
     // moon phases move, full around day 5-7
@@ -666,7 +670,7 @@ registerTest('weather', 'часы: 1 с = 2.4 мин, сон ×20; темпер�
     if (Math.abs(G.time - t0 - 2.4) > 0.01) throw new Error('1 с ≠ 2.4 мин: ' + (G.time - t0));
     G.timeScale = 20; const t1 = G.time; stepWeather(1); G.timeScale = 1; if (Math.abs(G.time - t1 - 48) > 0.1) throw new Error('×20');
     let mn = 0, mx = -99, wmax = 0, smax = 0;
-    for (let d = 1; d <= 12; d++) for (let h = 0; h < 24; h += 1.5) { setDay(d, h); mn = Math.min(mn, G.ambientT); mx = Math.max(mx, G.ambientT); wmax = Math.max(wmax, Math.abs(G.wind)); smax = Math.max(smax, G.storm); }
+    for (let d = 1; d <= 18; d++) for (let h = 0; h < 24; h += 1.5) { setDay(d, h); mn = Math.min(mn, G.ambientT); mx = Math.max(mx, G.ambientT); wmax = Math.max(wmax, Math.abs(G.wind)); smax = Math.max(smax, G.storm); }
     if (!(mn > -46 && mn < -34 && mx < -14 && mx > -30)) throw new Error('температура ' + mn + '..' + mx);
     if (!(smax > 0.9 && wmax > 15 && wmax < 40)) throw new Error('шторма: storm ' + smax + ' ветер ' + wmax);
     if (STORMS.length < 4 || !(STORMS[0].start > 1440 && STORMS[3].dur >= 30 * 60)) throw new Error('расписание');

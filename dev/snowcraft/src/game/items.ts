@@ -4,7 +4,7 @@ import { registerSource, tr } from '../content/i18n';
 import type { FixtureKind } from './state';
 
 export type ItemKind = 'material' | 'food' | 'tool' | 'wear' | 'fixture' | 'block' | 'misc' | 'note';
-export type WearSlot = 'head' | 'body' | 'hands' | 'feet';
+export type WearSlot = 'head' | 'body' | 'hands' | 'feet' | 'face';
 
 export interface FoodDef {
   food: number;            // satiety points (0..100 scale)
@@ -40,14 +40,12 @@ export interface ItemDef {
   place?: string;          // placing writes this material key (1×1 tile), e.g. 'LOG'
   fuel?: { campfire?: number; stove?: number; lamp?: number; brazier?: number }; // minutes of burn per unit
   tinder?: boolean;        // fire starting aid
+  dur0?: number;           // initial Slot.dur of a new stack (thermos heat, balm charges, sack contents...)
+  quick?: boolean;         // usable item (useitems.ts): goes to the belt first
   desc?: string;
 }
 
-const I: Record<string, ItemDef> = {};
-function def(id: string, name: string, kind: ItemKind, w: number, stack: number, o: Partial<ItemDef> = {}) {
-  I[id] = { id, name, kind, w, stack, icon: id, ...o };
-  registerSource('item.' + id, name);
-}
+import { I, def } from './itemreg';
 const food = (f: FoodDef) => ({ food: f });
 
 // ---- materials ----
@@ -138,6 +136,10 @@ def('sled', 'Нарты', 'misc', 6, 1, { desc: 'Тащи за собой: +30 �
 fx('mast', 'Мачта антенны', 6, 'mast');
 def('backpack', 'Рюкзак', 'misc', 1, 1, { desc: 'Всё, что было с тобой.' });
 
+// usable items (DESIGN §17): group 1 (warmth/health, storage) lives in items_a.ts; group 2 in items_b.ts
+import './items_a';
+import './items_b';
+
 registerSource('item.unknown', 'Предмет');
 
 export const ITEMS: Record<string, ItemDef> = I;
@@ -149,6 +151,12 @@ export function getItem(id: string): ItemDef {
   const isNote = /^note/.test(id);
   u = unknownCache[id] = { id, name: isNote ? 'Записка' : 'Предмет', kind: isNote ? 'note' : 'misc', w: 0.2, stack: isNote ? 1 : 10, icon: isNote ? 'note' : id };
   return u;
+}
+/** Sprite key of a concrete stack (a frozen flask looks different from a liquid one). */
+export function stackIcon(id: string, dur?: number): string {
+  const d = getItem(id);
+  if (id === 'flask' && (dur ?? 0) >= 50) return 'flask_frozen';
+  return d.icon;
 }
 export function itemName(id: string): string { const d = getItem(id); return tr('item.' + id, d.name); }
 export const isTool = (id: string) => getItem(id).kind === 'tool';

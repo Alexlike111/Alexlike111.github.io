@@ -382,7 +382,7 @@ function stampMine(T: Terrain) {
   frozenRoof(h0, h1, FB - 34);
   timberSet((h0 + h1) >> 1, FB, FB - 34);
   addFixture('bed', 25, FB / 4 - 1, 4, 1);          // west of both props
-  chest('minehut', 36, FB / 4 - 2, [slot('radio_coil', 1), slot('soapstone', 3), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
+  chest('minehut', 36, FB / 4 - 2, [slot('radio_coil', 1), slot('soapstone', 3), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('bandage', 1), slot('belt_pouch', 1), slot('note_n3', 1)], 2, 2, { look: 'miner' });
   addFixture('table', 38, FB / 4 - 2, 3, 2);
   worldInfo.radioParts.coil = { x: 36 * 4 + 4, y: FB - 4, site: 'minehut' };
   floorNote('n4', 'minehut', 156, FB);
@@ -537,7 +537,7 @@ function stampStation(T: Terrain) {
   addFixture('door', R, F - 6, 1, 6, { open: false, data: { side: 'east' } });
   // furniture
   addFixture('bed', L + 3, F - 1, 4, 1);
-  chest('station', L + 7, F - 2, [slot('can', 2), slot('biscuit', 4), slot('tea', 1), slot('matches', 8), slot('lantern', 1), slot('flare_gun', 1), slot('flare', 3), slot('rope', 1), slot('note_s1', 1)], 2, 2, { look: 'shelf' });
+  chest('station', L + 7, F - 2, [slot('can', 2), slot('biscuit', 4), slot('tea', 1), slot('matches', 8), slot('lantern', 1), slot('flare_gun', 1), slot('flare', 3), slot('rope', 1), slot('thermos', 1), slot('bandage', 2), slot('note_s1', 1)], 2, 2, { look: 'shelf' });
   floorNote('s2', 'station', (L + 9) * 4 + 4, F * 4);
   addFixture('table', L + 9, F - 2, 3, 2);
   addFixture('radio', L + 12, F - 2, 2, 2, { data: { fixed: false, parts: 0 } });
@@ -582,7 +582,7 @@ function stampMastAndShed(T: Terrain) {
   addFixture('door', L, F - 6, 1, 6, { open: false, data: { side: 'west' } });
   addFixture('drum', L + 3, F - 2, 2, 2, { data: { fuel: 'diesel', n: 6 } });
   addFixture('drum', L + 5, F - 2, 2, 2, { data: { fuel: 'diesel', n: 8 } });
-  chest('shed', L + 8, F - 2, [slot('coal', 14), slot('axe', 1), slot('scrap', 6), slot('tin', 2), slot('rope', 1), slot('diesel', 1)], 2, 2, { look: 'bench' });
+  chest('shed', L + 8, F - 2, [slot('coal', 14), slot('axe', 1), slot('scrap', 6), slot('tin', 2), slot('rope', 1), slot('diesel', 1), slot('hand_warmer', 1), slot('spirit', 1), slot('sack', 1)], 2, 2, { look: 'bench' });
   chest('shed', R - 3, F - 2, [slot('battery', 1)], 2, 2, { buried: true });
   worldInfo.radioParts.battery = { x: (R - 3) * 4 + 4, y: (F - 1) * 4, site: 'shed' };
   // the drift: packed in the east half, loose crown, a tongue reaching outside
@@ -718,7 +718,7 @@ function stampIceberg(T: Terrain) {
     if (y > floorY - 40 && y < floorY - 8 && rand() < 0.2) { const len = randInt(3, 10); for (let k = 1; k <= len && mat[(y + k) * W + x] === AIR; k++) put(x, y + k, M.ICE); }
     if (rand() < 0.05 && u < 4) { const hh = randInt(4, 10); for (let k = 1; k <= hh; k++) if (mat[(floorY - k) * W + x] === AIR) put(x, floorY - k, M.ICE); }
   }
-  chest('icecave', Math.floor((cx - 8) / 4), floorY / 4 - 2, [slot('fat', 3), slot('sinew', 2), slot('tin', 2), slot('rope', 2), slot('matches', 3), slot('note_n9', 1)], 2, 2, { look: 'old' });
+  chest('icecave', Math.floor((cx - 8) / 4), floorY / 4 - 2, [slot('fat', 3), slot('sinew', 2), slot('tin', 2), slot('rope', 2), slot('matches', 3), slot('frost_balm', 1), slot('note_n9', 1)], 2, 2, { look: 'old' });
   floorNote('n10', 'icecave', cx - 2, floorY);
   worldInfo.spots.iceberg = { x: cx, y: base - 40 };
   worldInfo.spots.icecave = { x: cx - 3, y: floorY - 8 };
@@ -803,9 +803,9 @@ function stampShip(T: Terrain) {
   LB(chimU, chimU + 2, -4, 4, M.METAL);
   st.f!.data = { smokeX: wx(chimU), smokeY: wy(chimU, -8) };
   fixOnFloor('bed', -34, FLOOR, 4, 1);
-  chestOn('ship', -6, FLOOR, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
+  chestOn('ship', -6, FLOOR, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('snow_goggles', 1), slot('spirit', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
   worldInfo.spots.shipCabin = { x: wx(-26), y: wy(-26, FLOOR) - 4 };
-  const hold = chestOn('ship', 4, FLOOR, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1), slot('canvas', 3), slot('biscuit', 3), slot('fat', 2), slot('note_n11', 1)], { look: 'tool' });
+  const hold = chestOn('ship', 4, FLOOR, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1), slot('canvas', 3), slot('biscuit', 3), slot('fat', 2), slot('big_pack', 1), slot('note_n11', 1)], { look: 'tool' });
   worldInfo.radioParts.triode = { x: hold.x, y: hold.y, site: 'ship' };
   floorNote('n14', 'ship', wx(-76), wy(-76, 0) - 2);
   // ice collar: the pack ice is heaved against both ends of the hull (pressure ridges with a snow crest), so the wreck is frozen in, not floating on it

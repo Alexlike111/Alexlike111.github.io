@@ -3,8 +3,9 @@
 // G.wind; decays), plus sight and sound. Stages: wander -> curious -> stalk -> charge (or siege of a snow shelter -> flee).
 // Animals live in G.animals (state = an art state of art/animals.ts, or 'hidden' for a diving seal); the AI sub-state is in `ai`.
 // Emits: 'dog_bark' {x,y,dir}, 'bear_roar' / 'bear_growl' {x,y}, 'bear_seen', 'bear_killed', 'seal_surface' / 'seal_dive' {x,y}, 'seal_caught',
-// 'animal_hit', 'fox_steal' {item}, 'dog_fed', 'dog_died', 'scent_hint' {dir}.
-import { G, newId, toast, type Animal } from './state';
+// 'animal_hit', 'fox_steal' {item}, 'dog_fed', 'dog_died', 'scent_hint' {dir}, 'dog_fetch' {x,y}, 'dog_point' {x,y}.
+// Live hunting (fish under the ice, ptarmigan flocks, tracks in the snow) lives in hunt.ts; stepFauna and initFauna drive it.
+import { G, newId, toast, type Animal, type Player } from './state';
 import { emit, on } from './bus';
 import { strings, fmt } from '../content/i18n';
 import { W, H, TS, mat, flags, setCell, edited, wake, F_PLACED } from '../engine/grid';
@@ -19,8 +20,10 @@ import { held } from './inventory';
 import { MIN_PER_SEC } from './weather';
 import { burstFx } from '../engine/particles';
 import { addShake } from '../engine/camera';
+import { stepHunt, initHunt, trackStep, dragMarks, pointHole, huntDropNear, takeHuntDrop } from './hunt';
 
 const S = strings('fauna', {
+  dogBird: 'Север принёс куропатку',
   dogBark: 'Север лает: что-то на {dir}',
   dirEast: 'востоке', dirWest: 'западе',
   dogWake: 'Север лает и рвётся с места!',
@@ -40,9 +43,12 @@ const S = strings('fauna', {
   sealScared: 'Тюлень ушёл под лёд',
 });
 
-type AI = { mode: string; t: number; tx: number; cd: number; hold: number; carry?: string; home?: number; hole?: number; stay?: boolean; hunger?: number; barkT?: number; seen?: boolean; hits?: number; futile?: number; sniffed?: boolean; stuck?: number; pause?: boolean };
+type AI = { mode: string; t: number; tx: number; cd: number; hold: number; carry?: string; home?: number; hole?: number; stay?: boolean; hunger?: number; barkT?: number; seen?: boolean; hits?: number; futile?: number; sniffed?: boolean; stuck?: number; pause?: boolean; fetch?: { id: number; ph: 'go' | 'back'; t: number }; pointed?: boolean; hintT?: number };
 const ai = new Map<number, AI>();
 const SZ: Record<string, [number, number]> = { dog: [10, 9], bear: [26, 15], seal: [16, 8], fox: [10, 7] };
+// the ring ramp (seasons.ts, DESIGN §18): the bear gets faster and bolder every ring. Read through a glob so the build does not need the file.
+const seasonMods = import.meta.glob('./seasons.ts', { eager: true }) as Record<string, { ramp?: { bear?: number } }>;
+const bearRamp = () => Math.max(0.5, Math.min(1.5, Object.values(seasonMods)[0]?.ramp?.bear ?? 1));
 
 export const fauna = { dog: null as Animal | null, bear: null as Animal | null, sealCd: new Map<number, number>(), bearActiveDay: 2, bearSmell: 0, bearMode: '', sealsCaught: 0 };
 
@@ -62,7 +68,8 @@ function mk(kind: Animal['kind'], x: number, y: number, hp: number): Animal {
 function setState(a: Animal, st: string) { if (a.state !== st) { a.state = st; a.t = 0; } }
 function walkTo(a: Animal, tx: number, speed: number, dt: number, opts: { swim?: boolean; jump?: number } = {}) {
   const dx = tx - a.x, dir = dx > 0 ? 1 : -1;
-  const want = Math.abs(dx) < 2 ? 0 : dir * speed;
+  const sp = a.kind === 'bear' ? speed * bearRamp() : speed;
+  const want = Math.abs(dx) < 2 ? 0 : dir * sp;
   a.vx += Math.max(-300 * dt, Math.min(300 * dt, want - a.vx));
   if (want !== 0) a.face = dir as 1 | -1;
   a.vy = Math.min(280, a.vy + 360 * dt);
@@ -158,6 +165,24 @@ function dogSpotNear(d: Animal, p: { x: number; y: number }): { x: number; y: nu
 }
 export const dogHunger = () => (fauna.dog ? ai.get(fauna.dog.id)?.hunger ?? 100 : 0);
 
+/** He runs to the bird, carries it back and drops it by your feet (the magnet picks it up). Gives up after 40 s. */
+function stepFetch(d: Animal, a: AI, dt: number, p: Player) {
+  const f = a.fetch!; f.t += dt;
+  if (f.t > 40) { a.fetch = undefined; a.carry = undefined; return; }
+  if (f.ph === 'go') {
+    const dr = G.drops.find(x => x.id === f.id);
+    if (!dr) { a.fetch = undefined; return; }                   // you took it first
+    walkTo(d, dr.x, 40, dt); setState(d, 'run');
+    if (Math.abs(d.x - dr.x) < 3 && Math.abs(d.y - dr.y) < 8) { takeHuntDrop(dr.id); a.carry = 'ptarmigan'; f.ph = 'back'; f.t = 0; }
+    return;
+  }
+  walkTo(d, p.x - (p.x >= d.x ? 6 : -6), 36, dt); setState(d, 'walk');
+  if (Math.abs(d.x - p.x) < 8) {
+    spawnDrop('ptarmigan', 1, d.x, d.y - 6, 0, -22, undefined, true);
+    a.carry = undefined; a.fetch = undefined; a.hold = 1.5; setState(d, 'sit');
+    toast(S.dogBird, 'good');
+  }
+}
 function stepDog(d: Animal, a: AI, dt: number) {
   const p = player();
   if (d.state === 'dead') return;
@@ -187,6 +212,9 @@ function stepDog(d: Animal, a: AI, dt: number) {
     }
   }
   if (!p || !p.alive) { setState(d, 'sit'); walkTo(d, d.x, 0, dt); return; }
+  // a bird that fell to a harpoon or a snare (hunt.ts): he fetches it, unless told to stay
+  if (a.fetch) { stepFetch(d, a, dt, p); return; }
+  if (!a.stay && !p.sleeping) { const dr = huntDropNear(d.x, d.y, 90); if (dr) { a.fetch = { id: dr.id, ph: 'go', t: 0 }; emit('dog_fetch', { x: dr.x, y: dr.y }); return; } }
   const dx = p.x - d.x, ad = Math.abs(dx);
   if (a.stay) { setState(d, ad < 20 ? 'sit' : 'sit'); walkTo(d, d.x, 0, dt); return; }
   // far behind: catch up (a husky finds you)
@@ -207,6 +235,12 @@ function stepDog(d: Animal, a: AI, dt: number) {
   } else {
     walkTo(d, d.x, 0, dt);
     a.t += dt;
+    // idle for a while beside you, with a fish hole nearby: he stands and points at it (once per stop)
+    if (!resting) a.pointed = false;
+    else if (a.t > 4 && !a.pointed && !p.sleeping) {
+      const h = pointHole(d.x, d.y, 100);
+      if (h) { a.pointed = true; d.face = h.x >= d.x ? 1 : -1; setState(d, 'sniff'); a.hold = 2.5; emit('dog_point', { x: h.x, y: h.y }); return; }
+    }
     if (p.sleeping) setState(d, 'sleep');
     else if (resting && a.t > 5 && p.airT < -8) setState(d, 'sleep');
     else if (resting && a.t > 1.6) setState(d, 'sit');
@@ -256,6 +290,7 @@ function killSeal(s: Animal, a: AI) {
   spawnDrop('fat', 4, s.x, s.y - 6, (Math.random() - 0.5) * 18, -30);
   spawnDrop('sealskin', 2, s.x, s.y - 6, (Math.random() - 0.5) * 18, -28);
   burstFx('blood', s.x, s.y - 4, 8, 22, 0.6);
+  dragMarks(s.x, s.y, G.player && G.player.x < s.x ? -1 : 1);       // hauled out of the hole: a drag trough in the snow
   fauna.sealsCaught++;
   toast(S.sealCaught, 'good'); emit('seal_caught', { x: s.x, y: s.y });
 }
@@ -268,6 +303,7 @@ on('dig', (d: { x: number; y: number }) => {      // digging near a hole spooks 
 function stepFox(f: Animal, a: AI, dt: number) {
   const p = player();
   if (f.state === 'dead') return;
+  if (Math.abs(f.vx) > 3) trackStep(f.id, 'fox', f.x, f.y, f.vx > 0 ? 1 : -1, 4);     // prints in the snow (hunt.ts)
   if (f.hp <= 0) { f.state = 'dead'; f.vx = 0; if (a.carry) spawnDrop(a.carry, 1, f.x, f.y - 4, 0, -20); spawnDrop('fox_fur', 1, f.x, f.y - 4, 0, -20); return; }
   a.t += dt; a.hold = Math.max(0, a.hold - dt);
   const pd = p && p.alive ? dist(f, { x: p.x, y: p.y }) : 999;
@@ -337,8 +373,11 @@ function stepBear(b: Animal, a: AI, dt: number) {
     toast(S.bearDead, 'good'); emit('bear_killed', {}); return;
   }
   a.t += dt; a.cd = Math.max(0, a.cd - dt);
+  // its prints: the scent made visible. A print close to the player gives the hint (throttled)
+  if (Math.abs(b.vx) > 3 && trackStep(b.id, 'bear', b.x, b.y, b.vx > 0 ? 1 : -1, 7) && p && p.alive && Math.abs(p.x - b.x) < 260 && !(a.hintT && a.hintT > 0)) { a.hintT = 25; emit('scent_hint', { dir: Math.sign(b.x - p.x) || 1 }); }
+  a.hintT = Math.max(0, (a.hintT ?? 0) - dt);
   const active = G.day >= fauna.bearActiveDay;
-  const aggr = G.diff.wolves;                             // difficulty: bear aggression
+  const aggr = G.diff.wolves * bearRamp();                // difficulty x ring ramp: bear aggression
   const alive = !!p && p.alive;
   const pd = alive ? Math.abs(p.x - b.x) : 9999, pdy = alive ? p.y - b.y : 0;
   const smell = scentAt(b.x) * aggr;
@@ -451,10 +490,12 @@ export function initFauna(spawnX: number, spawnY: number, loaded = false) {
   }
   const b = mk('bear', bx, by, 160); fauna.bear = b;
   ai.set(b.id, { mode: 'wander', t: 0, tx: bx, cd: 20, hold: 0 }); fauna.bearMode = 'wander';
+  initHunt();                                           // fish holes, ptarmigan sites, tracks: a fresh set for this world (or the loaded one)
 }
 export function stepFauna(dt: number) {
   if (G.paused || !G.player) return;
   stepScent(dt);
+  stepHunt(dt);                         // fish under the ice, ptarmigan flocks, tracks (hunt.ts)
   const arr = G.animals;
   for (let i = 0; i < arr.length; i++) {
     const e = arr[i], a = ai.get(e.id); if (!a) continue;

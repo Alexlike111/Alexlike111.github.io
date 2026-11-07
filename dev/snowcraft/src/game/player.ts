@@ -11,11 +11,13 @@ import { tempAt, windAt, shelterAt, addHeat } from '../engine/heat';
 import { spawnFx, burstFx } from '../engine/particles';
 import { addShake } from '../engine/camera';
 import { MAT, FRIC } from '../content/materials';
-import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, WEIGHT_RUN, overload, removeFromSlot, takeAll, giveStartKit, spawnDrop, backpacks, add, remove, count, held, clearInventory, find, select } from './inventory';
+import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, WEIGHT_RUN, runLimit, overload, removeFromSlot, takeAll, giveStartKit, spawnDrop, backpacks, add, remove, count, held, clearInventory, find, select } from './inventory';
 import { getItem, itemName, type WearSlot } from './items';
 import { radiantWarmth, dryBoost, nearStation } from './fixtures';
 import { H, W } from '../engine/grid';
 import { dogWarmth } from './fauna';
+import { resetUseState } from './useitems';
+import { mods } from './usemods';
 
 const S = strings('player', {
   frostnip: 'Белеет {part}: обморожение близко',
@@ -40,6 +42,7 @@ const S = strings('player', {
   rolled: 'Снег впитал воду с одежды',
   ate: 'Съел: {name}', drank: 'Выпил: {name}',
   nothing: 'Нечего есть и пить',
+  flaskFrozen: 'Вода во фляге замёрзла: спрячь её под парку (в сумку) или поставь к огню',
   respawn: 'Ты очнулся на станции…',
   causeCold: 'замёрз', causeFrost: 'обморожение и истощение', causeDrown: 'утонул в полынье', causeBear: 'медведь',
   causeCo: 'угарный газ', causeCollapse: 'обвал в шахте', causeFall: 'упал', causeHunger: 'голод', causeThirst: 'жажда', causeOther: 'погиб',
@@ -72,7 +75,7 @@ export const body = {
   rolling: 0, deadT: 0, lastStep: 0, hpPrev: 100,
   respawnX: 0, respawnY: 0,
   warned: { hands: false, feet: false, face: false, co: false, hungry: false, thirsty: false, tired: false, shiver: false, wet: false, sweat: false, confused: false },
-  stats: { daysSurvived: 0, deaths: 0 },
+  stats: { daysSurvived: 0, deaths: 0, use: { hints: [] as string[], d: {} as Record<string, number> } },      // `use`: usable-item state (useitems.ts), saved with the body
 };
 
 export function applyDifficulty(level: 0 | 1 | 2, hardcore = false) {
@@ -91,6 +94,7 @@ export function initPlayer(x: number, y: number): Player {
   body.respawnX = x; body.respawnY = y; body.deadT = 0; body.hpPrev = 100;
   for (const k in body.warned) (body.warned as Record<string, boolean>)[k] = false;
   G.timeScale = 1;
+  resetUseState();
   return p;
 }
 export function setRespawn(x: number, y: number) { body.respawnX = x; body.respawnY = y; }
@@ -107,13 +111,13 @@ export function windChill(T: number, windMs: number): number {
 }
 function wearIns(): { insul: number; hands: number; feet: number; face: number } {
   let insul = 0.35, hands = 0, feet = 0, face = 0.05;
-  for (const slot of ['head', 'body', 'hands', 'feet'] as WearSlot[]) {
+  for (const slot of ['head', 'body', 'hands', 'feet', 'face'] as WearSlot[]) {
     const id = inv.wear[slot]; if (!id) continue;
     const w = getItem(id).wear; if (!w) continue;
     let ins = w.insul;
     if (slot === 'body' && G.player.parkaOpen) ins *= 0.5;
     insul += ins;
-    if (slot === 'hands') hands = w.prot; else if (slot === 'feet') feet = w.prot; else if (slot === 'head') face = Math.max(face, w.prot);
+    if (slot === 'hands') hands = w.prot; else if (slot === 'feet') feet = w.prot; else if (slot === 'head') face = Math.max(face, w.prot); else if (slot === 'face') face = 1 - (1 - face) * (1 - w.prot);
   }
   return { insul, hands, feet, face };
 }
@@ -199,6 +203,7 @@ export function eatSlot(i: number): boolean {
 }
 function drinkFlask(i: number): boolean {
   const p = G.player, s = inv.slots[i]!;
+  if ((s.dur ?? 0) >= 50) { toast(S.flaskFrozen, 'warn'); return false; }
   if ((s.dur ?? 0) <= 0 || p.water > 94) return false;
   s.dur = (s.dur ?? 0) - 1; p.water = Math.min(100, p.water + 26);
   emit('drank', { item: 'flask' }); toast(fmt(S.drank, { name: itemName('water') }), 'good'); return true;
@@ -215,7 +220,7 @@ export function eatBest(): boolean {
     const f = getItem(s.id).food; if (!f && s.id !== 'flask') continue;
     if (s.id === 'snow') continue;
     let sc = 0;
-    if (s.id === 'flask') sc = (s.dur ?? 0) > 0 ? thirst * 1.0 : -1;
+    if (s.id === 'flask') sc = (s.dur ?? 0) > 0 && (s.dur ?? 0) < 50 ? thirst * 1.0 : -1;
     else if (f) sc = (f.food ?? 0) * (hunger / 60) + (f.water ?? 0) * (thirst / 40) - (f.raw ? 6 : 0);
     cands.push({ i, score: sc });
   }
@@ -299,7 +304,7 @@ function stepMove(dt: number) {
   if (body.sink > 1) mult *= 0.88;
   const fric = FRIC[body.feetMat] || 1;
   const ix = Math.abs(input.moveX) < 0.12 ? 0 : input.moveX;
-  const run = input.run && !swim && p.energy > 5 && p.carry <= WEIGHT_RUN;       // above 140 % of the load nobody runs
+  const run = input.run && !swim && p.energy > 5 && p.carry <= runLimit();       // above 140 % of the load nobody runs
   let target = ix * (run ? TUNE.run : TUNE.walk) * mult;
   if (swim) target = ix * TUNE.swimV;
   if (p.core < 32 && Math.random() < 0.02) target *= -0.5;   // stumbles
@@ -417,7 +422,7 @@ export function stepBody(bdt: number) {
   p.core += dCore;
   if (body.shockT > 0) { body.shockT -= bdt; if (swimming) p.core -= 0.06 * bdt; }
   // sweat
-  if (!swimming && p.core > 37.3 && net > 1.2) p.wet = Math.min(1, p.wet + Math.min(5, net - 1.2) * 0.0045 * bdt * 1.0);
+  if (!swimming && p.core > 37.3 && net > 1.2) p.wet = Math.min(1, p.wet + Math.min(5, net - 1.2) * 0.0045 * bdt * mods.sweat);
   if (net > 1.2 && p.core > 37.3 && !body.warned.sweat && !p.parkaOpen && p.wet > 0.15) { body.warned.sweat = true; toast(S.sweat, 'info'); }
   if (p.core < 37.2) body.warned.sweat = false;
   // wetness: water soaks, warm air dries (fire/stove/rack faster), cold only slowly
@@ -443,8 +448,9 @@ export function stepBody(bdt: number) {
   const parts: [keyof Player['frost'], number, number][] = [['hands', 2.6, bare ? 0 : wr.hands], ['feet', 1.8, wr.feet], ['face', 1.0, wr.face]];
   for (const [k, base, prot] of parts) {
     let fr = p.frost[k];
-    if (eRaw * (1 - prot) > 0.04) fr += base * eRaw * (1 - prot) * (k === 'face' ? 1 : act) * wetF * vaso * diff.cold * bdt;
+    if (eRaw * (1 - prot) > 0.04) fr += base * eRaw * (1 - prot) * (k === 'face' ? 1 : act) * wetF * vaso * diff.cold * bdt * (k === 'hands' ? mods.frostHands : k === 'face' ? mods.frostFace : mods.frostFeet);
     else if (calm || eRaw * (1 - prot) <= 0.04) fr -= (0.7 + radiantWarmth(cx, cy) * 0.09) * bdt;
+    if (k === 'hands' && mods.warmHands > 0) fr -= mods.warmHands * bdt;
     const floor = body.scar[k];
     fr = Math.max(floor, Math.min(100, fr));
     if (fr >= 40 && p.frost[k] < 40) toast(fmt(S.frostnip, { part: partName(k) }), 'warn');

@@ -137,7 +137,7 @@ registerTest('quest', 'малые победы: при выполнении це
   fresh(t);
 });
 
-registerTest('quest', 'сигнал «ледокол» и рассвет: строки и цели после пурги', async (t) => {
+registerTest('quest', 'цели после пурги: пурга ★★, большая пурга ★★★, три тюленя', async (t) => {
   fresh(t); await t.frames(5);
   const s0 = { ...runStats };
   t.expect(!goal('storm').done() && /пург/.test(goal('storm').text()), 'цель пурги не открыта');

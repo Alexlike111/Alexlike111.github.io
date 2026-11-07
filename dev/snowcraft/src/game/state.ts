@@ -66,7 +66,7 @@ export const G = {
   // weather (owner: game/weather)
   ambientT: -18, wind: 2, storm: 0, snowfall: 0.2 /* 0..1 intensity */, visibility: 1, daylight: 1, moon: 0.5, aurora: 0,
   // polar night (owner: game/weather) — sun elevation at the current moment in degrees (negative = below horizon)
-  sunElev: -12, noonElev: -9, endDay: 12, moonPhase: 0 /* 0 new .. 0.5 full .. 1 */, forecast: { stormAt: -1, text: '' },
+  sunElev: -12, noonElev: -9, cycle: 0 /* completed seasons rings (DESIGN §18), derived from day */, endDay: 0 /* legacy (old saves), unused: the game is endless */, moonPhase: 0 /* 0 new .. 0.5 full .. 1 */, forecast: { stormAt: -1, text: '' },
   shelter: null as null | { closed: boolean; tiles: number; temp: number; windIn: number; vent: boolean; co: number; stars: number; notes: string[] }, // owner: game/shelter
   // camera (owner: engine/camera) — centre in cells, scale = screen px per cell (device px)
   cam: { x: 1024, y: 300, scale: 3, shake: 0, viewW: 400, viewH: 200 },

@@ -1,16 +1,20 @@
-// Objectives & endings (DESIGN §9). One line, always visible: the first unfinished goal of the chain. Day-1 chain: coal (diesel shed) ->
-// stove -> barometer -> read the keeper's log in the house -> shelter (>= 2 stars, built outside the station) -> read the doctor's diary at the
-// cairn -> supplies (soft: shown once the rest is done); then the open goals: seal fat (harpoon), driftwood, the ship, the radio (3 parts inserted),
-// the mast (needs the knowledge), fur clothes; then storms, a parka, three seals. Endings: «Рассвет» (day 12 sunrise, emitted by weather.ts) and
-// «Ледокол» (radio repaired -> 2 game days later its searchlight appears; light the signal fire on the cape hill, or shoot a flare near it, while
-// it is in sight -> rescued). Small wins: a toast + bus event 'goal_done' per goal, 'win' for first-time milestones. Also: site discovery
-// ('site_found'), run statistics for the ending card, and objectiveTarget() (world cell of the current goal) for the HUD arrow.
+// Objectives (DESIGN §9 + §18 ENDLESS). One line, always visible. Day-1 onboarding chain: coal (diesel shed) -> door -> stove -> barometer -> read
+// the keeper's log -> shelter (>= 2 stars, built outside the station) -> read the doctor's diary at the cairn. After it the line is a rotating
+// «next sensible thing» computed from the game state (fuel for the next storm, food stock, shelter grade, undiscovered sites / notes, something
+// not yet crafted, the old open goals: seal, driftwood, ship, radio ...). Nothing ever ends the game except death. Radio -> the icebreaker (optional):
+// radio repaired -> 2 game days later it arrives; the signal fire / a flare calls it in, it passes, drops a supply crate near the cape and leaves
+// (once per ring). Milestone toasts (5/10/20/30/50 days, first ring, first twilight), 'goal_done' per goal, 'win' for first-time wins, site
+// discovery ('site_found'), run statistics for the death card, objectiveTarget() (world cell of the current goal) for the HUD arrow.
 import { G, toast } from './state';
 import { emit, on } from './bus';
 import { strings, fmt } from '../content/i18n';
-import { count } from './inventory';
-import { fuelMinutes } from './items';
+import { count, spawnDrop } from './inventory';
+import { fuelMinutes, itemName as itemNameFn } from './items';
+import { nextStorm as nextStormFn } from './weather';
 import { siteAt, LOC, worldInfo, sites } from './locations';
+import { RECIPES } from './recipes';
+import { NOTES } from './lore';
+import { phaseName, rampAt } from './seasons';
 import { driftSnapshot } from './drift';
 import { body } from './player';
 import { TS, W, mat } from '../engine/grid';
@@ -31,7 +35,7 @@ const S = strings('quest', {
   keeper: 'Прочти журнал смотрителя: сундук-полка в доме',
   shelter: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — снежное поле к западу, у холма)',
   diary: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
-  supplies: 'Запасы на 12 дней: топливо {fuel} ч · еда {food} дн.',
+  supplies: 'Запасы: топливо {fuel} ч · еда {food} дн. (цель: 72 ч и 8 дн.)',
   seal: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
   sealLearn: 'Узнай, как вязать гарпун: журнал смотрителя в доме',
   wood: 'Собери плавник на пляже: брёвна {n}/{m}',
@@ -48,8 +52,21 @@ const S = strings('quest', {
   missed: 'Ледокол прошёл мимо: огня не было. Он вернётся.',
   low: 'Запасы на исходе: топливо {fuel} ч · еда {food} дн.',
   gauge: '  ·  топливо {fuel} ч · еда {food} дн.',
-  free: 'Дотяни до рассвета: день {d} из {n}',
-  dawnH: 'До рассвета: {h} ч',
+  nxFuel: 'Запаси топливо к пурге (через {h} ч, ~{need} ч огня): есть {fuel} ч',
+  nxFuelLow: 'Топлива мало ({fuel} ч): добудь уголь, плавник, жир',
+  nxFood: 'Еды на {d} дн.: поохоться, порыбачь, поставь силки',
+  nxShelter: 'Построй укрытие получше: ★★★ с отдушиной и печью',
+  nxSites: 'Исследуй мир: найдено мест {n}/{m}',
+  nxNotes: 'Найди записки экспедиции: прочитано {n}/{m}',
+  nxCraft: 'Сделай что-нибудь новое: {name}',
+  nxIdle: 'Выживай: {phase}, день {d}',
+  nxCrate: 'Ледокол оставил ящик у мыса: забери припасы',
+  phNight: 'ночь', phTwi: 'сумерки',
+  msDays: 'Дней выжил: {n}. Мир не стал мягче',
+  msRing: 'Круг {c} пройден: ночь вернётся. Запасайся',
+  msTwilight: 'Первые сумерки: над горизонтом светлая полоса. Вылазки безопаснее, но берегись бликов',
+  crateT: 'Ледокол прошёл мимо и сбросил ящик у мыса',
+  crateNote: 'Записка на ящике: «Держитесь. Вернёмся с тем же курсом».',
   storm: 'Переживи пургу: укрытие ★★ во время шторма',
   parka: 'Сшей меховую парку (тюлень ×3, песец ×2, жилы ×2)',
   seals3: 'Добудь тюленя ×3: {n}/3 (у лунок стой тихо, бей гарпуном)',
@@ -58,18 +75,17 @@ const S = strings('quest', {
   milestoneBlock: 'Первый снежный блок вырезан: из таких строят укрытие',
   milestoneCraft: 'Первая вещь сделана своими руками',
   days: '{n} дн.', hours: '{n} ч', soon: 'меньше часа',
-  sunrise: 'Дожить до первого солнца',
   found: 'Место найдено: {name}',
   jKnow: 'Новый приём: {name}', jRead: 'Записка: {title}',
   arrival: 'На горизонте шарит прожектор — ледокол!',
-  dawnT: 'Рассвет', iceT: 'Ледокол',
 });
 
 export interface Goal { id: string; text: () => string; done: () => boolean }
 const done = new Set<string>();
-export const runStats = { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0 };
+export const runStats = { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0 };
 export const questState = {
-  icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '' as '' | 'dawn' | 'icebreaker', radioFixed: false, lit: false,
+  icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '' as '' | 'dawn' | 'icebreaker' /* legacy: never set, the game is endless */, radioFixed: false, lit: false,
+  crateRing: -1,      // ring of the icebreaker's last supply drop (one per ring)
 };
 
 export function suppliesNow() {
@@ -89,12 +105,12 @@ export function suppliesNow() {
   water += count('water') * 26 + count('snow') * 6 + count('ice') * 12;
   return { fuelH: Math.round(fuelMin / 6) / 10, foodDays: Math.round(food / 50 * 10) / 10, water };
 }
-const suppliesOk = () => { const s = suppliesNow(); return s.fuelH >= 72 && s.foodDays >= 8; };      // 12 days of winter
+const suppliesOk = () => { const s = suppliesNow(); return s.fuelH >= 72 && s.foodDays >= 8; };      // a comfortable stock (three days of fuel, eight of food)
 
 const flags = new Set<string>();
 const wins = new Set<string>();
 /** Goal flags shown by the journal (ui/devhud). parts = radio parts inserted, ending = null | 'dawn' | 'icebreaker'. */
-export const prog = { fire: false, baro: false, shelter: false, sleep: false, parts: [] as string[], mast: false, radio: false, ending: null as null | 'dawn' | 'icebreaker' };
+export const prog = { fire: false, baro: false, shelter: false, sleep: false, parts: [] as string[], mast: false, radio: false, ending: null as null | 'dawn' | 'icebreaker' /* legacy, unused */ };
 export interface JournalEntry { kind: 'note' | 'storm' | 'site' | 'event' | 'know'; text: string; t: number }
 export const journal: JournalEntry[] = [];
 function log(kind: JournalEntry['kind'], text: string) { if (journal.length < 200) journal.push({ kind, text, t: G.time }); }
@@ -144,34 +160,70 @@ export const GOALS: Goal[] = [
 
 type Step = { id: string; text: string; goal?: string };
 const nextOpen = (): Goal | undefined => GOALS.find(g => g.id !== 'supplies' && !g.done());
-/** Hours left until the sunrise (design: day N's noon). */
-const dawnHoursLeft = () => Math.max(0, Math.ceil((G.endDay - 1) * 24 + 12 - G.time / 60));
+const CHAIN = GOALS.findIndex(g => g.id === 'supplies');          // goals before this index form the day-1 onboarding chain
+const ROTATE_MIN = 240;                                             // game minutes between rotations of the «next sensible thing» line
+
+/** Results the player has made (from 'crafted'). */
+const craftedIds = new Set<string>();
+/** The rotating «next sensible thing» candidates, most urgent first (urgent ones pin the line). */
+function suggestions(): { step: Step; urgent: boolean }[] {
+  const out: { step: Step; urgent: boolean }[] = [];
+  const sp = suppliesNow(), gauge = fmt(S.gauge, { fuel: sp.fuelH, food: sp.foodDays });
+  if (sp.fuelH < 12 || sp.foodDays < 1) out.push({ step: { id: 'low', text: fmt(S.low, { fuel: sp.fuelH, food: sp.foodDays }) }, urgent: true });
+  // fuel for the next storm: it burns about its length in hours
+  const ns = nextStormFn();
+  if (ns && ns.start - G.time < 30 * 60) {
+    const need = Math.ceil(ns.dur / 60 * 0.8), hrs = Math.max(0, Math.round((ns.start - G.time) / 60));
+    if (sp.fuelH < need) out.push({ step: { id: 'nxfuel', text: fmt(S.nxFuel, { h: hrs, need, fuel: sp.fuelH }) }, urgent: sp.fuelH < need * 0.6 });
+  }
+  if (sp.fuelH < 30) out.push({ step: { id: 'nxfuel2', text: fmt(S.nxFuelLow, { fuel: sp.fuelH }) }, urgent: false });
+  if (sp.foodDays < 3) out.push({ step: { id: 'nxfood', text: fmt(S.nxFood, { d: sp.foodDays }), goal: 'seal' }, urgent: sp.foodDays < 1.5 });
+  const crate = crateDrops();
+  if (crate) out.push({ step: { id: 'crate', text: S.nxCrate }, urgent: false });
+  // the old open goals (seal, driftwood, ship, radio, mast, fur, storms, parka ...)
+  for (let k = CHAIN + 1; k < GOALS.length; k++) { const g = GOALS[k]; if (!g.done()) { out.push({ step: { id: g.id, text: g.text() + gauge }, urgent: false }); break; } }
+  if (runStats.bestStars < 3) out.push({ step: { id: 'nxshelter', text: S.nxShelter }, urgent: false });
+  const found = sites.filter(x => x.found).length;
+  if (found < sites.length) out.push({ step: { id: 'nxsites', text: fmt(S.nxSites, { n: found, m: sites.length }) }, urgent: false });
+  if (lore.read.size < NOTES.length) out.push({ step: { id: 'nxnotes', text: fmt(S.nxNotes, { n: lore.read.size, m: NOTES.length }) }, urgent: false });
+  const rec = RECIPES.find(r => knows(r.tech) && !craftedIds.has(r.result));
+  if (rec) out.push({ step: { id: 'nxcraft', text: fmt(S.nxCraft, { name: itemNameFn(rec.result) }) }, urgent: false });
+  if (!out.length) out.push({ step: { id: 'free', text: fmt(S.nxIdle, { phase: phaseName() === 'night' ? S.phNight : S.phTwi, d: G.day }) + gauge }, urgent: false });
+  return out;
+}
+/** Supply drops of the icebreaker still lying near the cape. */
+function crateDrops(): boolean { return questState.crateRing === G.cycle && G.drops.some(d => (d.item === 'flare' || d.item === 'can') && Math.abs(d.x - LOC.summit.x) < 120); }
 
 /** The line shown top-centre, with the goal id it belongs to (for objectiveTarget). */
 function activeStep(): Step | null {
   const q = questState;
-  if (q.ended) return null;
   if (q.iceDeadline > 0 && G.time < q.iceDeadline && q.iceArrivedAt > 0 && G.time >= q.iceArrivedAt) return q.lit ? { id: 'rescued', text: S.rescued } : { id: 'light', text: S.light };
+  // the day-1 onboarding chain first (coal, door, stove, barometer, keeper's log, shelter, diary)
+  const early = GOALS.slice(0, CHAIN);
+  for (const g of early) if (!g.done()) {
+    if (q.icebreakerAt > 0) break;
+    return { id: g.id, text: g.text() };
+  }
+  const sg = suggestions();
+  const urgent = sg.find(x => x.urgent);
+  let pick: { step: Step; urgent: boolean };
+  if (urgent) pick = urgent;
+  else {
+    const rot = Math.floor(G.time / ROTATE_MIN) % sg.length;
+    pick = sg[rot];
+  }
+  let text = pick.step.text;
   if (q.icebreakerAt > 0) {
     const left = q.icebreakerAt - G.time;
     const d = left > 1440 ? fmt(S.days, { n: Math.ceil(left / 1440) }) : left > 60 ? fmt(S.hours, { n: Math.ceil(left / 60) }) : S.soon;
-    const nx = nextOpen();
-    return { id: 'wait', text: fmt(S.wait, { d }) + (nx ? '  ·  ' + nx.text() : ''), goal: nx?.id };
+    text = fmt(S.wait, { d }) + '  ·  ' + text;
   }
-  // the chain first (coal, stove, barometer, keeper's log, shelter, diary); then supplies only as an emergency; then the open goals with the gauges
-  const early = GOALS.slice(0, GOALS.findIndex(g => g.id === 'supplies'));
-  for (const g of early) if (!g.done()) return { id: g.id, text: g.text() };
-  const sp = suppliesNow();
-  if (sp.fuelH < 12 || sp.foodDays < 1) return { id: 'low', text: fmt(S.low, { fuel: sp.fuelH, food: sp.foodDays }) };
-  const gauge = fmt(S.gauge, { fuel: sp.fuelH, food: sp.foodDays });
-  for (const g of GOALS) { if (g.id === 'supplies') continue; if (!g.done()) return { id: g.id, text: g.text() + gauge }; }
-  const sup = GOALS.find(g => g.id === 'supplies')!;
-  if (!sup.done()) return { id: 'supplies', text: sup.text() };
-  const line = G.day >= G.endDay - 2 ? fmt(S.dawnH, { h: dawnHoursLeft() }) : fmt(S.free, { d: G.day, n: G.endDay });
-  return { id: 'free', text: line + gauge };
+  return { ...pick.step, text };
 }
 export function objectiveText(): string { return activeStep()?.text ?? ''; }
 export function currentGoalId(): string { for (const g of GOALS) if (!g.done()) return g.id; return 'free'; }
+/** Steps of the rotating line right now (tests). */
+export function suggestionList(): string[] { return suggestions().map(x => x.step.id); }
 
 /** World cell (x, y) of the place the current line is about (HUD arrow), or null when there is none. */
 export function objectiveTarget(): { x: number; y: number } | null {
@@ -200,6 +252,7 @@ export function objectiveTarget(): { x: number; y: number } | null {
     case 'radio': return fixture('radio');
     case 'mast': return knows('mast') ? { x: worldInfo.spots.mast.x, y: worldInfo.spots.mast.y } : note('s2');
     case 'fur': return { x: worldInfo.spots.whale.x, y: worldInfo.spots.whale.y };
+    case 'crate': return pick(G.drops.filter(d => d.item === 'flare' || d.item === 'can'));
     case 'light': case 'rescued': return { x: worldInfo.spots.signalFire.x, y: worldInfo.spots.signalFire.y };
     default: return null;
   }
@@ -209,8 +262,9 @@ export function objectiveTarget(): { x: number; y: number } | null {
 export function resetQuest() {
   done.clear(); flags.clear(); wins.clear(); journal.length = 0;
   Object.assign(prog, { fire: false, baro: false, shelter: false, sleep: false, mast: false, radio: false, ending: null }); prog.parts.length = 0;
-  Object.assign(runStats, { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0 });
-  Object.assign(questState, { icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '', radioFixed: false, lit: false });
+  Object.assign(runStats, { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0 });
+  Object.assign(questState, { icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '', radioFixed: false, lit: false, crateRing: -1 });
+  craftedIds.clear();
   siteAcc = 0; winAcc = 0; lastDone = null; doorAcc = 0; doorT = 0; doorHinted = false;
 }
 let loaded: any = null;
@@ -220,7 +274,7 @@ export const peekLoaded = () => loaded;
 on('new_game', () => { resetQuest(); resetMine(); });
 /** Saved with the game (save.ts): goal flags, run statistics, the icebreaker schedule, journal, and the drift of the pack ice. */
 export function questSave() {
-  return { flags: [...flags], wins: [...wins], prog: { ...prog, parts: [...prog.parts] }, stats: { ...runStats }, q: { ...questState }, journal: journal.slice(-120), drift: driftSnapshot(), lore: loreSave() };
+  return { crafted: [...craftedIds], flags: [...flags], wins: [...wins], prog: { ...prog, parts: [...prog.parts] }, stats: { ...runStats }, q: { ...questState }, journal: journal.slice(-120), drift: driftSnapshot(), lore: loreSave() };
 }
 export function questLoad(s: any) {
   if (!s) return;
@@ -229,6 +283,8 @@ export function questLoad(s: any) {
   for (const w of s.wins ?? []) wins.add(w);
   Object.assign(prog, s.prog ?? {}); prog.parts = [...(s.prog?.parts ?? [])];
   Object.assign(runStats, s.stats ?? {}); Object.assign(questState, s.q ?? {});
+  questState.ended = ''; prog.ending = null;                 // old saves that ended (dawn / icebreaker) continue as endless
+  for (const c of s.crafted ?? []) craftedIds.add(c);
   for (const e of s.journal ?? []) journal.push(e);
   loreLoad(s.lore);
   loaded = s;
@@ -240,7 +296,9 @@ on('shelter', (d: { stars: number; closed: boolean }) => {
   if (d.closed && d.stars >= 2 && builtOutside()) { flags.add('shelter'); prog.shelter = true; }
   runStats.bestStars = Math.max(runStats.bestStars, d.closed ? d.stars : 0);
 });
-on('seal_caught', () => { runStats.seals++; });
+on('seal_caught', () => { runStats.seals++; runStats.hunted++; });
+on('fish_caught', () => { runStats.fish++; runStats.hunted++; });
+on('snare_caught', () => { runStats.hunted++; });
 on('storm_end', (d: { report?: { stars: number; text?: string } }) => {
   runStats.storms++;
   if (d.report) { runStats.bestStars = Math.max(runStats.bestStars, d.report.stars); runStats.stormStars = Math.max(runStats.stormStars, d.report.stars); if (d.report.text) log('storm', d.report.text); }
@@ -250,7 +308,7 @@ on('radio_part', (d: { id: string }) => { if (!prog.parts.includes(d.id)) prog.p
 on('mast_up', () => { prog.mast = true; });
 on('site_found', (d: { key: string }) => { if (d.key === 'ship') flags.add('ship'); log('site', fmt(S.found, { name: sites.find(x => x.key === d.key)?.name ?? d.key })); });
 on('crafted', (d: { id: string }) => {
-  runStats.crafts++;
+  runStats.crafts++; craftedIds.add(d.id);
   if (/^fur_|^kamiks$/.test(d.id)) flags.add('fur');
   if (d.id === 'fur_parka') flags.add('parka');
   win('craft', S.milestoneCraft);
@@ -339,7 +397,6 @@ export function stepQuest(dt: number) {
   goalWatch(dt);
   stepLore(dt); probeTarget(target()); stepMine(dt);
   const q = questState;
-  if (q.ended) return;
   const t = G.time;
   // the icebreaker comes on the second day after the radio call and stays in sight for 36 game hours
   if (q.icebreakerAt > 0 && q.iceArrivedAt < 0 && t >= q.icebreakerAt) {
@@ -348,14 +405,33 @@ export function stepQuest(dt: number) {
   }
   if (q.iceArrivedAt > 0 && t < q.iceDeadline) {
     if (!q.lit && signalLit() && G.daylight < 0.85) { q.lit = true; q.rescueAt = t + 90; toast(S.rescued, 'good'); }
-    if (q.lit && t >= q.rescueAt) { q.ended = 'icebreaker'; emit('ending', { kind: 'icebreaker' }); }
-  } else if (q.iceArrivedAt > 0 && t >= q.iceDeadline && !q.ended) {
+    if (q.lit && t >= q.rescueAt) icebreakerPasses();
+  } else if (q.iceArrivedAt > 0 && t >= q.iceDeadline) {
     toast(S.missed, 'warn');
     q.icebreakerAt = t + 2 * 1440; q.iceArrivedAt = -1; q.iceDeadline = -1; q.lit = false;      // it comes back two days later
   }
-  const c = body.stats; void c;
+  // a new ring: a repaired radio can call the icebreaker again
+  if (q.radioFixed && q.icebreakerAt < 0 && q.iceArrivedAt < 0 && q.crateRing >= 0 && G.cycle > q.crateRing && phaseName() === 'night') q.icebreakerAt = t + 2 * 1440;
   if (G.player.core < runStats.coldest) runStats.coldest = Math.round(G.player.core * 10) / 10;
 }
-on('ending', (d: { kind: 'dawn' | 'icebreaker' }) => { if (questState.ended) return; questState.ended = d.kind; prog.ending = d.kind; });
-export const endingTitle = (k: 'dawn' | 'icebreaker') => (k === 'dawn' ? S.dawnT : S.iceT);
+/** The icebreaker saw the fire: it passes along the ice edge, drops a supply crate near the cape (fuel, food, a note, 1 flare) and leaves. Once per ring. */
+export function icebreakerPasses() {
+  const q = questState;
+  q.icebreakerAt = -1; q.iceArrivedAt = -1; q.iceDeadline = -1; q.lit = false; q.rescueAt = -1; q.crateRing = G.cycle;
+  const sf = worldInfo.spots.signalFire, x = (sf?.x ?? LOC.summit.x) - 14, y = (sf?.y ?? 200) - 10;
+  spawnDrop('coal', 8, x, y, 0, -30); spawnDrop('log', 4, x + 6, y, 0, -30); spawnDrop('can', 6, x - 6, y, 0, -30); spawnDrop('flare', 1, x + 12, y, 0, -30);
+  const unread = NOTES.find(n => !lore.read.has(n.id));
+  if (unread) spawnDrop('note_' + unread.id, 1, x - 12, y, 0, -30);
+  toast(S.crateT, 'good'); log('event', S.crateT); log('event', S.crateNote);
+  emit('icebreaker_pass', { ring: G.cycle });
+}
+/** Milestones («вехи»): a toast once per game. */
+function milestone(id: string, text: string) { if (wins.has(id)) return; wins.add(id); toast(text, 'good'); log('event', text); emit('win', { id }); }
+on('day', (d: { n: number }) => {
+  if ([5, 10, 20, 30, 50, 75, 100].includes(d.n)) milestone('days' + d.n, fmt(S.msDays, { n: d.n }));
+});
+on('season', (d: { phase: 'night' | 'twilight'; cycle: number }) => {
+  if (d.phase === 'twilight') milestone('twilight', S.msTwilight);
+  else if (d.cycle >= 1) milestone('ring' + d.cycle, fmt(S.msRing, { c: d.cycle }));
+});
 void worldInfo;
