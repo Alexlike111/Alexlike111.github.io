@@ -13,7 +13,8 @@ import '@fontsource/jura/latin-400.css';
 import '@fontsource/jura/cyrillic-400.css';
 import './ui.css';
 import { G } from '../game/state';
-import { strings, fmt } from '../content/i18n';
+import { strings, fmt, LANGS, LANG_NAMES, getLang, type Lang } from '../content/i18n';
+import { chooseLanguage } from './menu';
 import { on } from '../game/bus';
 import { peekSave, loadGame, saveGame, deleteSave, type SaveMeta, type SaveData } from '../game/save';
 import { wx, setDay } from '../game/weather';
@@ -32,7 +33,7 @@ const S = strings('title', {
   name: 'SNOWCRAFT', sub: 'Полярная ночь', cont: 'Продолжить', newGame: 'Новая игра', start: 'Начать', back: 'Назад', selftest: 'Самотест',
   contInfo: 'День {d}', record: 'Рекорд: {d} дн. · круг {c}', diff: 'Сложность', hard: 'Хардкор: одна жизнь, без возврата',
   d0: 'Мягкая', d1: 'Обычная', d2: 'Суровая', d0t: 'теплее, меньше голода', d1t: 'как задумано', d2t: 'холод кусает, запасы редки',
-  hint: 'Полярная ночь не кончается. Станция «Мыс Безмолвия». Живи, сколько сможешь.', loading: 'Загрузка…', saved: 'Сохранено',
+  hint: 'Полярная ночь не кончается. Станция «Мыс Безмолвия». Живи, сколько сможешь.', loading: 'Загрузка…', saved: 'Сохранено', lang: 'Язык',
 });
 export interface StartOpts { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean; save?: SaveData }
 
@@ -56,6 +57,7 @@ body.title-open #hud,body.title-open #touch{display:none !important}
 #title label input{width:18px;height:18px}
 #title .dim{font-size:13px;opacity:.8;letter-spacing:.3px}
 #title .lnk{background:none;border:0;box-shadow:none;font-size:13px;opacity:.7;min-height:44px;min-width:0;padding:2px 12px}
+#title select{font:700 15px 'Jura',system-ui,sans-serif;color:#e8f6ff;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.55);border-radius:5px;min-height:44px;padding:4px 10px;max-width:60vw;opacity:.85}
 @media (max-height:480px){
   #title{padding-top:calc(6px + env(safe-area-inset-top,0px));padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
   #title h1{font-size:34px}#title .sub{font-size:12px;letter-spacing:.4em;margin:2px 0 0}
@@ -81,7 +83,9 @@ function view(mode: 'main' | 'new') {
   if (mode === 'main') {
     let h = '<div class="row">';
     if (meta) h += `<button class="pri" data-a="cont">${S.cont}<small>${fmt(S.contInfo, { d: meta.day, c: (meta.cycle ?? cycleOf(meta.day)) + 1, t: new Date(meta.savedAt).toLocaleString() })}</small></button>`;
-    h += `<button data-a="new"${meta ? '' : ' class="pri"'}>${S.newGame}</button></div><div class="row"><button class="lnk" data-a="test">${S.selftest}</button></div>`;
+    const cur = getLang();
+    const langs = LANGS.map(l => `<option value="${l}"${l === cur ? ' selected' : ''}>${LANG_NAMES[l]}</option>`).join('');
+    h += `<button data-a="new"${meta ? '' : ' class="pri"'}>${S.newGame}</button></div><div class="row"><button class="lnk" data-a="test">${S.selftest}</button><select data-a="lang" aria-label="${S.lang}">${langs}</select></div>`;
     const bst = loadBest(); if (bst) h += `<div class="dim">${fmt(S.record, { d: bst.day, c: bst.cycle + 1 })}</div>`;
     el.innerHTML = wrap(h);
   } else {
@@ -95,6 +99,7 @@ function view(mode: 'main' | 'new') {
 async function onClick(e: Event) {
   const t = (e.target as HTMLElement).closest('[data-a]') as HTMLElement | null; if (!t || !api) return;
   const a = t.dataset.a;
+  if (a === 'lang') { if (e.type === 'change') { chooseLanguage((t as HTMLSelectElement).value as Lang, false); view('main'); } return; }   // re-render only on a real pick: a click would rebuild the open list
   if (a === 'new') view('new');
   else if (a === 'back') view('main');
   else if (a === 'diff') { diff = +t.dataset.d! as 0 | 1 | 2; view('new'); }

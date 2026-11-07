@@ -30,6 +30,7 @@ import { worldToScreen } from '../engine/render';
 import { renderBag, attachBag, bagWantsOpen } from './bag';
 import { phaseName } from '../game/seasons';
 import { renderJournalInto, journalClick, setJournalTab } from './journal';
+import { initUiMode, shortScreen } from './hudmode';
 
 const S = strings('hud', {
   core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', coWarn: 'Угар!',
@@ -57,6 +58,10 @@ let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLEleme
 let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
 let beltKey = '', toastKey = '';
+let bot: HTMLElement, objTxt: HTMLElement;                       // the bottom stack (toasts, held-item name, belt) and the objective's text span
+let objKey = '', objShow = 0, objPin = false;                    // objective: shown for 6 s (first goal) / 3 s (a change) / while pinned by a tap, then folded to the «Цель» pill
+let lastSel = -2, bnameT = 0, bnameTxt = '';                     // held-item name: 1.5 s after the selection changes only
+let hintHidden = false, hintAutoDone = false;                    // the key box (desktop) folds itself after 90 s of play; H brings it back
 let acc = 0, panelAcc = 0, rectAcc = 9;
 let avoid: DOMRect[] = [];
 let freeCam = false;
@@ -96,30 +101,32 @@ const CSS = `
 #hud .dial .line.baro span{min-width:0;overflow-wrap:anywhere}
 #hud .dial .line .ic{width:14px;height:14px}
 #hud .dial .wa{transition:transform .4s}
-/* top centre stack: objective, shelter chip, toasts in one flow, so they never overlap */
+/* top centre stack: the objective line (one line; it folds into a «Цель» pill, see updateHud) and the shelter chip.
+   Toasts, the held item's name and the belt share the bottom stack .bot (centred, above the safe area). */
 #hud .stk{position:absolute;left:50%;top:8px;transform:translateX(-50%);max-width:calc(100vw - 2*(150px + 16px));display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none}
 #hud .stk .p{position:static;text-align:center;max-width:100%}
-#hud .obj{font-size:14px;color:#e8f4ff;border-color:rgba(255,196,110,.5)}
+#hud .obj{font-size:14px;color:#e8f4ff;border-color:rgba(255,196,110,.5);pointer-events:auto;cursor:pointer;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
 #hud .obj b{color:#ffc46e;font-weight:600;margin-right:6px}
+#hud .obj.col{padding-top:1px;padding-bottom:1px}
+#hud .obj.col .ot{display:none}
 #hud .chip{display:none;font-size:13px;padding:3px 8px}
 #hud .toast{font-size:16px;padding:4px 10px}
-/* belt */
-#hud .belt{position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;gap:4px;padding:4px;pointer-events:auto}
-#hud .belt .sl{position:relative;width:56px;height:56px;border:2px solid rgba(124,198,238,.3);border-radius:4px;background:rgba(10,18,32,.6);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#hud .bot{position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none;max-width:calc(100vw - 16px)}
+#hud .bot .tbox{display:flex;flex-direction:column;align-items:center;gap:3px;max-width:100%}
+#hud .bot .p{position:static;transform:none}
+/* belt: six cells (nine with the pouch); the cell is 56 px on a desktop, 40 px on a phone (border-box, so the size is the hit area) */
+#hud .belt{display:flex;gap:4px;padding:4px;pointer-events:auto}
+#hud .belt .sl{position:relative;box-sizing:border-box;width:56px;height:56px;border:2px solid rgba(124,198,238,.3);border-radius:4px;background:rgba(10,18,32,.6);display:flex;align-items:center;justify-content:center;cursor:pointer}
 #hud .belt .sl.frz{border-color:#9fd6ff}
 #hud .belt .sl.sel{border-color:#ffc46e;background:rgba(60,34,12,.72)}
 #hud .belt .sl .ic{width:32px;height:32px}
 #hud .belt .sl .k{position:absolute;left:3px;top:1px;font-size:11px;color:#8ab0c8;font-weight:400}
 #hud .belt .sl .n{position:absolute;right:2px;top:1px;font-size:12px;color:#fff;background:rgba(5,8,15,.7);padding:0 3px;border-radius:2px;font-style:normal;font-variant-numeric:tabular-nums}
 #hud .belt .sl .bar{position:absolute;left:4px;right:4px;bottom:3px;height:3px;background:#123}#hud .belt .sl .bar i{display:block;height:100%;background:#8fe3b0}
-#hud .bname{position:absolute;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:13px;padding:2px 8px;display:none;white-space:nowrap}
-body.touch-ui #hud .belt{left:50%;padding:3px;gap:4px}
-body.touch-ui #hud .belt .sl{display:flex;width:40px;height:40px;flex:none}
-body.touch-ui #hud .belt .sl .ic{width:28px;height:28px}
-body.touch-ui #hud .belt .sl .k{display:none}
+#hud .bname{font-size:14px;padding:2px 8px;display:none;white-space:nowrap}
 body.radial-open #hud .tbox{visibility:hidden}
-body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area-inset-bottom,0px))}
-#hud .tip{pointer-events:none;max-width:260px;font-size:13px;display:none}
+#hud .tip{pointer-events:none;max-width:230px;font-size:13px;display:none;white-space:normal}
+#hud .tip div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #hud .arw{position:absolute;display:none;align-items:center;gap:4px;font-size:14px;color:#ffc46e;pointer-events:none;white-space:nowrap;transform:translate(-50%,-50%);animation:arwblink .8s steps(2,end) infinite}
 #hud .arw svg{width:18px;height:18px;flex:none;filter:drop-shadow(0 0 3px #05080f)}
 #hud .arw path{fill:#ffc46e;stroke:#05080f;stroke-width:1.2;stroke-linejoin:round}
@@ -159,23 +166,65 @@ body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area
 #hud .hint .hfull{display:none;font-size:12px;line-height:1.9;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid rgba(124,198,238,.25);pointer-events:none}
 #hud .hint .hfull.on{display:block}
 #hud .dev{left:8px;bottom:70px;font-size:11px;font-family:system-ui,sans-serif;display:block;white-space:pre}
-@media (max-width:1100px){#hud .hint{max-width:calc(50vw - 20px);bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
-/* phone: compact HUD (belt collapses to the active slot, the Пояс radial replaces it) */
+@media (max-width:1100px){#hud .hint{max-width:calc(50vw - 230px);bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
+/* phone (touch UI), tall window (H >= 340): the body widget and the dial at the top-left, the objective between them and the top-right row */
 body.touch-ui #hud{font-size:14px}
-body.touch-ui #hud .bw{padding:3px 5px;gap:5px}body.touch-ui #hud .bw canvas{width:24px;height:48px}
-body.touch-ui #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
-#hud .bw .rows{min-width:84px;gap:1px}body.touch-ui #hud .bw .r{height:13px;gap:3px}body.touch-ui #hud .bw .ic{width:12px;height:12px}
-body.touch-ui #hud .bw .bar i{height:5px}body.touch-ui #hud .bw .v{min-width:34px}body.touch-ui #hud .bw .sub{font-size:11px;margin-top:0;white-space:nowrap}
-/* phone: a vital shows as its word only (the bar is squeezed out by the word, the words carry the warning) */
-body.touch-ui #hud .bw .bar{display:none}body.touch-ui #hud .bw .rows{min-width:0}body.touch-ui #hud .bw .r{white-space:nowrap}body.touch-ui #hud .bw .v{min-width:0;text-align:left;font-size:11px}
-body.touch-ui #hud .dial{left:150px;right:auto;top:8px;width:84px;padding:2px 3px}
-body.touch-ui #hud .dial canvas{width:78px;height:47px}
+body.touch-ui #hud .bw{left:8px;top:8px;width:126px;box-sizing:border-box;padding:3px 5px;gap:5px}
+body.touch-ui #hud .bw canvas{width:24px;height:48px}
+body.touch-ui #hud .bw .rows{min-width:0;gap:1px;flex:1}
+body.touch-ui #hud .bw .r{height:13px;gap:3px}
+body.touch-ui #hud .bw .ic{width:12px;height:12px}
+body.touch-ui #hud .bw .bar{display:none}
+body.touch-ui #hud .bw .v{min-width:0;text-align:left;font-size:11px}
+body.touch-ui #hud .bw .sub{font-size:11px;margin-top:0;white-space:nowrap}
+body.touch-ui #hud .dial{left:142px;right:auto;top:8px;width:84px;padding:2px 3px}
+body.touch-ui #hud .dial canvas{width:62px;height:38px}
 body.touch-ui #hud .dial .day{font-size:11px;line-height:1.15}
-body.touch-ui #hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
-#hud .dial .line{font-size:11px}body.touch-ui #hud .dial .line.mid{display:none}
-body.touch-ui #hud .stk{left:244px;right:220px;transform:none;max-width:none}
-body.touch-ui #hud .toast{font-size:13px;padding:2px 8px}body.touch-ui #hud .obj{font-size:12px;padding:2px 8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+body.touch-ui #hud .dial .clk{font-size:12px;opacity:.85;margin-top:-1px}
+body.touch-ui #hud .dial .line{font-size:11px}
+body.touch-ui #hud .dial .line.wind{display:none!important}
+body.touch-ui #hud .stk{left:234px;right:calc(var(--trow) + 10px + env(safe-area-inset-right,0px));transform:none;max-width:none}
+body.touch-ui #hud .obj{font-size:13px;padding:3px 8px}
+body.touch-ui #hud .toast{font-size:13px;padding:2px 8px}
+body.touch-ui #hud .chip{font-size:13px}
+body.touch-ui #hud .bname{font-size:13px}
+body.touch-ui #hud .belt .sl{width:40px;height:40px;flex:none}
+body.touch-ui #hud .belt .sl .ic{width:28px;height:28px}
+body.touch-ui #hud .belt .sl .k{display:none}
 body.touch-ui #hud .pnl{font-size:12px}
+/* the body widget and the dial are separate panels unless the window is short (then .topl is the one chip, see the media query below) */
+#hud .topl{display:contents}
+/* panels fade to 60 % while nothing is wrong (updateHud sets hud-calm); warnings (cold, hunger, storm) bring them back to full */
+@media (min-height:340px){body.hud-calm #hud .bw,body.hud-calm #hud .dial{opacity:.6}}
+@media (max-height:339px){body.hud-calm #hud .topl{opacity:.6}}
+/* UI mode «min» (ui/hudmode.ts): no sun arc, no key box, no wind / barometer rows, no «ощущается» line, shelter stars only, the folded goal pill goes */
+body.ui-min #hud .dial canvas,body.ui-min #hud .hint,body.ui-min #hud .dial .line.wind,body.ui-min #hud .dial .line.baro{display:none!important}
+body.ui-min #hud .bw .sub,body.ui-min #hud .chip .cd,body.ui-min #hud .obj.col{display:none!important}
+/* short window (H < 340, a landscape phone or a small window): ONE chip at the top-left = figure + temperature + «День 1 · 11:09».
+   The sun arc, the vitals (until they warn), the feels-like line and the wind / barometer rows are hidden; the chip is one box, so its figure,
+   temperature and clock take the chip's padding and border, and the objective and the shelter stars keep the top, the belt and one toast the bottom */
+@media (max-height:339px){
+  html body #hud .topl{position:absolute;left:calc(8px + var(--sa-l));top:calc(8px + var(--sa-t));display:flex;align-items:center;max-width:calc(100vw - 16px);box-sizing:border-box;
+    padding:3px 8px 3px 5px;background:linear-gradient(180deg,rgba(14,26,46,.78),rgba(8,16,30,.78));border:1px solid rgba(124,198,238,.38);border-radius:4px;box-shadow:0 0 0 1px #05080f,inset 0 1px 0 rgba(190,226,250,.12)}
+  html body #hud .topl .bw{position:static;display:flex;align-items:center;gap:5px;width:auto;padding:0;background:none;border:0;box-shadow:none;margin:0}
+  html body #hud .topl .bw canvas{width:14px;height:28px;align-self:center}
+  html body #hud .topl .bw .rows{min-width:0;flex:none;gap:2px}
+  html body #hud .topl .bw .r{height:auto;font-size:14px;gap:3px}
+  html body #hud .topl .bw .bar,html body #hud .topl .bw .sub{display:none}
+  html body #hud .topl .dial{position:static;left:auto;right:auto;top:auto;width:auto;display:flex;align-items:center;gap:4px;padding:0 0 0 8px;margin-left:8px;background:none;border:0;border-left:1px solid rgba(124,198,238,.3);box-shadow:none;text-align:left;border-radius:0}
+  html body #hud .topl .dial canvas{display:none}
+  html body #hud .topl .dial .day{font-size:13px;line-height:1.2;white-space:nowrap}
+  html body #hud .topl .dial .clk{font-size:13px;line-height:1.2;margin:0;opacity:1;white-space:nowrap}
+  html body #hud .topl .dial .clk::before{content:'· ';opacity:.8}
+  html body #hud .topl .dial .line{font-size:12px;margin:0;white-space:nowrap}
+  html body #hud .topl .dial .line.wind,html body #hud .topl .dial .line.baro{display:none!important}
+  html body #hud .stk{left:calc(236px + var(--sa-l));right:calc(var(--trow) + 10px + var(--sa-r));top:calc(8px + var(--sa-t));transform:none;max-width:none;align-items:flex-start}
+  html body #hud .stk .p{text-align:left}
+  html body #hud .obj{font-size:13px;padding:2px 8px;max-width:100%}
+  html body #hud .chip{font-size:13px}
+  html body #hud .bot{bottom:calc(8px + var(--sa-b))}
+  html body #hud .bot .tbox{gap:2px}
+}
 `;
 
 
@@ -259,14 +308,20 @@ const sunPath = sunElevAt;
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 export function initHud(host: HTMLElement) {
-  initQuest();
+  initQuest(); initUiMode();
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   root = document.createElement('div'); root.id = 'hud'; host.appendChild(root);
   const mk = (cls: string, parent: HTMLElement = root) => { const d = document.createElement('div'); d.className = 'p ' + cls; parent.appendChild(d); return d; };
-  bw = mk('bw'); dial = mk('dial');
+  // the body widget and the dial: separate panels on a tall window, one chip on a short one (CSS: .topl is display:contents unless H < 340)
+  const topl = document.createElement('div'); topl.className = 'topl'; root.appendChild(topl);
+  bw = mk('bw', topl); dial = mk('dial', topl);
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
-  objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.className = 'tbox'; toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
-  beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
+  objEl = mk('obj', stack); objEl.innerHTML = '<b>' + S.objTitle + '</b><span class="ot"></span>'; objTxt = objEl.querySelector('.ot') as HTMLElement;
+  objEl.addEventListener('click', () => { objPin = !objPin; objShow = 0; });                 // a tap keeps the goal on screen (again: folds it)
+  chip = mk('chip', stack);
+  bot = document.createElement('div'); bot.className = 'bot'; root.appendChild(bot);
+  toastBox = document.createElement('div'); toastBox.className = 'tbox'; bot.appendChild(toastBox);
+  bname = mk('bname', bot); beltEl = mk('belt', bot); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
   fullEl = document.createElement('div'); fullEl.className = 'hfull'; mainEl = document.createElement('div'); mainEl.className = 'hmain';
   hintEl.appendChild(fullEl); hintEl.appendChild(mainEl);       // the full list sits above the row: the panel grows upward
   arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
@@ -275,9 +330,9 @@ export function initHud(host: HTMLElement) {
   // key hints: four keys at first (WASD, Space, ЛКМ, E); F / C / J join when first needed; the rest is behind «?» (H toggles it too)
   try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); if (r && Array.isArray(r.learned)) hintMem.learned = r.learned.filter((x: unknown) => typeof x === 'string').slice(0, 12); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
-  if (!G.mobile) hintEl.style.display = 'block';
+
   if (DEV) { devEl = mk('dev'); }
-  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); shownKeys.clear(); playSec = 0; });
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); shownKeys.clear(); playSec = 0; hintHidden = false; hintAutoDone = false; objKey = ''; });
   on('picked', () => reveal('C')); on('crafted', () => reveal('C'));                  // the first thing in the bag: the bag key
   on('goal_done', () => reveal('J')); on('note_read', () => reveal('J'));                // the first goal or note: the journal key
   on('tech_learned', (d: { how: string }) => { if (d.how !== 'start') reveal('J'); });
@@ -362,14 +417,33 @@ function updateArrow(realDt: number) {
 const cls = (bad: boolean, warn: boolean) => (bad ? 'bad' : warn ? 'warn' : 'good');
 const fmtClock = () => { const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 60), m = Math.floor(G.time % 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); };
 
+/** The objective: the line shows for 6 s on the first goal of a game, 3 s after each change and while a tap pins it; then it folds to the «Цель» pill. */
+function objectiveLine(dt: number) {
+  const ok = objective();
+  if (ok !== objKey) { objShow = ok === '' ? 0 : objKey === '' ? 6 : 3; objKey = ok; objPin = false; }
+  objShow = Math.max(0, objShow - dt);
+  objEl.classList.toggle('col', !(objPin || objShow > 0));
+  if (objTxt.textContent !== ok) objTxt.textContent = ok;
+}
+/** The held item's name: 1.5 s after the selection changes (never at the start of a game, never over an open panel). */
+function heldName(dt: number) {
+  if (inv.sel !== lastSel) { if (lastSel !== -2) bnameT = 1.5; lastSel = inv.sel; }
+  bnameT = Math.max(0, bnameT - dt);
+  const sel = inv.slots[inv.sel];
+  const txt = sel && bnameT > 0 && !panelOpen && !jOpen ? itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + snowClassName(snowClass(sel.dur)) : '') : '';
+  if (txt !== bnameTxt) { bnameTxt = txt; bname.textContent = txt; }
+  bname.style.display = txt ? 'block' : 'none';
+}
+
 export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
   const titleOn = document.body.classList.contains('title-open');
   if (p?.alive && !G.paused && !titleOn) playSec += realDt;
   if (playSec >= 180) { reveal('F'); reveal('C'); reveal('J'); }                    // after 3 minutes of play the three keys show
+  if (!hintAutoDone && playSec >= 90) { hintAutoDone = true; hintHidden = true; }           // the key box folds itself after 90 s of play (desktop)
   for (const k of ['F', 'C', 'J']) { const d = isKeyDown('Key' + k); if (d && !hkPrev.has(k)) learn(k); if (d) hkPrev.add(k); else hkPrev.delete(k); }
-  const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) toggleFull(); hPrev = hDown;
+  const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) { if (hintHidden) hintHidden = false; else toggleFull(); } hPrev = hDown;
   if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
   if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
@@ -380,7 +454,7 @@ export function updateHud(dt: number, realDt: number) {
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
   for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
-  const shown = pickToasts(2);                                          // at most two at once
+  const shown = pickToasts(shortScreen() ? 1 : 2);                      // at most two at once (one on a short window)
   const tk = shown.map(t => t.text + t.kind).join('|');
   if (tk !== toastKey) {
     toastKey = tk; toastBox.innerHTML = '';
@@ -402,15 +476,17 @@ export function updateHud(dt: number, realDt: number) {
   const T = target();
   if (p?.alive && input.hasAim && T.lines.length && !panelOpen && (input.aimMode !== 'smart')) {
     const sx = input.aimX, sy = input.aimY;
-    tip.innerHTML = T.lines.map((l, i) => `<div class="${i === T.lines.length - 1 && T.reason ? 'warn' : ''}">${l}</div>`).join('');
+    const TL = T.lines.length > 3 ? [T.lines[0], T.lines[1], T.lines[T.lines.length - 1]] : T.lines;      // three lines at most: the cursor tip stays short
+    tip.innerHTML = TL.map((l, i) => `<div class="${i === TL.length - 1 && T.reason ? 'warn' : ''}">${l}</div>`).join('');
     tip.style.display = 'block'; placeTip(sx, sy);
   } else tip.style.display = 'none';
   document.body.classList.toggle('panel-open', panelOpen || jOpen);
 
   updateArrow(realDt);
   if (acc < 0.1) return;
-  acc = 0;
+  const dtBlock = acc; acc = 0;
   if (!p) return;
+  objectiveLine(dtBlock); heldName(dtBlock);
   // ---- body ----
   drawFigure(p);
   setRow('core', p.core.toFixed(1) + '°', cls(p.core < 34, p.core < 36));
@@ -423,6 +499,10 @@ export function updateHud(dt: number, realDt: number) {
   if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.coWarn; } else alertEl.style.display = 'none';
   subEl.textContent = fmt(S.feels, { t: p.feelT.toFixed(0) });
   renderHints();
+  hintEl.style.display = G.mobile || hintHidden ? 'none' : 'block';
+  // warnings (cold, hunger / thirst / tiredness / hurt, storm or a strong wind, CO, wet) bring the panels back to full opacity
+  const warnNow = p.core < 36 || p.frost.hands >= 40 || p.frost.feet >= 40 || p.frost.face >= 40 || p.food < 35 || p.water < 35 || p.energy < 30 || p.hp < 60 || G.storm > 0.2 || Math.abs(G.wind) >= 12 || p.co > 5 || p.wet > 0.25;
+  document.body.classList.toggle('hud-calm', !warnNow);
   // ---- sun clock: the day and the clock; the night and the ring from ring 2 on (or at twilight) ----
   drawDial();
   const twi = phaseName() !== 'night';
@@ -442,13 +522,13 @@ export function updateHud(dt: number, realDt: number) {
   stormRow.innerHTML = G.storm > 0.2 ? img(uiUrl('storm')) + `<span class="bad">${S.storm}</span>` : (G.timeScale > 1 ? `<span class="warn">Zzz ×${G.timeScale}</span>` : '') + (freeCam ? `<span class="warn">${S.free}</span>` : '');
   stormRow.style.display = stormRow.innerHTML ? 'flex' : 'none';
   // ---- objective + shelter chip ----
-  objEl.innerHTML = `<b>${S.objTitle}</b>${objective()}`;
+
   const sh = G.shelter;
   if (sh) {
     chip.style.display = 'block';
     const stars = '★'.repeat(sh.stars) + '☆'.repeat(4 - sh.stars);
     // a closed shelter: stars and one phrase; CO only as «Откройте отдушину» when it is dangerous (> 8); warm = inside not below -6° (shelter.ts)
-    chip.innerHTML = sh.closed ? `${stars} ${sh.co > 8 ? `<span class="bad">${S.openVent}</span>` : sh.temp >= -6 ? S.warm : `<span class="warn">${S.cold}</span>`}` : `${stars} <span class="warn">${sh.notes[0] ?? S.noShelter}</span>`;
+    chip.innerHTML = `<span class="st">${stars}</span> <span class="cd">` + (sh.closed ? (sh.co > 8 ? `<span class="bad">${S.openVent}</span>` : sh.temp >= -6 ? S.warm : `<span class="warn">${S.cold}</span>`) : `<span class="warn">${sh.notes[0] ?? S.noShelter}</span>`) + `</span>`;
   } else chip.style.display = 'none';
   // ---- belt ----
   const cells = beltCells();
@@ -469,8 +549,7 @@ export function updateHud(dt: number, realDt: number) {
       h += '</div>';
     });
     beltEl.innerHTML = h;
-    const sel = inv.slots[inv.sel];
-    if (sel) { bname.style.display = 'block'; bname.textContent = itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + snowClassName(snowClass(sel.dur)) : ''); } else bname.style.display = 'none';
+
   }
   if (panelOpen && panelAcc > 0.35) { panelAcc = 0; renderPanel(); }
   if (devEl) devEl.textContent = `core ${p.core.toFixed(2)} hands ${p.frost.hands | 0} feet ${p.frost.feet | 0} face ${p.frost.face | 0}\nwater ${p.water | 0} food ${p.food | 0} energy ${p.energy | 0} wet ${(p.wet * 100) | 0}% hp ${p.hp | 0} co ${p.co | 0}\nsun ${G.sunElev.toFixed(1)}° wind ${G.wind.toFixed(1)} storm ${G.storm.toFixed(2)}`;
@@ -485,5 +564,5 @@ function renderPanel() {
 function renderJournal() { renderJournalInto(jEl); }      // tabs Цели · Знания · Записки · Карта · Вещества live in ui/journal.ts
 export const panelIsOpen = () => panelOpen || jOpen;
 /** Tests: a fresh first minute for the key hints (nothing revealed, the full list closed). */
-export function resetHintsForTest() { shownKeys.clear(); hintMem.learned = []; hintMem.full = false; playSec = 0; hintKey = ''; }
+export function resetHintsForTest() { shownKeys.clear(); hintMem.learned = []; hintMem.full = false; playSec = 0; hintKey = ''; hintHidden = false; hintAutoDone = false; objKey = ''; }
 void itemName;

@@ -46,8 +46,7 @@ function build(stack: HTMLElement | null, host: HTMLElement) {
   legend.appendChild(row);
   keyEl = document.createElement('div'); keyEl.className = 'sn-key'; keyEl.innerHTML = `<div><span data-l="snow">${snowSub}</span><span class="sep"></span><span data-l="heat">${S.cold} → ${S.warm}</span></div>` +
     `<div><span data-l="wind">${S.wind}: ${S.windSub}</span><span class="sep"></span><span data-l="scent">${S.scent}: ${S.scentSub}</span></div>`; legend.appendChild(keyEl);   // phone: the ramp words live here, per-chip sub-lines are hidden
-  const toasts = stack?.lastElementChild ?? null;                       // legend goes under the objective + shelter chip, above the toasts
-  if (stack) stack.insertBefore(legend, toasts); else host.appendChild(legend);
+  if (stack) stack.appendChild(legend); else host.appendChild(legend);  // the legend goes under the objective + shelter chip (the toasts live in the bottom stack)
   const hud = (host.querySelector('#hud') as HTMLElement | null) ?? host;
   me = document.createElement('div'); me.className = 'p sn-lbl me'; hud.appendChild(me);
   cur = document.createElement('div'); cur.className = 'p sn-lbl cur'; hud.appendChild(cur);

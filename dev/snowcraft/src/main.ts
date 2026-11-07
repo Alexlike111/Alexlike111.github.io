@@ -17,6 +17,7 @@ import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from '
 import { stepZoom, setZoomIndex, zoomIndex, zoomCount, zoomCells, zoomScales, resetZoom } from './engine/zoom';
 import { initTouch } from './ui/touch';
 import { initZoomUi, updateZoomUi } from './ui/zoomui';
+import { initMenu } from './ui/menu';
 import { initSenses, toggleSenses } from './engine/senses';
 import { initSensesUi } from './ui/sensesui';
 import { initHud, updateHud, setFreeCamLabel } from './ui/devhud';
@@ -401,6 +402,7 @@ async function boot() {
   initHud(uiRoot);
   initTouch(uiRoot);
   initZoomUi(uiRoot);
+  initMenu(uiRoot);
   initOverlay(uiRoot, { start: (o) => { newGame(o); }, restart: () => { newGame({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore }); } });
   initSfxHooks();
   initLayers();

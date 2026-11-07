@@ -1,5 +1,6 @@
-// Phone controls (SPEC §1, DESIGN §10): floating left stick (up = jump, far = run), right-hand buttons >= 56 px:
-// Действие (hold, smart cursor) / Прыжок / Взять / Пояс (radial of the belt) / Сумка / Журнал / Парка. Touching the world aims there and holds the action.
+// Phone controls (SPEC §1, DESIGN §10): floating left stick (up = jump, far = run), right-hand buttons >= 36 px (icons, no words; the words are the aria-labels):
+// Действие (hold, smart cursor) / Прыжок / Взять / Пояс (radial of the belt) / Чутьё / Парка in the right-hand cluster; Сумка / Журнал / ⚙ меню in the top-right row.
+// ⚙ only dispatches 'sc:menu' (the settings panel, ui/menu.ts, listens). Touching the world aims there and holds the action. Zoom is pinch + the settings slider.
 // "Поверни телефон" overlay in portrait. Safe-area insets respected. Writes into engine/input.ts.
 import { input, touch } from '../engine/input';
 import { G } from '../game/state';
@@ -11,10 +12,23 @@ import { worldToScreen } from '../engine/render';
 import { stepZoom } from '../engine/zoom';
 
 const S = strings('touch', {
-  action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка',
+  action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка', menu: 'Меню',
   senses: 'Чутьё', rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
-  zoomIn: 'Ближе', zoomOut: 'Дальше', moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
+  moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
 });
+
+// icons: 24-unit grid, 2-unit strokes, drawn in currentColor (the button sets the palette)
+const ICON: Record<string, string> = {
+  act: '<path d="M11 4.5C16.5 4.5 19.8 7.2 20.5 11.2L18.4 11.8C16.8 8.6 13.6 6.6 9.2 6.6Z"/><path d="M14.2 10.2L4.6 19.6"/>',           // pick
+  jump: '<path d="M12 19.5V5"/><path d="M5.5 11.5L12 5L18.5 11.5"/>',                                                               // up arrow
+  take: '<path d="M12 3.5V14"/><path d="M7.5 9.5L12 14L16.5 9.5"/><path d="M4.5 19.5H19.5"/>',                                     // down into a tray
+  belt: '<rect x="2.5" y="5" width="5" height="5" rx="1"/><rect x="9.5" y="5" width="5" height="5" rx="1"/><rect x="16.5" y="5" width="5" height="5" rx="1"/><rect x="2.5" y="14" width="5" height="5" rx="1"/><rect x="9.5" y="14" width="5" height="5" rx="1"/><rect x="16.5" y="14" width="5" height="5" rx="1"/>',   // the six belt cells
+  senses: '<path d="M2 12C5 6.5 19 6.5 22 12C19 17.5 5 17.5 2 12Z"/><circle cx="12" cy="12" r="3"/>',                              // eye
+  bag: '<path d="M6 11Q6 4 12 4Q18 4 18 11V18.5Q18 20.5 16 20.5H8Q6 20.5 6 18.5Z"/><path d="M6 14H18"/><path d="M10.5 4.2V2.5M13.5 4.2V2.5"/>',   // backpack
+  journal: '<path d="M12 6.5C10 4.8 6.5 4.5 3.5 5.2V19.2C6.5 18.5 10 18.8 12 20.5C14 18.8 17.5 18.5 20.5 19.2V5.2C17.5 4.5 14 4.8 12 6.5Z"/><path d="M12 6.5V20.5"/>', // open book
+  parka: '<path d="M9 4L12 6L15 4L19.5 7L17.5 11L16.5 10.5V20.5H7.5V10.5L6.5 11L4.5 7Z"/><path d="M12 6V20.5"/>',   // jacket with a hood collar and a zip
+  menu: '<path d="M12 2.5L13.5 5L16.2 4.2L16.6 7L19.3 7.8L18.3 10.4L20.5 12L18.3 13.6L19.3 16.2L16.6 17L16.2 19.8L13.5 19L12 21.5L10.5 19L7.8 19.8L7.4 17L4.7 16.2L5.7 13.6L3.5 12L5.7 10.4L4.7 7.8L7.4 7L7.8 4.2L10.5 5Z"/><circle cx="12" cy="12" r="3"/>',   // gear
+};
 
 let root: HTMLElement | null = null;
 let layer: HTMLElement | null = null;
@@ -30,48 +44,53 @@ let R = 56;                                     // stick radius px (follows the 
 const AIM_LIFT = 48;                            // the aim cursor sits this many CSS px above the finger (the finger hides the spot it aims at)
 
 const CSS = `
-:root{--u:clamp(40px,13vh,60px);--tw:max(58px,calc(var(--u)*1.2));--th:max(34px,calc(var(--u)*.85));--zs:max(34px,calc(var(--u)*.75));--R:clamp(34px,15vh,56px)}
+:root{--u:clamp(36px,13vh,60px);--R:clamp(34px,15vh,56px);--trow:calc(var(--u)*3 + 24px)}
 #touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;
   padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0)}
-#touch .tb{box-sizing:border-box;position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;text-align:center;color:#dff0ff;
-  background:rgba(14,26,44,.62);border:2px solid rgba(124,198,238,.55);border-radius:50%;font-size:13px;line-height:1.05;letter-spacing:.2px;
-  backdrop-filter:blur(2px);-webkit-tap-highlight-color:transparent}
-#touch .tb.sq{border-radius:12px;font-size:13px;padding:0 2px}
+#touch .tb{box-sizing:border-box;position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;color:#dff0ff;
+  background:rgba(14,26,44,.62);border:2px solid rgba(124,198,238,.55);border-radius:50%;backdrop-filter:blur(2px);-webkit-tap-highlight-color:transparent}
+#touch .tb svg{width:52%;height:52%;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;overflow:visible;pointer-events:none;filter:drop-shadow(0 1px 0 #05080f)}
+#touch .tb.sq{border-radius:10px}
 #touch .tb:active,#touch .tb.on{background:rgba(124,198,238,.45);border-color:#cfeaff}
-#touch #tb-act{width:calc(var(--u)*1.6);height:calc(var(--u)*1.6);right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));font-size:15px;border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55)}
-#touch #tb-jump{width:calc(var(--u)*1.15);height:calc(var(--u)*1.15);right:calc(12px + var(--u)*1.6 + 6px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+/* right-hand cluster (SPEC §1): column A sits over Действие (right edge 12 + .3u), column B left of it (centred on Прыжок); rows counted from the bottom:
+   0 Действие / Прыжок, 1 Взять / Пояс, 2 Чутьё / Парка, 3 «Рядом». The gap between two buttons is 6 px; all sizes follow --u (36 px on a landscape phone). */
+#touch #tb-act{width:calc(var(--u)*1.6);height:calc(var(--u)*1.6);right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55);color:#ffe7bd}
+#touch #tb-act svg{width:50%;height:50%}
+#touch #tb-jump{width:calc(var(--u)*1.15);height:calc(var(--u)*1.15);right:calc(18px + var(--u)*1.6 + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
 #touch #tb-take{width:var(--u);height:var(--u);right:calc(12px + var(--u)*.3 + env(safe-area-inset-right,0px));bottom:calc(18px + var(--u)*1.6 + env(safe-area-inset-bottom,0px))}
-#touch #tb-belt{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(18px + var(--u)*1.15 + env(safe-area-inset-bottom,0px))}
-#touch #tb-senses{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.15 + env(safe-area-inset-bottom,0px));font-size:12px}
+#touch #tb-belt{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(18px + var(--u)*1.6 + env(safe-area-inset-bottom,0px))}
+#touch #tb-senses{width:var(--u);height:var(--u);right:calc(12px + var(--u)*.3 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.6 + env(safe-area-inset-bottom,0px))}
 #touch #tb-senses.act{background:rgba(40,120,96,.62);border-color:#8cf5cf;color:#eafff7}
-#touch #tb-bag,#touch #tb-jour,#touch #tb-parka{width:var(--tw);height:var(--th);top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-parka{right:calc(12px + env(safe-area-inset-right,0px))}
-#touch #tb-jour{right:calc(18px + var(--tw) + env(safe-area-inset-right,0px))}
-#touch #tb-bag{right:calc(24px + var(--tw)*2 + env(safe-area-inset-right,0px))}
-/* zoom: two small buttons under the top row on the right edge: clear of the stick, the cue column on the left and the action cluster */
-#touch #tb-zin,#touch #tb-zout{width:var(--zs);height:var(--zs);right:calc(12px + env(safe-area-inset-right,0px));font-size:22px;font-weight:700;line-height:1;background:rgba(14,26,44,.55)}
-#touch #tb-zin{top:calc(14px + var(--th) + env(safe-area-inset-top,0px))}
-#touch #tb-zout{top:calc(20px + var(--th) + var(--zs) + env(safe-area-inset-top,0px))}
+#touch #tb-parka{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.6 + env(safe-area-inset-bottom,0px))}
+/* top-right row: Сумка, Журнал, ⚙ меню (icon-only squares) */
+#touch #tb-bag,#touch #tb-jour,#touch #tb-menu{width:var(--u);height:var(--u);top:calc(8px + env(safe-area-inset-top,0px));border-radius:10px}
+#touch #tb-menu{right:calc(12px + env(safe-area-inset-right,0px))}
+#touch #tb-jour{right:calc(18px + var(--u) + env(safe-area-inset-right,0px))}
+#touch #tb-bag{right:calc(24px + var(--u)*2 + env(safe-area-inset-right,0px))}
 /* the walking stick is FIXED in the bottom-left corner and always visible; the knob follows the thumb */
 #touch .stick{position:absolute;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));width:calc(var(--R)*2);height:calc(var(--R)*2);box-sizing:border-box;border-radius:50%;border:2px solid rgba(190,226,250,.55);background:rgba(14,26,44,.35)}
 #touch .knob{position:absolute;width:calc(var(--R)*.95);height:calc(var(--R)*.95);margin:calc(var(--R)*-.475) 0 0 calc(var(--R)*-.475);border-radius:50%;background:rgba(190,226,250,.45);border:2px solid #cfeaff;box-sizing:border-box}
 #touch .ghost{position:absolute;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(14px + var(--R)*2 + 4px + env(safe-area-inset-bottom,0px));display:none;font-size:12px;color:#cfeaff;text-shadow:0 1px 0 #05080f;white-space:nowrap}
 #touch .rad{position:absolute;inset:0;pointer-events:auto;display:none;background:linear-gradient(0deg,rgba(5,9,16,.5),rgba(5,9,16,0) 45%)}
-#touch .rad .cap{position:absolute;width:max-content;max-width:62vw;box-sizing:border-box;text-align:right;font:700 13px 'Jura',system-ui,sans-serif;color:#e8f4ff;text-shadow:0 1px 0 #05080f;background:rgba(8,16,30,.88);border:1px solid rgba(124,198,238,.4);border-radius:4px;padding:4px 10px}
-#touch .rad .slot{position:absolute;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
+#touch .rad .cap{position:absolute;right:8px;bottom:calc(64px + env(safe-area-inset-bottom,0px));width:max-content;max-width:90vw;box-sizing:border-box;text-align:center;font:700 13px 'Jura',system-ui,sans-serif;color:#e8f4ff;text-shadow:0 1px 0 #05080f;background:rgba(8,16,30,.88);border:1px solid rgba(124,198,238,.4);border-radius:4px;padding:4px 10px;white-space:nowrap}
+#touch .rad .slot{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
   display:flex;flex-direction:column;align-items:center;justify-content:center;color:#dff0ff;font-size:13px;text-align:center}
 #touch .rad .slot.sel{border-color:#ffc46e;background:rgba(60,34,12,.9)}
-#touch .rad .slot.sm{width:44px;height:44px;margin:-22px 0 0 -22px}
-#touch .rad .slot.sm canvas{width:24px;height:24px}
-#touch .rad canvas{width:28px;height:28px;image-rendering:pixelated}
-#touch .rad .slot b{position:absolute;left:2px;top:1px;font-size:13px;line-height:1;font-weight:700;color:#cfeaff;background:rgba(5,8,15,.82);padding:1px 4px;border-radius:3px}
+#touch .rad .slot.sm{width:34px;height:34px;margin:-17px 0 0 -17px}
+#touch .rad .slot.sm canvas{width:20px;height:20px}
+#touch .rad canvas{width:24px;height:24px;image-rendering:pixelated}
+#touch .rad .slot b{position:absolute;left:1px;top:0;font-size:11px;line-height:1;font-weight:700;color:#cfeaff;background:rgba(5,8,15,.82);padding:1px 3px;border-radius:3px}
+/* the belt radial takes the screen: the other buttons step aside while it is open, so its slots never sit on them */
+body.radial-open #touch .tb:not(#tb-belt),body.radial-open #nearbtn{visibility:hidden}
 #rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Jura',system-ui,sans-serif;font-weight:600}
 #rotate b{font-family:'Pixelify Sans','Jura',sans-serif;font-size:26px;margin-bottom:10px}
 `;
 
-function btn(id: string, label: string, sq = false) {
+function btn(id: string, key: keyof typeof ICON, label: string, sq = false) {
   const b = document.createElement('div');
-  b.id = id; b.className = 'tb' + (sq ? ' sq' : ''); b.textContent = label; layer!.appendChild(b); return b;
+  b.id = id; b.className = 'tb' + (sq ? ' sq' : ''); b.setAttribute('role', 'button'); b.setAttribute('aria-label', label); b.title = label;
+  b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[key]}</svg>`;
+  layer!.appendChild(b); return b;
 }
 function hold(b: HTMLElement, down: () => void, up: () => void) {
   const ids = new Set<number>();
@@ -91,30 +110,30 @@ export function initTouch(uiRoot: HTMLElement) {
   let seenStick = false; try { seenStick = localStorage.getItem('sc.stickHint') === '1'; } catch { /* no storage */ }
   if (!seenStick) ghost.style.display = 'block';
 
-  const act = btn('tb-act', S.action);
+  const act = btn('tb-act', 'act', S.action);
   let actTimer = 0;
   hold(act, () => {
     actHeld = true; touch.primary = true; touch.smart = true; input.primaryPressed = true; input.hasAim = false; input.aimMode = 'smart';
     // long-press on a block ghost = dome (lean) mode
     actTimer = window.setTimeout(() => { if (touch.primary && inv.slots[inv.sel]?.id === 'snow_block') input.smartToggle = true; }, 650);
   }, () => { clearTimeout(actTimer); actHeld = false; touch.primary = touch.aimed; touch.smart = false; if (!touch.aimed) input.aimMode = 'touch'; });
-  const jump = btn('tb-jump', S.jump);
+  const jump = btn('tb-jump', 'jump', S.jump);
   hold(jump, () => { jumpBtn = true; touch.jumpHeld = true; input.jumpPressed = true; }, () => { jumpBtn = false; touch.jumpHeld = jumpStick; });
-  const take = btn('tb-take', S.take);
+  const take = btn('tb-take', 'take', S.take);
   hold(take, () => { input.interactPressed = true; }, () => { /* one-shot */ });
-  const belt = btn('tb-belt', S.belt);
+  const belt = btn('tb-belt', 'belt', S.belt);
   hold(belt, () => { toggleRadial(); }, () => { /* toggle */ });
-  const bag = btn('tb-bag', S.bag, true);
-  hold(bag, () => { input.craftPressed = true; }, () => {});
-  const jour = btn('tb-jour', S.journal, true);
-  hold(jour, () => { input.journalPressed = true; }, () => {});
-  const parka = btn('tb-parka', S.parka, true);
-  hold(parka, () => { input.ventPressed = true; }, () => {});
-  const zin = btn('tb-zin', '+'), zout = btn('tb-zout', '−');                  // zoom (DESIGN §14): small buttons on the free left edge, under the body panel
-  zin.setAttribute('aria-label', S.zoomIn); zout.setAttribute('aria-label', S.zoomOut);
-  hold(zin, () => { stepZoom(1); }, () => {}); hold(zout, () => { stepZoom(-1); }, () => {});
-  const sens = btn('tb-senses', S.senses);                      // «Чутьё»: the senses overlay (engine/senses.ts, ui/sensesui.ts keeps the .act state)
+  const sens = btn('tb-senses', 'senses', S.senses);            // «Чутьё»: the senses overlay (engine/senses.ts, ui/sensesui.ts keeps the .act state)
   hold(sens, () => { input.sensesPressed = true; }, () => {});
+  const parka = btn('tb-parka', 'parka', S.parka);              // «Парка»: the vent of the parka (V on desktop)
+  hold(parka, () => { input.ventPressed = true; }, () => {});
+  // top-right row: Сумка, Журнал, ⚙ меню (the settings panel is agent M's: it listens for 'sc:menu')
+  const bag = btn('tb-bag', 'bag', S.bag, true);
+  hold(bag, () => { input.craftPressed = true; }, () => {});
+  const jour = btn('tb-jour', 'journal', S.journal, true);
+  hold(jour, () => { input.journalPressed = true; }, () => {});
+  const menu = btn('tb-menu', 'menu', S.menu, true);
+  hold(menu, () => { window.dispatchEvent(new Event('sc:menu')); }, () => {});
 
   radial = document.createElement('div'); radial.className = 'rad'; layer.appendChild(radial);
   radial.addEventListener('pointerdown', (e) => { if (e.target === radial || (e.target as HTMLElement).classList.contains('cap')) { closeRadial(); e.preventDefault(); e.stopPropagation(); } });
@@ -248,19 +267,25 @@ function toggleRadial() {
   const br = document.getElementById('tb-belt')?.getBoundingClientRect();
   // the belt cells in key order: six, and the three of the belt pouch (keys 7-9) when it is carried (DESIGN §17): nine slots on a wider arc
   const cells = beltCells(), nc = cells.length, more = nc > 6;
-  const cx = br ? br.left + br.width / 2 : W - 150, cy = br ? br.top + br.height / 2 : Hh - 120, rad = more ? Math.min(176, Hh * 0.45) : Math.min(140, Hh * 0.36);
+  const live = !!br && br.width > 0;
+  const cx = live ? br!.left + br!.width / 2 : W - 150, cy = live ? br!.top + br!.height / 2 : Hh - 120;
+  // slots never touch each other: six 44 px slots on a 0.62 pi arc, nine 34 px slots on 0.70 pi; the arc's top slot stays on screen
+  const sr = more ? 17 : 22, rad = Math.min(more ? 150 : 140, cy - sr - 8), span = more ? 0.70 : 0.62, xs: number[] = [];
   for (let k = 0; k < nc; k++) {
     const i = cells[k];
-    const a = Math.PI * (0.92 + 0.62 * k / (nc - 1));          // from the left of the button, over the top, to straight above it
+    const a = Math.PI * (0.92 + span * k / (nc - 1));          // from the left of the button, over the top, to straight above it
     const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' sel' : '') + (more ? ' sm' : '');
-    el.style.left = Math.max(30, Math.min(W - 30, cx + Math.cos(a) * rad)) + 'px'; el.style.top = Math.max(30, Math.min(Hh - 30, cy + Math.sin(a) * rad)) + 'px';
+    const sx = Math.max(sr + 4, Math.min(W - sr - 4, cx + Math.cos(a) * rad)); xs.push(sx);
+    el.style.left = sx + 'px'; el.style.top = Math.max(sr + 4, Math.min(Hh - sr - 4, cy + Math.sin(a) * rad)) + 'px';
     const s = inv.slots[i];
     const n = document.createElement('b'); n.textContent = String(k + 1); el.appendChild(n);
     if (s) { const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc); el.title = itemName(s.id); }
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); closeRadial(); });
     radial.appendChild(el);
   }
-  const cap = document.createElement('div'); cap.className = 'cap'; cap.style.top = Math.max(4, cy - rad - 56) + 'px'; cap.style.right = Math.max(4, W - cx - 40) + 'px';
+  const cap = document.createElement('div'); cap.className = 'cap';        // the caption sits above the belt, left of the arc: clear of the arc, the objective and the top row
+  const edge = Math.max(60, Math.min(...xs) - sr - 10);                       // its right edge: just left of the arc's outermost slot
+  cap.style.right = (W - edge) + 'px'; cap.style.maxWidth = (edge - 8) + 'px';
   const sel = inv.slots[inv.sel]; cap.textContent = (sel ? itemName(sel.id) + ' · ' : '') + S.radialCap; radial.appendChild(cap);
   radial.style.display = 'block'; document.body.classList.add('radial-open');
   clearTimeout(radialTimer); radialTimer = window.setTimeout(closeRadial, 7000);

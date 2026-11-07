@@ -36,8 +36,13 @@ const CSS = `
 #compass.storm .tx{background:rgba(3,6,12,.93);border-color:#cfeaff}
 #compass.storm .tx b{font-size:14px}
 #compass.storm .tx span{font-size:13px}
-body.touch-ui #compass{top:calc(96px + env(safe-area-inset-top,0px));bottom:auto}
-body.touch-ui #compass svg{width:40px;height:40px}
+/* phone: the plate sits in the top-left stack, under the dial (tall window) or under the one chip (short window), never in the right-hand cluster */
+body.touch-ui #compass{left:calc(142px + env(safe-area-inset-left,0px));right:auto;top:calc(96px + env(safe-area-inset-top,0px));bottom:auto;gap:5px}
+body.touch-ui #compass svg{width:36px;height:36px}
+@media (max-height:339px){body.touch-ui #compass{left:calc(8px + env(safe-area-inset-left,0px));top:calc(50px + env(safe-area-inset-top,0px))}}
+#compass .tx b{max-width:min(46vw,240px);overflow:hidden;text-overflow:ellipsis}
+body.hud-calm #compass{opacity:.6}
+body.ui-min #compass .tx b{display:none}
 `;
 
 function build() {

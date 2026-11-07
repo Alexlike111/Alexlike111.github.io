@@ -110,8 +110,9 @@ const CSS = `
 #hud .nearl .nr .t{flex:1;min-width:0}#hud .nearl .nr small{display:block;opacity:.7;font-weight:600;font-size:11px}
 #hud .nearl .nr b{color:#8fe3b0;font-size:13px}
 #hud .nearl .nr.heavy b{color:#ffc46e}
-#nearbtn{position:fixed;z-index:31;display:none;width:var(--u,60px);height:var(--u,60px);border-radius:50%;box-sizing:border-box;right:calc(18px + var(--u,60px)*1.675 + env(safe-area-inset-right,0px));bottom:calc(30px + var(--u,60px)*3.15 + env(safe-area-inset-bottom,0px));
-  background:rgba(60,34,12,.7);border:2px solid rgba(255,196,110,.85);color:#ffe7bd;font:700 13px 'Jura',system-ui,sans-serif;align-items:center;justify-content:center;text-align:center;line-height:1.05;touch-action:none;-webkit-tap-highlight-color:transparent}
+/* phone: «Рядом N» is a pill on the top row of the right-hand cluster (above the Чутьё / Парка row, see ui/touch.ts): one unit tall, two units wide */
+#nearbtn{position:fixed;z-index:31;display:none;width:max(96px,calc(var(--u,36px)*2.5));height:var(--u,36px);border-radius:10px;box-sizing:border-box;right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(30px + var(--u,36px)*3.6 + env(safe-area-inset-bottom,0px));
+  background:rgba(60,34,12,.7);border:2px solid rgba(255,196,110,.85);color:#ffe7bd;font:700 13px 'Jura',system-ui,sans-serif;align-items:center;justify-content:center;text-align:center;line-height:1.05;white-space:nowrap;padding:0 6px;touch-action:none;-webkit-tap-highlight-color:transparent}
 #nearbtn:active{background:rgba(124,198,238,.45)}
 body.touch-ui #hud .pnl{max-height:calc(100vh - 12px - env(safe-area-inset-bottom,0px));padding:6px 8px}
 body.touch-ui #hud .pnl .cell{min-height:48px;aspect-ratio:auto;height:48px}
