@@ -11,13 +11,17 @@ import { fuelMinutes } from './items';
 import { siteAt, LOC, worldInfo, sites } from './locations';
 import { driftSnapshot } from './drift';
 import { body } from './player';
-import { TS } from '../engine/grid';
+import { TS, W, mat } from '../engine/grid';
+import { MAT } from '../content/materials';
+import { DOOR } from './snowpack';
 import { knows, lore, stepLore, probeTarget, loreSave, loreLoad, noteTitle, techName } from './lore';
 import { target } from './tools';
 import { stepMine, resetMine } from './mine';
 export { knows, learn, learnAll, forgetAll, lore, readNote, TECHS, NOTES, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, probe, seenCount, markSeen } from './lore';
 
 const S = strings('quest', {
+  door: 'Откопай дверь дома: лопата (слот 2), копай вниз у стены — ступенями, чтобы выбраться',
+  doorHint: 'Дверь занесло: выбери лопату (слот 2) и копай у стены дома вниз. Делай ступени, а не колодец: из колодца не выпрыгнуть.',
   stove: 'Растопи печь в доме (уголь из дизельной, спички)',
   baro: 'Проверь барометр на столбе у дома',
   keeper: 'Прочти журнал смотрителя: сундук-полка в доме',
@@ -88,6 +92,7 @@ function radioParts(): number {
   return Math.min(3, have + count('radio_triode') + count('radio_coil') + count('battery'));
 }
 export const GOALS: Goal[] = [
+  { id: 'door', text: () => S.door, done: () => flags.has('door') },       // DESIGN §13: the east door of the house is buried under the lee drift at the start
   { id: 'stove', text: () => S.stove, done: () => flags.has('stove') },
   { id: 'baro', text: () => S.baro, done: () => flags.has('baro') || count('barometer') > 0 },
   { id: 'keeper', text: () => S.keeper, done: () => lore.read.has('s1') },
@@ -128,7 +133,7 @@ export function resetQuest() {
   Object.assign(prog, { fire: false, baro: false, shelter: false, sleep: false, mast: false, radio: false, ending: null }); prog.parts.length = 0;
   Object.assign(runStats, { seals: 0, storms: 0, bestStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99 });
   Object.assign(questState, { icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '', radioFixed: false, lit: false });
-  siteAcc = 0;
+  siteAcc = 0; doorAcc = 0; doorT = 0; doorHinted = false;
 }
 let loaded: any = null;
 export function initQuest() { /* event wiring happens at import time; kept for the HUD's init call */ }
@@ -151,6 +156,7 @@ export function questLoad(s: any) {
 }
 on('fire_lit', (d: { kind: string }) => { runStats.fires++; if (d.kind === 'stove') { flags.add('stove'); prog.fire = true; } });
 on('barometer', () => { flags.add('baro'); prog.baro = true; });
+on('door_dug', () => { flags.add('door'); });
 on('shelter', (d: { stars: number; closed: boolean }) => { if (d.closed && d.stars >= 2) { flags.add('shelter'); prog.shelter = true; } runStats.bestStars = Math.max(runStats.bestStars, d.closed ? d.stars : 0); });
 on('seal_caught', () => { runStats.seals++; });
 on('storm_end', (d: { report?: { stars: number; text?: string } }) => { runStats.storms++; if (d.report) { runStats.bestStars = Math.max(runStats.bestStars, d.report.stars); if (d.report.text) log('storm', d.report.text); } });
@@ -171,6 +177,21 @@ on('radio_fixed', () => {
   questState.icebreakerAt = G.time + 2 * 1440;
 });
 
+/** The buried east door (snowpack.DOOR): done when its front is clear (a few loose cells are fine), or the player is already inside the house. */
+let doorAcc = 0, doorT = 0, doorHinted = false;
+export function doorFrontSnow(): number {
+  let n = 0;
+  for (let y = DOOR.y0; y < DOOR.y1; y++) for (let x = DOOR.x0; x < DOOR.x1; x++) { const m = mat[y * W + x]; if (m === MAT.SNOW || m === MAT.PACKED || m === MAT.ICE || m === MAT.SNOWBLOCK) n++; }
+  return n;
+}
+function doorWatch(dt: number) {
+  if (flags.has('door') || DOOR.crest <= 0) return;
+  doorAcc += dt; doorT += dt; if (doorAcc < 0.5) return; doorAcc = 0;
+  const p = G.player;
+  const inside = !!p && p.x > LOC.house.L * 4 + 4 && p.x < LOC.house.R * 4 && p.y > LOC.station.y - 30 && p.y <= LOC.station.y + 2;
+  if (inside || doorFrontSnow() <= 14) { emit('door_dug', { inside }); return; }
+  if (!doorHinted && doorT > 45) { doorHinted = true; toast(S.doorHint, 'info'); }
+}
 let siteAcc = 0;
 function siteWatch(dt: number) {
   siteAcc += dt; if (siteAcc < 0.5) return; siteAcc = 0;
@@ -186,7 +207,7 @@ function signalLit(): boolean {
 }
 export function stepQuest(dt: number) {
   if (G.paused || !G.player) return;
-  siteWatch(dt);
+  siteWatch(dt); doorWatch(dt);
   stepLore(dt); probeTarget(target()); stepMine(dt);
   const q = questState;
   if (q.ended) return;

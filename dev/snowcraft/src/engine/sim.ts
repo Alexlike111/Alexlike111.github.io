@@ -36,6 +36,9 @@ let nBurn = 0;
 const stamp = new Uint16Array(W * H);        // scratch visited marks for BFS (level / methane)
 let stampN = 0;
 let depAcc = 0;
+/** Snowfall deposition scale (DESIGN §13). 1 = the raw engine rate (0.25 cells / s / column at G.snowfall 1, what the headless sim tests measure); the game sets a
+ *  lower one in main.ts so a calm hour adds a few cells and a storm a metre, instead of burying the dug-out door within minutes. */
+export const snowCfg = { rate: 1, curve: 1 };       // curve > 1: calm snowfall adds almost nothing, storms add most of it (deposition ~ snowfall^curve)
 let prevX0 = -1, prevX1 = -1;
 let inited = false;
 
@@ -475,7 +478,7 @@ function snowfallTick(x0: number, x1: number) {
   const sf = G.snowfall;
   if (sf <= 0.001) return;
   const ncol = x1 - x0 + 1;
-  depAcc += ncol * sf * (1 / 240);
+  depAcc += ncol * (snowCfg.curve === 1 ? sf : Math.pow(sf, snowCfg.curve)) * (1 / 240) * snowCfg.rate;
   while (depAcc >= 1) { depAcc -= 1; depositAt(x0 + ((rnd() * ncol) | 0)); }
 }
 
@@ -603,7 +606,7 @@ export function stepSim(dt: number): void {
   const x0 = Math.max(1, w.x0 - MARGIN), x1 = Math.min(W - 2, w.x1 + MARGIN);
   if (x1 > x0) {
     // snow accumulates on columns outside the window; columns entering it receive their share
-    const rate = G.snowfall * dt * 0.25;
+    const rate = (snowCfg.curve === 1 ? G.snowfall : Math.pow(G.snowfall, snowCfg.curve)) * dt * 0.25 * snowCfg.rate;
     if (rate > 0) for (let x = 0; x < W; x++) if ((x < x0 || x > x1) && colSnow[x] < 12) colSnow[x] += rate;
     if (prevX0 >= 0) {
       const lo = Math.min(x0, prevX0), hi = Math.max(x1, prevX1);

@@ -251,7 +251,7 @@ function cabin(L: number, R: number, F: number, n: number, openEast = false) {
   for (let x = (L - 1) * 4; x < (R + 2) * 4; x++) {
     const sy = Math.round(topY - 9 + Math.abs(x + 0.5 - cx) * 0.5);                 // DESIGN §13: a real snow load on the roof (0.8 m over the step corners)
     let y = sy; while (y < H && mat[y * W + x] === AIR) y++;
-    for (let yy = sy; yy < y; yy++) { const i = yy * W + x, d = yy - sy; if (d < 3) { mat[i] = M.SNOW; aux[i] = 14 + d * 12; } else { mat[i] = M.PACKED; aux[i] = Math.min(165, 100 + d * 4 + (x * 7 % 9)); } flags[i] = 0; }
+    for (let yy = sy; yy < y; yy++) { const i = yy * W + x, d = yy - sy; mat[i] = M.SNOW; aux[i] = Math.min(96, 14 + d * 9 + (x * 7 % 7)); flags[i] = 0; }      // powder (not structural: a PACKED slab this wide would fail the support solver), dense enough to read as a slab
   }
   return { top, roofTop: topY - 3 };
 }

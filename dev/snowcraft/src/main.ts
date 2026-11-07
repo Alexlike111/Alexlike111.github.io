@@ -8,7 +8,7 @@ import { initRender, render, resize, addLayer, screenToWorld, worldToScreen } fr
 import { updateCamera, addShake } from './engine/camera';
 import { W, H, wakeRect, mat, aux as auxArr, TS } from './engine/grid';
 import { WALK } from './content/materials';
-import { initSim, stepSim } from './engine/sim';
+import { initSim, stepSim, snowCfg, simStats } from './engine/sim';
 import { initHeat, stepHeat, addHeat } from './engine/heat';
 import { initStructure, stepStructure } from './engine/structure';
 import { stepBodies, clearBodies, drawBodies, clusterHitsBox } from './engine/bodies';
@@ -33,6 +33,7 @@ import { seedStarterDrift } from './game/starter';
 import { purgeMethane } from './game/mine';
 import { applySave, applyQuestAgain, type SaveData } from './game/save';
 import { initWeather, stepWeather, setDay, setClock, wx } from './game/weather';
+import { stepUnstuck } from './game/unstuck';
 import { initPlayer, stepPlayer, applyDifficulty, damage, die, bodyHeat, body, setRespawn } from './game/player';
 import { stepTools, stepDrops, collectHeldLights, target, heldInfo, toolState, cutRegion } from './game/tools';
 import { stepFixtures, collectLights, resetFixtures } from './game/fixtures';
@@ -60,6 +61,7 @@ G.mobile = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 G.quality = (params.has('q') ? Math.max(0, Math.min(2, +params.get('q')!)) : G.mobile ? 1 : 2) as 0 | 1 | 2;
 const ladder = !params.has('q') && !params.has('noladder');
 
+snowCfg.rate = 0.12; snowCfg.curve = 2;          // DESIGN §13: a storm adds ~0.03 cells/s per column (a 12 h storm ~ 9 cells), calm weather almost nothing
 const STEP = 1 / 60;
 let acc = 0, ready = false, freeCam = false, shotFrames = 0, genMs = 0;
 let fpsAvg = 60, fpsMin = 60;
@@ -105,6 +107,7 @@ function newGame(o: StartOpts = {}) {
   const [sx, sy] = freeSpot(spawn.spawnX, spawn.spawnY);
   initPlayer(sx, sy);
   giveStartKit();
+  { const k = inv.slots.findIndex(s => s && s.id === 'shovel'); if (k >= 0 && k < 6) select(k); }       // the first job is digging out the door
   setRespawn(sx, sy);
   if (o.save) applySave(o.save);                       // Продолжить: saved cells / fixtures / body laid over the regenerated world (before the caches are built)
   const px = G.player.x, py = G.player.y;
@@ -196,6 +199,7 @@ function tick(dt: number) {
   stepWeather(dt);
   if (!freeCam) {
     stepPlayer(dt);
+    stepUnstuck(dt);
     stepTools(dt);
   } else {
     const sp = (input.run ? 220 : 90) * dt;
@@ -380,6 +384,7 @@ const sc = {
   senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
   setQuality(q: 0 | 1 | 2) { G.quality = q; resize(); },
+  simStats, snowCfg,
   zoom: { step: stepZoom, set: setZoomIndex, index: zoomIndex, count: zoomCount, cells: zoomCells, scales: () => zoomScales(), reset: resetZoom },
   viewerLight() { /* kept for old harnesses */ },
 };

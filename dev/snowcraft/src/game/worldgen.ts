@@ -241,6 +241,14 @@ function buildSea() {
     const slab = clamp(0.2 + 0.9 * l + (fbm1(X / 41 + 13, 2) - 0.4) * 1.3, 0, 1);
     const loose = Math.round(clamp(2 + 3 * fbm1(X / 23 + 4, 2) - slab * 2, 0, 5));
     fillSnow(x, top - dep, top, Math.min(loose, dep), slab);
+    // DESIGN §13: the sea ice keeps only 0.3-0.8 m of snow (fast ice) / a bit more on the pack, so the seal holes stay findable.
+    // The thick cover above is generated first (the rand() draws stay exactly as they were) and the top of it is shovelled off again.
+    const want = Math.round(clamp(dep * (x < FAST1 ? 0.36 : 0.5), 0, 9));
+    if (dep > want) {
+      for (let y = top - dep; y < top - want; y++) { const i = y * W + x; mat[i] = AIR; aux[i] = 0; flags[i] = 0; }
+      for (let k = 0; k < Math.min(2, want); k++) { const i = (top - want + k) * W + x; mat[i] = SNOW; aux[i] = 8 + ((((x * 31 + k * 17) % 29)) | 0); }     // a thin loose crown again
+      dep = want;
+    }
     snowDepth[x] = dep; surf[x] = top - dep;
   }
   // hidden crack: snow bridge over the gap

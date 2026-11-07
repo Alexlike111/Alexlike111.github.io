@@ -225,7 +225,8 @@ registerTest('ice', 'событие дрейфа: предупреждение, 
 registerTest('quest', 'цепочка первого дня и концовка «Ледокол»', t => {
   const s0 = { ...questState }, l0 = loreSave();
   resetQuest();
-  t.expect(GOALS[0].id === 'stove' && /печь/.test(objective()), 'первая цель: ' + objective());
+  t.expect(GOALS[0].id === 'door' && /Откопай/.test(objective()), 'первая цель — откопать дверь: ' + objective());
+  emit('door_dug', {}); t.expect(GOALS[1].id === 'stove' && /печь/.test(objective()), 'вторая цель — печь: ' + objective());
   emit('fire_lit', { kind: 'stove' }); t.expect(/барометр/i.test(objective()), 'вторая цель: ' + objective());
   emit('barometer', {}); t.expect(/журнал смотрителя/i.test(objective()), 'третья цель — прочесть журнал: ' + objective());
   readNote('s1'); t.expect(/★★|Утепли/.test(objective()), 'четвёртая цель: ' + objective());
