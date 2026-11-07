@@ -7,7 +7,7 @@ import { G } from '../game/state';
 export const ZOOM_MIN_CELLS = 200;          // most zoomed in: at least this many cells across the width
 export const ZOOM_MAX_CELLS = 700;          // most zoomed out
 export const ZOOM_DEFAULT_DESKTOP = 400;
-export const ZOOM_DEFAULT_PHONE = 340;      // a phone screen is small and the finger is fat: the world is drawn a bit larger
+export const ZOOM_DEFAULT_PHONE = 250;      // a phone screen is small and the finger is fat: the world is drawn larger (~3.4 css px per cell on a 844 px phone)
 const KEY = 'sc.zoom';
 
 let devW = 1600;                            // device pixels across the window (set by render.resize)

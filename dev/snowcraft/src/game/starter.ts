@@ -2,8 +2,12 @@
 // of ~250-340 kg/m3 (the ideal block class) while the rest of the snowpack nearby is loose (< 220, crumbles when cut).
 import { W, mat, aux, flags, shade, edited } from '../engine/grid';
 import { MAT } from '../content/materials';
+import { DOOR } from './snowpack';
 
 export function seedStarterDrift(spawnX: number) {
+  // DESIGN §13: the spawn stands on the wind-slab lee drift of the house (snowpack.ts, aux 140-200 = 290-380 kg/m3): the first knife cut works right there. The old
+  // extra slab 34-70 cells east of the spawn buried the coal sacks in front of the generator shed (x 740-756), so it is only a fallback now.
+  if (DOOR.crest > 0) return;
   const xa = spawnX + 34, xb = spawnX + 70;
   for (let x = xa; x <= xb; x++) {
     let top = 200; while (top < 600 && mat[top * W + x] === MAT.AIR) top++;

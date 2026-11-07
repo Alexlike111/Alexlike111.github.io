@@ -742,14 +742,15 @@ function interactAction(T: Target, selId: string | null) {
   if (!f) f = fixtureNear(p.x, p.y - 8, 18, (o) => !!FIXTURE_DEFS[o.kind] && o.kind !== 'table' && o.kind !== 'workbench' && !(o.kind === 'hide_door' && false));
   // DESIGN §12: containers, lying things, a backpack and a parked sled are chosen through the nearby list (E = the nearest one in front, E held = the list)
   const near = nearbyList();
+  // the cursor points at the fixture (mouse), or it is the one the target logic picked
+  const aimedAt = !!f && input.aimMode === 'mouse' && (T.fixture === f || (toolState.aimX >= f.tx * TS - 3 && toolState.aimX <= (f.tx + f.tw) * TS + 3 && toolState.aimY >= f.ty * TS - 3 && toolState.aimY <= (f.ty + f.th) * TS + 3));
   if (f && !isBoxFixture(f)) {
     // a stove / door / bed wins when the cursor points at it or it is nearer than the nearest lying thing
     const fd = Math.hypot(f.tx * TS + f.tw * 2 - p.x, f.ty * TS + f.th * 2 - (p.y - 8));
-    const aimedAt = input.aimMode === 'mouse' && (T.fixture === f || (toolState.aimX >= f.tx * TS - 3 && toolState.aimX <= (f.tx + f.tw) * TS + 3 && toolState.aimY >= f.ty * TS - 3 && toolState.aimY <= (f.ty + f.th) * TS + 3));
     if (aimedAt || !near.length || fd < near[0].dist - 2) { if (fxInteract(f)) return; }
   }
   if (near.length) {
-    const aimed = f && isBoxFixture(f) ? near.find(n => n.f === f) : undefined;
+    const aimed = f && aimedAt && isBoxFixture(f) ? near.find(n => n.f === f) : undefined;
     if (aimed || near.length === 1) { takeNear(aimed ?? near[0]); return; }
     holdE.t = 0; holdE.start = performance.now(); holdE.armed = true; holdE.list = near; return;      // several candidates: a tap takes the nearest, holding opens the list
   }

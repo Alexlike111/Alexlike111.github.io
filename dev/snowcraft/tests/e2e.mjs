@@ -67,7 +67,7 @@ for (const prof of PROFILES) {
     const airTile = (tx, ty) => { let air = 0; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if (S.cell(tx * 4 + i, ty * 4 + j) === 0) air++; return air >= 14; };
     for (let ty = 61; ty < 68; ty++) for (const tx of [173, 172, 171]) {
       let guard = 0;
-      while (!airTile(tx, ty) && guard++ < 12) { if (held.load > 26) { S.act('dig', 760, 250, 1.4); throws++; } S.act('dig', tx * 4 + 2, ty * 4 + 2, 0.6); digs++; }
+      while (!airTile(tx, ty) && guard++ < 12) { if (held.load > 26) { S.act('dig', 714, 238, 1.4); throws++; } S.act('dig', tx * 4 + 2, ty * 4 + 2, 0.6); digs++; }
       if (tx === 171) { S.teleport(692, Math.min(ty * 4 + 6, 271)); S.step(10); }
     }
     S.step(40);

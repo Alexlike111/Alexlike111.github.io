@@ -218,7 +218,9 @@ export function bagHtml(): string {
   if (boxOpen.box) h += boxHtml();
   if (sledOpen()) {            // the sled (dragged or parked beside you) is a second pack: it sits on top of the right column
     h += `<h3${boxOpen.box ? ' class="sub"' : ''}><span>${inv.sled!.hitched ? S.sledHere : S.sled}</span></h3><div class="grid sledg" data-z="sled" data-i="-1">`;
-    for (let i = 0; i < refSize('sled'); i++) h += cellHtml('sled', i);
+    let last = -1; for (let i = 0; i < refSize('sled'); i++) if (refGet({ z: 'sled', i })) last = i;
+    const shown = Math.min(refSize('sled'), Math.max(12, Math.ceil((last + 2) / 6) * 6));        // grows with the load (2 rows at least)
+    for (let i = 0; i < shown; i++) h += cellHtml('sled', i);
     h += `</div>`;
   }
   if (!boxOpen.box) {
