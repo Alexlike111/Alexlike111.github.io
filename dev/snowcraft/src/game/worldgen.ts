@@ -256,14 +256,35 @@ function edgesAndBedrock() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // permafrost ice wedges, outcrops of rock on the cape, lichen patches on the tundra, the whole cliff wall texture
+const kind0 = (k: number) => (k % 3 === 1 ? 1 : 2 + (k % 2));
 function rockFeatures() {
   // ice wedges in the permafrost of the tundra and the plateau: thin V-shaped veins going down from the top of the ground
+  // (shallow wedges that stay near the soil / snow boundary: long hanging veins looked like icicles under the snow shelf; not on the station pad)
   for (let k = 0; k < 34; k++) {
-    const x = randInt(380, 1060), y = ground[x] + randInt(0, 3), w = randInt(2, 4), dep = randInt(8, 18);
+    const x = randInt(380, 1060), y = ground[x] + randInt(0, 3), w0 = randInt(2, 4), dep0 = randInt(8, 18);     // same four draws as before (keeps the random stream of everything generated after)
+    if (x > 540 && x < 900) continue;
+    const w = w0 + 1, dep = 4 + (dep0 % 5);
     for (let dy = 0; dy < dep; dy++) {
       const hw = Math.max(0.5, (1 - dy / dep) * w / 2 + 0.4 * noise1(x + dy * 0.9)), c = x + Math.round(Math.sin(dy * 0.4 + x) * 1.2);
       for (let dx = -Math.ceil(hw); dx <= Math.ceil(hw); dx++) { if (Math.abs(dx) > hw) continue; const i = (y + dy) * W + c + dx; if (mat[i] === DIRT) { mat[i] = ICE; aux[i] = 0; } }
     }
+  }
+  // rock strata: wavy bands of dark hardrock and ice lenses in the stone below the soil, so the lower part of every cliff / shelf reads as layered permafrost rock
+  for (let k = 0; k < 9; k++) {
+    const off = 26 + k * 24, ph = k * 1.7 + SO, th = kind0(k), kind = k % 3;      // 0 hardrock band, 1 ice lens (patchy), 2 dark band
+    for (let x = 6; x < SHORE; x++) {
+      const y0 = stoneTop[x] + off + Math.round(Math.sin(x / 41 + ph) * 5 + Math.sin(x / 13 + ph * 2) * 1.5);
+      if (y0 + th >= deepTop[x]) continue;
+      if (kind === 1 && fbm1((x + SO) / 22 + k, 2) < 0.68) continue;
+      for (let y = y0; y < y0 + th; y++) { const i = y * W + x; if (mat[i] === STONE) { mat[i] = kind === 1 ? ICE : HARD; aux[i] = 0; } }
+    }
+  }
+  // wind-scoured cape: crusts of lichen on the rocky ledges of the cape hill (the tundra patches are placed below)
+  for (let x = 96; x < 340; x += 5) {
+    if (x > 255 && x < 345) continue;
+    if (fbm1((x + SO) / 17 + 70, 2) < 0.52 || snowDepth[x] > 3) continue;
+    const g = ground[x]; for (let k = 1; k <= 1 + (x % 2); k++) if (mat[(g - k) * W + x] === AIR) put(x, g - k, M.LICHEN);
+    if (mat[(g - 1) * W + x + 1] === AIR) put(x + 1, g - 1, M.LICHEN);
   }
   // boulders and tundra rocks
   for (let k = 0; k < 120; k++) {

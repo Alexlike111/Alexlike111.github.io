@@ -17,6 +17,17 @@ import { onBlast } from './engine/explode';
 import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from './engine/input';
 import { initTouch } from './ui/touch';
 import { initHud, updateHud, setFreeCamLabel } from './ui/devhud';
+import { initTitle } from './ui/title';
+import { initFauna, stepFauna } from './game/fauna';
+import * as faunaMod from './game/fauna';
+import * as driftMod from './game/drift';
+import * as questMod from './game/quest';
+import { initDrift, stepDrift, drawDrift } from './game/drift';
+import { stepQuest, takeLoaded } from './game/quest';
+import { initOverlay, updateOverlay } from './game/overlay';
+import { resetRun } from './game/runreset';
+import { seedStarterDrift } from './game/starter';
+import { applySave, applyQuestAgain, type SaveData } from './game/save';
 import { initWeather, stepWeather, setDay, setClock, wx } from './game/weather';
 import { initPlayer, stepPlayer, applyDifficulty, damage, die, bodyHeat, body, setRespawn } from './game/player';
 import { stepTools, stepDrops, collectHeldLights, target, heldInfo, toolState, cutRegion } from './game/tools';
@@ -25,7 +36,7 @@ import { stepShelter, resetShelter, evalShelterNow } from './game/shelter';
 import { giveStartKit, add, inv, select, selected, hitchSled } from './game/inventory';
 import { RECIPES, canCraft, craft } from './game/recipes';
 import { stationsAt } from './game/fixtures';
-import { drawPlayer, drawAnimal, drawFixture, drawDrop, drawTarget, drawSled, type HeldInfo } from './game/draw';
+import { drawPlayer, drawAnimal, drawFixture, drawFixtureEmissive, setSplitFixturePass, drawDrop, drawTarget, drawSled, type HeldInfo } from './game/draw';
 import { initSfxHooks, updateAmbient } from './game/sfxhooks';
 import { runSelfTest } from './game/selftest';
 import * as testkit from './game/testkit';
@@ -69,15 +80,18 @@ function freeSpot(x: number, y: number): [number, number] {
   return [x, yy];
 }
 
-export interface StartOpts { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean }
+export interface StartOpts { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean; save?: SaveData }
 function newGame(o: StartOpts = {}) {
   ready = false;
+  resetRun();
+  if (freeCam) toggleFreeCam();
   const seed = o.seed ?? (params.has('seed') ? +params.get('seed')! : 1);
   G.diff.level = (o.diff ?? (params.has('diff') ? +params.get('diff')! : 1)) as 0 | 1 | 2;
   applyDifficulty(G.diff.level, o.hardcore ?? params.has('hard'));
   const t0 = performance.now();
   G.fixtures.length = 0; G.drops.length = 0; G.animals.length = 0; G.toasts.length = 0; G.lights.length = 0;
   const spawn = generateWorld(seed);
+  seedStarterDrift(spawn.spawnX);
   genMs = performance.now() - t0;
   wx.override = null; G.storm = 0; G.timeScale = 1; G.paused = false;
   initWeather(seed);
@@ -85,15 +99,19 @@ function newGame(o: StartOpts = {}) {
   const [sx, sy] = freeSpot(spawn.spawnX, spawn.spawnY);
   initPlayer(sx, sy);
   giveStartKit();
-  updateCamera(0, sx, sy - 12, true);
+  setRespawn(sx, sy);
+  if (o.save) applySave(o.save);                       // Продолжить: saved cells / fixtures / body laid over the regenerated world (before the caches are built)
+  const px = G.player.x, py = G.player.y;
+  updateCamera(0, px, py - 12, true);
   updateWindow();
   initSim(); initStructure(); initHeat();
-  wakeRect(sx - 80, sy - 60, sx + 80, sy + 40, 120);
-  setRespawn(sx, sy);
+  { const L = takeLoaded(); initDrift(seed, L?.drift); initFauna(px, py, !!L); }
+  wakeRect(px - 80, py - 60, px + 80, py + 40, 120);
   resetInput();
   toolState.dome = false; toolState.smart = false;
   ready = true; shotFrames = 0;
   emit('new_game', { seed });
+  if (o.save) applyQuestAgain(o.save);                 // quest.ts resets on 'new_game': lay the saved objective progress back
   return { spawnX: sx, spawnY: sy };
 }
 
@@ -111,14 +129,25 @@ function initLayers() {
       drawFixture(ctx, v, f, v.t);
     }
   });
+  setSplitFixturePass(true);
+  addLayer(5, (ctx, v) => {
+    const fx = G.fixtures;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < fx.length; i++) {
+      const f = fx[i]; if (!f.lit) continue;
+      if ((f.tx + f.tw + 6) * TS < v.x0 || (f.tx - 6) * TS > v.x0 + v.w || (f.ty + f.th + 10) * TS < v.y0 || (f.ty - 10) * TS > v.y0 + v.h) continue;
+      drawFixtureEmissive(ctx, v, f, v.t);
+    }
+    ctx.restore();
+  });
   addLayer(-11, (ctx, v) => {
     const d = G.drops;
     for (let i = 0; i < d.length; i++) { const e = d[i]; if (e.x < v.x0 - 8 || e.x > v.x0 + v.w + 8 || e.y < v.y0 - 8 || e.y > v.y0 + v.h + 8) continue; drawDrop(ctx, v, e, v.t); }
   });
-  addLayer(-10, (ctx, v) => { const s = inv.sled; if (s && s.hitched) drawSled(ctx, v, s.x, s.y, s.slots.filter(Boolean).length / 30); });
+  addLayer(-10, (ctx, v) => { const s = inv.sled; if (s) drawSled(ctx, v, s.x, s.y, s.slots.filter(Boolean).length / 30); });
   addLayer(-9, (ctx, v) => {
     const a = G.animals;
-    for (let i = 0; i < a.length; i++) { const e = a[i]; if (e.x < v.x0 - 40 || e.x > v.x0 + v.w + 40) continue; drawAnimal(ctx, v, e, v.t); }
+    for (let i = 0; i < a.length; i++) { const e = a[i]; if (e.state === 'hidden' || e.x < v.x0 - 40 || e.x > v.x0 + v.w + 40) continue; drawAnimal(ctx, v, e, v.t); }
   });
   addLayer(-8, (ctx, v) => {
     const p = G.player; if (!p) return;
@@ -127,6 +156,7 @@ function initLayers() {
   });
   addLayer(-6, (ctx, v) => drawParticles(ctx, v, false));
   addLayer(10, (ctx, v) => drawParticles(ctx, v, true));
+  addLayer(120, (ctx, v) => drawDrift(ctx, v));
   addLayer(150, (ctx, v) => {
     const p = G.player; if (!p || !p.alive || freeCam || G.paused) return;
     const T = target();
@@ -165,6 +195,9 @@ function tick(dt: number) {
     free.x += input.moveX * sp; free.y += (input.jumpHeld ? -sp : input.moveY > 0.5 ? sp : 0);
   }
   stepDrops(dt);
+  stepFauna(dt);
+  stepDrift(dt);
+  stepQuest(dt);
   stepSled(dt);
   stepFixtures(dt);
   stepShelter(dt);
@@ -195,7 +228,7 @@ function advance(dt: number, realDt: number) {
   let n = 0;
   const hadAcc = acc >= STEP;
   if (hadAcc) { updateHud(dt, realDt); }
-  while (acc >= STEP && n < 3) {
+  while (acc >= STEP && n < 5) {
     if (!G.paused && ready) { G.realTime += STEP; G.frame++; tick(STEP); }
     if (n === 0) endFrame();
     acc -= STEP; n++;
@@ -209,6 +242,7 @@ function frame(now: number) {
   poll();
   if (input.freeCamPressed) toggleFreeCam();
   const ticks = advance(dt, dt);
+  updateOverlay(dt);
   void ticks;
   if (ready) {
     const p = G.player;
@@ -338,7 +372,7 @@ const sc = {
   },
   selftest: (filter?: string) => runSelfTest(filter),
   cutRegion, selected,
-  mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, inv: invMod },
+  mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
   screenToWorld, worldToScreen,
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
   setQuality(q: 0 | 1 | 2) { G.quality = q; resize(); },
@@ -353,10 +387,12 @@ async function boot() {
   initInput(canvas);
   initHud(uiRoot);
   initTouch(uiRoot);
+  initOverlay(uiRoot, { start: (o) => { newGame(o); }, restart: () => { newGame({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore }); } });
   initSfxHooks();
   initLayers();
   addEventListener('resize', () => { resize(); });
   newGame();
+  void initTitle({ start: (o) => { newGame(o); } });
   sc.ready = true;
   requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
   void DIFFS; void toast; void addHeat; void screenToWorld;

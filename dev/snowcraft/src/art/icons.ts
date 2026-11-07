@@ -48,21 +48,21 @@ ic('ice', [
   '...IIBBBBBII..',
 ]);
 ic('log', [
-  '..xxxxxxxxCCC.',
-  '.xxxXxxxxCcccC',
-  'xxXxxxxxxCcCcC',
-  'xxxxxxxXxCcccC',
-  '.xUxxxxxxxCCC.',
-  '..UUUUUUUU....',
+  '..UUUUUUUUUCCC',
+  '.UuuxuuuuuCccC',
+  'UuxuuUuuuuCcCc',
+  'UuuuuuuxuuCccC',
+  '.UuuuUuuuuUCCC',
+  '..UUUUUUUUU...',
 ]);
 ic('plank', [
   'tttttttttttttt',
-  'twwwwwwwwwwwwW',
-  'wwhwwwwwwwwhwW',
+  'tcwwwwwwwwwwcW',
+  'wzwwhwwwwhwwzW',
   'WWWWWWWWWWWWWW',
   '.tttttttttttttt',
-  '.twwwwwwwwwwwWW',
-  '.wwhwwwwwwwhwWW',
+  '.tcwwwwwwwwwcWW',
+  '.wzwhwwwwhwwzWW',
   '.WWWWWWWWWWWWWW',
 ]);
 ic('bone', grid(g => {
@@ -144,38 +144,39 @@ ic('fat', [
   '..YYYYYYYYYY..',
 ]);
 ic('sealskin', [
-  '..hhh....hhh..',
-  '.hSSShhhhSSSh.',
-  'hSSSSSSSSSSSSh',
-  'hSSDSSSSDSSSSh',
-  'hSSSSSSSSSSSSh',
-  'hSSSSDSSSSDSSh',
-  '.hSSSSSSSSSSh.',
-  '..hhSSSSSShh..',
-  '....hh..hh....',
-].map(r => r.replace(/D/g, 'z')));
+  '.hh........hh.',
+  'hSuuhhhhhhuuSh',
+  'huuuuuuuuuuuuh',
+  'hUuKuuuuuKuuUh',
+  'huuuuuKuuuuuuh',
+  'hUuuuuuuuKuuUh',
+  '.huuKuuuuuuuh.',
+  '..huuuuuuuuh..',
+  '...hhh..hhh...',
+]);
 ic('fox_fur', [
-  '.......nn.....',
-  '.....nnNNn....',
-  '....nnnnNnn...',
-  '...nnnnnnNnn..',
-  '..nnnnNnnnnn..',
-  '.nnnnnnnNnnn..',
-  'nnnnNnnnnnn...',
-  'NnnnnnnnNn....',
-  '.NNnnnNN......',
+  '..........o...',
+  '........ooOo..',
+  '.......ooooOo.',
+  '.....oooooOOo.',
+  '...oooooooOO..',
+  '..ooooooOOO...',
+  '.ooooooOOO....',
+  'noooOOOO......',
+  'nnnOO.........',
+  '.nn...........',
 ]);
 ic('bear_fur', [
-  '.cc.......cc..',
-  'cCCcccccccCCc.',
-  'cCcccccccccCc.',
-  '.cccCccccCccc.',
-  '.cccccccccccc.',
-  'ccCcccCccCcccc',
-  'cCccccccccccCc',
-  '.cccCccccCccc.',
-  '.cc.cc..cc.cc.',
-  '.C...C..C...C.',
+  '.UU.......UU..',
+  'UuuUUUUUUUuuU.',
+  'UuxuuuuuuuxuU.',
+  '.UuuuxuuuxuuU.',
+  '.UuxuuuuuuuuU.',
+  'UuuuuuxuuxuuuU',
+  'UuxuuuuuuuuxuU',
+  '.UuuuxuuuUuuU.',
+  '.UU.UU..UU.UU.',
+  '.U...U..U...U.',
 ]);
 ic('scrap', grid(g => {
   g.rect(1, 8, 6, 4, 'S'); g.rect(1, 8, 6, 1, 's'); g.set(2, 10, 'K'); g.set(5, 10, 'K');
@@ -226,22 +227,29 @@ ic('diesel', [
 ]);
 ic('radio_triode', [
   '....SSSS......',
-  '...SiiiiS.....',
-  '..SiiaaiiS....',
-  '..SiaEEaiS....',
-  '..SiaEEaiS....',
-  '..SiiaaiiS....',
-  '...SiiiiS.....',
-  '...zzzzzz.....',
-  '...zllllz.....',
-  '...y.y.y.y....',
+  '...SnIIbS.....',
+  '..SnIbbbbS....',
+  '..SIbbEEbS....',
+  '..SIbEEEbS....',
+  '..SIbbEEbS....',
+  '...SBbbbBS....',
+  '....SSSSS.....',
+  '...yyyyyyy....',
+  '...yYYYYYy....',
+  '...h.h.h.h....',
+  '...h.h.h.h....',
 ]);
-ic('radio_coil', grid(g => {
-  g.rect(3, 1, 8, 12, 'W'); g.rect(3, 1, 8, 1, 'w');
-  for (let y = 2; y < 12; y++) { g.rect(2, y, 10, 1, y % 2 ? 'O' : 'o'); g.set(2, y, 'W'); g.set(11, y, 'W'); }
-  g.rect(1, 0, 12, 2, 'T'); g.rect(1, 12, 12, 2, 'T');
-  g.set(13, 5, 'y'); g.set(13, 8, 'y');
-}));
+ic('radio_coil', [
+  '..............',
+  '.TTTTTTTTTTTT.',
+  'TOoOoOoOoOoOoT',
+  'TooOoOoOoOoOoT',
+  'TOoOoOoOoOoOoT',
+  'TooOoOoOoOoOoT',
+  '.TTTTTTTTTTTT.',
+  'y..........y..',
+  'Y..........Y..',
+]);
 ic('battery', [
   '..zz....zz....',
   '.zrrz..zhhz...',
@@ -301,26 +309,27 @@ ic('water', [
   '....BBBBBB....',
 ]);
 ic('hot_tea', [
-  '....q..q......',
-  '...q..q.......',
-  '.zzzzzzzzzz...',
-  'zSSSSSSSSSSzz.',
-  'zSOOOOOOOOSzzz',
-  'zSOOOOOOOOSzSz',
-  'zSSSSSSSSSSzSz',
-  '.zSSSSSSSSzzz.',
+  '...N..N..N....',
+  '..N..N..N.....',
+  '.N..N..N......',
+  'zzzzzzzzzzz...',
+  'zOOOOOOOOOzzz.',
+  'zOooooooooOzSz',
+  'zOooooooooOzSz',
+  'zOOOOOOOOOOzzz',
+  '.zOOOOOOOOz...',
   '..zzzzzzzz....',
-].map(r => r.replace(/q/g, 'N')));
+]);
 ic('tea', [
-  '..t.....t.....',
-  '..tgg...t.....',
-  '.ttttttttt....',
-  'twwwwwwwwwt...',
-  'twGGGGGGGwt...',
-  'twGgggggGwt...',
-  'twGGGGGGGwt...',
-  'twwwwwwwwwt...',
-  '.TTTTTTTTT....',
+  '..zzzzzzzz....',
+  '.zyyyyyyyyz...',
+  '.zGGGGGGGGz...',
+  '.zGnnnnnnGz...',
+  '.zGnggggnGz...',
+  '.zGnnnnnnGz...',
+  '.zGGGGGGGGz...',
+  '.zjjjjjjjjz...',
+  '..zzzzzzzz....',
 ]);
 // ---------------------------------------------------------------------------------------------------------------------------------- food
 ic('seal_meat', [
@@ -916,6 +925,52 @@ ui('cross', [
   '.rr....rr.',
   'rr......rr',
 ]);
+// ---- HUD stat icons (DESIGN §10): hydration drop, food ration, energy bolt, warning
+ui('drop', [
+  '.....b.....',
+  '....bib....',
+  '...bibbb...',
+  '...bibbb...',
+  '..bibbbbb..',
+  '.bibbbbbbb.',
+  '.bbbbbbbBb.',
+  '.bbbbbbBBb.',
+  '..bbBBBBb..',
+  '...bbbbb...',
+], PAL, 12);
+ui('food', [
+  '.....GG.....',
+  '....Gg......',
+  '.CCCCCCCCC..',
+  'CcccccccccC.',
+  'CcOOOOOOocC.',
+  'CcOooooOocC.',
+  'CcOOOOOOocC.',
+  'CcccccccccC.',
+  '.CCCCCCCCC..',
+], PAL, 12);
+ui('bolt', [
+  '....yyy.',
+  '...yyy..',
+  '..yyy...',
+  '.yyyyyy.',
+  '...yyy..',
+  '..yy....',
+  '.yy.....',
+  'y.......',
+], PAL, 12);
+ui('warn', [
+  '.....rr.....',
+  '....rRRr....',
+  '....rRRr....',
+  '...rrKKrr...',
+  '...rrKKrr...',
+  '..rrrKKrrr..',
+  '..rrrrrrrr..',
+  '.rrrrKKrrrr.',
+  '.rrrrrrrrrr.',
+  'RRRRRRRRRRRR',
+], PAL, 12);
 // ---- HUD body figure: four 12×24 layers that stack at the same origin; tint with uiIcon(key, tintColour)
 {
   const figure = (draw: (g: Grid) => void) => { const g = new Grid(12, 24); draw(g); return g.rows(); };

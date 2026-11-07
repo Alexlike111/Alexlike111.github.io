@@ -138,13 +138,15 @@ export function hitchSled(x: number, y: number) {
   else { inv.sled.hitched = true; inv.sled.x = x; inv.sled.y = y; }
   changed();
 }
-export function unhitchSled() { if (inv.sled) inv.sled.hitched = false; changed(); }
+/** Put the sled down where it stands: the contents stay on it (E next to it hitches it again). */
+export function unhitchSled(x?: number, y?: number) { if (inv.sled) { inv.sled.hitched = false; if (x !== undefined) inv.sled.x = x; if (y !== undefined) inv.sled.y = y; } changed(); }
+export function sledNear(x: number, y: number, r = 26): boolean { const s = inv.sled; return !!s && !s.hitched && Math.abs(s.x - x) < r && Math.abs(s.y - y) < r; }
 
 // ---- lifecycle ----
-export function clearInventory() {
+export function clearInventory(keepParkedSled = false) {
   inv.slots.fill(null); inv.sel = 0;
   inv.wear.head = inv.wear.body = inv.wear.hands = inv.wear.feet = null;
-  inv.sled = null;
+  if (!(keepParkedSled && inv.sled && !inv.sled.hitched)) inv.sled = null;
   changed();
 }
 /** DESIGN §8 start kit. */
@@ -161,6 +163,11 @@ export function takeAll(): Slot[] {
   const out: Slot[] = [];
   for (let i = 0; i < NSLOT; i++) { const s = inv.slots[i]; if (s) { out.push(s); inv.slots[i] = null; } }
   for (const p of WEAR_SLOTS) { const id = inv.wear[p]; if (id) { out.push({ id, n: 1 }); inv.wear[p] = null; } }
+  // a dragged sled goes down with its owner: its load and the sled itself end up in the backpack (a parked sled stays where it is)
+  if (inv.sled?.hitched) {
+    for (let i = 0; i < inv.sled.slots.length; i++) { const s = inv.sled.slots[i]; if (s) { out.push(s); inv.sled.slots[i] = null; } }
+    out.push({ id: 'sled', n: 1 }); inv.sled = null;
+  }
   changed(); return out;
 }
 
@@ -169,12 +176,17 @@ export function takeAll(): Slot[] {
 export const dropDur = new Map<number, number>();
 export const MAX_DROPS = 240;
 /** Drop an item stack into the world. Plain stacks merge with a close drop of the same item. */
-export function spawnDrop(item: string, n: number, x: number, y: number, vx = 0, vy = -24, dur?: number) {
+export function spawnDrop(item: string, n: number, x: number, y: number, vx = 0, vy = -24, dur?: number, noMerge = false) {
   if (n <= 0) return null;
-  if (dur === undefined) {
+  if (dur === undefined && !noMerge && item !== 'backpack') {
     for (const d of G.drops) if (d.item === item && !dropDur.has(d.id) && Math.abs(d.x - x) < 6 && Math.abs(d.y - y) < 6 && d.n + n <= getItem(item).stack * 2) { d.n += n; return d; }
   }
-  if (G.drops.length >= MAX_DROPS) { const old = G.drops.shift(); if (old) dropDur.delete(old.id); }
+  if (G.drops.length >= MAX_DROPS) {
+    // never push a dead player's backpack out of the world: evict the oldest ordinary drop instead
+    const k = G.drops.findIndex(d => d.item !== 'backpack');
+    const old = k >= 0 ? G.drops.splice(k, 1)[0] : G.drops.shift();
+    if (old) { dropDur.delete(old.id); if (old.item === 'backpack') backpacks.delete(old.id); }
+  }
   const d = { id: newId(), item, n, x, y, vx, vy, age: 0 };
   G.drops.push(d);
   if (dur !== undefined) dropDur.set(d.id, dur);

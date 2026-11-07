@@ -11,6 +11,7 @@ import { icon } from '../engine/sprites';
 const S = strings('touch', {
   action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка',
   rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
+  moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть',
 });
 
 let root: HTMLElement | null = null;
@@ -19,7 +20,9 @@ let radial: HTMLElement | null = null;
 let rotateEl: HTMLElement | null = null;
 let stickBase: HTMLElement | null = null, stickKnob: HTMLElement | null = null;
 let enabled = false;
-let jumpBtn = false, jumpStick = false;
+let jumpBtn = false, jumpStick = false, actHeld = false, rotatePaused = false;
+let ghost: HTMLElement | null = null;
+let radialTimer = 0;
 const R = 56;                                   // stick radius px
 
 const CSS = `
@@ -37,13 +40,19 @@ const CSS = `
 #touch #tb-bag{width:58px;height:50px;right:calc(150px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-jour{width:58px;height:50px;right:calc(84px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-parka{width:58px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(124,198,238,.45);background:rgba(14,26,44,.35);display:none}
+#touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
+#touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
+#touch .ghost i{width:34px;height:34px;border-radius:50%;background:rgba(190,226,250,.22);border:2px solid rgba(190,226,250,.45)}
+#touch .ghost span{position:absolute;top:-22px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:12px;color:#cfeaff;text-shadow:0 1px 0 #05080f}
+@keyframes scghost{0%,100%{opacity:.55}50%{opacity:1}}
 #touch .knob{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(190,226,250,.5);border:2px solid #cfeaff;display:none}
-#touch .rad{position:absolute;inset:0;pointer-events:auto;display:none;background:rgba(5,9,16,.45)}
-#touch .rad .slot{position:absolute;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
+#touch .rad{position:absolute;inset:0;pointer-events:auto;display:none;background:linear-gradient(0deg,rgba(5,9,16,.5),rgba(5,9,16,0) 45%)}
+#touch .rad .cap{position:absolute;left:0;right:0;text-align:center;font:600 13px 'Jura',system-ui,sans-serif;color:#cfeaff;text-shadow:0 1px 0 #05080f}
+#touch .rad .slot{position:absolute;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
   display:flex;flex-direction:column;align-items:center;justify-content:center;color:#dff0ff;font-size:10px;text-align:center}
 #touch .rad .slot.sel{border-color:#ffc46e;background:rgba(60,34,12,.9)}
-#touch .rad canvas{width:30px;height:30px;image-rendering:pixelated}
+#touch .rad canvas{width:28px;height:28px;image-rendering:pixelated}
+#touch .rad .slot b{position:absolute;left:3px;top:0;font-size:10px;font-weight:400;color:#8ab0c8}
 #rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Pixelify Sans',system-ui,sans-serif}
 #rotate b{font-size:26px;margin-bottom:10px}
 `;
@@ -66,14 +75,17 @@ export function initTouch(uiRoot: HTMLElement) {
   layer = document.createElement('div'); layer.id = 'touch'; root.appendChild(layer);
   stickBase = document.createElement('div'); stickBase.className = 'stick'; layer.appendChild(stickBase);
   stickKnob = document.createElement('div'); stickKnob.className = 'knob'; layer.appendChild(stickKnob);
+  ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.innerHTML = '<i></i><span>' + S.moveHint + '</span>'; layer.appendChild(ghost);
+  let seenStick = false; try { seenStick = localStorage.getItem('sc.stickHint') === '1'; } catch { /* no storage */ }
+  if (!seenStick) ghost.style.display = 'flex';
 
   const act = btn('tb-act', S.action);
   let actTimer = 0;
   hold(act, () => {
-    touch.primary = true; touch.smart = true; input.primaryPressed = true; input.hasAim = false; input.aimMode = 'smart';
+    actHeld = true; touch.primary = true; touch.smart = true; input.primaryPressed = true; input.hasAim = false; input.aimMode = 'smart';
     // long-press on a block ghost = dome (lean) mode
     actTimer = window.setTimeout(() => { if (touch.primary && inv.slots[inv.sel]?.id === 'snow_block') input.smartToggle = true; }, 650);
-  }, () => { clearTimeout(actTimer); touch.primary = false; touch.smart = false; if (!touch.aimed) input.aimMode = 'touch'; });
+  }, () => { clearTimeout(actTimer); actHeld = false; touch.primary = touch.aimed; touch.smart = false; if (!touch.aimed) input.aimMode = 'touch'; });
   const jump = btn('tb-jump', S.jump);
   hold(jump, () => { jumpBtn = true; touch.jumpHeld = true; input.jumpPressed = true; }, () => { jumpBtn = false; touch.jumpHeld = jumpStick; });
   const take = btn('tb-take', S.take);
@@ -88,7 +100,8 @@ export function initTouch(uiRoot: HTMLElement) {
   hold(parka, () => { input.ventPressed = true; }, () => {});
 
   radial = document.createElement('div'); radial.className = 'rad'; layer.appendChild(radial);
-  radial.addEventListener('pointerdown', (e) => { if (e.target === radial) { closeRadial(); e.preventDefault(); } });
+  radial.addEventListener('pointerdown', (e) => { if (e.target === radial || (e.target as HTMLElement).classList.contains('cap')) { closeRadial(); e.preventDefault(); e.stopPropagation(); } });
+  window.addEventListener('sc:radial', () => toggleRadial());
 
   rotateEl = document.createElement('div'); rotateEl.id = 'rotate';
   rotateEl.innerHTML = `<b>${S.rotate}</b><span>${S.rotateHint}</span>`;
@@ -107,6 +120,7 @@ export function initTouch(uiRoot: HTMLElement) {
     const left = e.clientX < window.innerWidth * 0.4;
     if (left && stickId < 0) {
       stickId = e.pointerId; sx = e.clientX; sy = e.clientY;
+      if (ghost && ghost.style.display !== 'none') { ghost.style.display = 'none'; try { localStorage.setItem('sc.stickHint', '1'); } catch { /* ignore */ } }
       for (const el of [stickBase!, stickKnob!]) { el.style.display = 'block'; el.style.left = sx + 'px'; el.style.top = sy + 'px'; }
     } else if (!left && aimId < 0) {
       aimId = e.pointerId; touch.aimed = true; touch.primary = true;
@@ -138,7 +152,7 @@ export function initTouch(uiRoot: HTMLElement) {
     if (e.pointerId === stickId) {
       stickId = -1; touch.x = 0; touch.run = false; jumpStick = false; touch.jumpHeld = jumpBtn; touch.down = false; wasUp.v = false;
       stickBase!.style.display = stickKnob!.style.display = 'none';
-    } else if (e.pointerId === aimId) { aimId = -1; touch.aimed = false; touch.primary = false; }
+    } else if (e.pointerId === aimId) { aimId = -1; touch.aimed = false; touch.primary = actHeld; }
   };
   addEventListener('pointerup', end); addEventListener('pointercancel', end);
 
@@ -146,10 +160,10 @@ export function initTouch(uiRoot: HTMLElement) {
   const upd = () => {
     const portrait = mq.matches && enabled;
     rotateEl!.style.display = portrait ? 'flex' : 'none';
-    G.paused = portrait ? true : (G.paused && rotateWasPaused ? false : G.paused);
-    rotateWasPaused = portrait;
+    // only undo a pause that the rotate overlay itself caused (a manual pause survives a rotation)
+    if (portrait && !G.paused) { G.paused = true; rotatePaused = true; }
+    else if (!portrait && rotatePaused) { G.paused = false; rotatePaused = false; }
   };
-  let rotateWasPaused = false;
   mq.addEventListener?.('change', upd);
   addEventListener('resize', upd);
   setEnabled(G.mobile);
@@ -163,27 +177,30 @@ export function setEnabled(on: boolean) {
   if (layer) layer.style.display = on ? 'block' : 'none';
   if (rotateEl && !on) rotateEl.style.display = 'none';
   document.body.classList.toggle('touch-ui', on);
-  if (on && matchMedia('(orientation: portrait)').matches && rotateEl) { rotateEl.style.display = 'flex'; G.paused = true; }
+  if (on && matchMedia('(orientation: portrait)').matches && rotateEl) { rotateEl.style.display = 'flex'; if (!G.paused) { G.paused = true; rotatePaused = true; } }
 }
 export const touchEnabled = () => enabled;
 
-function closeRadial() { if (radial) radial.style.display = 'none'; }
+function closeRadial() { if (radial) radial.style.display = 'none'; clearTimeout(radialTimer); }
 function toggleRadial() {
   if (!radial) return;
   if (radial.style.display === 'block') { closeRadial(); return; }
   radial.innerHTML = '';
-  // a fan of the six belt slots above the belt button (screen-safe for a 390 px tall phone)
+  // an arc of the six belt slots opening upward from the belt chip at the bottom centre (the player in the middle of the screen stays visible)
   const W = window.innerWidth, Hh = window.innerHeight;
-  const size = 76, gap = 8, total = BELT * size + (BELT - 1) * gap;
-  const x0 = Math.max(8, Math.min(W - total - 8, W / 2 - total / 2)), y = Math.max(60, Hh * 0.42);
+  const cx = W / 2 - 40, cy = Hh - 66, rad = Math.min(92, Hh * 0.3);
   for (let i = 0; i < BELT; i++) {
+    const a = Math.PI * (1.08 + 0.84 * i / (BELT - 1));        // from lower-left over the top to lower-right
     const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' sel' : '');
-    el.style.left = x0 + i * (size + gap) + size / 2 + 'px'; el.style.top = y - Math.sin((i / (BELT - 1)) * Math.PI) * 26 + 'px';
+    el.style.left = cx + Math.cos(a) * rad * 1.25 + 'px'; el.style.top = cy + Math.sin(a) * rad + 'px';
     const s = inv.slots[i];
-    if (s) { const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc); const t = document.createElement('span'); t.textContent = itemName(s.id); el.appendChild(t); }
-    else el.textContent = String(i + 1);
+    const n = document.createElement('b'); n.textContent = String(i + 1); el.appendChild(n);
+    if (s) { const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc); el.title = itemName(s.id); }
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); closeRadial(); });
     radial.appendChild(el);
   }
+  const cap = document.createElement('div'); cap.className = 'cap'; cap.style.top = Math.max(4, cy - rad - 52) + 'px';
+  const sel = inv.slots[inv.sel]; cap.textContent = (sel ? itemName(sel.id) + ' · ' : '') + S.radialCap; radial.appendChild(cap);
   radial.style.display = 'block';
+  clearTimeout(radialTimer); radialTimer = window.setTimeout(closeRadial, 7000);
 }

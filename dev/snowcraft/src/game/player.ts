@@ -15,6 +15,7 @@ import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, removeFromSlot, takeAll, giveStar
 import { getItem, itemName, type WearSlot } from './items';
 import { radiantWarmth, dryBoost, nearStation } from './fixtures';
 import { H, W } from '../engine/grid';
+import { dogWarmth } from './fauna';
 
 const S = strings('player', {
   frostnip: 'Белеет {part}: обморожение близко',
@@ -54,7 +55,7 @@ export const TUNE = {
   walk: 27, run: 46, accel: 380, gravity: 360, jumpV: 102, swimV: 20, termV: 280, coyote: 0.09, buffer: 0.12, stepUp: 4,
   fallSafe: 175, fallDmg: 0.33,
   // heat balance
-  L0: 0.07, KC: 0.0055, coldGain: 0.2, shiverMax: 1.6, shelterK: 0.6, waterLoss: 6, bedBonus: 1.45, skinBonus: 1.7,
+  L0: 0.075, KC: 0.0055, coldGain: 0.2, shiverMax: 1.6, shelterK: 0.6, waterLoss: 6, bedBonus: 1.45, skinBonus: 1.7,
   // needs (per body second)
   waterDrain: 100 / 900, foodDrain: 100 / 1200, energyDrain: 100 / 1000, sleepGain: 0.5,
   hpRegen: 0.25,
@@ -149,7 +150,7 @@ export function die(cause: string) {
   // the pack stays where you fell
   const items = takeAll();
   if (items.length) {
-    const d = spawnDrop('backpack', 1, p.x, p.y - 4, 0, -20);
+    const d = spawnDrop('backpack', 1, p.x, p.y - 4, 0, -20, undefined, true);
     if (d) backpacks.set(d.id, items);
   }
   held.torchLit = held.lanternLit = false; held.load = 0;
@@ -161,8 +162,9 @@ export function respawn(): boolean {
   p.alive = true; p.hp = 60; p.core = 36.4; p.food = 45; p.water = 45; p.energy = 60; p.wet = 0; p.co = 0; p.sleeping = false;
   p.frost.hands = p.frost.feet = p.frost.face = 0; body.scar.hands = body.scar.feet = body.scar.face = 0;
   p.x = body.respawnX; p.y = body.respawnY; p.vx = p.vy = 0; p.anim.state = 'idle'; p.hurtT = 1.5; p.cause = '';
-  body.warmT = body.shockT = body.drownT = 0; G.timeScale = 1;
-  clearInventory();
+  body.warmT = body.shockT = body.drownT = 0; G.timeScale = 1; body.sleepFix = null; body.working = 0; body.fineT = 0;
+  for (const k in body.warned) (body.warned as Record<string, boolean>)[k] = false;
+  clearInventory(true);
   add('snow_knife', 1); add('shovel', 1); add('matches', 5); add('can', 1);
   inv.wear.hands = 'wool_mittens'; inv.wear.feet = 'felt_boots'; inv.wear.body = 'station_parka'; inv.wear.head = 'wool_hat';
   toast(S.respawn, 'info'); emit('respawn', {});
@@ -375,11 +377,13 @@ export function stepBody(bdt: number) {
   const p = G.player;
   const diff = G.diff;
   const cx = p.x, cy = p.y - 10;
-  p.airT = tempAt(cx, cy);
-  const windLocal = Math.abs(windAt(cx, cy));
-  p.shelter = shelterAt(cx, cy);
+  // inputs are sanitised: one NaN from the heat/wind fields must never poison the body permanently
+  const fin = (v: number, d: number) => (Number.isFinite(v) ? v : d);
+  p.airT = fin(tempAt(cx, cy), fin(G.ambientT, -20));
+  const windLocal = Math.abs(fin(windAt(cx, cy), 0));
+  p.shelter = Math.max(0, Math.min(1, fin(shelterAt(cx, cy), 0)));
   const swimming = p.inWater > 0.45;
-  const rad = swimming ? 0 : radiantWarmth(cx, cy) + (held.torchLit ? 3 : 0);
+  const rad = swimming ? 0 : radiantWarmth(cx, cy) + (held.torchLit ? 3 : 0) + dogWarmth(cx, cy, p.sleeping);
   let feel = swimming ? -45 : windChill(p.airT, windLocal) + 0.5 * rad;
   p.feelT = feel;
   const wr = wearIns();
@@ -489,6 +493,10 @@ export function stepBody(bdt: number) {
   warnOnce('thirsty', p.water < 15, S.thirsty, 'warn');
   warnOnce('tired', p.energy < 12, S.tired, 'warn');
   body.hpPrev = p.hp;
+  if (!Number.isFinite(p.core)) p.core = 36;
+  if (!Number.isFinite(p.wet)) p.wet = 0;
+  for (const k of ['hands', 'feet', 'face'] as const) if (!Number.isFinite(p.frost[k])) p.frost[k] = 0;
+  if (!Number.isFinite(p.hp)) p.hp = 50;
 }
 function warnOnce(k: keyof typeof body.warned, cond: boolean, text: string, kind: 'warn' | 'bad') {
   if (cond && !body.warned[k]) { body.warned[k] = true; toast(text, kind); }

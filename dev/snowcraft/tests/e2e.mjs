@@ -56,6 +56,21 @@ for (const prof of PROFILES) {
   log(`  worldgen ${info.genMs.toFixed(0)} ms, scale ${info.scale}, mobile ${info.mobile}, touch UI ${info.touchUi}`);
   await shot(page, prof, '01-start');
 
+  // ---- doors: the 8x20 player must be able to walk through every station / shed door (regression: doors used to be 5 tiles high under a stone lintel) ----
+  const doorWalk = await ev(page, () => {
+    const S = window.__sc, G = S.G, out = [];
+    for (const d of G.fixtures.filter(f => f.kind === 'door')) {
+      const west = d.data && d.data.side === 'west';
+      S.teleport(d.tx * 4 + (west ? -14 : 18), 272); S.step(8);
+      S.act('interact', d.tx * 4 + 2, d.ty * 4 + 12);
+      const key = west ? 'KeyD' : 'KeyA';
+      S.key(key, true); S.stepFast(70); S.key(key, false);
+      out.push({ tx: d.tx, side: west ? 'W' : 'E', x: Math.round(G.player.x), passed: west ? G.player.x > d.tx * 4 + 3 : G.player.x < d.tx * 4 + 1 });
+    }
+    return out;
+  });
+  check('walks through every station / shed door', doorWalk.length >= 3 && doorWalk.every(r => r.passed), JSON.stringify(doorWalk));
+
   // ---- 1. walk, run, jump on open ground ----
   const walk = await ev(page, () => {
     const S = window.__sc; const p = S.G.player;
@@ -245,10 +260,9 @@ if (!args.includes('--noselftest')) {
   const lines = text.split('\n');
   log('  ' + lines[0]);
   const fails = lines.filter(l => l.startsWith('FAIL'));
-  const mine = fails.filter(l => !/^FAIL \[sim\]/.test(l));
+  const mine = fails;
   for (const l of fails) log('  ' + l.slice(0, 240));
-  check('self-test: no failures in the gameplay core', mine.length === 0, `${mine.length} failing`);
-  if (fails.length > mine.length) log(`  note: ${fails.length - mine.length} failing [sim] test(s) belong to the engine owner`);
+  check('self-test: no failures', mine.length === 0, `${mine.length} failing`);
   if (errors.length) { failures += errors.length; log('  ERRORS:\n    ' + errors.join('\n    ')); }
   await ctx.close();
 }

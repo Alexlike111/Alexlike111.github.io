@@ -231,7 +231,7 @@ function cabin(L: number, R: number, F: number, n: number, openEast = false) {
   box((L - 1) * 4, (top - 12) * 4, (R + 2) * 4, F * 4, AIR);                       // clear space (stray snow)
   foundation(L * 4, L * 4 + 4, (F + 1) * 4); foundation(R * 4, R * 4 + 4, (F + 1) * 4);
   boxT(L, F, R, F, M.PLANK);
-  boxT(L, top, L, F - 6, M.STONE); if (!openEast) boxT(R, top, R, F - 6, M.STONE); else boxT(R, top, R, top, M.STONE);   // lintel walls above the doors (natural STONE = structural anchor)
+  boxT(L, top, L, F - 7, M.STONE); if (!openEast) boxT(R, top, R, F - 7, M.STONE); else boxT(R, top, R, top, M.STONE);   // lintel walls above the doors (natural STONE = structural anchor)
   bgT(L + 1, top, R - 1, F - 1, 5);
   boxT(L - 1, top - 1, R + 1, top - 1, M.LOG);                                       // eave row with overhang
   let kmax = 0;
@@ -282,6 +282,22 @@ function timberFrame(x: number, floor: number, h: number, floorOf?: (x: number) 
   for (let xx = x - 1; xx < x + 7; xx++) { const f = floorOf ? floorOf(xx) : floor; box(xx, f - h, xx + 1, f - h + 4, M.PLANK); }
   bgBox(x, floor - h + 4, x + 4, floor, 7);
 }
+/** Permafrost character of the adit and the decline: ice crust and icicles on the roof, frosted back wall, ice in the cracks of the floor edge. */
+function frostAdit() {
+  const roofRow = (x: number, floor: number) => floor - HA - 1;
+  for (let x = MI.rampTop; x < MI.portalX - 14; x++) {          // stops short of the portal header (an ice crust next to it would cut its support)
+    const ry = roofRow(x, FA);
+    if (mat[(ry + 1) * W + x] !== AIR) continue;
+    const n = noise1(x * 0.17 + 5);
+    const rm = mat[ry * W + x];
+    let rock = true; for (let k = 0; k <= 8; k++) { const mm = mat[(ry - k) * W + x]; if (mm !== M.STONE && mm !== M.DIRT && mm !== M.HARDROCK) { rock = false; break; } }   // only under real rock (a crust under snow / the portal header would fall)
+    if (!rock) continue;
+    if (n > 0.38) { put(x, ry, M.ICE); if (n > 0.6 && mat[(ry - 1) * W + x] === rm) put(x, ry - 1, M.ICE); }
+    if (rand() < 0.1) { const len = randInt(2, 6); for (let k = 1; k <= len && mat[(ry + k) * W + x] === AIR; k++) put(x, ry + k, M.ICE); }
+  }
+  for (let x = MI.rampTop; x < MI.portalX + 40; x += 4) if (noise1(x * 0.09 + 11) > 0.5) { const ty = (FA - HA) >> 2; for (let k = 0; k < 5; k++) if (bg[(ty + k) * TW + (x >> 2)] === 2) bg[(ty + k) * TW + (x >> 2)] = 3; }
+  for (let x = MI.rampBot; x < MI.rampTop; x += 4) { const f = FA + 4 * Math.floor((MI.rampTop - x) / 5); if (noise1(x * 0.11 + 2) > 0.55) for (let k = 1; k < 6; k++) { const ty = ((f - HA) >> 2) + k; if (bg[ty * TW + (x >> 2)] === 2) bg[ty * TW + (x >> 2)] = 3; } }
+}
 function stampMine(T: Terrain) {
   const [c0, c1] = MI.collapse;
   // --- coal seams and soapstone: lenses in the rock (before the tunnels so they are cut through) ---
@@ -325,20 +341,22 @@ function stampMine(T: Terrain) {
   // the roof above the cave-in is torn open
   { const xm = (c0 + c1) >> 1, ym = floorD(xm) - HA - 3; for (let y = ym - 14; y < ym + 6; y++) for (let x = c0 + 3; x < c1 - 3; x++) { const dx = (x - xm) / 11, dy = (y - ym) / 9; if (dx * dx + dy * dy < 1) put(x, y, AIR); } bgBox(c0, ym - 14, c1, ym + 6, 2); }
   // timber frames (cap beams + posts as wall decoration)
-  for (const fx of [284, 270]) timberFrame(fx, FA, HA);
+  for (const fx of [284]) timberFrame(fx, FA, HA);   // permafrost adit: a single portal frame, the rest is bare frost-crusted rock
   for (const fx of [254, 246, 196, 186]) for (let tx = fx >> 2; tx <= (fx >> 2); tx++) { const f = floorD(tx * 4); bgBox(tx * 4, f - HA, tx * 4 + 4, f, 7); }      // props on the stairs are background strips only (no beams: the head room is needed)
   timberFrame(166, FB, HA);
   // portal: heavy header and bg posts
   box(MI.portalX - 6, FA - HA - 2, MI.portalX + 14, FA - HA + 6, M.LOG); bgBox(MI.portalX + 10, FA - HA, MI.portalX + 14, FA, 7); bgBox(MI.portalX - 4, FA - HA, MI.portalX, FA, 7);
   // --- rails with sleepers on the flat adit, a cart ---
   const rails = (x0: number, x1: number, f: number) => {
+    // straight rails (the way on foot needs them level); the sleepers are heaved: some tilted / missing, and frost sits on the metal
     for (let x = x0; x < x1; x++) {
       if (mat[(f - 1) * W + x] !== AIR && mat[(f - 1) * W + x] !== M.METAL) continue;
       put(x, f - 1, M.METAL);
-      if (((x >> 2) & 1) === 0) { put(x, f, M.PLANK); put(x, f + 1, M.PLANK); }
+      if (((x >> 2) & 1) === 0 && noise1(x * 0.4) > 0.12) { put(x, f, M.PLANK); put(x, f + 1, M.PLANK); }
     }
   };
   rails(MI.rampTop + 12, MI.portalX + 64, FA);
+  frostAdit();
   addFixture('cart', 74, FA / 4 - 2, 4, 2, { data: { loaded: 'coal' } });
   worldInfo.spots.portal = { x: MI.portalX + 4, y: FA - 10 };
   // --- hut chamber: timber lined, floor planks, beams, furniture, chest ---
@@ -422,15 +440,23 @@ function stampApron(T: Terrain) {
 function stampCairn(T: Terrain) {
   const cx = LOC.cairn.x, gy = T.surf[cx];
   const gyA = Math.floor(gy / 4) * 4;                    // tile aligned ground line for the niche
-  // base pad and a pyramid of rough stones
-  box(cx - 20, gyA, cx + 24, gyA + 4, M.STONE);
-  for (let r = 0; r < 8; r++) {
-    const w = 28 - 3.2 * r, y0 = gyA - 3 * (r + 1);
-    for (let x = Math.round(cx - w / 2); x <= Math.round(cx + w / 2); x++) {
-      for (let y = y0; y < y0 + 3; y++) { const e = Math.abs(x - cx) / (w / 2); if (e > 0.82 && rand() < 0.5) continue; if (rand() < 0.07) continue; put(x, y, M.STONE); }
+  // base pad and a squat heap of rough boulders (wide tiers, ragged edges) with a leaning marker pole: reads as a cairn, not as a conifer
+  box(cx - 22, gyA, cx + 26, gyA + 4, M.STONE);
+  const tiers = [[34, 5], [28, 5], [22, 4], [15, 4]];
+  let yy = gyA;
+  for (let r = 0; r < tiers.length; r++) {
+    const [w, hgt] = tiers[r], y0 = yy - hgt, off = Math.round(noise1(r * 3.1 + cx) * 4 - 2);
+    for (let x = Math.round(cx + off - w / 2); x <= Math.round(cx + off + w / 2); x++) {
+      for (let y = y0; y < yy; y++) {
+        const e = Math.abs(x - cx - off) / (w / 2);
+        if ((e > 0.78 && rand() < 0.55) || (y === y0 && rand() < 0.22) || rand() < 0.05) continue;
+        put(x, y, M.STONE);
+      }
     }
+    yy = y0;
   }
-  box(cx - 3, gyA - 30, cx + 3, gyA - 24, M.STONE);              // the top stone
+  box(cx - 5, yy - 5, cx + 1, yy, M.STONE);                      // one upright slab on top
+  { const ptx = (cx >> 2), pty = (yy - 20) >> 2; bgT(ptx, pty, ptx, (yy - 5) >> 2, 5); }   // marker pole: a wooden strip behind the walker (a solid pole would block the crest)
   const hgt = new Int16Array(40);
   // niche on the east side with the tin box
   box(cx + 5, gyA - 8, cx + 13, gyA, AIR);
@@ -452,8 +478,8 @@ function stampStation(T: Terrain) {
   draftTile(L + 5, top - 1); draftTile(R - 6, top - 1);
   // high windows next to the lintels (glass is weak: it must sit close to the stone)
   boxT(L + 1, top - 1, L + 1, top - 1, M.GLASS); boxT(R - 1, top - 1, R - 1, top - 1, M.GLASS);
-  addFixture('door', L, F - 5, 1, 5, { open: false, data: { side: 'west' } });
-  addFixture('door', R, F - 5, 1, 5, { open: false, data: { side: 'east' } });
+  addFixture('door', L, F - 6, 1, 6, { open: false, data: { side: 'west' } });
+  addFixture('door', R, F - 6, 1, 6, { open: false, data: { side: 'east' } });
   // furniture
   addFixture('bed', L + 3, F - 1, 4, 1);
   chest('station', L + 7, F - 2, [slot('can', 2), slot('biscuit', 4), slot('tea', 1), slot('matches', 8), slot('lantern', 1), slot('flare_gun', 1), slot('flare', 3), slot('rope', 1), slot('note_s1', 1)], 2, 2, { look: 'shelf' });
@@ -497,7 +523,7 @@ function stampMastAndShed(T: Terrain) {
   const { top } = cabin(L, R, F, 8, true);
   draftTile(L + 4, top - 1);
   boxT(R - 1, top - 1, R - 1, top - 1, M.GLASS);
-  addFixture('door', L, F - 5, 1, 5, { open: false, data: { side: 'west' } });
+  addFixture('door', L, F - 6, 1, 6, { open: false, data: { side: 'west' } });
   addFixture('drum', L + 3, F - 2, 2, 2, { data: { fuel: 'diesel', n: 6 } });
   addFixture('drum', L + 5, F - 2, 2, 2, { data: { fuel: 'diesel', n: 8 } });
   chest('shed', L + 8, F - 2, [slot('coal', 14), slot('axe', 1), slot('scrap', 6), slot('tin', 2), slot('rope', 1), slot('diesel', 1)], 2, 2, { look: 'bench' });
@@ -690,7 +716,7 @@ function stampShip(T: Terrain) {
   LB(12, 18, -96, 0, M.LOG); LB(58, 63, -74, 0, M.LOG);
   LB(-16, 46, -86, -82, M.LOG); LB(-10, 40, -62, -58, M.LOG); LB(42, 80, -72, -69, M.LOG);
   LB(-14, 44, -82, -77, M.CANVAS);                                      // furled upper sail
-  for (let u = -8; u < 38; u++) { const hh = 14 + Math.round(12 * noise1(u * 0.35 + 3)); if (noise1(u * 0.9) > 0.78) continue; LB(u, u + 1, -58, -58 + hh, M.CANVAS); }   // torn mainsail
+  for (let u = -8; u < 38; u++) { const hh = 7 + Math.round(11 * noise1(u * 0.35 + 3)); if (noise1(u * 0.9) > 0.6) continue; LB(u, u + 1, -58, -58 + hh, M.CANVAS); }   // frayed strips, not a solid curtain   // torn mainsail
   LB(44, 78, -69, -64, M.CANVAS);
   line(wx(15), wy(15, -95), wx(-30), wy(-30, -34), M.PLANK, 2);                // a backstay that stays well above head height over the stern deck
   LB(-32, -28, -34, -30, M.PLANK);
@@ -698,7 +724,12 @@ function stampShip(T: Terrain) {
   line(wx(60), wy(60, -73), wx(83), wy(83, -4), M.PLANK, 2);
   line(wx(83), wy(83, -4), wx(104), wy(104, -22), M.LOG, 3);                // bowsprit
   // upturned boat on deck (low) and a windlass at the bow
-  for (let u = 22; u < 54; u++) { const t = (u - 38) / 16, hh = Math.round(6 * Math.sqrt(Math.max(0, 1 - t * t))); for (let d = -hh; d < -hh + 2; d++) L(u, d, M.PLANK); }
+  // deckhouse: a wooden cabin on the main deck (cut open to show its panelled inside), a window in the stern wall, a rusted stove pipe, drifted snow on the roof
+  LB(21, 24, -20, 0, M.PLANK); LB(51, 54, -20, 0, M.PLANK); LB(20, 55, -23, -20, M.PLANK);
+  for (let u = 24; u < 51; u++) for (let d = -20; d < 0; d++) markBg(wx(u), wy(u, d), 5);
+  LB(21, 24, -15, -8, M.GLASS);
+  LB(43, 46, -38, -23, M.METAL); LB(42, 47, -40, -38, M.METAL);
+  for (let u = 20; u < 55; u++) { const hh = 2 + ((u * 5) % 3); for (let k = 1; k <= hh; k++) if (mat[wy(u, -23 - k) * W + wx(u)] === AIR) L(u, -23 - k, M.SNOW, k === hh ? 14 : 70); }
   LB(70, 78, -4, 0, M.METAL);
   // fixtures below deck: stove, bunk, the captain's chest and the cargo chest (all on the crew-deck floor)
   const fixOnFloor = (kind: FixtureKind, u: number, dFloor: number, tw: number, th: number, extra?: Partial<Fixture>) => {
@@ -725,6 +756,14 @@ function stampShip(T: Terrain) {
   const hold = chestOn('ship', 4, FLOOR, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1), slot('canvas', 3), slot('biscuit', 3), slot('fat', 2), slot('note_n11', 1)], { look: 'tool' });
   worldInfo.radioParts.triode = { x: hold.x, y: hold.y, site: 'ship' };
   floorNote('n14', 'ship', wx(-76), wy(-76, 0) - 2);
+  // ice collar: the pack ice is heaved against both ends of the hull (pressure ridges with a snow crest), so the wreck is frozen in, not floating on it
+  for (const [xa, xb, hmax] of [[cx - 106, cx - 74, 15], [cx + 84, cx + 116, 11]] as const) {
+    for (let x = xa; x <= xb; x++) {
+      const t = xa < cx ? (x - xa) / (xb - xa) : 1 - (x - xa) / (xb - xa), h = Math.round(hmax * Math.pow(Math.max(0, t), 0.8) * (0.85 + 0.3 * noise1(x * 0.3)));
+      const top = T.iceTop[x] || SEA - 3;
+      for (let k = 1; k <= h; k++) { const y = top - k; if (mat[y * W + x] === AIR) put(x, y, k > h - 2 ? M.SNOW : k > h - 5 ? M.PACKED : M.ICE, k > h - 2 ? 14 : 120); }
+    }
+  }
   // snow on the deck, icicles on the yards
   for (let u = -76; u <= 82; u++) { if (deckHole(u)) continue; const hh = 1 + ((u * 7) & 1); for (let k = 1; k <= hh; k++) if (mat[wy(u, -k) * W + wx(u)] === AIR) L(u, -k, M.SNOW, k > hh - 1 ? 16 : 60); }
   for (let k = 0; k < 18; k++) { const u = randInt(-14, 44), d = randInt(-61, -57) + 14; if (mat[wy(u, d) * W + wx(u)] === AIR && mat[wy(u, d - 1) * W + wx(u)] !== AIR) { const len = randInt(3, 8); for (let j = 0; j < len && mat[wy(u, d + j) * W + wx(u)] === AIR; j++) L(u, d + j, M.ICE); } }

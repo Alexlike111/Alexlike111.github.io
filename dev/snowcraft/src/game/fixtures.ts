@@ -8,7 +8,7 @@ import { W, H, TS, mat, flags, aux, setCell, edited, wake, F_FIXTURE } from '../
 import { MAT, WALK } from '../content/materials';
 import { addHeat, windAt, isSkyOpen, HEAT_POWER } from '../engine/heat';
 import { spawnFx, burstFx } from '../engine/particles';
-import { add, count, remove, inv, spawnDrop, addOrDrop, held, find } from './inventory';
+import { add, count, remove, inv, spawnDrop, addOrDrop, held, find, changed } from './inventory';
 import { getItem, fuelMinutes, itemName } from './items';
 import { MIN_PER_SEC, readBarometer } from './weather';
 import { floodEnclosure } from './shelter';
@@ -47,6 +47,9 @@ const S = strings('fix', {
   drumBrazier: 'Бочка стала жаровней',
   drumDiesel: 'Налил солярки: {n}',
   drumEmpty: 'В бочке пусто',
+  drumFull: 'В бочке ещё солярка: слей её (E), потом руби в жаровню',
+  potFull: 'Котелок полон',
+  fuelBack: 'Топливо вернулось в сумку',
   mastUp: 'Мачта стоит',
   mastNeed: 'Для мачты нужно 3 доски (или кости) и 2 верёвки',
   bedSleep: 'Ложишься спать…',
@@ -256,7 +259,20 @@ export function pickupFixture(f: Fixture): boolean {
   const dur = f.kind === 'torch' ? Math.max(1, Math.round(f.fuel ?? 60)) : undefined;
   const left = add(id, 1, dur);
   if (left > 0) spawnDrop(id, 1, cx, cy - 4, 0, -20, dur);
-  if (f.kind === 'pot') { const w = Number(f.data?.water ?? 0); if (w > 0) addOrDrop('water', w, cx, cy); }
+  if (f.kind === 'pot') {
+    const w = Number(f.data?.water ?? 0); if (w > 0) addOrDrop('water', w, cx, cy);
+    const sn = Number(f.data?.snow ?? 0), ic = Number(f.data?.ice ?? 0);
+    if (sn > 0) addOrDrop('snow', sn, cx, cy);
+    if (ic > 0) addOrDrop('ice', ic, cx, cy);
+  }
+  // unburnt fuel comes back as items (logs for fires, fat for a lamp); a torch keeps its own burn time
+  const cls = d.fuel;
+  if (cls && f.kind !== 'torch' && (f.fuel ?? 0) > 0) {
+    const fuelItem = cls === 'lamp' ? 'fat' : 'log';
+    const per = fuelMinutes(fuelItem, cls);
+    const n = per > 0 ? Math.floor((f.fuel ?? 0) / per) : 0;
+    if (n > 0) { addOrDrop(fuelItem, n, cx, cy); toast(S.fuelBack, 'info'); }
+  }
   removeFixture(f);
   toast(fmt(S.pickup, { name: itemName(id) }), 'info');
   return true;
@@ -397,17 +413,24 @@ export function stash(f: Fixture): boolean {
   if (items.length >= d.storage && !items.some(s => s.id === sel.id)) return false;
   const ex = items.find(s => s.id === sel.id && s.dur === sel.dur);
   if (ex) ex.n += sel.n; else items.push({ ...sel });
-  inv.slots[inv.sel] = null;
+  inv.slots[inv.sel] = null; changed();
   toast(fmt(S.stashed, { name: itemName(sel.id) }), 'info');
   return true;
 }
 
+const POT_CAP = 6;
 function interactPot(f: Fixture): boolean {
   const dd = f.data!;
   const sel = inv.slots[inv.sel];
+  const room = () => POT_CAP - Number(dd.snow ?? 0) - Number(dd.ice ?? 0);
   const put = (id: 'snow' | 'ice', n = 1) => { dd[id] = Number(dd[id] ?? 0) + n; toast(fmt(S.potAdded, { name: itemName(id) }), 'info'); return true; };
-  if (sel && (sel.id === 'snow' || sel.id === 'ice')) { remove(sel.id, 1); return put(sel.id); }
-  if (held.load >= 8) { held.load = 0; return put('snow', 2); }
+  if (sel && (sel.id === 'snow' || sel.id === 'ice')) { if (room() < 1) { toast(S.potFull, 'info'); return true; } remove(sel.id, 1); return put(sel.id); }
+  if (held.load >= 8) {
+    // one bag (8 cells) of shovelled snow = 1 snow; the rest stays on the blade
+    if (room() < 1) { toast(S.potFull, 'info'); return true; }
+    const bags = Math.min(Math.floor(held.load / 8), room());
+    held.load -= bags * 8; return put('snow', bags);
+  }
   const w = Number(dd.water ?? 0);
   if (w > 0) {
     const fi = find(s => s.id === 'flask');
@@ -418,7 +441,7 @@ function interactPot(f: Fixture): boolean {
     if (taken > 0) { toast(fmt(S.potTook, { n: taken }), 'good'); return true; }
   }
   const load = Number(dd.snow ?? 0) + Number(dd.ice ?? 0);
-  if (load < 6) {
+  if (load < POT_CAP) {
     if (count('ice') > 0) { remove('ice', 1); return put('ice'); }
     if (count('snow') > 0) { remove('snow', 1); return put('snow'); }
   }
@@ -449,6 +472,7 @@ function interactDrum(f: Fixture): boolean {
   const sel = inv.slots[inv.sel];
   const dd = f.data ?? (f.data = {});
   if (sel && (sel.id === 'axe' || sel.id === 'pick')) {
+    if (Number(dd.diesel ?? dd.n ?? 0) > 0) { toast(S.drumFull, 'warn'); return true; }
     f.kind = 'brazier'; f.fuel = 0; f.lit = false; f.tw = 2; f.th = 2;
     toast(S.drumBrazier, 'good'); emit('drum_brazier', { fixture: f }); return true;
   }

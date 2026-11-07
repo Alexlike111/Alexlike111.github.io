@@ -8,7 +8,10 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const PORT = 5181, BASE = `http://localhost:${PORT}/tests/viewer.html`;
 const ALL = ['cape', 'portal', 'mineA', 'collapse', 'hut', 'methane', 'lake', 'cairn', 'tundra', 'station', 'shed', 'beach', 'whale', 'tide', 'fast', 'seal', 'iceberg', 'icecave', 'pack', 'lead', 'ship', 'cabin', 'hold', 'sea'];
-const zones = process.argv.slice(2).length ? process.argv.slice(2) : ALL;
+const REPRESENTATIVE = ['station', 'beach', 'fast', 'pack', 'ship', 'cape'];
+const argv = process.argv.slice(2);
+// default = a few representative zones (the full set is 192 PNGs and takes ~10 min): pass --all or zone names
+const zones = argv.includes('--all') ? ALL : argv.filter(a => !a.startsWith('--')).length ? argv.filter(a => !a.startsWith('--')) : REPRESENTATIVE;
 const CONDS = [
   { id: 'd1noon', day: 1, hour: 12, storm: 0, extra: '' },
   { id: 'd6night', day: 6, hour: 0, storm: 0, extra: 'v.setMoon && v.setMoon(0.5); v.setAurora && v.setAurora(1);' },
@@ -26,6 +29,8 @@ if (!(await up())) {
   for (let i = 0; i < 60 && !(await up()); i++) await new Promise(r => setTimeout(r, 500));
 }
 fs.mkdirSync('shots', { recursive: true });
+// clear our own previous output for the zones about to be shot, so stale frames never get mixed in
+for (const f of fs.readdirSync('shots')) if (/^world-(desktop|phone)-/.test(f) && zones.some(z => f.includes('-' + z + '-'))) fs.unlinkSync('shots/' + f);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const errs = []; let n = 0;
 for (const dev of DEVICES) {

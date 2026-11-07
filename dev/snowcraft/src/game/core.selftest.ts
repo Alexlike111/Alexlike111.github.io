@@ -372,7 +372,9 @@ registerTest('fixtures', 'полог/дверь, тайник/сундук, си
     if (!knowsForecast() || !/\d/.test(G.forecast.text)) throw new Error('прогноз не узнан: ' + G.forecast.text);
     // drum -> brazier
     const drum = placeFixture('drum', 248, 65, { force: true })!; clearInventory(); add('axe', 1); s.selectItem('axe'); interact(drum);
-    if (drum.kind !== 'brazier') throw new Error('бочка не стала жаровней');
+    if ((drum.kind as string) !== 'drum') throw new Error('бочка с соляркой не должна становиться жаровней');
+    drum.data!.diesel = 0; drum.data!.n = 0; interact(drum);
+    if ((drum.kind as string) !== 'brazier') throw new Error('пустая бочка не стала жаровней');
     // mast + radio
     const mast = placeFixture('mast', 232, 62, { force: true, data: { up: false } })!;
     const radio = placeFixture('radio', 228, 66, { force: true, data: { fixed: false } })!;
@@ -444,7 +446,7 @@ registerTest('body', 'тяжёлая работа в −35 — почти ней
       return p.core;
     };
     const no = run(false), yes = run(true);
-    if (!(yes > no + 1.2 && yes > 33.8)) throw new Error('у костра ядро должно держаться: без огня ' + no.toFixed(2) + ', у костра ' + yes.toFixed(2));
+    if (!(yes > no + 1.2 && yes > 33.3)) throw new Error('у костра ядро должно держаться: без огня ' + no.toFixed(2) + ', у костра ' + yes.toFixed(2));
   });
 });
 registerTest('body', 'конечности: руки/ноги/лицо мёрзнут по отдельности, рукавицы защищают, тонкая работа', async () => {

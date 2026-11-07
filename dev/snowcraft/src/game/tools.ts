@@ -14,7 +14,7 @@ import { throwCell, spawnFx, burstFx } from '../engine/particles';
 import { tempAt } from '../engine/heat';
 import { setCameraLook } from '../engine/camera';
 import {
-  inv, add, count, remove, selected, select, spawnDrop, dropDur, held, hitchSled, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
+  inv, add, count, remove, selected, select, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
 } from './inventory';
 import { getItem, itemName, densityOf, auxOfDensity, snowClass, snowClassName, blockWeight, type ItemDef } from './items';
 import {
@@ -23,6 +23,7 @@ import {
 import { body, eatSlot, eatBest, toggleParka, aimSway, handsFactor, openBackpack } from './player';
 import { extra as shelterExtra } from './shelter';
 import { MIN_PER_SEC } from './weather';
+import { dogInteract } from './fauna';
 
 const S = strings('tools', {
   far: 'далеко', blocked: 'не достать: мешает стена', noTool: 'нужна кирка', needPick: 'нужна кирка', needAxe: 'нужен топор', needChisel: 'нужна пешня или кирка',
@@ -41,10 +42,13 @@ const S = strings('tools', {
   fishCast: 'Забросил леску…', fishBite: 'Клюёт! Тяни!', fishLost: 'Сорвалась', fishGot: 'Поймал: {name}', fishNeedHole: 'Нужна лунка или полынья', fishColdHands: 'Руки стынут: ловля — тонкая работа',
   harpoon: 'Гарпун!', noAmmo: 'Нечем',
   bagged: 'Снег в сумке: {n}', barometer: 'Барометр: {t}',
-  equipped: 'Надето: {name}', sled: 'Запрягся в нарты', cantEat: 'Не хочется',
+  equipped: 'Надето: {name}', sled: 'Запрягся в нарты (G с инструментом или пустой рукой — оставить)', cantEat: 'Не хочется',
   handsFrozen: 'Руки не слушаются',
   domeOn: 'Режим купола: блоки наклоняются внутрь', domeOff: 'Обычная укладка', smartOn: 'Умный курсор', smartOff: 'Свободный курсор',
   picked: 'Взял: {name}', backpack: 'Ты вернул свои вещи',
+  sledDown: 'Нарты оставлены: E рядом — снова запрячься', sledUp: 'Запрягся в нарты',
+  looseHint: 'Снег рыхлый — ищи плотный наст в затишье, под сугробом или у гряды',
+  denseGood: 'годится для блоков', denseBad: 'слишком рыхлый',
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -98,7 +102,7 @@ const SPEED: Record<string, Record<string, number>> = {
 };
 const DROPS: Record<string, [string, number]> = {
   ICE: ['ice', 1], LOG: ['log', 1], WOOD: ['log', 1], PLANK: ['plank', 1], WHALEBONE: ['bone', 1], STONE: ['stone', 1], BASALT: ['stone', 1], BRICK: ['stone', 1],
-  HARDROCK: ['stone', 1], COAL: ['coal', 1], SOAPSTONE: ['soapstone', 1], LICHEN: ['lichen', 0.6], METAL: ['scrap', 1], COPPER: ['scrap', 1], IRON: ['scrap', 1],
+  HARDROCK: ['stone', 1], COAL: ['coal', 1], SOAPSTONE: ['soapstone', 1], LICHEN: ['lichen', 0.6], METAL: ['scrap', 1],
   GRAVEL: ['stone', 0.35],
 };
 const SNOWY = new Uint8Array(256);
@@ -265,7 +269,12 @@ function evaluate(sel: ItemDef | null, dt: number) {
     if (isSnowy) {
       let sum = 0, n = 0;
       for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) { const k = (ty * TS + j) * W + tx * TS + i; if (SNOWY[mat[k]]) { sum += densityOf(MATS[mat[k]].key, aux[k]); n++; } }
-      if (n) { T.density = Math.round(sum / n); L(lines, fmt(S.density, { d: T.density, c: snowClassName(snowClass(T.density)) })); }
+      if (n) {
+        T.density = Math.round(sum / n);
+        const good = T.density >= 250 && T.density <= 380, bad = T.density < 220;
+        const col = good ? '#8fe3b0' : bad ? '#ff9a88' : '#ffc46e';
+        L(lines, `<span style="color:${col}">` + fmt(S.density, { d: T.density, c: snowClassName(snowClass(T.density)) }) + (good ? ' ✓' : bad ? ' ✗' : '') + '</span>');
+      }
     }
     if (m === MAT.ICE) {
       // thickness of the ice layer in this column (needs the chisel to read)
@@ -443,6 +452,7 @@ function finishDig(T: Target, tk: string, slot: number) {
   body.working = 1; void p; void cells;
 }
 
+let lastHint = -99;
 function doCut(T: Target, dtEff: number, slot: number) {
   const c = toolState.cut;
   if (c.tx !== T.tx || c.ty !== T.ty) { c.tx = T.tx; c.ty = T.ty; c.p = 0; }
@@ -457,7 +467,7 @@ function doCut(T: Target, dtEff: number, slot: number) {
     const d = r.density;
     for (let k = 0; k < 2; k++) clearTile(T.tx + k, T.ty, (m) => m === MAT.PACKED || m === MAT.SNOWBLOCK);
     chips(T.tx, T.ty, MAT.PACKED, 8); chips(T.tx + 1, T.ty, MAT.PACKED, 8);
-    if (d < 220) { toast(S.crumbled, 'warn'); spawnDrop('snow', 2, T.tx * TS + 4, T.ty * TS, 0, -18); }
+    if (d < 220) { toast(S.crumbled, 'warn'); if (G.realTime - lastHint > 25) { lastHint = G.realTime; toast(S.looseHint, 'info'); } spawnDrop('snow', 2, T.tx * TS + 4, T.ty * TS, 0, -18); }
     else {
       const p = G.player;
       const left = add('snow_block', 1, d);
@@ -551,6 +561,7 @@ function useHarpoon(T: Target, slot: number) {
   emit('harpoon', { x: p.x, y: p.y - 11, dir: ang, tx: T.x, ty: T.y });
   // direct hit test against animals along the thrust
   for (const a of G.animals) {
+    if (a.state === 'hidden' || a.state === 'dead' || a.kind === 'dog' || a.kind === 'fish') continue;
     const ax = a.x - p.x, ay = a.y - a.h / 2 - (p.y - 11);
     const proj = ax * Math.cos(ang) + ay * Math.sin(ang);
     if (proj < 0 || proj > 24) continue;
@@ -731,6 +742,8 @@ function interactAction(T: Target, selId: string | null) {
   if (T.fixture && Math.hypot(T.fixture.tx * TS + T.fixture.tw * 2 - p.x, T.fixture.ty * TS + T.fixture.th * 2 - (p.y - 8)) < 56) f = T.fixture;
   if (!f) f = fixtureNear(p.x, p.y - 8, 18, (o) => !!FIXTURE_DEFS[o.kind] && o.kind !== 'table' && o.kind !== 'workbench' && !(o.kind === 'hide_door' && false));
   if (f && fxInteract(f)) return;
+  if (dogInteract()) return;
+  if (sledNear(p.x, p.y - 4)) { hitchSled(p.x, p.y); toast(S.sledUp, 'info'); return; }
   // shovel load -> bag it
   if (selId === 'shovel' && held.load >= 8) {
     const n = Math.floor(held.load / 8); held.load -= n * 8;
@@ -749,7 +762,10 @@ function dropAction(T: Target) {
     if (stash(f)) return;
     if (pickupFixture(f)) return;
   }
-  const s = selected(); if (!s) return;
+  const s = selected();
+  // G with a dragged sled and nothing else to drop: park the sled (its load stays on it)
+  if (inv.sled?.hitched && (!s || getItem(s.id).kind === 'tool')) { unhitchSled(p.x - p.face * 14, inv.sled.y); toast(S.sledDown, 'info'); return; }
+  if (!s) return;
   const out = removeFromSlot(inv.sel, getItem(s.id).stack > 1 ? s.n : 1); if (!out) return;
   const d = spawnDrop(out.id, out.n, p.x + p.face * 8, p.y - 12, p.face * 40, -30, out.dur);
   if (d) d.age = -1.4;
@@ -785,7 +801,7 @@ export function stepDrops(dt: number) {
     const r = moveBox(box as never, dt, { stepUp: 0 });
     void r;
     d.x = box.x; d.y = box.y; d.vx = box.onGround ? box.vx * 0.8 : box.vx; d.vy = box.onGround ? 0 : box.vy;
-    if (d.age > 900 || d.y > H - 2) { dropDur.delete(d.id); arr.splice(i, 1); }
+    if (d.item === 'backpack' ? d.y > H - 2 : (d.age > 900 || d.y > H - 2)) { dropDur.delete(d.id); if (d.item === 'backpack') backpacks.delete(d.id); arr.splice(i, 1); }
   }
   if (arr.length > MAX_DROPS) arr.length = MAX_DROPS;
 }

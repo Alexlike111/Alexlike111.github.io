@@ -142,13 +142,14 @@ add('вода замерзает при −20 °C сверху вниз', (t) =>
   fill(821, 420, 899, 439, MAT.WATER);
   temp.fill(-20);
   let first = -1;
-  for (let k = 0; k < 2400; k++) {
-    run(1);
+  // heat must be stepped too: freezing releases latent heat into the tile, and only the thermal field carries it away to the -20 ambient
+  for (let k = 0; k < 3600; k++) {
+    run(1, true);
     if (first < 0 && count(MAT.ICE, 821, 420, 899, 439) > 0) first = k;
   }
   const ice = count(MAT.ICE, 821, 420, 899, 439);
   t.expect(first >= 0 && first < 300, 'лёд не появился за 5 с');
-  t.expect(ice > 79 * 20 * 0.4, `лёд ${ice}/${79 * 20} за 40 с`);
+  t.expect(ice > 79 * 20 * 0.4, `лёд ${ice}/${79 * 20} за 60 с`);
   let sealed = true; for (let x = 821; x <= 899; x++) { let top = -1; for (let y = 420; y < 440; y++) if (mat[idx(x, y)] !== MAT.AIR) { top = y; break; } if (top < 0 || mat[idx(x, top)] !== MAT.ICE) { sealed = false; break; } }
   t.expect(sealed, 'поверхность не затянулась льдом');
   t.metric('first ice', first / 60, 's');

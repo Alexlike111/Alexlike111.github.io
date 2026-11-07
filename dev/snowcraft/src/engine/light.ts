@@ -18,7 +18,9 @@ const K_LEAVE_PT = 0.42;
 const SCATTER = 2.0;          // subsurface glow gain of lit snow / ice walls (iconic amber igloo)
 const DIAG = 1.4142;
 const AIR_T = 0.3;             // tile opacity below this counts as open air
-const SOLID_AMBIENT = 0.1;    // faint floor so strata/ores read in unlit rock
+const SOLID_AMBIENT = 0.2;    // floor so rock silhouettes / strata / tunnel walls stay readable in the polar night (DESIGN: silhouettes >= ~3:1 vs the sky)
+const INDOOR_MIN = 0.1, INDOOR_SKY = 0.4;   // dim blue fill of enclosed air (rooms, igloos, tunnels): a minimum + a share of the sky light (windows, roof gaps)
+const RIM = 0.3;              // cool moon/aurora rim on solid edges that face open sky
 
 /** Region of tiles currently covered by the light arrays. */
 export const lt = { tx0: 0, ty0: 0, w: 0, h: 0 };
@@ -244,14 +246,27 @@ export function computeLight(v: { x0: number; y0: number; w: number; h: number }
   // 4. compose + tone map
   const se = skyTint.e, sr = skyTint.r * se, sg = skyTint.g * se, sb = skyTint.b * se;
   const bloom = q === 0 ? 0 : 0.3;
-  const AMBIENT = 0.026 + 0.045 * skyState.light;
-  const solidAmb = SOLID_AMBIENT * (0.5 + 0.5 * skyState.light);
+  const AMBIENT = 0.07 + 0.05 * skyState.light;
+  const solidAmb = SOLID_AMBIENT * (0.6 + 0.4 * skyState.light);
+  const rimE = skyOn ? RIM + 0.5 * Math.min(1, se) : 0;
+  const finR = 0.62 * rimE, finG = 0.8 * rimE, finB = 1.0 * rimE;
+  const inE = INDOOR_MIN + INDOOR_SKY * Math.min(1, se);
   for (let i = 0; i < n; i++) {
     const s = skyE[i];
     const er = Math.max(0, s * sr + pR[i]), eg = Math.max(0, s * sg + pG[i]), eb = Math.max(0, s * sb + pB[i]);
     const mr = (1 - Math.exp(-KR * er)) * NR, mg = (1 - Math.exp(-KG * eg)) * NG, mb = (1 - Math.exp(-KB * eb)) * NB;
-    const sa = opac[i] > 0.5 ? solidAmb : 0;
-    const lr = mr + AMBIENT + sa * 0.8, lg = mg + AMBIENT * 1.2 + sa * 0.9, lb = mb + AMBIENT * 1.8 + sa * 1.2;
+    const solid = opac[i] > 0.5;
+    const sa = solid ? solidAmb : 0;
+    let lr = mr + AMBIENT + sa * 0.8, lg = mg + AMBIENT * 1.2 + sa * 0.9, lb = mb + AMBIENT * 1.8 + sa * 1.2;
+    if (indoor[i]) { const f = inE * (skyOn ? 1 : 0.7); lr += f * (0.5 + 0.3 * skyTint.r); lg += f * (0.66 + 0.2 * skyTint.g); lb += f * (0.92 + 0.1 * skyTint.b); }
+    else if (solid && skyOn) {
+      // rim light: a solid tile whose upper / side neighbour is open sky
+      const x = i % w, y = (i / w) | 0;
+      let k = 0;
+      if (y > 0 && airF[i - w] === 1 && skyE[i - w] > 0.3) k = 1;
+      else if ((x > 0 && airF[i - 1] === 1 && skyE[i - 1] > 0.3) || (x < w - 1 && airF[i + 1] === 1 && skyE[i + 1] > 0.3)) k = 0.6;
+      if (k > 0) { lr += finR * k; lg += finG * k; lb += finB * k; }
+    }
     lightR[i] = lr; lightG[i] = lg; lightB[i] = lb;
     const j = i * 4;
     lightRGBA[j] = lr * 255; lightRGBA[j + 1] = lg * 255; lightRGBA[j + 2] = lb * 255; lightRGBA[j + 3] = 255;

@@ -30,6 +30,7 @@ function initTables() {
     OPEN[m] = ph === P_EMPTY || ph === P_GAS || ph === P_FIRE || ph === P_LIQUID || d.key === 'FIXTURE' ? 1 : 0;
     TOPB[m] = 20;
     if (d.key === 'SNOW' || d.key === 'PACKED' || d.key === 'SNOWBLOCK') { TOPB[m] = 46; SPARK[m] = 1; }
+    else if (d.key === 'COAL') { TOPB[m] = 40; SPARK[m] = 1; }
     else if (d.key === 'ICE') { TOPB[m] = 38; SPARK[m] = 1; TRANS[m] = 70; }
     else if (d.key === 'GLASS') { TOPB[m] = 30; SPARK[m] = 1; TRANS[m] = 110; }
     else if (d.key === 'CRYSTAL') { TOPB[m] = 30; SPARK[m] = 1; }
@@ -323,7 +324,15 @@ function drawWeather(c: CanvasRenderingContext2D, v: View, t: number) {
   if (fog > 0.01) {
     const hz = horizonRGB, k = 0.35 + 0.65 * skyState.light;
     const r = (hz[0] * 0.55 + 150 * light * k + 16) | 0, g = (hz[1] * 0.55 + 160 * light * k + 20) | 0, b = (hz[2] * 0.55 + 176 * light * k + 30) | 0;
-    c.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${Math.min(0.9, fog)})`;
+    const col = `${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)}`, fa = Math.min(0.8, fog);
+    // whiteout stays playable: the fog thins out around the player (a short-range clear pocket keeps the nearby terrain and shelter readable)
+    const pl = G.player;
+    if (pl && fa > 0.3) {
+      const px = pl.x - v.x0, py = pl.y - 10 - v.y0, R0 = 26 + 40 * (1 - vis), R1 = R0 + 110;
+      const gr = c.createRadialGradient(px, py, R0 * 0.4, px, py, R1);
+      gr.addColorStop(0, `rgba(${col},${fa * 0.28})`); gr.addColorStop(0.45, `rgba(${col},${fa * 0.6})`); gr.addColorStop(1, `rgba(${col},${fa})`);
+      c.fillStyle = gr;
+    } else c.fillStyle = `rgba(${col},${fa})`;
     c.fillRect(0, 0, v.w, v.h);
   }
   const wind = Math.abs(G.wind);

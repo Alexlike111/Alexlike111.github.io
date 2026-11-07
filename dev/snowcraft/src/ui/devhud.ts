@@ -1,202 +1,422 @@
-// TEMPORARY minimal HUD (the UI wave replaces it): body numbers incl. extremities, belt with names, tooltip at the cursor,
-// toast line, shelter chip, day / clock / sun elevation, forecast, CO warning, a small inventory + crafting panel (C), death card.
+// HUD (DESIGN §10): body figure with per-extremity frost tint + thermometer / hydration / food / energy / wet / CO, sun-clock semicircle with
+// moon phase and barometer arrow, wind arrow, one top-centre stack (objective line, shelter chip, toasts: they can never overlap), belt with icons
+// (count badge top-right, name only for the active slot), bag + crafting panel (icon grid, clothing slots, weight bar, recipes grouped by DESIGN
+// categories), death card, ending card. One pixel font (Pixelify Sans) shared with the touch controls. `?devhud` adds the old numeric readout.
+// File name kept for main.ts; the old developer list lives behind the flag.
+import '@fontsource/pixelify-sans/latin-400.css';
+import '@fontsource/pixelify-sans/cyrillic-400.css';
+import '@fontsource/pixelify-sans/latin-600.css';
+import '@fontsource/pixelify-sans/cyrillic-600.css';
+import '@fontsource/jura/latin-400.css';
+import '@fontsource/jura/cyrillic-400.css';
+import '@fontsource/jura/latin-600.css';
+import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
 import { input } from '../engine/input';
-import { worldToScreen } from '../engine/render';
 import { strings, fmt } from '../content/i18n';
-import { inv, weight, BELT, NSLOT, select, equip, unequip, WEAR_SLOTS, WEIGHT_MAX } from '../game/inventory';
+import { inv, weight, BELT, NSLOT, select, equip, unequip, WEAR_SLOTS, WEIGHT_MAX, WEIGHT_SOFT } from '../game/inventory';
 import { getItem, itemName } from '../game/items';
-import { RECIPES, canCraft, craft, craftedText } from '../game/recipes';
+import { RECIPES, canCraft, craft, craftedText, type Recipe, type RecipeGroup } from '../game/recipes';
 import { stationsAt } from '../game/fixtures';
-import { target, toolState } from '../game/tools';
+import { target } from '../game/tools';
 import { body, handsFrozen, eatSlot, respawn } from '../game/player';
 import { icon } from '../engine/sprites';
-import { knowsForecast, STORMS } from '../game/weather';
+import { uiIcon, moonIcon } from '../art/icons';
+import { knowsForecast, sunElevAt } from '../game/weather';
 import { toast } from '../game/state';
 import { on } from '../game/bus';
+import { objective, initQuest, prog, journal } from '../game/quest';
+import { sites } from '../game/locations';
 
 const S = strings('hud', {
   core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', co: 'CO',
   feels: 'ощущается {t}°', air: 'воздух {t}°',
-  day: 'День {d} / {n}', sun: 'Солнце {e}°', moon: 'луна',
+  day: 'День {d}/{n}', sunDeep: 'солнце {e}°', moon: 'луна',
   shelter: 'Укрытие', noShelter: 'нет укрытия', vent: 'отдушина ✓', noVentTxt: 'отдушины нет', temp: '{t}°',
   dead: 'Ты погиб: {c}', deadHint: 'Нажми любую клавишу — вернуться на станцию', deadHard: 'Хардкор: забег окончен',
   pause: 'ПАУЗА', free: 'свободная камера (F2)',
   ending: 'Рассвет. Солнце вернулось.',
-  bag: 'Сумка', craft: 'Мастерская', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть',
-  forecast: 'Прогноз: {t}', noForecast: 'Прогноз: нужен барометр',
-  hint: 'WASD — ход · ЛКМ — действие · E — взять · F — еда · V — парка · C — сумка · R — купол/курсор · G — бросить',
-  storm: 'ПУРГА', wind: 'ветер {w} м/с',
+  bag: 'Сумка', craft: 'Мастерская', weight: 'Вес {w}/{m} кг', worn: 'Одето', close: 'закрыть', pack: 'Пояс и сумка',
+  slotHead: 'шапка', slotBody: 'парка', slotHands: 'рукавицы', slotFeet: 'обувь',
+  forecast: 'прогноз: {t}', noForecast: 'барометр?', baroUp: 'давление растёт', baroDown: 'давление падает',
+  storm: 'ПУРГА', wind: '{w} м/с', calm: 'штиль',
+  dens: 'плотность {d}', fine: 'тонкая работа: голые руки', needs: 'нужно: {s}', variant: 'вариант',
+  gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
+  stNone: '', stTable: 'стол', stFire: 'огонь', stDrum: 'бочка', stAntenna: 'мачта',
+  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок',
+  jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
+  lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
 });
 
-let root: HTMLElement, left: HTMLElement, top: HTMLElement, right: HTMLElement, beltEl: HTMLElement, tip: HTMLElement, toastEl: HTMLElement, chip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, endEl: HTMLElement;
-let panelOpen = false;
-let beltKey = '';
+let root: HTMLElement, bw: HTMLElement, dial: HTMLElement, stack: HTMLElement, objEl: HTMLElement, chip: HTMLElement, toastBox: HTMLElement, beltEl: HTMLElement, bname: HTMLElement;
+let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement;
+let panelOpen = false, jOpen = false;
+let jEl: HTMLElement;
+let beltKey = '', toastKey = '';
 let acc = 0, panelAcc = 0;
 let freeCam = false;
 export function setFreeCamLabel(on: boolean) { freeCam = on; }
+const DEV = new URLSearchParams(location.search).has('devhud');
+
+// ---- icon helpers (data URLs so innerHTML templates can use them) -------------------------------------------------------------------
+const urlCache = new Map<string, string>();
+const itemUrl = (id: string) => { let u = urlCache.get(id); if (!u) { u = icon(getItem(id).icon).toDataURL(); urlCache.set(id, u); } return u; };
+const uiUrl = (key: string, tint?: string) => { const k = 'ui.' + key + '|' + (tint ?? ''); let u = urlCache.get(k); if (!u) { u = uiIcon(key, tint).toDataURL(); urlCache.set(k, u); } return u; };
+const img = (src: string, cls = '') => `<img class="ic ${cls}" src="${src}" alt="" draggable="false">`;
 
 const CSS = `
-#hud{position:fixed;inset:0;z-index:20;pointer-events:none;font:13px/1.35 'Jura',system-ui,sans-serif;color:#dff0ff;
- padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);text-shadow:0 1px 2px #000}
-#hud .p{position:absolute;background:rgba(10,18,32,.58);border:1px solid rgba(124,198,238,.28);border-radius:6px;padding:5px 8px}
-#hud .l{left:8px;top:8px;min-width:150px}
-#hud .l div{display:flex;justify-content:space-between;gap:10px;font-variant-numeric:tabular-nums}
-#hud .warn{color:#ffc46e}#hud .bad{color:#ff7a68}#hud .good{color:#8fe3b0}
-#hud .r{right:8px;top:8px;text-align:right;max-width:240px}
-body.touch-ui #hud .r{top:64px}
-#hud .t{left:50%;top:8px;transform:translateX(-50%);text-align:center;max-width:46vw}
-body.touch-ui #hud .t{max-width:34vw}
-#hud .belt{left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;gap:4px;padding:4px;pointer-events:auto}
-#hud .sl{width:54px;height:58px;border:2px solid rgba(124,198,238,.3);border-radius:6px;background:rgba(10,18,32,.6);position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:3px;font-size:9px;text-align:center;overflow:hidden}
-#hud .sl.sel{border-color:#ffc46e;background:rgba(60,34,12,.7)}
-#hud .sl canvas{width:28px;height:28px;image-rendering:pixelated}
-#hud .sl .n{position:absolute;right:3px;top:2px;font-size:11px;color:#fff}
-#hud .sl .k{position:absolute;left:3px;top:1px;font-size:9px;color:#8aa}
-#hud .sl .nm{margin-top:1px;line-height:1;max-width:50px}
-#hud .sl .bar{position:absolute;left:3px;right:3px;bottom:2px;height:3px;background:#123}#hud .sl .bar i{display:block;height:100%;background:#8fe3b0}
-#hud .tip{pointer-events:none;max-width:240px;font-size:12px;display:none}
-#hud .toast{left:50%;top:70px;transform:translateX(-50%);text-align:center;display:none;font-size:15px;max-width:60vw}
-body.touch-ui #hud .toast{top:46px}
-#hud .chip{left:50%;top:40px;transform:translateX(-50%);display:none;font-size:12px;white-space:nowrap}
-body.touch-ui #hud .chip{top:34px}
-#hud .dead{inset:0;background:rgba(40,0,0,.55);display:none;align-items:center;justify-content:center;flex-direction:column;font-size:22px;pointer-events:auto;border:0;border-radius:0}
+#hud{position:fixed;inset:0;z-index:20;pointer-events:none;font:600 14px/1.3 'Jura',system-ui,sans-serif;color:#dff0ff;
+ padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);text-shadow:0 1px 0 #05080f}
+#hud .p{position:absolute;background:linear-gradient(180deg,rgba(14,26,46,.78),rgba(8,16,30,.78));border:1px solid rgba(124,198,238,.38);border-radius:4px;padding:5px 7px;box-shadow:0 0 0 1px #05080f,inset 0 1px 0 rgba(190,226,250,.12)}
+#hud .ic{image-rendering:pixelated;width:16px;height:16px;vertical-align:middle;flex:none}
+#hud .warn{color:#ffc46e}#hud .bad{color:#ff7a68}#hud .good{color:#8fe3b0}#hud .dim{opacity:.7}
+/* body widget */
+#hud .bw{left:8px;top:8px;display:flex;gap:8px;align-items:stretch}
+#hud .bw canvas{width:36px;height:72px;image-rendering:pixelated;align-self:center;flex:none}
+#hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
+#hud .bw .rows{display:flex;flex-direction:column;gap:3px;min-width:104px}
+#hud .bw .r{display:flex;align-items:center;gap:5px;height:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#hud .bw .bar{display:flex;gap:1px;flex:1}
+#hud .bw .bar i{flex:1;height:7px;background:#16273d;border-radius:1px}
+#hud .bw .bar i.on{background:#8fe3b0}#hud .bw .bar.warn i.on{background:#ffc46e}#hud .bw .bar.bad i.on{background:#ff7a68}
+#hud .bw .v{min-width:44px;text-align:right}
+#hud .bw .sub{font-size:12px;opacity:.78;margin-top:1px}
+#hud .bw .alert{display:none;align-items:center;gap:4px;color:#ff9a88}
+/* sun clock + wind */
+#hud .dial{right:8px;top:8px;width:116px;padding:4px 5px;text-align:center}
+#hud .dial canvas{width:112px;height:68px;image-rendering:pixelated;display:block}
+#hud .dial .day{font-weight:400;letter-spacing:.2px;font-variant-numeric:tabular-nums}
+#hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
+#hud .dial .line{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;margin-top:2px;white-space:nowrap}
+#hud .dial .line .ic{width:14px;height:14px}
+#hud .dial .wa{transition:transform .4s}
+/* top centre stack: objective, shelter chip, toasts in one flow, so they never overlap */
+#hud .stk{position:absolute;left:50%;top:8px;transform:translateX(-50%);max-width:calc(100vw - 2*(150px + 16px));display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:none}
+#hud .stk .p{position:static;text-align:center;max-width:100%}
+#hud .obj{font-size:14px;color:#e8f4ff;border-color:rgba(255,196,110,.5)}
+#hud .obj b{color:#ffc46e;font-weight:600;margin-right:6px}
+#hud .chip{display:none;font-size:13px;padding:3px 8px}
+#hud .toast{font-size:16px;padding:4px 10px}
+/* belt */
+#hud .belt{position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;gap:4px;padding:4px;pointer-events:auto}
+#hud .belt .sl{position:relative;width:56px;height:56px;border:2px solid rgba(124,198,238,.3);border-radius:4px;background:rgba(10,18,32,.6);display:flex;align-items:center;justify-content:center;cursor:pointer}
+#hud .belt .sl.sel{border-color:#ffc46e;background:rgba(60,34,12,.72)}
+#hud .belt .sl .ic{width:32px;height:32px}
+#hud .belt .sl .k{position:absolute;left:3px;top:1px;font-size:11px;color:#8ab0c8;font-weight:400}
+#hud .belt .sl .n{position:absolute;right:2px;top:1px;font-size:12px;color:#fff;background:rgba(5,8,15,.7);padding:0 3px;border-radius:2px;font-style:normal;font-variant-numeric:tabular-nums}
+#hud .belt .sl .bar{position:absolute;left:4px;right:4px;bottom:3px;height:3px;background:#123}#hud .belt .sl .bar i{display:block;height:100%;background:#8fe3b0}
+#hud .bname{position:absolute;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);font-size:13px;padding:2px 8px;display:none;white-space:nowrap}
+body.touch-ui #hud .belt{left:calc(50% - 40px);padding:3px;gap:3px}
+body.touch-ui #hud .belt .sl{display:none}body.touch-ui #hud .belt .sl.sel{display:flex;width:50px;height:50px}
+body.touch-ui #hud .belt .sl .k{display:none}
+body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area-inset-bottom,0px))}
+#hud .tip{pointer-events:none;max-width:260px;font-size:13px;display:none}
+#hud .dead{inset:0;background:rgba(40,0,0,.55);display:none;align-items:center;justify-content:center;flex-direction:column;font-size:24px;pointer-events:auto;border:0;border-radius:0;text-align:center}
 #hud .end{inset:0;background:rgba(255,220,160,.18);display:none;align-items:center;justify-content:center;font-size:30px;border:0;border-radius:0}
-#hud .pnl{left:50%;top:50%;transform:translate(-50%,-50%);width:min(760px,94vw);max-height:84vh;overflow:auto;display:none;pointer-events:auto;background:rgba(8,14,26,.92);font-size:12px}
-#hud .pnl .cols{display:flex;gap:10px;flex-wrap:wrap}#hud .pnl .col{flex:1 1 300px}
-#hud .pnl button{font:inherit;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:3px 6px;margin:2px;cursor:pointer;min-height:30px;pointer-events:auto}
-#hud .pnl button.no{opacity:.55}#hud .pnl button.ok{border-color:#8fe3b0}
-#hud .hint{left:8px;bottom:8px;font-size:10px;opacity:.7;display:none}
-body.touch-ui #hud{font-size:11px}body.touch-ui #hud .l{min-width:118px;padding:3px 6px}body.touch-ui #hud .r{max-width:190px;padding:3px 6px}body.touch-ui #hud .sl{width:48px;height:52px}
+#hud .pause{left:50%;top:44%;transform:translate(-50%,-50%);display:none;font-size:22px;letter-spacing:2px;padding:8px 18px}
+/* bag + craft panel */
+#hud .pnl{left:50%;top:50%;transform:translate(-50%,-50%);width:min(820px,96vw);max-height:86vh;overflow:auto;display:none;pointer-events:auto;background:rgba(8,14,26,.94);font-size:13px;padding:8px 10px}
+#hud .pnl h3{margin:0 0 4px;font-size:14px;font-weight:600;color:#ffc46e;display:flex;justify-content:space-between;align-items:center}
+#hud .pnl .cols{display:flex;gap:12px;flex-wrap:wrap}#hud .pnl .col{flex:1 1 300px;min-width:0}
+#hud .pnl .wt{height:6px;background:#16273d;border-radius:2px;position:relative;margin:3px 0 7px}
+#hud .pnl .wt i{display:block;height:100%;background:#8fe3b0;border-radius:2px}
+#hud .pnl .wear{display:flex;gap:6px;margin-bottom:7px}
+#hud .pnl .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+#hud .pnl .cell{position:relative;aspect-ratio:1;min-height:40px;border:2px solid rgba(124,198,238,.22);border-radius:4px;background:rgba(10,18,32,.6);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#dff0ff;font:inherit;padding:0}
+#hud .pnl .cell.belt{border-color:rgba(255,196,110,.4)}#hud .pnl .cell.sel{border-color:#ffc46e}
+#hud .pnl .cell.empty{cursor:default;opacity:.55}
+#hud .pnl .cell .ic{width:28px;height:28px}
+#hud .pnl .cell .n{position:absolute;right:2px;top:1px;font-size:11px;background:rgba(5,8,15,.7);padding:0 3px;border-radius:2px;font-style:normal}
+#hud .pnl .cell .k{position:absolute;left:3px;top:0;font-size:10px;color:#8ab0c8}
+#hud .pnl .wear .cell{width:52px;aspect-ratio:auto;height:52px;flex:none}
+#hud .pnl .wear .cell small{position:absolute;bottom:1px;left:0;right:0;text-align:center;font-size:9px;opacity:.7}
+#hud .pnl .grp{margin:7px 0 3px;font-size:12px;color:#7cc6ee;border-bottom:1px solid rgba(124,198,238,.25);letter-spacing:.5px}
+#hud .pnl .rec{display:flex;align-items:center;gap:7px;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:3px 6px;margin:2px 0;cursor:pointer;min-height:34px}
+#hud .pnl .rec.no{opacity:.55}#hud .pnl .rec.ok{border-color:#8fe3b0}
+#hud .pnl .rec .t{flex:1;min-width:0}#hud .pnl .rec .ing{font-size:11px;opacity:.8;display:flex;flex-wrap:wrap;gap:2px 8px;align-items:center}
+#hud .pnl .rec .ing .ic{width:12px;height:12px;margin-right:1px}#hud .pnl .rec .why{font-size:11px;color:#ffb08a}
+#hud .pnl .rec .fw{width:14px;height:14px}
+#hud .pnl button.cl{font:inherit;color:#dff0ff;background:#13243a;border:1px solid #2c4a6a;border-radius:4px;padding:3px 10px;cursor:pointer;min-height:30px}
+/* hints */
+#hud .hint{left:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));font-size:13px;display:none;max-width:calc(50vw - 230px);line-height:1.7}
+#hud .hint kbd{font:inherit;font-size:12px;background:#1b2f48;border:1px solid #4b7aa0;border-bottom-width:2px;border-radius:3px;padding:0 4px;margin-right:3px;color:#fff}
+#hud .hint span{margin-right:9px;white-space:nowrap;display:inline-block}
+#hud .dev{left:8px;bottom:70px;font-size:11px;font-family:system-ui,sans-serif;display:block;white-space:pre}
+@media (max-width:1100px){#hud .hint{max-width:calc(50vw - 20px);bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
+/* phone: compact HUD (belt collapses to the active slot, the Пояс radial replaces it) */
+body.touch-ui #hud{font-size:12px}
+body.touch-ui #hud .bw{padding:3px 5px;gap:5px}body.touch-ui #hud .bw canvas{width:24px;height:48px}
+body.touch-ui #hud .bw .rows,#hud .dial .day,#hud .belt,#hud .pnl h3,#hud .dead,#hud .pause{font-family:'Pixelify Sans','Jura',sans-serif}
+#hud .bw .rows{min-width:84px;gap:1px}body.touch-ui #hud .bw .r{height:13px;gap:3px}body.touch-ui #hud .bw .ic{width:12px;height:12px}
+body.touch-ui #hud .bw .bar i{height:5px}body.touch-ui #hud .bw .v{min-width:34px}body.touch-ui #hud .bw .sub{display:none}
+body.touch-ui #hud .dial{left:150px;right:auto;top:8px;width:84px;padding:2px 3px}
+body.touch-ui #hud .dial canvas{width:78px;height:47px}
+body.touch-ui #hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
+#hud .dial .line{font-size:11px}body.touch-ui #hud .dial .line.mid{display:none}
+body.touch-ui #hud .stk{left:244px;right:220px;transform:none;max-width:none}
+body.touch-ui #hud .toast{font-size:13px;padding:2px 8px}body.touch-ui #hud .obj{font-size:12px;padding:2px 8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+body.touch-ui #hud .pnl{font-size:12px}
 `;
 
-export function initHud(host: HTMLElement) {
-  const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
-  root = document.createElement('div'); root.id = 'hud'; host.appendChild(root);
-  const mk = (cls: string) => { const d = document.createElement('div'); d.className = 'p ' + cls; root.appendChild(d); return d; };
-  left = mk('l'); right = mk('r'); top = mk('t'); beltEl = mk('belt'); tip = mk('tip'); toastEl = mk('toast'); chip = mk('chip'); deadEl = mk('dead'); panel = mk('pnl'); hintEl = mk('hint'); endEl = mk('end');
-  hintEl.textContent = S.hint; if (!G.mobile) hintEl.style.display = 'block';
-  deadEl.addEventListener('pointerdown', () => { if (!G.player.alive) respawn(); });
-  on('ending', () => { endEl.textContent = S.ending; endEl.style.display = 'flex'; setTimeout(() => { endEl.style.display = 'none'; }, 9000); });
+const GROUPS: [RecipeGroup, () => string][] = [['fire', () => S.gFire], ['food', () => S.gFood], ['wear', () => S.gWear], ['hunt', () => S.gHunt], ['build', () => S.gBuild]];
+const stName = (s: string) => (s === 'table' ? S.stTable : s === 'fire' ? S.stFire : s === 'drum' ? S.stDrum : s === 'antenna' ? S.stAntenna : '');
+const SLOT_LABEL: Record<string, () => string> = { head: () => S.slotHead, body: () => S.slotBody, hands: () => S.slotHands, feet: () => S.slotFeet };
+
+// ---- body widget ----------------------------------------------------------------------------------------------------------------
+interface Row { icon: string; bar: HTMLElement; v: HTMLElement; row: HTMLElement }
+const rows: Record<string, Row> = {};
+let fig: HTMLCanvasElement, figCtx: CanvasRenderingContext2D, figKey = '', subEl: HTMLElement, alertEl: HTMLElement, wetEl: HTMLElement;
+const SEGS = 8;
+function mkRow(key: string, ic: string, withBar = true): Row {
+  const row = document.createElement('div'); row.className = 'r';
+  row.innerHTML = img(ic) + (withBar ? '<span class="bar">' + '<i></i>'.repeat(SEGS) + '</span>' : '') + '<span class="v"></span>';
+  const bar = row.querySelector('.bar') as HTMLElement, v = row.querySelector('.v') as HTMLElement;
+  return (rows[key] = { icon: ic, bar, v, row });
+}
+function buildBody() {
+  bw.innerHTML = '';
+  fig = document.createElement('canvas'); fig.width = 12; fig.height = 24; figCtx = fig.getContext('2d')!; figCtx.imageSmoothingEnabled = false;
+  bw.appendChild(fig);
+  const col = document.createElement('div'); col.className = 'rows'; bw.appendChild(col);
+  for (const [k, ic, bar] of [['core', uiUrl('thermo'), false], ['water', uiUrl('drop'), true], ['food', uiUrl('food'), true], ['energy', uiUrl('bolt'), true], ['hp', uiUrl('heart'), true]] as [string, string, boolean][]) col.appendChild(mkRow(k, ic, bar).row);
+  wetEl = mkRow('wet', uiUrl('wet'), false).row; col.appendChild(wetEl);
+  alertEl = document.createElement('div'); alertEl.className = 'r alert'; alertEl.innerHTML = img(uiUrl('warn')) + '<span></span>'; col.appendChild(alertEl);
+  subEl = document.createElement('div'); subEl.className = 'sub'; col.appendChild(subEl);
+}
+const frostTint = (v: number) => (v >= 80 ? '#5c7396' : v >= 40 ? '#9ccfff' : v >= 20 ? '#d6ecff' : '#ffffff');
+const coreTint = (c: number) => (c < 33 ? '#6f8fb8' : c < 35.5 ? '#a9cdf0' : c >= 37.2 ? '#ffe6c8' : '#ffffff');
+function drawFigure(p: typeof G.player) {
+  const th = frostTint(p.frost.hands), tf = frostTint(p.frost.feet), tface = frostTint(p.frost.face), tc = coreTint(p.core);
+  const key = th + tf + tface + tc; if (key === figKey) return; figKey = key;
+  figCtx.clearRect(0, 0, 12, 24);
+  figCtx.drawImage(uiIcon('body_torso', tc), 0, 0); figCtx.drawImage(uiIcon('body_head', tface), 0, 0);
+  figCtx.drawImage(uiIcon('body_hands', th), 0, 0); figCtx.drawImage(uiIcon('body_feet', tf), 0, 0);
+}
+function setBar(r: Row, v: number, bad: number, warn: number) {
+  const n = Math.max(0, Math.min(SEGS, Math.round(v / 100 * SEGS)));
+  const kids = r.bar.children;
+  for (let i = 0; i < SEGS; i++) (kids[i] as HTMLElement).className = i < n ? 'on' : '';
+  r.bar.className = 'bar ' + (v < bad ? 'bad' : v < warn ? 'warn' : '');
+  r.v.textContent = String(Math.round(v));
 }
 
-const bar = (v: number, w = 6) => { const n = Math.max(0, Math.min(w, Math.round(v / 100 * w))); return '█'.repeat(n) + '░'.repeat(w - n); };
+// ---- sun clock ------------------------------------------------------------------------------------------------------------------
+let dialCv: HTMLCanvasElement, dialCtx: CanvasRenderingContext2D, dayEl: HTMLElement, clkEl: HTMLElement, windRow: HTMLElement, baroRow: HTMLElement, stormRow: HTMLElement;
+const DW = 56, DH = 34, HZ = 21;
+function buildDial() {
+  dial.innerHTML = '<canvas width="' + DW + '" height="' + DH + '"></canvas><div class="day"></div><div class="clk"></div><div class="line mid wind"></div><div class="line baro"></div><div class="line storm"></div>';
+  dialCv = dial.querySelector('canvas') as HTMLCanvasElement; dialCtx = dialCv.getContext('2d')!;
+  dayEl = dial.querySelector('.day') as HTMLElement; clkEl = dial.querySelector('.clk') as HTMLElement; windRow = dial.querySelector('.wind') as HTMLElement; baroRow = dial.querySelector('.baro') as HTMLElement; stormRow = dial.querySelector('.storm') as HTMLElement;
+}
+function px(c: CanvasRenderingContext2D, x: number, y: number, col: string) { c.fillStyle = col; c.fillRect(Math.round(x), Math.round(y), 1, 1); }
+function drawDial() {
+  const c = dialCtx; c.clearRect(0, 0, DW, DH);
+  const cx = DW / 2, R = 25;
+  // sky dome (upper half-disc) above the horizon, dim ground band below
+  for (let y = 0; y <= HZ; y++) { const dy = HZ - y, half = Math.sqrt(Math.max(0, R * R - dy * dy)); c.fillStyle = y > HZ - 6 ? '#27406a' : '#122240'; c.fillRect(Math.round(cx - half), y, Math.round(half * 2), 1); }
+  c.fillStyle = '#0a1424'; c.fillRect(2, HZ + 1, DW - 4, DH - HZ - 1);
+  for (let a = 0; a <= 180; a += 3) { const r = a * Math.PI / 180; px(c, cx - Math.cos(r) * R, HZ - Math.sin(r) * R, '#5e9bd0'); }
+  c.fillStyle = '#7cc6ee'; c.fillRect(1, HZ, DW - 2, 1);
+  // tick marks every 6 hours + the path of the sun through the day (valley below the horizon in the polar night)
+  for (const f of [0, 0.25, 0.5, 0.75, 1]) { const x = 3 + 50 * f; c.fillStyle = '#35618f'; c.fillRect(Math.round(x), HZ + 1, 1, f === 0.5 ? 4 : 2); }
+  const ey = (el: number) => Math.min(DH - 3, HZ - el * 0.36);
+  const tod = ((G.time % 1440) + 1440) % 1440 / 1440;
+  for (let i = 0; i <= 50; i += 2) { const f = i / 50, tt = G.time - tod * 1440 + f * 1440; px(c, 3 + 50 * f, ey(sunPath(tt)), '#4d6f99'); }
+  const sx = 3 + 50 * tod, sy = ey(G.sunElev);
+  const above = G.sunElev > -0.5;
+  c.fillStyle = above ? '#ffd870' : '#c9962e'; c.fillRect(Math.round(sx) - 2, Math.round(sy) - 1, 5, 3); c.fillRect(Math.round(sx) - 1, Math.round(sy) - 2, 3, 5);
+  c.fillStyle = above ? '#fff4b0' : '#f4cf5a'; c.fillRect(Math.round(sx) - 1, Math.round(sy) - 1, 2, 2);
+  // moon in the dome
+  if (G.moon > 0.05) c.drawImage(moonIcon(G.moonPhase), cx + 9, 2, 10, 10);
+}
+const sunPath = sunElevAt;
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+export function initHud(host: HTMLElement) {
+  initQuest();
+  const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
+  root = document.createElement('div'); root.id = 'hud'; host.appendChild(root);
+  const mk = (cls: string, parent: HTMLElement = root) => { const d = document.createElement('div'); d.className = 'p ' + cls; parent.appendChild(d); return d; };
+  bw = mk('bw'); dial = mk('dial');
+  stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
+  objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
+  beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', () => { jOpen = false; jEl.style.display = 'none'; }); hintEl = mk('hint'); endEl = mk('end');
+  buildBody(); buildDial();
+  const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
+  hintEl.innerHTML = k('WASD', S.hintMove) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('R', S.hintDome) + k('G', S.hintDrop);
+  if (!G.mobile) hintEl.style.display = 'block';
+  if (DEV) { devEl = mk('dev'); }
+  deadEl.addEventListener('pointerdown', () => { if (!G.player.alive) respawn(); });
+  on('ending', () => { endEl.textContent = S.ending; endEl.style.display = 'flex'; setTimeout(() => { endEl.style.display = 'none'; }, 9000); });
+  beltEl.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
+    if (document.body.classList.contains('touch-ui')) { window.dispatchEvent(new Event('sc:radial')); return; }
+    select(+el.dataset.i!);
+  });
+  panel.addEventListener('click', onPanelClick);
+}
+const shortcut = (key: string) => key;
+
+function onPanelClick(e: Event) {
+  const t = (e.target as HTMLElement).closest('[data-a]') as HTMLElement | null; if (!t) return;
+  const p = G.player, a = t.dataset.a;
+  if (a === 'close') { panelOpen = false; panel.style.display = 'none'; return; }
+  if (a === 'un') unequip(t.dataset.s as never);
+  else if (a === 'slot') {
+    const i = +t.dataset.i!; const s = inv.slots[i]; if (!s) return;
+    const d = getItem(s.id);
+    if (d.wear) equip(i); else if (d.food) eatSlot(i);
+    else if (i >= BELT) { const j = inv.slots.findIndex((x, k) => !x && k < BELT); if (j >= 0) { inv.slots[j] = s; inv.slots[i] = null; inv.sel = j; } }
+    else select(i);
+  } else if (a === 'rec') {
+    const r = RECIPES[+t.dataset.r!];
+    if (craft(r, stationsAt(p.x, p.y - 8), handsFrozen())) toast(craftedText(r), 'good');
+  }
+  panelAcc = 9;
+}
+
 const cls = (bad: boolean, warn: boolean) => (bad ? 'bad' : warn ? 'warn' : 'good');
+const fmtClock = () => { const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 60), m = Math.floor(G.time % 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); };
 
 export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
+  if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
+  if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
   if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
   acc += realDt; panelAcc += realDt;
-  // toasts
+  // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
   for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
-  const t = G.toasts[G.toasts.length - 1];
-  if (t) { toastEl.style.display = 'block'; toastEl.textContent = t.text; toastEl.style.color = t.kind === 'bad' ? '#ff9a88' : t.kind === 'warn' ? '#ffc46e' : t.kind === 'good' ? '#8fe3b0' : '#dff0ff'; }
-  else toastEl.style.display = 'none';
+  const shown = G.toasts.slice(document.body.classList.contains('touch-ui') ? -1 : -2);
+  const tk = shown.map(t => t.text + t.kind).join('|');
+  if (tk !== toastKey) {
+    toastKey = tk; toastBox.innerHTML = '';
+    for (const t of shown) {
+      const d = document.createElement('div'); d.className = 'p toast'; d.textContent = t.text;
+      d.style.color = t.kind === 'bad' ? '#ff9a88' : t.kind === 'warn' ? '#ffc46e' : t.kind === 'good' ? '#8fe3b0' : '#dff0ff';
+      toastBox.appendChild(d);
+    }
+  }
   // death card
   if (p && !p.alive) {
     deadEl.style.display = 'flex';
-    deadEl.innerHTML = `<div>${fmt(S.dead, { c: p.cause })}</div><div style="font-size:14px;margin-top:8px">${G.diff.hardcore ? S.deadHard : S.deadHint}</div>`;
+    deadEl.innerHTML = `<div>${fmt(S.dead, { c: p.cause })}</div><div style="font-size:15px;margin-top:8px">${G.diff.hardcore ? S.deadHard : S.deadHint}</div>`;
     if (body.deadT > 1.8 && (input.anyKey || input.primaryPressed) && !G.diff.hardcore) respawn();
   } else deadEl.style.display = 'none';
+  pauseEl.style.display = G.paused && !document.getElementById('rotate')?.style.display?.includes('flex') && !document.body.classList.contains('title-open') ? 'block' : 'none';
+  if (pauseEl.style.display === 'block') pauseEl.textContent = S.pause;
   // tooltip
   const T = target();
   if (p?.alive && input.hasAim && T.lines.length && !panelOpen && (input.aimMode !== 'smart')) {
-    const [sx, sy] = input.aimMode === 'touch' ? [input.aimX, input.aimY] : [input.aimX, input.aimY];
-    void worldToScreen;
-    tip.style.display = 'block'; tip.style.left = Math.min(window.innerWidth - 250, sx + 16) + 'px'; tip.style.top = Math.max(4, sy + 14) + 'px';
+    const sx = input.aimX, sy = input.aimY;
+    tip.style.display = 'block'; tip.style.left = Math.min(window.innerWidth - 270, sx + 16) + 'px'; tip.style.top = Math.max(4, sy + 14) + 'px';
     tip.innerHTML = T.lines.map((l, i) => `<div class="${i === T.lines.length - 1 && T.reason ? 'warn' : ''}">${l}</div>`).join('');
   } else tip.style.display = 'none';
 
   if (acc < 0.1) return;
   acc = 0;
   if (!p) return;
-  // body panel
-  const f = p.frost;
-  left.innerHTML =
-    `<div><span>${S.core}</span><span class="${cls(p.core < 34, p.core < 36)}">${p.core.toFixed(1)}°</span></div>` +
-    `<div><span>${S.hands}</span><span class="${cls(f.hands >= 80, f.hands >= 40)}">${Math.round(f.hands)}</span></div>` +
-    `<div><span>${S.feet}</span><span class="${cls(f.feet >= 80, f.feet >= 40)}">${Math.round(f.feet)}</span></div>` +
-    `<div><span>${S.face}</span><span class="${cls(f.face >= 80, f.face >= 40)}">${Math.round(f.face)}</span></div>` +
-    `<div><span>${S.water}</span><span class="${cls(p.water < 15, p.water < 35)}">${bar(p.water)} ${Math.round(p.water)}</span></div>` +
-    `<div><span>${S.food}</span><span class="${cls(p.food < 15, p.food < 35)}">${bar(p.food)} ${Math.round(p.food)}</span></div>` +
-    `<div><span>${S.energy}</span><span class="${cls(p.energy < 12, p.energy < 30)}">${bar(p.energy)} ${Math.round(p.energy)}</span></div>` +
-    `<div><span>${S.wet}</span><span class="${cls(p.wet > 0.6, p.wet > 0.25)}">${Math.round(p.wet * 100)}%</span></div>` +
-    `<div><span>${S.hp}</span><span class="${cls(p.hp < 30, p.hp < 60)}">${Math.round(p.hp)}</span></div>` +
-    (p.co > 5 ? `<div class="bad"><span>${S.co}</span><span>${Math.round(p.co)} ⚠</span></div>` : '') +
-    `<div style="opacity:.75"><span>${fmt(S.air, { t: p.airT.toFixed(0) })}</span><span>${fmt(S.feels, { t: p.feelT.toFixed(0) })}</span></div>`;
-  // clock / sun
-  const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 60), m = Math.floor(G.time % 60);
+  // ---- body ----
+  drawFigure(p);
+  setRow('core', p.core.toFixed(1) + '°', cls(p.core < 34, p.core < 36));
+  setBar(rows.water, p.water, 15, 35); setBar(rows.food, p.food, 15, 35); setBar(rows.energy, p.energy, 12, 30); setBar(rows.hp, p.hp, 30, 60);
+  wetEl.style.display = p.wet > 0.12 ? 'flex' : 'none'; rows.wet.v.textContent = Math.round(p.wet * 100) + '%'; rows.wet.v.className = 'v ' + cls(p.wet > 0.6, p.wet > 0.25);
+  if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.co + ' ' + Math.round(p.co); } else alertEl.style.display = 'none';
+  subEl.textContent = fmt(S.air, { t: p.airT.toFixed(0) }) + ' · ' + fmt(S.feels, { t: p.feelT.toFixed(0) });
+  // ---- sun clock ----
+  drawDial();
+  dayEl.textContent = fmt(S.day, { d: G.day, n: G.endDay }); clkEl.textContent = fmtClock();
   const know = knowsForecast();
-  right.innerHTML =
-    `<div>${fmt(S.day, { d: G.day, n: G.endDay })} · ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}</div>` +
-    `<div>${fmt(S.sun, { e: G.sunElev.toFixed(1) })}</div>` +
-    `<div>${fmt(S.wind, { w: Math.abs(G.wind).toFixed(0) })}${G.storm > 0.2 ? ' · <span class="bad">' + S.storm + '</span>' : ''}</div>` +
-    `<div style="opacity:.85">${know ? fmt(S.forecast, { t: G.forecast.text }) : S.noForecast}</div>` +
-    (G.timeScale > 1 ? '<div class="warn">Zzz ×' + G.timeScale + '</div>' : '') + (G.paused ? '<div class="warn">' + S.pause + '</div>' : '') + (freeCam ? '<div class="warn">' + S.free + '</div>' : '');
-  top.style.display = 'none';
-  // shelter chip
+  const wdir = G.wind >= 0 ? 90 : -90, ws = Math.abs(G.wind);
+  windRow.innerHTML = ws < 1 ? S.calm : img(uiUrl('wind_arrow'), 'wa').replace('class="ic wa"', `class="ic wa" style="transform:rotate(${wdir}deg)"`) + fmt(S.wind, { w: ws.toFixed(0) });
+  const falling = G.storm > 0.05 || (know && G.forecast.stormAt > 0 && G.forecast.stormAt - G.time < 12 * 60);
+  baroRow.innerHTML = know ? img(uiUrl(falling ? 'baro_down' : 'baro_up')) + `<span class="${falling ? 'warn' : ''}">${G.forecast.text}</span>` : `<span class="dim">${S.noForecast}</span>`;
+  stormRow.innerHTML = G.storm > 0.2 ? img(uiUrl('storm')) + `<span class="bad">${S.storm}</span>` : (G.timeScale > 1 ? `<span class="warn">Zzz ×${G.timeScale}</span>` : '') + (freeCam ? `<span class="warn">${S.free}</span>` : '');
+  stormRow.style.display = stormRow.innerHTML ? 'flex' : 'none';
+  // ---- objective + shelter chip ----
+  objEl.innerHTML = `<b>${S.objTitle}</b>${objective()}`;
   const sh = G.shelter;
   if (sh) {
     chip.style.display = 'block';
     const stars = '★'.repeat(sh.stars) + '☆'.repeat(4 - sh.stars);
     chip.innerHTML = sh.closed ? `${S.shelter} ${stars} · ${fmt(S.temp, { t: sh.temp.toFixed(0) })} · ${sh.vent ? S.vent : S.noVentTxt}${sh.co > 8 ? ' · <span class="bad">CO ' + Math.round(sh.co) + '</span>' : ''}` : `<span class="warn">${sh.notes[0] ?? S.noShelter}</span>`;
   } else chip.style.display = 'none';
-  // belt
+  // ---- belt ----
   let key = inv.sel + '|';
   for (let i = 0; i < BELT; i++) { const s = inv.slots[i]; key += s ? s.id + s.n + (s.dur !== undefined ? Math.round(s.dur / 5) : '') + ',' : ','; }
   if (key !== beltKey) {
-    beltKey = key; beltEl.innerHTML = '';
+    beltKey = key;
+    let h = '';
     for (let i = 0; i < BELT; i++) {
-      const s = inv.slots[i];
-      const el = document.createElement('div'); el.className = 'sl' + (i === inv.sel ? ' sel' : '');
-      el.innerHTML = `<span class="k">${i + 1}</span>`;
-      if (s) {
-        const d = getItem(s.id);
-        const src = icon(d.icon); const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; c.getContext('2d')!.drawImage(src, 0, 0); el.appendChild(c);
-        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = itemName(s.id); el.appendChild(nm);
-        if (s.n > 1) { const n = document.createElement('span'); n.className = 'n'; n.textContent = String(s.n); el.appendChild(n); }
-        if (d.tool && isFinite(d.tool.dur) && s.dur !== undefined) { const b = document.createElement('div'); b.className = 'bar'; b.innerHTML = `<i style="width:${Math.max(0, Math.min(100, s.dur / d.tool.dur * 100))}%"></i>`; el.appendChild(b); }
-        if (s.id === 'snow_block' && s.dur) { const n = document.createElement('span'); n.className = 'n'; n.style.top = '34px'; n.style.fontSize = '9px'; n.textContent = Math.round(s.dur) + ''; el.appendChild(n); }
+      const s = inv.slots[i]; const d = s ? getItem(s.id) : null;
+      h += `<div class="sl${i === inv.sel ? ' sel' : ''}" data-i="${i}"><span class="k">${i + 1}</span>`;
+      if (s && d) {
+        h += img(itemUrl(s.id));
+        if (s.n > 1) h += `<i class="n">${s.n}</i>`;
+        if (d.tool && isFinite(d.tool.dur) && s.dur !== undefined) h += `<div class="bar"><i style="width:${Math.max(0, Math.min(100, s.dur / d.tool.dur * 100))}%"></i></div>`;
       }
-      el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); });
-      beltEl.appendChild(el);
+      h += '</div>';
     }
+    beltEl.innerHTML = h;
+    const sel = inv.slots[inv.sel];
+    if (sel) { bname.style.display = 'block'; bname.textContent = itemName(sel.id) + (sel.id === 'snow_block' && sel.dur ? ' · ' + fmt(S.dens, { d: Math.round(sel.dur) }) : ''); } else bname.style.display = 'none';
   }
   if (panelOpen && panelAcc > 0.35) { panelAcc = 0; renderPanel(); }
-  void toolState; void STORMS;
+  if (devEl) devEl.textContent = `core ${p.core.toFixed(2)} hands ${p.frost.hands | 0} feet ${p.frost.feet | 0} face ${p.frost.face | 0}\nwater ${p.water | 0} food ${p.food | 0} energy ${p.energy | 0} wet ${(p.wet * 100) | 0}% hp ${p.hp | 0} co ${p.co | 0}\nsun ${G.sunElev.toFixed(1)}° wind ${G.wind.toFixed(1)} storm ${G.storm.toFixed(2)}`;
+  void shortcut;
 }
+function setRow(k: string, text: string, c: string) { const r = rows[k]; r.v.textContent = text; r.v.className = 'v ' + c; }
 
+// ---- bag + crafting panel ----------------------------------------------------------------------------------------------------
+function cellHtml(i: number): string {
+  const s = inv.slots[i];
+  if (!s) return `<div class="cell empty${i < BELT ? ' belt' : ''}">${i < BELT ? `<span class="k">${i + 1}</span>` : ''}</div>`;
+  return `<button class="cell${i < BELT ? ' belt' : ''}${i === inv.sel ? ' sel' : ''}" data-a="slot" data-i="${i}" title="${itemName(s.id)}${s.id === 'snow_block' && s.dur ? ' · ' + fmt(S.dens, { d: Math.round(s.dur) }) : ''}">${i < BELT ? `<span class="k">${i + 1}</span>` : ''}${img(itemUrl(s.id))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</button>`;
+}
+function ingHtml(rec: Recipe): string {
+  return rec.variants.map(v => '<span>' + v.map(g => img(itemUrl(g.id)) + itemName(g.id) + (g.n > 1 ? ' ×' + g.n : '')).join(', ') + '</span>').join('<span class="dim">/</span>');
+}
 function renderPanel() {
   const p = G.player;
   const wt = weight();
-  let h = `<div style="display:flex;justify-content:space-between"><b>${S.bag}</b><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></div><div class="cols"><div class="col" id="pk">`;
-  h += `<div>${S.worn}: `;
-  for (const sl of WEAR_SLOTS) { const id = inv.wear[sl]; h += id ? `<button data-un="${sl}">${itemName(id)}</button>` : ''; }
-  h += `</div>`;
-  for (let i = 0; i < NSLOT; i++) { const s = inv.slots[i]; if (!s) continue; h += `<button data-i="${i}">${i < BELT ? i + 1 + '·' : ''}${itemName(s.id)}${s.n > 1 ? ' ×' + s.n : ''}${s.id === 'snow_block' && s.dur ? ' (' + Math.round(s.dur) + ')' : ''}</button>`; }
-  h += `</div><div class="col" id="rc"><b>${S.craft}</b><br/>`;
-  const st = stationsAt(p.x, p.y - 8);
-  RECIPES.forEach((r, idx) => {
-    const c = canCraft(r, st, handsFrozen());
-    h += `<button class="${c.ok ? 'ok' : 'no'}" data-r="${idx}" title="${c.reason ?? ''}">${itemName(r.result)}${r.n > 1 ? ' ×' + r.n : ''}${r.fine ? ' ✋' : ''}${c.ok ? '' : ' — ' + (c.reason ?? '')}</button>`;
-  });
-  h += `</div></div><div style="text-align:right"><button id="cl">${S.close}</button></div>`;
-  panel.innerHTML = h;
-  panel.querySelectorAll('button[data-i]').forEach((b) => b.addEventListener('click', () => {
-    const i = +(b as HTMLElement).dataset.i!; const s = inv.slots[i]; if (!s) return;
-    const d = getItem(s.id);
-    if (d.wear) equip(i); else if (d.food) eatSlot(i); else if (i >= BELT) { const j = inv.slots.findIndex((x, k) => !x && k < BELT); if (j >= 0) { inv.slots[j] = s; inv.slots[i] = null; inv.sel = j; } }
-    else select(i);
-    panelAcc = 9;
-  }));
-  panel.querySelectorAll('button[data-un]').forEach((b) => b.addEventListener('click', () => { unequip((b as HTMLElement).dataset.un as never); panelAcc = 9; }));
-  panel.querySelectorAll('button[data-r]').forEach((b) => b.addEventListener('click', () => {
-    const r = RECIPES[+(b as HTMLElement).dataset.r!];
-    if (craft(r, stationsAt(p.x, p.y - 8), handsFrozen())) toast(craftedText(r), 'good');
-    panelAcc = 9;
-  }));
-  panel.querySelector('#cl')?.addEventListener('click', () => { panelOpen = false; panel.style.display = 'none'; });
+  let h = `<h3><span>${S.bag}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
+  h = '';
+  h += `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
+  h += `<div class="wt"><i style="width:${Math.min(100, wt / WEIGHT_MAX * 100)}%;background:${wt > WEIGHT_SOFT ? '#ffc46e' : '#8fe3b0'}"></i></div>`;
+  h += `<div class="wear">`;
+  for (const sl of WEAR_SLOTS) {
+    const id = inv.wear[sl];
+    h += id ? `<button class="cell" data-a="un" data-s="${sl}" title="${itemName(id)}">${img(itemUrl(id))}<small>${SLOT_LABEL[sl]()}</small></button>` : `<div class="cell empty"><small>${SLOT_LABEL[sl]()}</small></div>`;
+  }
+  h += `</div><div class="grid">`;
+  for (let i = 0; i < NSLOT; i++) h += cellHtml(i);
+  h += `</div></div><div class="col"><h3><span>${S.craft}</span></h3>`;
+  const st = stationsAt(p.x, p.y - 8), hf = handsFrozen();
+  for (const [g, name] of GROUPS) {
+    const list = RECIPES.map((r, idx) => [r, idx] as const).filter(([r]) => r.group === g);
+    if (!list.length) continue;
+    h += `<div class="grp">${name()}</div>`;
+    for (const [r, idx] of list) {
+      const c = canCraft(r, st, hf);
+      h += `<button class="rec ${c.ok ? 'ok' : 'no'}" data-a="rec" data-r="${idx}">${img(itemUrl(r.result))}<span class="t"><div>${itemName(r.result)}${r.n > 1 ? ' ×' + r.n : ''}${r.station !== 'none' ? ` <span class="dim">· ${stName(r.station)}</span>` : ''}</div><div class="ing">${ingHtml(r)}</div>${c.ok ? '' : `<div class="why">${c.reason ?? ''}</div>`}</span>${r.fine ? img(uiUrl('fine_work'), 'fw') : ''}</button>`;
+    }
+  }
+  h += `</div></div><div style="text-align:right;margin-top:6px"><button class="cl" data-a="close">${S.close}</button></div>`;
+  const sy = panel.scrollTop; panel.innerHTML = h; panel.scrollTop = sy;
 }
-export const panelIsOpen = () => panelOpen;
+function renderJournal() {
+  const chk = (ok: boolean, t: string) => `<div>${img(uiUrl(ok ? 'check' : 'cross'), '')}<span class="${ok ? 'good' : 'dim'}">${t}</span></div>`;
+  let h = `<h3><span>${S.jTitle}</span><span class="dim">${fmt(S.day, { d: G.day, n: G.endDay })}</span></h3><div class="cols"><div class="col"><div class="grp">${S.jGoals}</div>`;
+  h += chk(prog.fire, S.gFire2) + chk(prog.baro, S.gBaro) + chk(prog.shelter, S.gShelter) + chk(prog.sleep, S.gSleep) + chk(prog.parts.length >= 3, fmt(S.gParts, { n: prog.parts.length })) + chk(prog.mast, S.gMast) + chk(prog.radio, S.gRadio) + chk(!!prog.ending, fmt(S.gEnd, { n: G.endDay }));
+  h += `<div class="grp">${S.jSites}</div>`;
+  const found = sites.filter(x => x.found);
+  h += found.length ? found.map(x => `<div>${x.name}</div>`).join('') : `<div class="dim">${S.jNone}</div>`;
+  h += `</div><div class="col"><div class="grp">${S.jLog}</div>`;
+  h += journal.length ? journal.slice(-14).reverse().map(e => `<div>${e.kind === 'note' ? S.jNote + ' ' + e.text : e.text}</div>`).join('') : `<div class="dim">${S.jNone}</div>`;
+  h += `</div></div>`;
+  jEl.innerHTML = h;
+}
+export const panelIsOpen = () => panelOpen || jOpen;
+void itemName;

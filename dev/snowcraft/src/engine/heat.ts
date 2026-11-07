@@ -25,6 +25,7 @@ const AIR_CAP = 2.0;          // effective heat capacity of an air tile (air + f
 const RS_SURF = 0.12;         // the exposed surface tile of a column relaxes towards ambient too
 const RS_BASE = 0.5;          // sky-open relaxation rate to ambient (1/s)
 const RS_WIND = 0.12;         // + per m/s of local wind
+const SHAFT = 0.08;           // a sky-open tile boxed in by non-sky tiles on both sides (a roof vent above a room) exchanges heat with the sky only through its small opening
 const RG_SOLID = 0.0015;      // relaxation of enclosed/solid tiles to the geothermal profile (1/s)
 const RG_AIR = 0.004;         // same for enclosed air
 const POWER_PER_HEAT = 0.012; // cell HEAT (°C) → source power
@@ -310,7 +311,9 @@ export function stepHeat(dt: number): void {
       const ic = ict[t];
       if (sky[t]) {
         const wv = wind[t];
-        T += (amb - T) * Math.min(0.9, (RS_BASE + RS_WIND * (wv < 0 ? -wv : wv)) * dt);
+        let rs = RS_BASE + RS_WIND * (wv < 0 ? -wv : wv);
+        if (!sky[t - 1] && !sky[t + 1]) rs *= SHAFT;
+        T += (amb - T) * Math.min(0.9, rs * dt);
       } else {
         const p = (watN[t] >= 8 && prof < -1) ? -1 : prof;
         T += (p - T) * (blk[t] ? RG_SOLID : RG_AIR) * dt;

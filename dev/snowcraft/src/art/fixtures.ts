@@ -130,14 +130,14 @@ fxs('fx.bird', ['.nnnn.', 'nnNnnn', 'oo..oo'], { ...PAL });
   fxs('fx.cart.coal', c.rows().slice(0, 5), PAL);
 }
 {
-  const closed = new Grid(4, 20), open = new Grid(3, 20);
-  closed.rect(0, 0, 4, 20, 'W'); closed.rect(1, 1, 2, 18, 'w'); for (const y of [4, 5, 14, 15]) closed.rect(0, y, 4, 1, 'z'); closed.rect(2, 10, 1, 2, 'y');
-  for (let y = 2; y < 18; y += 3) closed.set(1, y, 'W');
+  const closed = new Grid(4, 24), open = new Grid(3, 24);
+  closed.rect(0, 0, 4, 24, 'W'); closed.rect(1, 1, 2, 22, 'w'); for (const y of [4, 5, 18, 19]) closed.rect(0, y, 4, 1, 'z'); closed.rect(2, 12, 1, 2, 'y');
+  for (let y = 2; y < 22; y += 3) closed.set(1, y, 'W');
   fxs('fx.door', closed.rows(), PAL);
-  open.rect(0, 0, 2, 20, 'w'); open.rect(0, 0, 1, 20, 'W'); for (const y of [4, 14]) open.rect(0, y, 2, 1, 'z'); open.set(1, 11, 'y');
+  open.rect(0, 0, 2, 24, 'w'); open.rect(0, 0, 1, 24, 'W'); for (const y of [4, 18]) open.rect(0, y, 2, 1, 'z'); open.set(1, 13, 'y');
   fxs('fx.door.open', open.rows(), PAL);
-  const br = new Grid(4, 20);
-  br.rect(0, 0, 4, 20, 'W'); br.rect(1, 1, 2, 18, 'w'); br.rect(1, 5, 2, 4, 'k'); br.rect(2, 12, 1, 5, 'k'); br.set(0, 4, 'z'); br.set(3, 14, 'z');
+  const br = new Grid(4, 24);
+  br.rect(0, 0, 4, 24, 'W'); br.rect(1, 1, 2, 22, 'w'); br.rect(1, 5, 2, 4, 'k'); br.rect(2, 15, 1, 5, 'k'); br.set(0, 4, 'z'); br.set(3, 17, 'z');
   fxs('fx.door.broken', br.rows(), PAL);
 }
 
@@ -468,7 +468,7 @@ export const FIXTURE_SHEET: { kind: Fixture['kind']; tw: number; th: number; var
   { kind: 'skin_bed', tw: 4, th: 1, variants: [{ name: 'skins', patch: {} }] },
   { kind: 'bed', tw: 4, th: 1, variants: [{ name: 'bed', patch: {} }] },
   { kind: 'hide_door', tw: 3, th: 6, variants: [{ name: 'closed', patch: { open: false } }, { name: 'open', patch: { open: true } }] },
-  { kind: 'door', tw: 1, th: 5, variants: [{ name: 'closed', patch: { open: false } }, { name: 'open', patch: { open: true } }, { name: 'broken', patch: { data: { broken: true } } }] },
+  { kind: 'door', tw: 1, th: 6, variants: [{ name: 'closed', patch: { open: false } }, { name: 'open', patch: { open: true } }, { name: 'broken', patch: { data: { broken: true } } }] },
   { kind: 'cache', tw: 2, th: 2, variants: [{ name: 'cache', patch: {} }] },
   { kind: 'snare', tw: 1, th: 1, variants: [{ name: 'off', patch: {} }, { name: 'set', patch: { data: { set: true } } }, { name: 'catch', patch: { data: { set: true, catch: 'ptarmigan' } } }] },
   { kind: 'table', tw: 3, th: 2, variants: [{ name: 'table', patch: {} }] },
