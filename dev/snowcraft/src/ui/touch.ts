@@ -254,16 +254,19 @@ function toggleRadial() {
 // ---------------------------------------------------------------------------------------------------------------------
 // desktop belt wheel: hold Q, flick the mouse towards a slot (top = 1, clockwise), release Q. Same glass slots / amber selection / caption as the phone wheel.
 let wheel: HTMLElement | null = null, wheelHov = -1, wheelCx = 0, wheelCy = 0, wheelIsOpen = false;
+let wheelCells: number[] = [0, 1, 2, 3, 4, 5];           // the belt cells of this wheel (six, nine with the pouch); wheelHov indexes them
 const WHEEL_R = 112;
 export const wheelOpen = () => wheelIsOpen;
 function wheelHtml() {
   if (!wheel) return;
   wheel.innerHTML = '';
-  for (let i = 0; i < BELT; i++) {
-    const a = -Math.PI / 2 + i * (Math.PI * 2 / BELT);
-    const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' cur' : '') + (i === wheelHov ? ' hov' : ''); el.dataset.i = String(i);
+  const nc = wheelCells.length;
+  for (let k = 0; k < nc; k++) {
+    const i = wheelCells[k];
+    const a = -Math.PI / 2 + k * (Math.PI * 2 / nc);
+    const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' cur' : '') + (k === wheelHov ? ' hov' : ''); el.dataset.i = String(i);
     el.style.left = wheelCx + Math.cos(a) * WHEEL_R + 'px'; el.style.top = wheelCy + Math.sin(a) * WHEEL_R + 'px';
-    const n = document.createElement('b'); n.textContent = String(i + 1); el.appendChild(n);
+    const n = document.createElement('b'); n.textContent = String(k + 1); el.appendChild(n);
     const s = inv.slots[i];
     if (s) {
       const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc);
@@ -273,7 +276,7 @@ function wheelHtml() {
     wheel.appendChild(el);
   }
   const mid = document.createElement('div'); mid.className = 'mid'; mid.style.left = wheelCx + 'px'; mid.style.top = wheelCy + WHEEL_R + 58 + 'px';   // under the ring: the middle belongs to the player
-  const sl = inv.slots[wheelHov >= 0 ? wheelHov : inv.sel];
+  const sl = inv.slots[wheelHov >= 0 ? wheelCells[wheelHov] : inv.sel];
   mid.innerHTML = (sl ? itemName(sl.id) : S.wheelEmpty) + `<small>${S.wheelCap}</small>`;
   wheel.appendChild(mid);
 }
@@ -282,18 +285,20 @@ function openWheel() {
   const [sx, sy] = worldToScreen(G.player.x, G.player.y - 10);
   wheelCx = Math.max(WHEEL_R + 40, Math.min(window.innerWidth - WHEEL_R - 40, sx)); wheelCy = Math.max(WHEEL_R + 40, Math.min(window.innerHeight - WHEEL_R - 40, sy));
   wheel.style.setProperty('--wx', wheelCx + 'px'); wheel.style.setProperty('--wy', wheelCy + 'px');
+  wheelCells = beltCells();
   wheelHov = -1; wheelIsOpen = true; wheel.classList.add('open'); wheelHtml();
 }
 function closeWheel(apply: boolean) {
   if (!wheel || !wheelIsOpen) return;
-  if (apply && wheelHov >= 0) select(wheelHov);
+  if (apply && wheelHov >= 0) select(wheelCells[wheelHov]);
   wheelIsOpen = false; wheel.classList.remove('open'); wheelHov = -1;
 }
 function wheelAim(x: number, y: number) {
   if (!wheelIsOpen) return;
   const dx = x - wheelCx, dy = y - wheelCy;
   let h = -1;
-  if (Math.hypot(dx, dy) > 34) { const a = Math.atan2(dy, dx) + Math.PI / 2; h = Math.round(((a % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / BELT)) % BELT; }
+  const nc = wheelCells.length;
+  if (Math.hypot(dx, dy) > 34) { const a = Math.atan2(dy, dx) + Math.PI / 2; h = Math.round(((a % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / nc)) % nc; }
   if (h !== wheelHov) { wheelHov = h; wheelHtml(); }
 }
 function initWheel(host: HTMLElement) {

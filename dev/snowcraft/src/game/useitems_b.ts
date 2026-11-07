@@ -45,7 +45,7 @@ const S = strings('useB', {
   // whistle
   whTip: 'Свисток: свистни — Север прибежит и пойдёт за тобой. Держи — пусть ждёт на месте.',
   whLabel: 'Свистнуть', whCome: 'Свисток: Север бежит к тебе', whStay: 'Свисток: Север, ждать здесь', whNoDog: 'Севера рядом нет, некому свистеть',
-  whNote: 'Север: {st}', whStayNote: 'ждёт', whFollowNote: 'идёт за тобой',
+  whStayNote: 'ждёт', whFollowNote: 'идёт за тобой',
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------- shared state
@@ -212,8 +212,11 @@ registerUse('probe_pole', {
     probe.cells = [];
     if (p) for (const r of rs) {
       if (r.kind === 'none' || r.kind === 'ground') continue;
+      // the column of the tile: its ice (or water, or the gap under the crust) from the surface down, and a white line on the surface
       const tx = Math.floor(p.x / TS) + p.face * r.k, col = r.kind === 'safe' ? COL_OK : r.kind === 'ice' ? COL_MID : COL_BAD;
-      probe.cells.push({ x: tx * TS, y: r.y0, w: TS, h: Math.max(2, r.y1 - r.y0 + 1), col });
+      const gap = r.kind === 'void' || r.kind === 'hole' || r.kind === 'bridge' ? 6 : 0;
+      probe.cells.push({ x: tx * TS, y: r.y0, w: TS, h: Math.max(6, r.y1 - r.y0 + 1 + gap), col });
+      probe.cells.push({ x: tx * TS, y: r.y0, w: TS, h: 1, col: '#ffffff' });
     }
     probe.until = G.realTime + 3;
     const s = probeSummary(rs); toast(s.text, s.kind);
@@ -263,10 +266,10 @@ registerUse('smoke_flare', {
   tick(dt) {
     if (smoke.t <= 0) return;
     smoke.t -= dt;
-    // a dense column: puffs rise and drift with the wind (about 6 a second)
-    if (Math.random() < dt * 6) {
+    // a dense column: puffs rise (about 90 cells in 7 s) and drift with the wind; pale enough to show against the twilight sky
+    for (let k = 0; k < 2; k++) if (Math.random() < dt * 9) {
       const wind = G.wind * 1.2 + (Math.random() - 0.5) * 2;
-      spawnFx('smoke', smoke.x + (Math.random() - 0.5) * 3, smoke.y, wind, -(10 + Math.random() * 6), 5 + Math.random() * 3, [96, 96, 104], 2);
+      spawnFx('smoke', smoke.x + (Math.random() - 0.5) * 3, smoke.y, wind, -(12 + Math.random() * 6), 6 + Math.random() * 3, [176, 180, 190], 3);
     }
   },
 });
@@ -279,7 +282,8 @@ registerUse('whistle', {
   use() {
     const d = fauna.dog, a = d ? aiOf(d) : undefined;
     if (!d || !a || d.state === 'dead') { toast(S.whNoDog, 'warn'); return false; }
-    a.stay = false; a.fetch = undefined; a.hold = 0;
+    a.stay = false; a.fetch = undefined; a.hold = 0; a.t = 0;
+    if (d.state === 'sleep') { d.state = 'sit'; d.t = 0; }                // he lifts his head (what fauna's setState does); the AI takes it from here
     holdT.whistle.stayed = false;
     toast(S.whCome, 'good'); emit('whistle', { stay: false });
     return true;

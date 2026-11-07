@@ -120,7 +120,7 @@ registerTest('ui', 'ночью силуэт скалы читается на ф�
 // ---- playability wave (G5): hints, phone touch, toasts, sound hooks. Each test restores the touch / panel state it changes.
 registerTest('ui', 'подсказки: Space, Shift, 1–6 и J написаны в строке подсказок', t => {
   const hint = document.querySelector('#hud .hint')?.textContent ?? '';
-  for (const k of ['Space', 'WASD', 'Shift', 'J', '1–6']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
+  for (const k of ['Space', 'WASD', 'Shift', 'J', '1–9']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
 });
 
 registerTest('ui', 'телефон: прицел касанием смещён вверх от пальца на 48 px', async t => {

@@ -68,9 +68,12 @@ function sameStack(a: Slot, id: string, dur?: number): boolean {
 /** Tools go to the belt first; so do snow blocks: a freshly cut block must be placeable at once, not after a trip into the bag panel (the builder's loop is
  *  cut - place - cut). Everything else stackable goes to the pack first and only then to the belt. */
 export function beltFirst(id: string): boolean { const d = getItem(id); return d.kind === 'tool' || d.kind === 'block' || !!d.quick || (d.stack === 1 && d.kind !== 'misc'); }
+/** How many belt cells an item may fill by itself: blocks and kits all six; tools five (the last cell stays free for a freshly cut block); usable odds
+ *  and ends (compass, bandage, whistle…) four. The rest of the belt the player arranges by hand. */
+function beltLimit(id: string): number { const d = getItem(id); if (d.kind === 'block' || d.kind === 'fixture') return BELT; return d.quick && d.kind !== 'tool' ? 4 : BELT - 1; }
 function* order(id: string): Generator<number> {
-  const tooly = beltFirst(id);
-  if (tooly) { for (let i = 0; i < NSLOT; i++) yield i; }
+  const lim = beltLimit(id);
+  if (beltFirst(id)) { for (let i = 0; i < lim; i++) yield i; for (let i = BELT; i < NSLOT; i++) yield i; for (let i = lim; i < BELT; i++) yield i; }
   else { for (let i = BELT; i < NSLOT; i++) yield i; for (let i = 0; i < BELT; i++) yield i; }
   if (id !== 'belt_pouch' && id !== 'big_pack') yield* extraCells();
 }
@@ -441,7 +444,11 @@ export function placeInto(z: ZoneId, s: Slot, belt?: boolean): Ref | null {
   if (max > 1) for (let i = lo; i < hi; i++) { if (skip(i)) continue; const c = refGet({ z, i }); if (c && sameStack(c, s.id, s.dur) && c.n < max) return { z, i }; }
   // anywhere in the inventory (belt not asked for): the same order as add(): tools and snow blocks fill the belt first, other stacks the pack first,
   // so «Взять всё» from a chest does not fill the six belt slots with ropes and flares
-  if (z === 'inv' && belt === undefined && !beltFirst(s.id)) { const pk = placeInto('inv', s, false); if (pk) return pk; }
+  if (z === 'inv' && belt === undefined) {
+    const lim = beltLimit(s.id);
+    if (beltFirst(s.id)) { if (lim < BELT) { for (let i = 0; i < lim; i++) if (!skip(i) && !refGet({ z, i })) return { z, i }; const pk = placeInto('inv', s, false); if (pk) return pk; } }
+    else { const pk = placeInto('inv', s, false); if (pk) return pk; }
+  }
   for (let i = lo; i < hi; i++) if (!skip(i) && !refGet({ z, i })) return { z, i };
   if (z === 'box' && boxZone.cur && boxZone.cur.canPut(s)) return { z, i: n };
   return null;

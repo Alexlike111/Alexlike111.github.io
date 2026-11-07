@@ -76,10 +76,10 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     // climb out and place on the ground
     await p.keyboard.down('d'); await p.keyboard.down(' '); await step(20); await p.keyboard.up(' '); await step(16); await p.keyboard.up('d');
     const slot = (await st()).belt.split(',').findIndex(x => x.startsWith('snow_block')); await tap(String(slot + 1), 3);
-    let placed = 0; const b0 = await inv('snow_block');
-    for (let k = 0; k < 8 && placed < 1; k++) { const s2 = await st(), x = s2.x - 8 - k * 6; let y = 150; while (y < 290 && (await cell(x, y)) === 0) y++; await hover(x, y - 2); const t = await T();
+    let placed = 0; const b0 = await inv('snow_block'), probes = [];
+    for (let k = 0; k < 16 && placed < 1; k++) { const s2 = await st(), x = s2.x + (k % 2 ? 1 : -1) * (8 + (k >> 1) * 6); let y = 150; while (y < 290 && (await cell(x, y)) === 0) y++; await hover(x, y - 2); const t = await T(); probes.push(Math.round(x) + ',' + y + ' ' + JSON.stringify(t));
       if (t.mode === 'place' && t.ok) { await p.mouse.down(); await step(4); await p.mouse.up(); await step(6); if ((await inv('snow_block')) < b0) placed++; } }
-    ok(placed >= 1, 'a block was placed on the ground with LMB'); await shot('blocks'); }
+    ok(placed >= 1, 'a block was placed on the ground with LMB' + (placed >= 1 ? '' : ' | player ' + JSON.stringify(await st()) + ' | probes ' + probes.join(' ; '))); await shot('blocks'); }
   // 7. the bag (C) and the zoom (Ctrl + wheel)
   { await tap('c', 10); await step(20); ok(await ev(() => document.body.classList.contains('panel-open')), 'C opens the bag'); await shot('bag'); await tap('c', 10); await step(10);
     ok(!(await ev(() => document.body.classList.contains('panel-open'))), 'C closes the bag');

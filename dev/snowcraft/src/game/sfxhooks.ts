@@ -30,7 +30,7 @@ export function initSfxHooks() {
   on('fire_lit', () => call('play', 'fire_lit', { vol: 0.8 }));
   on('door', () => call('play', 'door', { vol: 0.7 }));
   on('harpoon', () => call('play', 'throw', { vol: 0.8 }));
-  on('flare', () => call('play', 'flare', { vol: 0.9 }));
+  on('flare', (d: any) => { if (!d?.smoke) call('play', 'flare', { vol: 0.9 }); });   // smoke flare: sfxhooks_use.ts
   on('storm_start', () => call('play', 'gust', { vol: 1 }));
   on('died', () => call('play', 'death', { vol: 1 }));
   // knife cut (its own sound, not the shovel's dig loop); pickups throttled so a stack of drops does not buzz; a refused placement says no

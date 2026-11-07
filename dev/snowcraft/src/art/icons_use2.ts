@@ -10,10 +10,9 @@ function ic(id: string, rows: Rows, pal: Palette = PAL) {
 const grid = (fn: (g: Grid) => void, w = 14, h = 14): Rows => { const g = new Grid(w, h); fn(g); return g.rows(); };
 
 ic('compass', grid(g => {
-  g.disc(7, 7, 6.2, 'z'); g.disc(7, 7, 5, 'S'); g.disc(7, 7, 4, 'i');
-  g.set(7, 3, 'z'); g.set(7, 11, 'z'); g.set(3, 7, 'z'); g.set(11, 7, 'z');
-  g.line(7, 7, 7, 2, 'r', 1); g.line(7, 7, 11, 11, 'H', 1);
-  g.set(7, 7, 'K');
+  g.disc(7, 7, 6.2, 'z'); g.disc(7, 7, 5, 'n'); g.disc(7, 7, 4.2, 'i');
+  g.line(7, 7, 7, 2, 'r', 2); g.line(7, 7, 7, 12, 'S', 2);       // a red north needle, a pale south one
+  g.set(7, 2, 'R'); g.set(7, 7, 'K');
 }));
 
 ic('binoculars', grid(g => {

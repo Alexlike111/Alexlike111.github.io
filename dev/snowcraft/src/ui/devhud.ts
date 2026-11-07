@@ -265,7 +265,7 @@ export function initHud(host: HTMLElement) {
   arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
-  hintEl.innerHTML = k('Space', S.hintJump) + k('WASD', S.hintMove) + k('Shift', S.hintRun) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('J', S.hintJournal) + k('1–6', S.hintBelt) + k('R', S.hintDome) + k('G', S.hintDrop);
+  hintEl.innerHTML = k('Space', S.hintJump) + k('WASD', S.hintMove) + k('Shift', S.hintRun) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('J', S.hintJournal) + k('1–9', S.hintBelt) + k('R', S.hintDome) + k('G', S.hintDrop);
   if (!G.mobile) hintEl.style.display = 'block';
   if (DEV) { devEl = mk('dev'); }
   on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); });

@@ -1,10 +1,10 @@
-// Compass HUD (DESIGN §17, «Ориентиры»), agent U2. A small dial under the objective line: the needle points at the selected target (station, ship,
-// signal hill, smoke, marks) and the line under it gives the name and the distance in metres. Pure DOM: game/useitems_b.ts feeds it every frame
+// Compass HUD (DESIGN §17, «Ориентиры»), agent U2. A small dial in the lower right corner (under the touch buttons on a phone): the needle points at
+// the selected target (station, ship, signal hill, smoke, marks) and the line beside it gives the name and the distance in metres. Pure DOM: game/useitems_b.ts feeds it every frame
 // with showCompass(view) or showCompass(null) (no compass carried). In a storm or whiteout the plate gets darker and the letters bigger, so it stays
 // readable over the snow (it sits in the HUD layer, above the world canvas and its weather).
 import { strings } from '../content/i18n';
 
-const S = strings('compass', { west: 'З', east: 'В', nothing: '' });
+const S = strings('compass', { west: 'З', east: 'В' });
 
 export interface CompassView {
   name: string;          // selected target
@@ -17,7 +17,7 @@ export interface CompassView {
 let el: HTMLElement | null = null, needle: SVGGElement | null = null, nameEl: HTMLElement | null = null, distEl: HTMLElement | null = null;
 let lastKey = '';
 const CSS = `
-#compass{position:absolute;left:50%;top:calc(40px + env(safe-area-inset-top,0px));transform:translateX(-50%);display:none;align-items:center;gap:6px;
+#compass{position:absolute;right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px));display:none;align-items:center;gap:6px;
   pointer-events:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;color:#e8f4ff;text-shadow:0 1px 0 #05080f;white-space:nowrap;z-index:2}
 #compass.on{display:flex}
 #compass svg{width:46px;height:46px;flex:none;filter:drop-shadow(0 1px 2px #05080f)}
@@ -26,7 +26,8 @@ const CSS = `
 #compass .lt{fill:#cfeaff;font-size:9px;font-weight:700;text-anchor:middle;dominant-baseline:central}
 #compass .nd path{fill:#ffc46e;stroke:#05080f;stroke-width:1}
 #compass .nd .tl{fill:#7cc6ee}
-#compass .tx{display:flex;flex-direction:column;line-height:1.05;background:rgba(8,16,30,.7);border:1px solid rgba(124,198,238,.35);border-radius:4px;padding:3px 7px}
+#compass .tx{display:flex;flex-direction:column;line-height:1.1;background:rgba(8,16,30,.7);border:1px solid rgba(124,198,238,.35);border-radius:4px;padding:3px 7px}
+#compass .tx b,#compass .tx span{white-space:nowrap;font-weight:700}
 #compass .tx b{font-size:13px}
 #compass .tx span{font-size:12px;opacity:.9;font-variant-numeric:tabular-nums}
 #compass.storm .pl{fill:rgba(3,6,12,.96);stroke:#cfeaff;stroke-width:2.2}
@@ -35,7 +36,7 @@ const CSS = `
 #compass.storm .tx{background:rgba(3,6,12,.93);border-color:#cfeaff}
 #compass.storm .tx b{font-size:14px}
 #compass.storm .tx span{font-size:13px}
-body.touch-ui #compass{top:calc(36px + env(safe-area-inset-top,0px))}
+body.touch-ui #compass{top:calc(96px + env(safe-area-inset-top,0px));bottom:auto}
 body.touch-ui #compass svg{width:40px;height:40px}
 `;
 
