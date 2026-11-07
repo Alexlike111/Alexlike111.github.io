@@ -21,6 +21,7 @@ import { MIN_PER_SEC } from './weather';
 import { burstFx } from '../engine/particles';
 import { addShake } from '../engine/camera';
 import { stepHunt, initHunt, trackStep, dragMarks, pointHole, huntDropNear, takeHuntDrop } from './hunt';
+import { ramp } from './seasons';
 
 const S = strings('fauna', {
   dogBird: 'Север принёс куропатку',
@@ -46,9 +47,8 @@ const S = strings('fauna', {
 type AI = { mode: string; t: number; tx: number; cd: number; hold: number; carry?: string; home?: number; hole?: number; stay?: boolean; hunger?: number; barkT?: number; seen?: boolean; hits?: number; futile?: number; sniffed?: boolean; stuck?: number; pause?: boolean; fetch?: { id: number; ph: 'go' | 'back'; t: number }; pointed?: boolean; hintT?: number };
 const ai = new Map<number, AI>();
 const SZ: Record<string, [number, number]> = { dog: [10, 9], bear: [26, 15], seal: [16, 8], fox: [10, 7] };
-// the ring ramp (seasons.ts, DESIGN §18): the bear gets faster and bolder every ring. Read through a glob so the build does not need the file.
-const seasonMods = import.meta.glob('./seasons.ts', { eager: true }) as Record<string, { ramp?: { bear?: number } }>;
-const bearRamp = () => Math.max(0.5, Math.min(1.5, Object.values(seasonMods)[0]?.ramp?.bear ?? 1));
+// the ring ramp (seasons.ts, DESIGN §18): the bear gets faster and bolder every ring
+const bearRamp = () => Math.max(0.5, Math.min(1.5, ramp.bear ?? 1));
 
 export const fauna = { dog: null as Animal | null, bear: null as Animal | null, sealCd: new Map<number, number>(), bearActiveDay: 2, bearSmell: 0, bearMode: '', sealsCaught: 0 };
 
