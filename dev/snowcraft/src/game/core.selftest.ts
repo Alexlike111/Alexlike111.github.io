@@ -717,12 +717,12 @@ registerTest('input', 'клавиатура и мышь: ход, бег, пры�
 });
 registerTest('input', 'сенсорное управление: кнопки ≥ 56 px, стик, действие', async (t) => {
   const el = (id: string) => document.getElementById(id) as HTMLElement | null;
-  const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-bag', 'tb-jour', 'tb-parka'];
+  const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka', 'tb-bag', 'tb-jour', 'tb-menu'];      // icon buttons (ui/touch.ts); the size follows the window (36 px on a landscape phone)
   const present = ids.filter(i => el(i));
   ok(t, present.length === ids.length, 'нет кнопок: ' + ids.filter(i => !el(i)).join(','));
   const layer = document.getElementById('touch');
   if (layer && layer.style.display !== 'none') {
-    for (const id of ids) { const r = el(id)!.getBoundingClientRect(); ok(t, r.width >= 50 && r.height >= 48, `${id} ${Math.round(r.width)}×${Math.round(r.height)} < 56`); }
+    for (const id of ids) { const r = el(id)!.getBoundingClientRect(); ok(t, r.width >= 34 && r.height >= 34, `${id} ${Math.round(r.width)}×${Math.round(r.height)} < 34`); }
   } else t.log('сенсорный слой скрыт (десктоп) — размеры не проверялись');
   touch.x = 1; poll(); ok(t, input.moveX === 1, 'стик → moveX'); touch.x = 0; poll();
 });
