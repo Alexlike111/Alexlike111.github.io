@@ -115,19 +115,9 @@ for (const prof of PROFILES) {
       const keep = await page.evaluate(() => localStorage.getItem('sc.zoom'));
       check('zoom: the choice is remembered in localStorage', !!keep && Number(keep) >= 200 && Number(keep) <= 700, String(keep));
     } else {
-      const rects = await page.evaluate(() => {
-        const r = (e) => { const b = e.getBoundingClientRect(); return { id: e.id || e.className, x: b.left, y: b.top, w: b.width, h: b.height }; };
-        const zin = r(document.getElementById('tb-zin')), zout = r(document.getElementById('tb-zout'));
-        const others = [...document.querySelectorAll('#touch .tb, #hud .bw, #hud .dial, #hud .stk, #hud .belt, #hud .bname')].filter(e => e.id !== 'tb-zin' && e.id !== 'tb-zout' && getComputedStyle(e).display !== 'none').map(r);
-        const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-        return { zin, zout, clash: others.filter(o => o.w > 0 && (hit(zin, o) || hit(zout, o))).map(o => o.id) };
-      });
-      check('zoom: the phone +/- buttons are >= 44 px and overlap no other button or HUD block', rects.zin.w >= 44 && rects.zin.h >= 44 && rects.zout.w >= 44 && rects.clash.length === 0, JSON.stringify(rects));
-      await page.touchscreen.tap(rects.zin.x + 22, rects.zin.y + 22); await page.waitForTimeout(150);
-      const z1 = await zs();
-      await page.touchscreen.tap(rects.zout.x + 22, rects.zout.y + 22); await page.touchscreen.tap(rects.zout.x + 22, rects.zout.y + 22); await page.waitForTimeout(150);
-      const z2 = await zs();
-      check('zoom: the "+" button zooms in, "-" zooms out', z1.i === z0.i + 1 && z2.i === z0.i - 1, JSON.stringify([z0, z1, z2]));
+      // the phone has no on-screen +/- buttons any more (wave 5): pinch and the settings slider zoom
+      const zb = await page.evaluate(() => [!document.getElementById('tb-zin'), !document.getElementById('tb-zout')]);
+      check('zoom: no on-screen +/- buttons on the phone (pinch and the settings slider only)', zb[0] && zb[1], JSON.stringify(zb));
       // pinch: two fingers on the right half of the world, spreading apart = closer
       await ev(page, () => {
         const stage = document.getElementById('stage');
@@ -138,7 +128,7 @@ for (const prof of PROFILES) {
       });
       await page.waitForTimeout(150);
       const z3 = await zs();
-      check('zoom: pinch (fingers apart) zooms in', z3.i >= z2.i + 2, JSON.stringify([z2, z3]));
+      check('zoom: pinch (fingers apart) zooms in', z3.i >= z0.i + 2, JSON.stringify([z0, z3]));
     }
     // a look at the extremes and the middle
     for (const frac of [0, 0.5, 1]) {
@@ -325,11 +315,11 @@ for (const prof of PROFILES) {
   } else {
     await ev(page, () => window.__sc.step(4));                       // the HUD drops `panel-open` on its next update: do not rely on the wall-clock wait after closing the journal
     const t = await ev(page, () => {
-      const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-bag', 'tb-jour', 'tb-parka'];
+      const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka', 'tb-bag', 'tb-jour', 'tb-menu'];
       const rects = ids.map(i => { const r = document.getElementById(i).getBoundingClientRect(); return { i, w: Math.round(r.width), h: Math.round(r.height) }; });
       return { rects, portraitOverlay: getComputedStyle(document.getElementById('rotate')).display, body: document.body.className, pnl: [...document.querySelectorAll('#hud .pnl')].map(e => e.className + ':' + e.style.display) };
     });
-    check('touch buttons present, >= 56 px', t.rects.every(r => r.w >= 56 && r.h >= 50), JSON.stringify(t));
+    check('touch buttons present, >= 34 px (icons; the size follows the window)', t.rects.every(r => r.w >= 34 && r.h >= 34), JSON.stringify(t));
     check('no rotate overlay in landscape', t.portraitOverlay === 'none');
     // stick: synthetic touch pointer events
     const st = await ev(page, () => {

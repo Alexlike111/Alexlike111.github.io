@@ -715,7 +715,7 @@ registerTest('input', 'клавиатура и мышь: ход, бег, пры�
     resetInput();
   });
 });
-registerTest('input', 'сенсорное управление: кнопки ≥ 56 px, стик, действие', async (t) => {
+registerTest('input', 'сенсорное управление: кнопки ≥ 34 px, стик, действие', async (t) => {
   const el = (id: string) => document.getElementById(id) as HTMLElement | null;
   const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka', 'tb-bag', 'tb-jour', 'tb-menu'];      // icon buttons (ui/touch.ts); the size follows the window (36 px on a landscape phone)
   const present = ids.filter(i => el(i));

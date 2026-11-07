@@ -5,6 +5,7 @@
 import { registerTest } from '../game/selftest';
 import { getUiMode, setUiMode, applyUiMode, shortScreen, SHORT_H } from './hudmode';
 import { setEnabled, touchEnabled } from './touch';
+import { menuOpen, closeMenu } from './menu';
 
 const KEY = 'sc.ui';
 
@@ -44,6 +45,8 @@ registerTest('hudmode', 'кнопки телефона: нет кнопок +/�
   }
   window.removeEventListener('sc:menu', h);
   t.expect(got === 1, 'sc:menu не пришёл при нажатии ⚙');
+  t.expect(menuOpen(), 'панель меню не открылась по sc:menu');
+  if (menuOpen()) closeMenu();                       // the panel pauses the game while open: close it again, the next tests need the world running
   const top = ['tb-bag', 'tb-jour', 'tb-menu'].map(i => el(i)?.getBoundingClientRect());
   t.expect(top.every(r => r && r.top < 60), 'Сумка / Журнал / ⚙ не в верхнем ряду');
   for (const id of ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka']) {
@@ -57,8 +60,9 @@ registerTest('hudmode', 'раскладка: кнопки, стик, «Рядо�
   const prevOn = touchEnabled();
   setEnabled(true);
   const nb = document.getElementById('nearbtn'), cp = document.getElementById('compass');
-  const nbDisp = nb?.style.display ?? '', cpCls = cp?.className ?? '';
-  if (nb) { nb.style.display = 'flex'; nb.textContent = 'Рядом 3'; }     // the pill shows only with two or more things near: force it here
+  const cpCls = cp?.className ?? '';
+  const forceNear = document.createElement('style'); forceNear.textContent = '#nearbtn{display:flex !important}'; document.head.appendChild(forceNear);   // the pill shows only with two or more things near (the bag module re-sets its display): force it here
+  if (nb) nb.textContent = 'Рядом 3';
   cp?.classList.add('on');
   t.sc.step(6); await t.wait(120);
   const vis = (e: Element) => { const cs = getComputedStyle(e); const r = e.getBoundingClientRect(); return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0; };
@@ -76,7 +80,7 @@ registerTest('hudmode', 'раскладка: кнопки, стик, «Рядо�
   const off = [...thumbs, ...panels].filter(x => x.r.left < -1 || x.r.top < -1 || x.r.right > W + 1 || x.r.bottom > H + 1).map(x => x.n);
   t.expect(bad.length === 0, `наложения при ${W}×${H}: ${bad.slice(0, 6).join(' | ')}`);
   t.expect(off.length === 0, `за краем экрана при ${W}×${H}: ${off.join(', ')}`);
-  if (nb) { nb.style.display = nbDisp; nb.textContent = ''; }
+  forceNear.remove(); if (nb) nb.textContent = '';
   if (cp) cp.className = cpCls;
   setEnabled(prevOn);
 });
@@ -87,7 +91,7 @@ registerTest('hudmode', 'цель: строка сворачивается в «
   const obj = () => document.querySelector('#hud .stk .obj') as HTMLElement;
   t.sc.step(4); await t.wait(60);
   const before = obj().querySelector('.ot')?.textContent ?? '';
-  await t.wait(6600);
+  t.sc.step(400);                                    // 6.7 s of HUD time (the steps feed the HUD's clock)
   const same = (obj().querySelector('.ot')?.textContent ?? '') === before;
   if (!same) { t.log('цель сменилась во время ожидания: проверка пропущена'); setEnabled(prevOn); return; }
   t.expect(obj().classList.contains('col'), 'через 6 с строка цели не свернулась');

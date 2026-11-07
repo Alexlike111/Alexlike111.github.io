@@ -17,6 +17,8 @@ import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from '
 import { stepZoom, setZoomIndex, zoomIndex, zoomCount, zoomCells, zoomScales, resetZoom } from './engine/zoom';
 import { initTouch } from './ui/touch';
 import { initZoomUi, updateZoomUi } from './ui/zoomui';
+import * as i18nMod from './content/i18n';
+import './content/langpacks';          // registers src/content/lang/*.json (translations)
 import { initMenu } from './ui/menu';
 import { initSenses, toggleSenses } from './engine/senses';
 import { initSensesUi } from './ui/sensesui';
@@ -383,7 +385,7 @@ const sc = {
   },
   selftest: (filter?: string) => runSelfTest(filter),
   cutRegion, selected,
-  mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, seasons: seasonsMod, overlay: overlayMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
+  mods: { i18n: i18nMod, fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, seasons: seasonsMod, overlay: overlayMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
   screenToWorld, worldToScreen,
   senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
@@ -397,6 +399,8 @@ window.__sc = sc;
 
 // ---------------------------------------------------------------------------------------------------------------------
 async function boot() {
+  { let L: string | null = null; try { L = localStorage.getItem('sc.lang'); } catch { /* no storage */ }       // language: the stored choice, else the browser's (packs missing -> Russian)
+    i18nMod.setLang(((i18nMod.LANGS as readonly string[]).includes(L ?? '') ? L : i18nMod.detectLang()) as i18nMod.Lang); }
   initRender(canvas);
   initInput(canvas);
   initHud(uiRoot);

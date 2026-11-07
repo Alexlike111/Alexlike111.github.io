@@ -39,19 +39,25 @@ registerTest('ui', 'двери дома и дизельной проходимы
   });
 });
 
-registerTest('ui', 'верхняя полоса HUD: цель, чип укрытия и тосты не налезают друг на друга', async t => {
+registerTest('ui', 'верхняя полоса HUD (цель, чип укрытия) и тосты над поясом не налезают друг на друга', async t => {
   const sc = t.sc;
   const prev = G.shelter;
   G.shelter = { closed: true, tiles: 40, temp: -24, windIn: 0, vent: true, co: 8, stars: 2, notes: [] };
   toast('Белеет ноги: обморожение близко', 'warn'); toast('Тебя трясёт: пора греться', 'warn');
   sc.step(14); await t.wait(150);
-  const kids = [...document.querySelectorAll('#hud .stk > *')].flatMap(e => (e as HTMLElement).classList.contains('p') ? [e] : [...e.children]).filter(e => (e as HTMLElement).offsetParent !== null) as HTMLElement[];
-  const r = kids.map(k => k.getBoundingClientRect());
-  t.expect(r.length >= 3, 'элементов в полосе: ' + r.length);
+  // the top stack holds the objective and the shelter chip; the toasts and the belt share the bottom stack (wave 5, devhud.ts .bot)
+  const vis = (e: Element) => (e as HTMLElement).offsetParent !== null;
+  const top = ([...document.querySelectorAll('#hud .stk > *')].flatMap(e => (e as HTMLElement).classList.contains('p') ? [e] : [...e.children]) as HTMLElement[]).filter(vis);
+  const toasts = ([...document.querySelectorAll('#hud .tbox .toast')] as HTMLElement[]).filter(vis);
+  const belt = document.querySelector('#hud .belt') as HTMLElement | null;
+  t.expect(top.length >= 2, 'элементов в верхней полосе: ' + top.length);
+  t.expect(toasts.length >= 1 && toasts.length <= 2, 'тостов на экране: ' + toasts.length);
+  const r = [...top, ...toasts, ...(belt ? [belt] : [])].map(k => k.getBoundingClientRect());
   for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
     const o = !(r[i].right <= r[j].left || r[j].right <= r[i].left || r[i].bottom <= r[j].top + 0.5 || r[j].bottom <= r[i].top + 0.5);
     t.expect(!o, `элементы ${i} и ${j} пересекаются`);
   }
+  if (belt && toasts.length) t.expect(toasts.every(x => x.getBoundingClientRect().bottom <= belt.getBoundingClientRect().top + 0.5), 'тост лежит на поясе');
   G.shelter = prev; G.toasts.length = 0; sc.step(12);
 });
 
@@ -160,18 +166,18 @@ registerTest('ui', 'телефон: все 6 слотов пояса видны,
   const hud = document.getElementById('hud')!;
   t.expect(getComputedStyle(hud).fontSize === '14px', 'шрифт HUD: ' + getComputedStyle(hud).fontSize);
   const stk = document.querySelector('#hud .stk') as HTMLElement;
-  t.expect(getComputedStyle(stk).right === '220px', 'полоса цели right: ' + getComputedStyle(stk).right);
+  t.expect(parseFloat(getComputedStyle(stk).right) >= 150, 'полоса цели не оставляет места верхнему ряду: right ' + getComputedStyle(stk).right);
   // nothing overlaps the objective strip: the body panel, the dial and the top-right touch buttons stay clear of it
   const box = (sel: string) => (document.querySelector(sel) as HTMLElement | null)?.getBoundingClientRect();
   const hit = (a?: DOMRect, b?: DOMRect) => !!a && !!b && a.width > 0 && b.width > 0 && !(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top);
-  const obj = box('#hud .stk .obj'), bw = box('#hud .bw'), dial = box('#hud .dial'), bag = box('#tb-bag'), jour = box('#tb-jour'), par = box('#tb-parka');
+  const obj = box('#hud .stk .obj'), bw = box('#hud .bw'), dial = box('#hud .dial'), bag = box('#tb-bag'), jour = box('#tb-jour'), menu = box('#tb-menu');
   t.expect(!hit(obj, bw) && !hit(obj, dial), 'полоса цели налезает на тело или часы');
-  t.expect(!hit(obj, bag) && !hit(obj, jour) && !hit(obj, par), 'полоса цели налезает на кнопки Сумка/Журнал/Парка');
+  t.expect(!hit(obj, bag) && !hit(obj, jour) && !hit(obj, menu), 'полоса цели налезает на кнопки Сумка/Журнал/⚙');
   t.expect(!hit(bw, dial), 'тело налезает на часы');
   setEnabled(prevOn);
 });
 
-registerTest('ui', 'телефон: при открытом журнале видны только Сумка, Журнал и Парка; сумка занимает экран и закрывается своей кнопкой', async t => {
+registerTest('ui', 'телефон: при открытом журнале видны только Сумка, Журнал и ⚙; сумка занимает экран и закрывается своей кнопкой', async t => {
   const sc = t.sc; const prevOn = touchEnabled();
   await closePanels(t);
   setEnabled(true); sc.step(4);
@@ -181,7 +187,8 @@ registerTest('ui', 'телефон: при открытом журнале ви�
   input.journalPressed = true; sc.step(6); await t.wait(60);
   t.expect(document.body.classList.contains('panel-open'), 'журнал не открылся');
   t.expect(disp('tb-act') === 'none' && disp('tb-jump') === 'none' && disp('tb-take') === 'none', 'кнопки действия не спрятаны под журналом');
-  t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-parka') !== 'none', 'Сумка / Журнал / Парка пропали, body: ' + document.body.className);
+  t.expect(disp('tb-bag') !== 'none' && disp('tb-jour') !== 'none' && disp('tb-menu') !== 'none', 'Сумка / Журнал / ⚙ пропали, body: ' + document.body.className);
+  t.expect(disp('tb-parka') === 'none', 'Парка видна поверх журнала');
   t.expect(ghostHidden(), 'подсказка «тяни» видна поверх журнала');
   input.journalPressed = true; sc.step(6); await t.wait(60);
   // the bag (DESIGN §12) is a full-screen panel with its own «закрыть»: every touch button is hidden under it
