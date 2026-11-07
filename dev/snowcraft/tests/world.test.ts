@@ -133,7 +133,7 @@ ok(has('shed', 'battery'), 'radio part #3 (аккумулятор) in the genera
   const b = worldInfo.radioParts.battery; let snow = 0; for (let y = b.y - 30; y < b.y - 8; y++) { const m = at(b.x, y); if (m === MAT.PACKED || m === MAT.SNOW) snow++; }
   ok(snow >= 8, 'the battery chest lies buried under a deep drift', `(${snow} snow cells above)`);
 }
-ok(has('minehut', 'pick') && has('shed', 'axe') && has('ship', 'saw') && has('station', 'lantern') && has('station', 'flare_gun') && has('ship', 'flint') && has('ship', 'barometer'), 'tools: pick (mine), axe (shed), saw + flint + barometer (ship), lantern + flare gun (station)');
+ok(G.drops.some(d => d.item === 'pick' && d.x > LOC.mine.portalX - 30 && d.x < LOC.mine.portalX) && has('shed', 'axe') && has('ship', 'saw') && has('station', 'lantern') && has('station', 'flare_gun') && has('ship', 'flint') && has('ship', 'barometer'), 'tools: pick (lies by the mine portal), axe (shed), saw + flint + barometer (ship), lantern + flare gun (station)');
 ok(has('station', 'matches') && has('station', 'can') && has('icecave', 'fat') && has('shed', 'coal'), 'supplies: station rations and matches, coal in the shed, fat in the iceberg cave');
 const ids = worldInfo.notes.map(n => n.id);
 for (let n = 1; n <= 14; n++) ok(ids.filter(i => i === 'n' + n).length === 1, `note n${n} placed exactly once`, '');
@@ -173,8 +173,10 @@ ok(solidAt(sp.spawnX, sp.spawnY) && clear, 'spawn: standing on ground with 8x20 
 const M_ = LOC.mine;
 const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
 {
-  let coalNearTunnel = 0, soap = 0; for (let y = 230; y < 420; y++) for (let x = 60; x < 380; x++) { const m = at(x, y); if (m === MAT.COAL) coalNearTunnel++; else if (m === MAT.SOAPSTONE) soap++; }
-  ok(coalNearTunnel > 400 && soap > 150, 'mine: coal seams and a soapstone vein', `(coal ${coalNearTunnel}, soapstone ${soap})`);
+  // DESIGN v2.1: no ore grind. The coal seams are only dark streaks on the back wall; coal lies in sacks (drops) and carts; a short soapstone outcrop remains.
+  let coalCells = 0, soap = 0; for (let y = 230; y < 420; y++) for (let x = 60; x < 380; x++) { const m = at(x, y); if (m === MAT.COAL) coalCells++; else if (m === MAT.SOAPSTONE) soap++; }
+  const sacks = G.drops.filter(d => d.item === 'coal' && d.x > 60 && d.x < 420).length;
+  ok(coalCells === 0 && sacks >= 8 && kinds('cart').length >= 3 && soap > 20, 'mine: no coal seams to dig; coal sacks, mine carts and a short soapstone outcrop', `(coal cells ${coalCells}, sacks ${sacks}, carts ${kinds('cart').length}, soapstone ${soap})`);
   let rails = 0; for (let x = M_.portalX - 40; x < M_.portalX + 40; x++) if (at(x, M_.floorA - 1) === MAT.METAL) rails++;
   ok(rails > 40, 'rails run out of the adit', `(${rails} rail cells)`);
   let rubble = 0, rubbleAir = 0; for (let x = M_.collapse[0]; x < M_.collapse[1]; x++) for (let y = floorD(x) - 20; y < floorD(x); y++) { const m = at(x, y); if (m === MAT.GRAVEL || m === MAT.LOG || m === MAT.PLANK) rubble++; else if (m === MAT.AIR) rubbleAir++; }
@@ -277,10 +279,12 @@ const floorD = (x: number) => M_.floorA + 4 * Math.floor((M_.rampTop - x) / 5);
   ok(near(s1, worldInfo.spots.portal.x, worldInfo.spots.portal.y), 'on foot: mine portal');
   ok(near(s1, M_.collapse[1] + 12, floorD(M_.collapse[1] + 12) - 2), 'on foot: the adit and the decline up to the collapse');
   ok(near(s1, 790, LOC.station.y - 3), 'on foot: the generator shed through its west door');
-  ok(!near(s1, chestPos('minehut').x, chestPos('minehut').y, 6, 8), 'the miner hut is beyond the collapse (must dig first)');
+  ok(!near(s1, chestPos('minehut').x, chestPos('minehut').y, 6, 8), 'the miner hut is beyond the collapse (must dig first: shovel, axe, and the pick for the rock plug)');
   ok(!near(s1, M_.lake.x0 + 40, M_.lake.ice - 6, 6, 8), 'the ice lake cavern is sealed in the rock (dig down to it)');
   // dig the collapse and the shed drift (shovel-diggable stuff), then everything else must be walkable
-  for (let x = M_.collapse[0]; x < M_.collapse[1]; x++) for (let y = floorD(x) - 28; y < floorD(x); y++) { const m = at(x, y); if (m === MAT.GRAVEL || m === MAT.LOG || m === MAT.PLANK) mat[y * W + x] = MAT.AIR; }
+  for (let x = M_.collapse[0]; x < M_.collapse[1]; x++) for (let y = floorD(x) - 28; y < floorD(x); y++) { const m = at(x, y); if (m === MAT.GRAVEL || m === MAT.LOG || m === MAT.PLANK || (m === MAT.STONE && x >= M_.plug[0] && x < M_.plug[1])) mat[y * W + x] = MAT.AIR; }   // shovel, axe and (rock plug) pick
+  for (let x = M_.icePlug[0]; x < M_.icePlug[1]; x++) for (let y = M_.floorB - 28; y < M_.floorB; y++) if (at(x, y) === MAT.ICE) mat[y * W + x] = MAT.AIR;   // the frozen seep: pick or chisel
+  for (const set of worldInfo.timberSets) for (const i of [...set.east, ...set.west]) if ((i / W | 0) >= M_.floorB - 28) mat[i] = MAT.AIR;   // chop a doorway through each timber prop of the hut (axe)
   { const { L, R } = LOC.shed; for (let x = (L + 1) * 4; x < (R + 6) * 4; x++) for (let y = (LOC.station.y / 4 - 8) * 4; y < LOC.station.y; y++) { const m = at(x, y); if (m === MAT.PACKED || m === MAT.SNOW) mat[y * W + x] = MAT.AIR; } }
   t = performance.now();
   const s2 = bfs();

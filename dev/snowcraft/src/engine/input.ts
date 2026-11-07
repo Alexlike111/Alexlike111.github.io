@@ -8,6 +8,7 @@ export interface InputState {
   interactPressed: boolean; eatPressed: boolean; craftPressed: boolean; journalPressed: boolean; mapPressed: boolean; pausePressed: boolean;
   wheelOpen: boolean; smartToggle: boolean;
   ventPressed: boolean; dropPressed: boolean; freeCamPressed: boolean;
+  sensesPressed: boolean;    // X / touch «Чутьё»: toggled by main.ts (consumed there)
   hotbar: number;            // -1 or 0..8 pressed this frame
   scroll: -1 | 0 | 1;
   aimX: number; aimY: number; hasAim: boolean; aimMode: 'mouse' | 'touch' | 'smart';
@@ -17,7 +18,7 @@ export interface InputState {
 export const input: InputState = {
   moveX: 0, moveY: 0, run: false, jumpHeld: false, jumpPressed: false, primary: false, primaryPressed: false,
   secondaryPressed: false, secondaryHeld: false, interactPressed: false, eatPressed: false, craftPressed: false, journalPressed: false, mapPressed: false,
-  pausePressed: false, wheelOpen: false, smartToggle: false, ventPressed: false, dropPressed: false, freeCamPressed: false,
+  pausePressed: false, wheelOpen: false, smartToggle: false, ventPressed: false, dropPressed: false, freeCamPressed: false, sensesPressed: false,
   hotbar: -1, scroll: 0, aimX: 0, aimY: 0, hasAim: false, aimMode: 'mouse', touchActive: false, anyKey: false,
 };
 /** Held state written by ui/touch.ts (merged with the keyboard/mouse each frame). */
@@ -46,6 +47,7 @@ function press(code: string) {
     case 'KeyR': input.smartToggle = true; break;
     case 'KeyV': input.ventPressed = true; break;
     case 'KeyG': input.dropPressed = true; break;
+    case 'KeyX': input.sensesPressed = true; break;
     case 'F2': input.freeCamPressed = true; break;
   }
 }
@@ -102,7 +104,7 @@ export function poll() {
 export function endFrame() {
   input.jumpPressed = input.primaryPressed = input.secondaryPressed = input.interactPressed = input.eatPressed = false;
   input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = input.smartToggle = false;
-  input.ventPressed = input.dropPressed = input.freeCamPressed = false;
+  input.ventPressed = input.dropPressed = input.freeCamPressed = false;   // sensesPressed is consumed (and cleared) by main.ts at once
   input.hotbar = -1; input.scroll = 0; input.anyKey = false;
 }
 /** Test/dev helper: reset all held state. */

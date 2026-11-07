@@ -26,8 +26,8 @@ import { MIN_PER_SEC } from './weather';
 import { dogInteract } from './fauna';
 
 const S = strings('tools', {
-  far: 'далеко', blocked: 'не достать: мешает стена', noTool: 'нужна кирка', needPick: 'нужна кирка', needAxe: 'нужен топор', needChisel: 'нужна пешня или кирка',
-  tooHard: 'не по силам', hardRock: 'слишком твёрдо', bedrock: 'не пробить',
+  far: 'далеко', blocked: 'не достать: мешает стена', needPick: 'нужна кирка', needAxe: 'нужен топор', needChisel: 'нужна пешня или кирка', needShovel: 'нужна лопата',
+  wrongTool: 'этим не взять', bedrock: 'не пробить',
   thin: 'слой слишком тонкий для блока', cutNeedSnow: 'Нужен плотный наст', crumble: 'рассыпется: слишком рыхло ({d})', cutOk: 'Вырезать блок ({d}, {c})',
   looseSnow: 'рыхлый снег: бери лопатой', packed: 'наст', block: 'снежный блок',
   density: '{d} кг/м³ · {c}', iceThick: 'лёд {cm} см',
@@ -35,7 +35,7 @@ const S = strings('tools', {
   scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Вырезать блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Использовать',
   noSupport: 'нет опоры', span: 'слишком длинный пролёт', ok: 'держится',
   occupied: 'занято', inYou: 'мешает тебе',
-  gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…', brokeTool: '{name} сломался',
+  gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…',
   torchLit: 'Факел горит', torchOut: 'Факел погас', noFlame: 'Нечем зажечь факел',
   lanternOn: 'Фонарь горит', lanternOff: 'Фонарь погашен', lanternEmpty: 'В фонаре нет солярки',
   flareNone: 'Нет ракет', flareShot: 'Ракета в небо!',
@@ -90,19 +90,22 @@ let fishFallback = true;
 export function setFishingFallback(on: boolean) { fishFallback = on; }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// tool speeds: SPEED[toolKind][materialToolKind] (higher = faster). 0 = cannot.
+// What each tool is for (no tiers, nothing wears out). SPEED[tool][material class] = relative speed, 0 = cannot.
+// Material classes are MatDef.tool: 'shovel' (snow, gravel, frozen earth), 'axe' (wood, bone), 'pick' (rock, ice, metal, glass), 'any'.
 const SPEED: Record<string, Record<string, number>> = {
   hand: { shovel: 0.3, any: 0.7 },
-  knife: { shovel: 0.55, any: 1 },
-  shovel: { shovel: 1, any: 1 },
-  chisel: { shovel: 0.4, pick: 1.4, any: 1 },
-  axe: { shovel: 0.35, axe: 1, pick: 0.45, any: 1 },
-  pick: { shovel: 0.6, axe: 0.7, pick: 1, any: 1 },
-  saw: { axe: 1.8, any: 1 },
+  knife: { shovel: 0.55, any: 1 },                 // cuts snow blocks, scrapes snow
+  shovel: { shovel: 1, any: 1 },                   // moves snow
+  chisel: { shovel: 0.4, any: 1 },                 // + ice, see ICE_ONLY
+  axe: { shovel: 0.35, axe: 1, any: 1 },           // wood and bone
+  pick: { shovel: 0.6, axe: 0.7, pick: 1, any: 1 },// rock and ice obstacles
+  saw: { shovel: 0.6, axe: 1.8, any: 1 },          // timber and snow blocks, faster
 };
+/** The chisel's own material: ice (it reads the thickness too). */
+const CHISEL_ICE = 1.4;
 const DROPS: Record<string, [string, number]> = {
-  ICE: ['ice', 1], LOG: ['log', 1], WOOD: ['log', 1], PLANK: ['plank', 1], WHALEBONE: ['bone', 1], STONE: ['stone', 1], BASALT: ['stone', 1], BRICK: ['stone', 1],
-  HARDROCK: ['stone', 1], COAL: ['coal', 1], SOAPSTONE: ['soapstone', 1], LICHEN: ['lichen', 0.6], METAL: ['scrap', 1],
+  ICE: ['ice', 1], LOG: ['log', 1], WOOD: ['log', 1], PLANK: ['plank', 1], WHALEBONE: ['bone', 1], STONE: ['stone', 0.5], BASALT: ['stone', 0.5], BRICK: ['stone', 0.5],
+  HARDROCK: ['stone', 0.5], COAL: ['coal', 1], SOAPSTONE: ['soapstone', 1], LICHEN: ['lichen', 0.6], METAL: ['scrap', 1],
   GRAVEL: ['stone', 0.35],
 };
 const SNOWY = new Uint8Array(256);
@@ -122,10 +125,11 @@ export function digTime(m: number, tk: string): number {
   if (!d || !isFinite(d.hard) || d.tool === 'none' || m === MAT.FIXTURE || m === MAT.BEDROCK) return Infinity;
   if (d.phase !== P_SOLID && d.phase !== P_POWDER) return Infinity;
   let sp = SPEED[tk]?.[d.tool] ?? 0;
+  if (tk === 'chisel' && m === MAT.ICE) sp = CHISEL_ICE;
   if (tk === 'saw' && d.tool === 'axe' && !WOODY[m]) sp = 0;
+  if (tk === 'saw' && d.tool === 'shovel' && !SNOWY[m]) sp = 0;
+  if (tk === 'knife' && d.tool === 'shovel' && !SNOWY[m]) sp = 0;       // a knife is no spade
   if (d.tool === 'any') sp = Math.max(sp, SPEED[tk]?.any ?? 0.7);
-  if (d.tier >= 1 && d.tool === 'pick' && !(tk === 'pick' || (tk === 'chisel' && m === MAT.ICE))) return Infinity;
-  if (d.tier >= 2) sp *= 0.5;
   if (sp <= 0) return Infinity;
   return Math.max(0.18, d.hard / sp);
 }
@@ -134,7 +138,8 @@ export function digReason(m: number, tk: string): string {
   if (!d || !isFinite(d.hard) || m === MAT.BEDROCK) return S.bedrock;
   if (d.tool === 'pick') return m === MAT.ICE ? S.needChisel : S.needPick;
   if (d.tool === 'axe') return S.needAxe;
-  return S.tooHard;
+  if (d.tool === 'shovel') return S.needShovel;
+  return S.wrongTool;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -304,7 +309,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
   }
   if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
 
-  if (tk === 'knife' && m !== 0 && (m === MAT.PACKED || m === MAT.SNOWBLOCK)) { evalCut(T, tx, ty); return finishTarget(T); }
+  if ((tk === 'knife' || tk === 'saw') && m !== 0 && (m === MAT.PACKED || m === MAT.SNOWBLOCK)) { evalCut(T, tx, ty); return finishTarget(T); }
   if (id === 'shovel' && held.load > 0 && m === 0) {
     T.mode = 'dig'; T.ok = true; T.verb = S.throwSnow; return finishTarget(T);
   }
@@ -394,13 +399,7 @@ function evalFish(T: Target, tx: number, ty: number) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// actions
-function wearTool(slotIdx: number, amount: number) {
-  const s = inv.slots[slotIdx]; if (!s) return;
-  const d = getItem(s.id).tool; if (!d || !isFinite(d.dur) || s.dur === undefined) return;
-  s.dur -= amount;
-  if (s.dur <= 0) { inv.slots[slotIdx] = null; toast(fmt(S.brokeTool, { name: itemName(s.id) }), 'bad'); emit('tool_broke', { id: s.id }); }
-}
+// actions (tools never wear out)
 function clearTile(tx: number, ty: number, only?: (m: number) => boolean): number {
   let n = 0;
   const x0 = tx * TS, y0 = ty * TS;
@@ -418,7 +417,7 @@ function chips(tx: number, ty: number, m: number, n = 5) {
   burstFx('chip', tx * TS + 2, ty * TS + 2, n, 28, 0.5, (rgb[0] << 16) | (rgb[1] << 8) | rgb[2], 12);
 }
 
-function finishDig(T: Target, tk: string, slot: number) {
+function finishDig(T: Target, tk: string) {
   const tx = T.tx, ty = T.ty, m = tileMaterial(tx, ty);
   if (m === 0) return;
   const key = MATS[m].key;
@@ -434,8 +433,8 @@ function finishDig(T: Target, tk: string, slot: number) {
   const cx = tx * TS + 2, cy = ty * TS + 2;
   if (SNOWY[m]) {
     if (tk === 'shovel') held.load = Math.min(32, held.load + removed);
-    else if (tk === 'hand' || tk === 'knife') { if (m === MAT.SNOW || m === MAT.PACKED) spawnDrop('snow', 1, cx, cy); }
-    if (m === MAT.SNOWBLOCK && tk === 'knife' && dn) {
+    else if (tk === 'hand' || tk === 'knife' || tk === 'saw') { if (m === MAT.SNOW || m === MAT.PACKED) spawnDrop('snow', 1, cx, cy); }
+    if (m === MAT.SNOWBLOCK && (tk === 'knife' || tk === 'saw') && dn) {
       toolState.blockRefund += 0.5; toolState.blockDens = dsum / dn;
       if (toolState.blockRefund >= 1) { toolState.blockRefund -= 1; const left = add('snow_block', 1, Math.round(toolState.blockDens)); if (left) spawnDrop('snow_block', 1, cx, cy, 0, -20, Math.round(toolState.blockDens)); toast(fmt(S.gotBlock, { c: snowClassName(snowClass(toolState.blockDens)) }), 'good'); }
     }
@@ -443,23 +442,22 @@ function finishDig(T: Target, tk: string, slot: number) {
     const dr = DROPS[key];
     if (dr) {
       let n = dr[1] >= 1 ? Math.floor(dr[1]) : (Math.random() < dr[1] ? 1 : 0);
-      if (placed && dr[1] >= 1) n = 1;
+      if (placed) n = Math.max(n, 1);
       if (n > 0) { const left = add(dr[0], n); if (left > 0) spawnDrop(dr[0], left, cx, cy, (Math.random() - 0.5) * 24, -26); else emit('picked', { item: dr[0], n }); }
     }
   }
   emit('dug', { mat: m, key, x: cx, y: cy, tx, ty });
-  wearTool(slot, SNOWY[m] ? 0.08 : 0.6);
   body.working = 1; void p; void cells;
 }
 
 let lastHint = -99;
-function doCut(T: Target, dtEff: number, slot: number) {
+function doCut(T: Target, dtEff: number, tk: string) {
   const c = toolState.cut;
   if (c.tx !== T.tx || c.ty !== T.ty) { c.tx = T.tx; c.ty = T.ty; c.p = 0; }
   const r = cutRegion(T.tx, T.ty);
   if (!r.ok) { c.p = 0; return; }
   const cls = r.density < 220 ? 0.7 : r.density <= 250 ? 1.2 : r.density <= 380 ? 1 : r.density <= 420 ? 1.4 : 2.2;
-  c.p += dtEff / (0.9 * cls);
+  c.p += (dtEff * (tk === 'saw' ? 1.6 : 1)) / (0.9 * cls);   // the saw is faster than the knife
   body.working = 1;
   if ((toolState.digSnd -= dtEff) <= 0) { toolState.digSnd = 0.22; emit('dig', { mat: MAT.PACKED, x: T.x, y: T.y }); spawnFx('dust', T.tx * TS + 4, T.ty * TS + 2, (Math.random() - 0.5) * 12, -8, 0.4, 0xe6eef8); }
   if (c.p >= 1) {
@@ -475,7 +473,6 @@ function doCut(T: Target, dtEff: number, slot: number) {
       toast(fmt(S.gotBlock, { c: snowClassName(snowClass(d)) }), 'good');
       emit('cut_block', { density: d, cls: snowClass(d) });
     }
-    wearTool(slot, 1);
     emit('dug', { mat: MAT.PACKED, key: 'PACKED', x: T.x, y: T.y, tx: T.tx, ty: T.ty });
   }
 }
@@ -553,7 +550,7 @@ function tamp(dt: number, T: Target) {
 
 // harpoon
 const hCool = { t: 0 };
-function useHarpoon(T: Target, slot: number) {
+function useHarpoon(T: Target) {
   const p = G.player;
   if (hCool.t > 0) return;
   hCool.t = 0.9; toolState.swing = 1;
@@ -569,7 +566,6 @@ function useHarpoon(T: Target, slot: number) {
     if (perp < Math.max(5, a.h / 2)) { a.hp -= 12; emit('animal_hit', { id: a.id, dmg: 12, x: a.x, y: a.y, by: 'harpoon' }); burstFx('blood', a.x, a.y - a.h / 2, 6, 24, 0.5); break; }
   }
   burstFx('dust', p.x + Math.cos(ang) * 14, p.y - 11 + Math.sin(ang) * 14, 3, 10, 0.3, 0xdde6ef);
-  wearTool(slot, 0.4);
 }
 // fishing
 function stepFishing(dt: number, T: Target, primaryPressed: boolean, sel: ItemDef | null) {
@@ -593,7 +589,6 @@ function stepFishing(dt: number, T: Target, primaryPressed: boolean, sel: ItemDe
       const n = Math.random() < 0.3 ? 2 : 1;
       const left = add('fish', n); if (left) spawnDrop('fish', left, G.player.x, G.player.y - 12);
       toast(fmt(S.fishGot, { name: itemName('fish') }), 'good'); emit('fish_caught', { n }); f.state = 'idle';
-      wearTool(inv.sel, 0.3);
     } else if (f.bite <= 0) { f.state = 'idle'; toast(S.fishLost, 'info'); }
   }
 }
@@ -697,13 +692,13 @@ export function stepTools(dt: number) {
       toast(S.flareShot, 'good'); emit('flare', { x: p.x, y: p.y - 14 }); toolState.swing = 1;
     } else toast(S.flareNone, 'warn');
   }
-  if (sel?.id === 'harpoon' && pressed) useHarpoon(T, inv.sel);
+  if (sel?.id === 'harpoon' && pressed) useHarpoon(T);
 
   // dig / cut / place / throw
   const act = down && T.inReach;
   if (act) {
     const tk = toolKindOf(sel?.id);
-    if (T.mode === 'cut' && T.ok) { doCut(T, dt * hf, inv.sel); held.using = true; toolState.swing = Math.max(toolState.swing, 0.5); }
+    if (T.mode === 'cut' && T.ok) { doCut(T, dt * hf, tk); held.using = true; toolState.swing = Math.max(toolState.swing, 0.5); }
     else if (T.mode === 'place' && pressed && T.ok && sel) {
       if (sel.id === 'snow_block') placeBlock(T);
       else if (sel.place) placeSingle(T);
@@ -718,7 +713,7 @@ export function stepTools(dt: number) {
       const t = digTime(m, tk);
       st.p += (dt * hf) / t; T.progress = st.p; held.using = true; body.working = 1; toolState.swing = Math.max(toolState.swing, 0.55);
       if ((toolState.digSnd -= dt) <= 0) { toolState.digSnd = Math.min(0.3, t * 0.5); emit('dig', { mat: m, x: T.x, y: T.y }); if (!SNOWY[m]) chips(T.tx, T.ty, m, 2); }
-      if (st.p >= 1) { st.p = 0; finishDig(T, tk, inv.sel); }
+      if (st.p >= 1) { st.p = 0; finishDig(T, tk); }
     } else if (T.mode === 'dig' && !T.ok && pressed && T.reason) toast(T.reason, 'warn');
   } else {
     toolState.throwing = false;

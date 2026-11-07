@@ -8,6 +8,8 @@
 //  'sleep_request' {fixture}  'snare_set' / 'snare_caught' / 'snare_taken'  'harpoon' {x,y,dir,tx,ty}  'fishing' {x,y}  'fish_bite'  'flare' {x,y}  'animal_hit' {id,dmg,x,y,by}
 //  'jump' 'land' {speed,mat} 'splash' 'step' {mat,run} 'bump' {dir,x,y} 'frostbite' {part} 'drank' {item} 'pot_water' 'mast_up' 'drum_brazier' 'barometer' {text}
 //  'storm_start' {n,peak} 'storm_end' {n,report: StormReport}  'shelter' {stars,closed,vent} (when the player's shelter rating changes)  'new_game' {seed}
+// Knowledge (lore.ts): 'note_read' {id} (a note's page was read for the first time)  'tech_learned' {id,how:'start'|'note'|'exp',ref}  'fact_learned' {id} (a material fact was probed)
+//  'note_found' {id:'note_n3'} is emitted by chests and pickups; lore.ts turns the item into a journal page and removes it from the bag.
 type Fn = (d: any) => void;
 const subs = new Map<string, Fn[]>();
 export function on(evt: string, fn: Fn) { let a = subs.get(evt); if (!a) subs.set(evt, (a = [])); a.push(fn); return () => { const i = a!.indexOf(fn); if (i >= 0) a!.splice(i, 1); }; }

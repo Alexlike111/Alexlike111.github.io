@@ -7,11 +7,12 @@ import { strings } from '../content/i18n';
 import { inv, select, BELT } from '../game/inventory';
 import { getItem, itemName } from '../game/items';
 import { icon } from '../engine/sprites';
+import { worldToScreen } from '../engine/render';
 
 const S = strings('touch', {
   action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка',
-  rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
-  moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть',
+  senses: 'Чутьё', rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
+  moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
 });
 
 let root: HTMLElement | null = null;
@@ -26,19 +27,21 @@ let radialTimer = 0;
 const R = 56;                                   // stick radius px
 
 const CSS = `
-#touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Pixelify Sans','Jura',system-ui,sans-serif;
+#touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;
   padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0)}
-#touch .tb{position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;text-align:center;color:#dff0ff;
+#touch .tb{box-sizing:border-box;position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;text-align:center;color:#dff0ff;
   background:rgba(14,26,44,.62);border:2px solid rgba(124,198,238,.55);border-radius:50%;font-size:13px;line-height:1.05;letter-spacing:.2px;
   backdrop-filter:blur(2px);-webkit-tap-highlight-color:transparent}
-#touch .tb.sq{border-radius:12px}
+#touch .tb.sq{border-radius:12px;font-size:13px;padding:0 2px}
 #touch .tb:active,#touch .tb.on{background:rgba(124,198,238,.45);border-color:#cfeaff}
 #touch #tb-act{width:92px;height:92px;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));font-size:15px;border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55)}
 #touch #tb-jump{width:68px;height:68px;right:calc(124px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
 #touch #tb-take{width:60px;height:60px;right:calc(30px + env(safe-area-inset-right,0px));bottom:calc(120px + env(safe-area-inset-bottom,0px))}
 #touch #tb-belt{width:58px;height:58px;right:calc(112px + env(safe-area-inset-right,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px))}
-#touch #tb-bag{width:58px;height:50px;right:calc(150px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-jour{width:58px;height:50px;right:calc(84px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-senses{width:58px;height:58px;right:calc(104px + env(safe-area-inset-right,0px));bottom:calc(176px + env(safe-area-inset-bottom,0px));font-size:13px}
+#touch #tb-senses.act{background:rgba(40,120,96,.62);border-color:#8cf5cf;color:#eafff7}
+#touch #tb-bag{width:58px;height:50px;right:calc(144px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-jour{width:58px;height:50px;right:calc(78px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch #tb-parka{width:58px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
 #touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
@@ -53,8 +56,8 @@ const CSS = `
 #touch .rad .slot.sel{border-color:#ffc46e;background:rgba(60,34,12,.9)}
 #touch .rad canvas{width:28px;height:28px;image-rendering:pixelated}
 #touch .rad .slot b{position:absolute;left:3px;top:0;font-size:10px;font-weight:400;color:#8ab0c8}
-#rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Pixelify Sans',system-ui,sans-serif}
-#rotate b{font-size:26px;margin-bottom:10px}
+#rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Jura',system-ui,sans-serif;font-weight:600}
+#rotate b{font-family:'Pixelify Sans','Jura',sans-serif;font-size:26px;margin-bottom:10px}
 `;
 
 function btn(id: string, label: string, sq = false) {
@@ -98,6 +101,8 @@ export function initTouch(uiRoot: HTMLElement) {
   hold(jour, () => { input.journalPressed = true; }, () => {});
   const parka = btn('tb-parka', S.parka, true);
   hold(parka, () => { input.ventPressed = true; }, () => {});
+  const sens = btn('tb-senses', S.senses);                      // «Чутьё»: the senses overlay (engine/senses.ts, ui/sensesui.ts keeps the .act state)
+  hold(sens, () => { input.sensesPressed = true; }, () => {});
 
   radial = document.createElement('div'); radial.className = 'rad'; layer.appendChild(radial);
   radial.addEventListener('pointerdown', (e) => { if (e.target === radial || (e.target as HTMLElement).classList.contains('cap')) { closeRadial(); e.preventDefault(); e.stopPropagation(); } });
@@ -166,6 +171,7 @@ export function initTouch(uiRoot: HTMLElement) {
   };
   mq.addEventListener?.('change', upd);
   addEventListener('resize', upd);
+  initWheel(uiRoot);
   setEnabled(G.mobile);
   // a first touch anywhere enables the controls on hybrid devices
   addEventListener('touchstart', () => setEnabled(true), { once: true, passive: true });
@@ -203,4 +209,59 @@ function toggleRadial() {
   const sel = inv.slots[inv.sel]; cap.textContent = (sel ? itemName(sel.id) + ' · ' : '') + S.radialCap; radial.appendChild(cap);
   radial.style.display = 'block';
   clearTimeout(radialTimer); radialTimer = window.setTimeout(closeRadial, 7000);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// desktop belt wheel: hold Q, flick the mouse towards a slot (top = 1, clockwise), release Q. Same glass slots / amber selection / caption as the phone wheel.
+let wheel: HTMLElement | null = null, wheelHov = -1, wheelCx = 0, wheelCy = 0, wheelIsOpen = false;
+const WHEEL_R = 112;
+export const wheelOpen = () => wheelIsOpen;
+function wheelHtml() {
+  if (!wheel) return;
+  wheel.innerHTML = '';
+  for (let i = 0; i < BELT; i++) {
+    const a = -Math.PI / 2 + i * (Math.PI * 2 / BELT);
+    const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' cur' : '') + (i === wheelHov ? ' hov' : ''); el.dataset.i = String(i);
+    el.style.left = wheelCx + Math.cos(a) * WHEEL_R + 'px'; el.style.top = wheelCy + Math.sin(a) * WHEEL_R + 'px';
+    const n = document.createElement('b'); n.textContent = String(i + 1); el.appendChild(n);
+    const s = inv.slots[i];
+    if (s) {
+      const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc);
+      if (s.n > 1) { const q = document.createElement('i'); q.textContent = String(s.n); el.appendChild(q); }
+    }
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); closeWheel(false); });
+    wheel.appendChild(el);
+  }
+  const mid = document.createElement('div'); mid.className = 'mid'; mid.style.left = wheelCx + 'px'; mid.style.top = wheelCy + WHEEL_R + 58 + 'px';   // under the ring: the middle belongs to the player
+  const sl = inv.slots[wheelHov >= 0 ? wheelHov : inv.sel];
+  mid.innerHTML = (sl ? itemName(sl.id) : S.wheelEmpty) + `<small>${S.wheelCap}</small>`;
+  wheel.appendChild(mid);
+}
+function openWheel() {
+  if (!wheel || wheelIsOpen || document.body.classList.contains('title-open') || document.body.classList.contains('touch-ui') || !G.player?.alive) return;
+  const [sx, sy] = worldToScreen(G.player.x, G.player.y - 10);
+  wheelCx = Math.max(WHEEL_R + 40, Math.min(window.innerWidth - WHEEL_R - 40, sx)); wheelCy = Math.max(WHEEL_R + 40, Math.min(window.innerHeight - WHEEL_R - 40, sy));
+  wheel.style.setProperty('--wx', wheelCx + 'px'); wheel.style.setProperty('--wy', wheelCy + 'px');
+  wheelHov = -1; wheelIsOpen = true; wheel.classList.add('open'); wheelHtml();
+}
+function closeWheel(apply: boolean) {
+  if (!wheel || !wheelIsOpen) return;
+  if (apply && wheelHov >= 0) select(wheelHov);
+  wheelIsOpen = false; wheel.classList.remove('open'); wheelHov = -1;
+}
+function wheelAim(x: number, y: number) {
+  if (!wheelIsOpen) return;
+  const dx = x - wheelCx, dy = y - wheelCy;
+  let h = -1;
+  if (Math.hypot(dx, dy) > 34) { const a = Math.atan2(dy, dx) + Math.PI / 2; h = Math.round(((a % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / BELT)) % BELT; }
+  if (h !== wheelHov) { wheelHov = h; wheelHtml(); }
+}
+function initWheel(host: HTMLElement) {
+  wheel = document.createElement('div'); wheel.id = 'wheel'; host.appendChild(wheel);
+  addEventListener('keydown', (e) => { if (e.code === 'KeyQ' && !e.repeat && !(e.target as HTMLElement)?.closest?.('input,textarea')) openWheel(); });
+  addEventListener('keyup', (e) => { if (e.code === 'KeyQ') closeWheel(true); });
+  addEventListener('blur', () => closeWheel(false));
+  addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') wheelAim(e.clientX, e.clientY); });
+  /** test hook: aim the wheel at a screen point without a real mouse */
+  (window as unknown as { __wheel?: unknown }).__wheel = { open: openWheel, close: closeWheel, aim: wheelAim };
 }

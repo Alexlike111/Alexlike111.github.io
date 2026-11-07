@@ -25,7 +25,9 @@ export interface WearDef {
 }
 export interface ToolDef {
   kind: string;            // tool class id (used by tools.ts)
-  dur: number;             // max durability uses (digs); Infinity = unbreakable
+  /** Tools never break and have no tiers. `dur` is only the burn/fuel budget of the two consumable light sources
+   *  (torch: minutes of flame, lantern: minutes of diesel); every other tool is Infinity. */
+  dur: number;
   speed?: number;
 }
 export interface ItemDef {
@@ -91,21 +93,22 @@ def('can', 'Консервы', 'food', 0.5, 6, food({ food: 30, water: 4, warm: 
 def('biscuit', 'Галеты', 'food', 0.2, 10, food({ food: 12 }));
 def('tea', 'Чай', 'material', 0.1, 10, { desc: 'Сухой чай. Заваривается в котелке.' });
 
-// ---- tools ----
+// ---- tools: no tiers, no durability. Each one does what it is for (tools.ts: SPEED table). ----
 const tool = (id: string, name: string, w: number, kind: string, dur: number, o: Partial<ItemDef> = {}) =>
   def(id, name, 'tool', w, 1, { tool: { kind, dur }, ...o });
-tool('snow_knife', 'Снежный нож', 0.8, 'knife', 400);
-tool('shovel', 'Лопата', 2.5, 'shovel', 600);
-tool('ice_chisel', 'Пешня', 3.5, 'chisel', 500);
-tool('axe', 'Топор', 2.2, 'axe', 400);
-tool('pick', 'Кирка', 3, 'pick', 400);
-tool('saw', 'Пила', 1.2, 'saw', 350);
-tool('harpoon', 'Гарпун', 2.5, 'harpoon', 60);
-tool('fishing_line', 'Леска с крючком', 0.2, 'fishing', 80);
-tool('torch', 'Факел', 0.8, 'torch', 60);            // dur = burn minutes left
-tool('lantern', 'Фонарь', 1.5, 'lantern', 360);      // dur = diesel minutes left
-tool('flare_gun', 'Ракетница', 1, 'flare_gun', Infinity);
-tool('barometer', 'Карманный барометр', 0.3, 'barometer', Infinity);
+const NEVER = Infinity;
+tool('snow_knife', 'Снежный нож', 0.8, 'knife', NEVER, { desc: 'Режет снежные блоки из плотного наста. Рыхлый снег рассыплется.' });
+tool('shovel', 'Лопата', 2.5, 'shovel', NEVER, { desc: 'Двигает снег: черпать, перебрасывать, утрамбовывать, засыпать.' });
+tool('ice_chisel', 'Пешня', 3.5, 'chisel', NEVER, { desc: 'Работает по льду: лунки, ледяные блоки, толщина льда под ногами.' });
+tool('axe', 'Топор', 2.2, 'axe', NEVER, { desc: 'Рубит дерево и кость: плавник, брёвна, стойки, китовые рёбра.' });
+tool('pick', 'Кирка', 3, 'pick', NEVER, { desc: 'Разбивает камень и ледяные пробки. Грунт и снег ей копать неудобно.' });
+tool('saw', 'Пила', 1.2, 'saw', NEVER, { desc: 'Быстрее топора по брёвнам и доскам, быстрее ножа по снежным блокам.' });
+tool('harpoon', 'Гарпун', 2.5, 'harpoon', NEVER, { desc: 'Для тюленя у лунки: бей, когда он всплывает.' });
+tool('fishing_line', 'Леска с крючком', 0.2, 'fishing', NEVER, { desc: 'Для лунки или полыньи. Голые пальцы мёрзнут.' });
+tool('torch', 'Факел', 0.8, 'torch', 60, { desc: 'Горит около часа. Освещает шахту, отпугивает зверя.' });            // dur = burn minutes left
+tool('lantern', 'Фонарь', 1.5, 'lantern', 360, { desc: 'Горит на солярке: 6 часов на заправку.' });      // dur = diesel minutes left
+tool('flare_gun', 'Ракетница', 1, 'flare_gun', NEVER);
+tool('barometer', 'Карманный барометр', 0.3, 'barometer', NEVER);
 
 // ---- wear ----
 const wear = (id: string, name: string, w: number, slot: WearSlot, insul: number, prot: number) =>

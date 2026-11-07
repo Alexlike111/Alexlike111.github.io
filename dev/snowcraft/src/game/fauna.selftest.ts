@@ -9,7 +9,8 @@ import { SEA } from './locations';
 import { worldInfo } from './worldgen';
 import { fauna, stepFauna, groundY, scentAt, scent, setAiMode, aiOf, dogInteract, dogWarmth, dogHunger } from './fauna';
 import { driftState, shiftFloes, stepDrift, iceUnder, freezeLeads } from './drift';
-import { questState, resetQuest, objective, stepQuest, GOALS, suppliesNow } from './quest';
+import { questState, resetQuest, objective, stepQuest, GOALS, suppliesNow, readNote } from './quest';
+import { loreSave, loreLoad } from './lore';
 import { inv, add, count, clearInventory, takeAll, spawnDrop, hitchSled, unhitchSled, backpacks } from './inventory';
 import { stepDrops } from './tools';
 import { wx } from './weather';
@@ -222,13 +223,15 @@ registerTest('ice', 'событие дрейфа: предупреждение, 
 });
 
 registerTest('quest', 'цепочка первого дня и концовка «Ледокол»', t => {
-  const s0 = { ...questState };
+  const s0 = { ...questState }, l0 = loreSave();
   resetQuest();
   t.expect(GOALS[0].id === 'stove' && /печь/.test(objective()), 'первая цель: ' + objective());
   emit('fire_lit', { kind: 'stove' }); t.expect(/барометр/i.test(objective()), 'вторая цель: ' + objective());
-  emit('barometer', {}); t.expect(/★★|Утепли/.test(objective()), 'третья цель: ' + objective());
+  emit('barometer', {}); t.expect(/журнал смотрителя/i.test(objective()), 'третья цель — прочесть журнал: ' + objective());
+  readNote('s1'); t.expect(/★★|Утепли/.test(objective()), 'четвёртая цель: ' + objective());
   emit('shelter', { stars: 1, closed: true, vent: true }); t.expect(/Утепли/.test(objective()), 'одна звезда не засчитана');
-  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/жир|Запасы/.test(objective()), 'четвёртая цель: ' + objective());
+  emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
+  readNote('n1'); t.expect(/жир|Запасы/.test(objective()), 'шестая цель: ' + objective());
   const sp = suppliesNow(); t.expect(Number.isFinite(sp.fuelH) && Number.isFinite(sp.foodDays), 'запасы не посчитаны');
   // the radio call -> icebreaker two days later -> signal fire on the cape hill -> ending
   const t0 = G.time, day = G.day;
@@ -246,7 +249,7 @@ registerTest('quest', 'цепочка первого дня и концовка 
   t.expect(ended === 'icebreaker', 'концовка не наступила: ' + ended);
   off();
   if (sf) { sf.lit = false; sf.fuel = 0; }
-  G.time = t0; G.day = day; resetQuest(); Object.assign(questState, s0);
+  G.time = t0; G.day = day; resetQuest(); Object.assign(questState, s0); loreLoad(l0);
 });
 
 registerTest('core', 'рюкзак не затирается второй смертью и не исчезает; нарты можно оставить', t => {

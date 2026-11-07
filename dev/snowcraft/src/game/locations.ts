@@ -4,7 +4,7 @@
 // worldgen.ts shapes the terrain first (profile, snowpack, rock, sea, ice field) and then calls stampLocations().
 // Fixtures are records in G.fixtures; solid ones also write MAT.FIXTURE + F_FIXTURE cells (SPEC §4).
 import { G, Fixture, FixtureKind, Slot, Light, newId } from './state';
-import { W, H, TW, mat, aux, flags, bg, F_FIXTURE, rand, randInt, noise1, fbm1 } from '../engine/grid';
+import { W, H, TW, mat, aux, flags, bg, F_FIXTURE, F_PLACED, rand, randInt, noise1, fbm1 } from '../engine/grid';
 import { MAT, ANCHOR } from '../content/materials';
 import { strings, tr } from '../content/i18n';
 
@@ -18,7 +18,9 @@ export const LOC = {
     portalX: 302, floorA: 264, hA: 28,                   // adit: floor row 264, 28 rows of air above it
     collapse: [208, 238] as [number, number],            // rubble section on the decline
     rampTop: 262, rampBot: 177, floorB: 332,             // the decline: stairs (rise 4 / run 5) west-down from the flat adit to level B (floor row 332)
-    hut: [110, 160] as [number, number],                 // miner's hut chamber on level B
+    hut: [100, 164] as [number, number],                 // miner's hut chamber on level B (frozen roof, one timber set in the middle)
+    plug: [220, 228] as [number, number],                // the rock plug in the collapse: only the pick breaks it
+    icePlug: [168, 174] as [number, number],             // frozen seep between the stair foot and the hut: ice (pick or chisel)
     bulkhead: 96, pocket: [62, 96] as [number, number],  // sealed methane pocket (west of the bulkhead)
     lake: { x0: 268, x1: 376, ice: 372, shore: 364 },    // sealed cavern deeper down: reached by digging
   },
@@ -81,7 +83,11 @@ export interface WorldInfoOut {
     shipCabin: { x: number; y: number }; tideCrack: { x: number; y: number }; lakeThin: { x: number; y: number };
   };
   lichen: { x: number; w: number }[];
-  coal: { x: number; y: number }[];     // loose coal heaps (station, mine apron)
+  coal: { x: number; y: number }[];     // sacks of coal lying about (mine, apron); the shed chest and the carts hold more
+  carts: number;                        // mine carts (fixtures with data.loaded = 'coal')
+  pick: { x: number; y: number };       // the pick lying by the mine portal
+  roof: { x0: number; x1: number; y0: number; y1: number };           // the frozen roof slab of the hut
+  timberSets: { x: number; y: number; cells: number[]; west: number[]; east: number[] }[];   // LOG props that hold it (cell indices; east = the one in the way)
 }
 const P0 = () => ({ x: 0, y: 0 });
 export const worldInfo: WorldInfoOut = {
@@ -90,13 +96,13 @@ export const worldInfo: WorldInfoOut = {
   notes: [], chests: [],
   radioParts: { triode: { x: 0, y: 0, site: 'ship' }, coil: { x: 0, y: 0, site: 'minehut' }, battery: { x: 0, y: 0, site: 'shed' } },
   spots: { spawn: P0(), kennel: P0(), barometer: P0(), mast: P0(), signalFire: P0(), cairn: P0(), portal: P0(), methane: P0(), whale: P0(), iceberg: P0(), icecave: P0(), ship: P0(), shipCabin: P0(), tideCrack: P0(), lakeThin: P0() },
-  lichen: [], coal: [],
+  lichen: [], coal: [], carts: 0, pick: { x: 0, y: 0 }, roof: { x0: 0, x1: 0, y0: 0, y1: 0 }, timberSets: [],
 };
 
 export function resetLocations() {
   sites.length = 0; warmZones.length = 0; G.fixtures.length = 0;
   const w = worldInfo;
-  w.sealHoles.length = 0; w.driftwood.length = 0; w.notes.length = 0; w.chests.length = 0; w.lichen.length = 0; w.coal.length = 0;
+  w.sealHoles.length = 0; w.driftwood.length = 0; w.notes.length = 0; w.chests.length = 0; w.lichen.length = 0; w.coal.length = 0; w.carts = 0; w.timberSets.length = 0;
   const f = w.iceField; f.floes.length = 0; f.cracks.length = 0; f.hiddenCracks.length = 0; f.leads.length = 0; f.ridges.length = 0;
 }
 
@@ -300,20 +306,15 @@ function frostAdit() {
 }
 function stampMine(T: Terrain) {
   const [c0, c1] = MI.collapse;
-  // --- coal seams and soapstone: lenses in the rock (before the tunnels so they are cut through) ---
+  // --- rock strata: the coal seams only survive as dark streaks on the back wall (bg 8, painted below). There is no ore to dig: the coal lies in
+  // sacks and carts. A short soapstone outcrop sits by the decline; the lamp stones lie in the hut. ---
   const seams: { y: (x: number) => number; th: number; x0: number; x1: number }[] = [];
   for (let k = 0; k < 7; k++) {
     const y0 = 246 + k * 24 + randInt(-4, 4), sl = (rand() - 0.5) * 0.18, th = randInt(4, 8), x0 = 84 + randInt(0, 40), x1 = 300 + randInt(0, 70), ph = rand() * 6;
     seams.push({ y: (x) => y0 + (x - 200) * sl + Math.sin(x / 31 + ph) * 3, th, x0, x1 });
   }
-  for (const s of seams) for (let x = s.x0; x < s.x1; x++) {
-    const yc = s.y(x), t = s.th * (0.5 + 0.5 * Math.sin((x - s.x0) / (s.x1 - s.x0) * Math.PI)) * (0.7 + 0.5 * noise1(x * 0.13));
-    for (let y = Math.round(yc - t / 2); y < yc + t / 2; y++) { const i = y * W + x; if (mat[i] === M.STONE || mat[i] === M.DIRT) { mat[i] = M.COAL; aux[i] = 0; } }
-  }
-  // soapstone vein crossing the decline
   const sv = (x: number) => 340 - (x - 180) * 0.9;
-  for (let x = 176; x < 262; x++) for (let y = Math.round(sv(x) - 5); y < sv(x) + 5 + 2 * noise1(x * 0.2); y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
-  for (let x = 262; x < 300; x++) for (let y = Math.round(206 + (x - 262) * 0.6); y < 214 + (x - 262) * 0.6; y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
+  for (let x = 246; x < 262; x++) for (let y = Math.round(sv(x) - 2); y < sv(x) + 2 + noise1(x * 0.2); y++) { const i = y * W + x; if (mat[i] === M.STONE) { mat[i] = M.SOAPSTONE; aux[i] = 0; } }
 
   // --- tunnels: flat adit + open trench (A), the decline with wooden-topped steps (D), level B with the hut chamber ---
   const floorD = (x: number) => FA + 4 * Math.floor((MI.rampTop - x) / 5);
@@ -327,26 +328,27 @@ function stampMine(T: Terrain) {
     const yc = sm.y(x);
     for (let y = Math.floor((yc - sm.th) / 4) * 4; y < yc + sm.th; y += 4) { const tx = x >> 2, ty = y >> 2; if (mat[(ty * 4 + 2) * W + tx * 4 + 2] === AIR && (bg[ty * TW + tx] === 2 || bg[ty * TW + tx] === 1)) bg[ty * TW + tx] = 8; }
   }
-  // collapse on the decline: rubble above the steps, gravel mostly so a shovel gets through
+  // collapse on the decline: rubble above the steps, gravel mostly so a shovel gets through ...
   for (let x = c0; x < c1; x++) {
     const prof = Math.sin((x - c0) / (c1 - c0) * Math.PI), f = floorD(x);
     for (let y = f - HA; y < f; y++) {
       const fromFloor = f - y, i = y * W + x;
       if (fromFloor > 10 + 15 * prof && fromFloor < HA - 6) continue;       // open gap high up under the ceiling
       const r = rand();
-      if (r < 0.1 && fromFloor > 4) put(x, y, rand() < 0.5 ? M.LOG : M.PLANK);       // the way through is gravel and broken timber (shovel and axe)
+      if (r < 0.1 && fromFloor > 4) put(x, y, rand() < 0.5 ? M.LOG : M.PLANK);       // broken timber (axe)
       else { mat[i] = M.GRAVEL; aux[i] = 0; flags[i] = 0; }
     }
   }
   // the roof above the cave-in is torn open
   { const xm = (c0 + c1) >> 1, ym = floorD(xm) - HA - 3; for (let y = ym - 14; y < ym + 6; y++) for (let x = c0 + 3; x < c1 - 3; x++) { const dx = (x - xm) / 11, dy = (y - ym) / 9; if (dx * dx + dy * dy < 1) put(x, y, AIR); } bgBox(c0, ym - 14, c1, ym + 6, 2); }
+  // ... and in the middle of it a ROCK PLUG: a fallen slab two tiles wide that only the pick breaks (gravel and timber around it are shovel and axe work)
+  for (let x = MI.plug[0]; x < MI.plug[1]; x++) { const f = floorD(x); for (let y = f - HA; y < f; y++) { const i = y * W + x; mat[i] = M.STONE; aux[i] = 0; flags[i] = 0; } }
   // timber frames (cap beams + posts as wall decoration)
   for (const fx of [284]) timberFrame(fx, FA, HA);   // permafrost adit: a single portal frame, the rest is bare frost-crusted rock
   for (const fx of [254, 246, 196, 186]) for (let tx = fx >> 2; tx <= (fx >> 2); tx++) { const f = floorD(tx * 4); bgBox(tx * 4, f - HA, tx * 4 + 4, f, 7); }      // props on the stairs are background strips only (no beams: the head room is needed)
-  timberFrame(166, FB, HA);
   // portal: heavy header and bg posts
   box(MI.portalX - 6, FA - HA - 2, MI.portalX + 14, FA - HA + 6, M.LOG); bgBox(MI.portalX + 10, FA - HA, MI.portalX + 14, FA, 7); bgBox(MI.portalX - 4, FA - HA, MI.portalX, FA, 7);
-  // --- rails with sleepers on the flat adit, a cart ---
+  // --- rails with sleepers on the flat adit, mine carts (containers of coal), the miner's tools at the portal ---
   const rails = (x0: number, x1: number, f: number) => {
     // straight rails (the way on foot needs them level); the sleepers are heaved: some tilted / missing, and frost sits on the metal
     for (let x = x0; x < x1; x++) {
@@ -357,21 +359,32 @@ function stampMine(T: Terrain) {
   };
   rails(MI.rampTop + 12, MI.portalX + 64, FA);
   frostAdit();
-  addFixture('cart', 74, FA / 4 - 2, 4, 2, { data: { loaded: 'coal' } });
+  for (const tx of [70, 74, 84]) addFixture('cart', tx, FA / 4 - 2, 4, 2, { data: { loaded: 'coal' } });
+  worldInfo.carts += 3;
   worldInfo.spots.portal = { x: MI.portalX + 4, y: FA - 10 };
-  // --- hut chamber: timber lined, floor planks, beams, furniture, chest ---
+  // the miner left the pick and two torches by the portal timber: the rock plug is the only thing in the mine that needs it
+  floorItem('pick', 1, MI.portalX - 14, FA);
+  floorItem('torch', 2, MI.portalX - 20, FA);
+  worldInfo.pick = { x: MI.portalX - 14, y: FA - 3 };
+  // coal sacks lie along the adit and on the stair landings (one pickup each: no seams to grind)
+  for (const sx of [276, 290, 308]) coalSack(sx, FA);
+  // --- hut chamber: timber lined, floor planks, furniture, chest, and a frozen roof carried by ONE timber set (see timberSet) ---
   const [h0, h1] = MI.hut;
-  box(h0, FB - 34, h1, FB - 30, M.PLANK);                                                          // ceiling beams
   box(h0, FB, h1, FB + 4, M.PLANK);
-  bgBox(h0, FB - 30, h1, FB, 5);
-  for (let x = h0; x < h1; x += 12) bgBox(x, FB - 30, x + 4, FB, 7);                                 // support posts (decorative, behind the player)
-  addFixture('bed', 28, FB / 4 - 1, 4, 1);
-  chest('minehut', 33, FB / 4 - 2, [slot('pick', 1), slot('radio_coil', 1), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
-  addFixture('table', 36, FB / 4 - 2, 3, 2);
-  worldInfo.radioParts.coil = { x: 33 * 4 + 4, y: FB - 4, site: 'minehut' };
-  floorNote('n4', 'minehut', 130, FB);
-  floorNote('n6', 'minehut', 158, FB);
+  bgBox(h0, FB - 34, h1, FB, 5);
+  for (let x = h0 + 6; x < h1; x += 12) bgBox(x, FB - 30, x + 4, FB, 7);                              // support posts (decorative, behind the player)
+  frozenRoof(h0, h1, FB - 34);
+  timberSet((h0 + h1) >> 1, FB, FB - 34);
+  addFixture('bed', 25, FB / 4 - 1, 4, 1);          // west of both props
+  chest('minehut', 36, FB / 4 - 2, [slot('radio_coil', 1), slot('soapstone', 3), slot('torch', 3), slot('tin', 2), slot('matches', 6), slot('note_n3', 1)], 2, 2, { look: 'miner' });
+  addFixture('table', 38, FB / 4 - 2, 3, 2);
+  worldInfo.radioParts.coil = { x: 36 * 4 + 4, y: FB - 4, site: 'minehut' };
+  floorNote('n4', 'minehut', 156, FB);
+  floorNote('n6', 'minehut', 160, FB);
+  coalSack(h0 + 6, FB); coalSack(h0 + 12, FB); coalSack(h0 + 16, FB);      // behind both props
   addSite('minehut', (h0 + h1) / 2, FB - 14, h1 - h0 + 20, 44);
+  // a frozen seep blocks the corridor between the stair foot and the hut: ice, pick or chisel (the only other obstacle in the mine)
+  for (let x = MI.icePlug[0]; x < MI.icePlug[1]; x++) for (let y = FB - HA; y < FB; y++) put(x, y, M.ICE, 0);
   // --- bulkhead and sealed methane pocket in the west dead end ---
   const [p0, p1] = MI.pocket;
   box(p0, FB - HA, p1, FB, AIR);
@@ -380,13 +393,46 @@ function stampMine(T: Terrain) {
   box(MI.bulkhead, FB - HA, MI.bulkhead + 4, FB, M.PLANK);
   box(MI.bulkhead, FB - 20, MI.bulkhead + 4, FB - 18, M.METAL); box(MI.bulkhead, FB - 8, MI.bulkhead + 4, FB - 6, M.METAL);
   worldInfo.spots.methane = { x: Math.round((p0 + p1) / 2), y: FB - 10 };
-  floorNote('n5', 'mine', MI.bulkhead + 14, FB);
-  floorNote('n2', 'mine', 276, FA);
+  floorNote('n5', 'minehut', MI.bulkhead + 12, FB);
+  floorNote('n2', 'mine', 268, FA);
   // --- the underground ice lake (sealed cavern, reached by digging down) ---
   stampIceLake(T);
   addSite('mine', 190, 300, 300, 140);
 }
 
+/** A sack of coal lying on the floor (a drop of 4: one pickup, no digging). */
+function coalSack(x: number, floor: number) {
+  G.drops.push({ id: newId(), item: 'coal', n: 4, x, y: floor - 3, vx: 0, vy: 0, age: 0 });
+  worldInfo.coal.push({ x, y: floor - 3 });
+}
+/** A loose item lying on the floor. */
+function floorItem(item: string, n: number, x: number, floor: number) {
+  G.drops.push({ id: newId(), item, n, x, y: floor - 3, vx: 0, vy: 0, age: 0 });
+}
+/** The frozen roof of the hut: a 4-cell slab of placed frozen earth (limit: 20 cells sideways) lies under a load of gravel. Walls carry the ends,
+ *  the timber set carries the middle. Placed cells (F_PLACED) use the plain span, natural cells would carry 2.5 times more. */
+function frozenRoof(x0: number, x1: number, topRow: number) {
+  const s0 = topRow - 4, s1 = topRow;                           // slab rows [s0, s1) directly above the chamber air
+  for (let y = s0 - 8; y < s0; y++) for (let x = x0; x < x1; x++) { const i = y * W + x; mat[i] = M.GRAVEL; aux[i] = 0; flags[i] = 0; }
+  for (let y = s0; y < s1; y++) for (let x = x0; x < x1; x++) { const i = y * W + x; mat[i] = M.DIRT; aux[i] = 0; flags[i] = F_PLACED; }
+  bgBox(x0, s0 - 8, x1, s1, 2);
+  worldInfo.roof = { x0, x1, y0: s0, y1: s1 };
+}
+/** A timber set: two inclined LOG props (their feet far apart, their heads close under the slab). Each prop reaches from the floor to the slab, so the
+ *  way into the hut leads THROUGH the east one: chop a doorway into it with the axe (the stump above it still hangs from the slab and the west prop
+ *  still carries the middle: the roof holds). Chop the second prop as well (free firewood!) and the middle of the ceiling comes down. */
+function timberSet(cx: number, floor: number, topRow: number) {
+  const foot = 8, head = 1, th = 3, h = floor - topRow;
+  const legs: number[][] = [[], []];
+  for (const side of [-1, 1]) for (let k = 0; k < h; k++) {
+    const xc = Math.round(cx + side * (foot - (foot - head) * k / (h - 1))), y = floor - 1 - k;
+    for (let t = 0; t < th; t++) {
+      const x = side < 0 ? xc - t : xc + t, i = y * W + x;
+      mat[i] = M.LOG; aux[i] = 0; flags[i] = F_PLACED; legs[side < 0 ? 0 : 1].push(i);
+    }
+  }
+  worldInfo.timberSets.push({ x: cx, y: floor, cells: [...legs[0], ...legs[1]], west: legs[0], east: legs[1] });
+}
 function stampIceLake(T: Terrain) {
   void T;
   const L = MI.lake, mid = (L.x0 + L.x1) / 2, iceY = L.ice;
@@ -424,13 +470,16 @@ function stampIceLake(T: Terrain) {
 }
 
 function stampApron(T: Terrain) {
-  // spoil heaps in front of the portal: coal and gravel, rails end at a tipple
+  // spoil heaps in front of the portal: gravel (the coal went into sacks), rails end at a tipple
   const x0 = MI.portalX + 36, x1 = MI.portalX + 62;
   for (let x = x0; x < x1; x++) {
-    const t = 1 - Math.abs((x - (x0 + x1) / 2) / ((x1 - x0) / 2)), hh = Math.round(14 * t * (0.7 + 0.5 * noise1(x * 0.2)));
-    for (let k = 1; k <= hh; k++) { const y = FA - 1 - k; if (mat[y * W + x] === AIR) put(x, y, rand() < 0.6 ? M.COAL : M.GRAVEL); }
+    const t = 1 - Math.abs((x - (x0 + x1) / 2) / ((x1 - x0) / 2)), hh = Math.round(10 * t * (0.7 + 0.5 * noise1(x * 0.2)));
+    for (let k = 1; k <= hh; k++) { const y = FA - 1 - k; if (mat[y * W + x] === AIR) put(x, y, M.GRAVEL); }
+    // keep the random stream of everything generated after the mine (cairn, station, beach...) exactly as it was when this heap was half coal
+    const old = Math.round(14 * t * (0.7 + 0.5 * noise1(x * 0.2)));
+    for (let k = 1; k <= old; k++) { if (mat[(FA - 1 - k) * W + x] === AIR || k <= hh) rand(); }
   }
-  worldInfo.coal.push({ x: (x0 + x1) >> 1, y: FA - 8 });
+  for (const sx of [x0 + 4, x0 + 9]) coalSack(sx, FA - 2);
   snowBank(x1 - 6, x1 + 18, x1 + 2, 6, 200, 130);
   void T;
 }
@@ -536,16 +585,12 @@ function stampMastAndShed(T: Terrain) {
     const hh = Math.round((6 + 22 * t) * Math.max(0, tail) * (0.9 + 0.2 * noise1(x * 0.25)));
     for (let k = 1; k <= hh; k++) { const y = F * 4 - k; if (mat[y * W + x] === AIR) put(x, y, k > hh - 3 ? M.SNOW : M.PACKED, k > hh - 3 ? 12 : 110 + ((rand() * 40) | 0)); }
   }
-  // coal heap and fuel drums outside
-  const hx0 = (L - 12) * 4, hx1 = (L - 6) * 4;
-  for (let x = hx0; x < hx1; x++) {
-    const t = 1 - Math.abs((x - (hx0 + hx1) / 2) / ((hx1 - hx0) / 2)), hh = Math.round(9 * t);
-    for (let k = 1; k <= hh; k++) { const y = F * 4 - k; if (mat[y * W + x] === AIR) put(x, y, k > hh - 2 ? M.SNOW : M.COAL, k > hh - 2 ? 40 : 0); }
-  }
-  worldInfo.coal.push({ x: (hx0 + hx1) >> 1, y: F * 4 - 6 });
+  // sacks of coal and fuel drums outside (no heap to dig: the sacks lie in a row by the wall)
+  for (const k of [0, 1, 2]) coalSack((L - 11 + k * 2) * 4, F * 4);
   addFixture('drum', R + 3, F - 2, 2, 2, { data: { fuel: 'diesel', n: 5 } });
   addFixture('drum', R + 5, F - 2, 2, 2, { data: { fuel: 'diesel', n: 7 } });
   addFixture('drum', R + 7, F - 2, 2, 2, { data: { fuel: 'diesel', n: 0, empty: true } });
+  floorNote('s3', 'shed', (L + 6) * 4 + 4, F * 4);
   addSite('shed', (L + R) * 2 + 2, top * 4 + 12, 80, 60);
   void T;
 }

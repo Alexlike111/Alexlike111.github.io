@@ -1,5 +1,6 @@
 // Inventory (DESIGN §8): belt 6 (slots 0..5) + pack 18 (6..23) + clothes + weight. A sled adds 30 slots while dragged.
-// Snow blocks keep their density in Slot.dur and stack by quality class.
+// Snow blocks keep their density in Slot.dur and stack by quality class. Tools have no durability: Slot.dur is only the density of a snow block,
+// the burn minutes of a torch, the diesel minutes of a lantern and the water in a flask. Notes never sit in the bag: reading turns them into journal pages (lore.ts).
 import { G, newId, type Slot } from './state';
 import { getItem, snowClass, type WearSlot } from './items';
 
@@ -38,7 +39,7 @@ function* order(id: string): Generator<number> {
   else { for (let i = BELT; i < NSLOT; i++) yield i; for (let i = 0; i < BELT; i++) yield i; }
 }
 
-/** Add n items; returns how many did NOT fit. `dur` sets durability / snow-block density. */
+/** Add n items; returns how many did NOT fit. `dur` sets the snow-block density / torch minutes / lantern fuel / flask water. */
 export function add(id: string, n: number, dur?: number, into: (Slot | null)[] = inv.slots): number {
   if (n <= 0) return 0;
   const d = getItem(id), max = d.stack;
@@ -172,7 +173,7 @@ export function takeAll(): Slot[] {
 }
 
 // ---- world drops ----
-/** Durability / density of dropped tools and snow blocks (Drop has no dur field). */
+/** Density / fuel of dropped snow blocks, torches and lanterns (Drop has no dur field). */
 export const dropDur = new Map<number, number>();
 export const MAX_DROPS = 240;
 /** Drop an item stack into the world. Plain stacks merge with a close drop of the same item. */

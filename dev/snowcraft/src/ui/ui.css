@@ -1,0 +1,117 @@
+/* SNOWCRAFT UI layer (wave 3): fonts, readability, phone layout, «Чутьё» legend, desktop belt wheel.
+   Loaded from ui/sensesui.ts. The HUD injects its own <style> at runtime (devhud.ts), so every override here uses `html body #hud …` (higher specificity).
+   Rules of thumb:
+   - Pixelify Sans only for the big title and big headings (title h1, death / ending / pause cards, rotate overlay). It is hard to read in Cyrillic at HUD sizes
+     (з/э, 5/S, 6/8), so labels, numbers, buttons and tooltips use Jura (bundled), numbers tabular.
+   - touch targets >= 48 px; everything positioned from the edges adds env(safe-area-inset-*) (the #hud padding does not move absolute children).
+   - phone (844x390): top-left body panel | sun dial | objective flow | top-right buttons never share a row segment; the centre stays clear. */
+:root{
+  --f-ui:'Jura',system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --f-px:'Pixelify Sans','Jura',system-ui,sans-serif;
+  --sa-t:env(safe-area-inset-top,0px);--sa-r:env(safe-area-inset-right,0px);--sa-b:env(safe-area-inset-bottom,0px);--sa-l:env(safe-area-inset-left,0px);
+}
+
+/* ---------- fonts ---------- */
+html body #hud{font-family:var(--f-ui);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.15px;text-shadow:0 1px 0 #05080f,0 0 3px rgba(5,8,15,.6)}
+html body #hud .bw .rows,html body #hud .dial .day,html body #hud .belt,html body #hud .pnl h3,html body #hud .bw .v,html body #hud .tip,html body #hud .bname{font-family:var(--f-ui)}
+html body #hud .dial .day{font-weight:700;font-size:13px;letter-spacing:.3px}
+html body #hud .pnl h3{font-weight:700;font-size:15px}
+html body #hud .belt .sl .k,html body #hud .belt .sl .n,html body #hud .pnl .cell .n,html body #hud .pnl .cell .k{font-family:var(--f-ui);font-weight:700}
+html body #hud .dead,html body #hud .pause,html body #hud .end{font-family:var(--f-px)}
+html body #hud .dead div+div,html body #hud .end span{font-family:var(--f-ui)}
+html body #touch,html body #touch .tb{font-family:var(--f-ui);font-weight:700}
+html body #touch .tb{font-size:14px;letter-spacing:.2px;text-shadow:0 1px 0 #05080f}
+html body #touch #tb-act{font-size:16px}
+html body #touch .rad .cap{font-family:var(--f-ui)}
+html body #rotate{font-family:var(--f-ui)}
+html body #rotate b{font-family:var(--f-px)}
+
+/* ---------- desktop sizes ---------- */
+html body #hud .bw{left:calc(8px + var(--sa-l));top:calc(8px + var(--sa-t))}
+html body #hud .bw .r{font-size:14px}
+html body #hud .bw .sub{font-size:12px;opacity:.85}
+html body #hud .dial{right:calc(8px + var(--sa-r));top:calc(8px + var(--sa-t))}
+html body #hud .dial .clk,html body #hud .dial .line{font-size:13px;opacity:.92}
+html body #hud .stk{top:calc(8px + var(--sa-t));max-width:calc(100vw - 2*(150px + 16px))}
+html body #hud .obj{font-size:15px}
+html body #hud .chip{font-size:14px}
+html body #hud .toast{font-size:16px}
+html body #hud .tip{font-size:14px}
+html body #hud .bname{font-size:14px;bottom:calc(84px + var(--sa-b))}
+html body #hud .hint{left:calc(8px + var(--sa-l));font-size:13px}
+html body #hud .hint kbd{font-family:var(--f-ui);font-weight:700}
+html body #hud .belt{bottom:calc(8px + var(--sa-b))}
+
+/* ---------- «Чутьё» legend + labels ---------- */
+html body #hud .sn-leg{display:none;position:static;flex-direction:column;gap:3px;align-items:center;padding:3px;max-width:100%;pointer-events:none}
+html body #hud .sn-row{display:flex;flex-wrap:nowrap;gap:4px;justify-content:center;width:100%}
+html body #hud .sn-key{display:none;font:700 11.5px/1.2 var(--f-ui);padding:2px 6px;background:rgba(10,20,36,.78);border-radius:3px;white-space:nowrap;color:#cfe4f5}
+html body #hud .sn-key s{text-decoration:none}
+html body #hud .sn-key s.g{font-weight:700;text-shadow:0 0 6px rgba(96,238,190,.7),0 1px 0 #05080f}
+html body #hud .sn-key .sep{display:inline-block;width:1px;height:10px;background:rgba(124,198,238,.4);margin:0 6px;vertical-align:-1px}
+html body #hud .sn-key.nosnow s,html body #hud .sn-key.nosnow .sep{display:none}
+html body #hud .sn-it{pointer-events:auto;display:block;font:700 13px/1.2 var(--f-ui);color:#e8f4ff;background:rgba(10,20,36,.78);border:1px solid rgba(124,198,238,.4);border-radius:4px;padding:4px 8px 5px;text-align:left;cursor:pointer;min-width:112px;min-height:38px;
+  text-shadow:0 1px 0 #05080f;-webkit-tap-highlight-color:transparent}
+html body #hud .sn-it:hover{border-color:#ffc46e}
+html body #hud .sn-it.off{opacity:.4;filter:saturate(.3)}
+html body #hud .sn-sw{display:block;height:5px;border-radius:2px;margin-bottom:3px;box-shadow:0 0 0 1px rgba(5,8,15,.6)}
+html body #hud .sn-sw.wind{background:repeating-linear-gradient(90deg,#9fe8ff 0 9px,rgba(159,232,255,0) 9px 13px);height:4px;margin-top:1px;margin-bottom:4px}
+html body #hud .sn-sw.scent{background:radial-gradient(circle,#ffd6ec 0 1.6px,rgba(255,150,210,0) 2.4px) 0 50%/11px 5px repeat-x}
+html body #hud .sn-tx b{font-weight:700;font-size:13px}
+html body #hud .sn-tx i{display:block;font-style:normal;font-weight:600;font-size:11.5px;opacity:.92;white-space:nowrap}
+html body #hud .sn-tx s{text-decoration:none}
+html body #hud .sn-tx s.g{font-weight:700;text-shadow:0 0 6px rgba(96,238,190,.7),0 1px 0 #05080f}
+html body #hud .sn-lbl{position:absolute;display:none;pointer-events:none;white-space:nowrap;font:700 13px/1.2 var(--f-ui);padding:2px 7px;border-width:1px;border-style:solid;z-index:3;text-shadow:0 1px 0 #05080f;background:rgba(8,16,30,.82)}
+html body #hud .sn-lbl.me{transform:translate(-50%,0)}
+html body #hud .sn-lbl .bad{color:#ff8c78}
+html body.senses-on #hud .belt{opacity:1}
+
+/* ---------- desktop belt wheel (hold Q) ---------- */
+#wheel{position:fixed;inset:0;z-index:40;display:none;pointer-events:none;font-family:var(--f-ui);font-weight:700;color:#dff0ff;background:radial-gradient(circle at var(--wx,50%) var(--wy,50%),rgba(5,9,16,0) 0,rgba(5,9,16,.18) 22%,rgba(5,9,16,.5) 60%)}
+#wheel.open{display:block}
+#wheel .slot{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);display:flex;align-items:center;justify-content:center;font-size:11px;
+  transition:transform .08s,border-color .08s,background .08s;pointer-events:auto;cursor:pointer}
+#wheel .slot.cur{border-color:#8fe3b0}
+#wheel .slot.hov{border-color:#ffc46e;background:rgba(70,40,14,.94);transform:scale(1.16)}
+#wheel .slot canvas{width:32px;height:32px;image-rendering:pixelated}
+#wheel .slot b{position:absolute;left:4px;top:1px;font-size:11px;color:#8ab0c8;font-weight:700}
+#wheel .slot i{position:absolute;right:2px;bottom:0;font-size:11px;font-style:normal;color:#fff;background:rgba(5,8,15,.7);padding:0 3px;border-radius:2px}
+#wheel .mid{position:absolute;transform:translate(-50%,-50%);text-align:center;font-size:15px;text-shadow:0 1px 0 #05080f;white-space:nowrap}
+#wheel .mid small{display:block;font-size:12px;opacity:.75;font-weight:600;margin-top:2px}
+
+/* ---------- phone (touch UI) ---------- */
+html body.touch-ui #hud{font-size:13px}
+html body.touch-ui #hud .bw{left:calc(8px + var(--sa-l));top:calc(8px + var(--sa-t));width:126px;box-sizing:border-box;padding:3px 6px;gap:5px}
+html body.touch-ui #hud .bw .rows{min-width:0;flex:1}
+html body.touch-ui #hud .bw .r{font-size:13px;height:14px}
+html body.touch-ui #hud .bw .v{min-width:30px}
+html body.touch-ui #hud .dial{left:calc(142px + var(--sa-l));right:auto;top:calc(8px + var(--sa-t));width:84px;box-sizing:border-box}
+html body.touch-ui #hud .dial .clk,body.touch-ui #hud .dial .line{font-size:12px}
+html body.touch-ui #hud .dial .day{font-size:12.5px}
+/* the objective flow lives between the dial and the three top-right buttons (3 x 58 + 2 x 8 gaps + 12 margin + 8 breathing room) */
+html body.touch-ui #hud .stk{left:calc(234px + var(--sa-l));right:calc(210px + var(--sa-r));top:calc(8px + var(--sa-t));transform:none;max-width:none}
+html body.touch-ui #hud .obj{font-size:13px;padding:3px 8px}
+html body.touch-ui #hud .toast{font-size:14px}
+html body.touch-ui #hud .chip{font-size:13px}
+html body.touch-ui #hud .bname{font-size:13px}
+html body.touch-ui #hud .sn-it{min-width:0;flex:1 1 0;min-height:36px;padding:4px 6px 4px}
+html body.touch-ui #hud .sn-tx i{display:none}
+html body.touch-ui #hud .sn-tx b{font-size:12.5px}
+html body.touch-ui #hud .sn-key{display:block}
+html body.touch-ui #hud .bw .rows,html body.touch-ui #hud .belt,html body.touch-ui #hud .dial .day,html body.touch-ui #hud .pnl h3{font-family:var(--f-ui)}
+html body.touch-ui #hud .bname{bottom:calc(74px + var(--sa-b));left:calc(50% - 40px)}
+/* senses on a phone: the legend takes the chip's place (the same numbers hang above the player), so the flow stays clear of the player's head */
+html body.touch-ui.senses-on #hud .chip{display:none !important}
+
+/* ---------- sound-off captions (game/overlay.ts #ov .cues) ----------
+   They used to sit at a fixed top offset right inside the HUD flow (legend / shelter chip / toasts) and in Pixelify Sans. Move them under the body panel
+   (left column: nothing else lives there, the objective flow and the player stay clear) and set them in Jura. */
+html body #ov .cues{left:calc(8px + var(--sa-l));transform:none;top:calc(134px + var(--sa-t));bottom:auto;align-items:flex-start;gap:3px;max-width:42vw}
+html body.touch-ui #ov .cues{top:calc(134px + var(--sa-t));max-width:30vw}
+html body #ov .cue{font-family:var(--f-ui);font-weight:700;font-size:14px;letter-spacing:.15px;white-space:normal}
+html body #ov,html body #ov .sub,html body #ov table,html body #ov button{font-family:var(--f-ui)}
+html body #ov h2{font-family:var(--f-px)}
+html body #ov .sub{font-weight:600}
+
+/* small Cyrillic in Pixelify Sans elsewhere (journal tabs / headings, quick-slot numbers) -> Jura */
+html body #hud .jr .tab,html body #hud .jr .paper h4,html body #hud .jr .q b,html body #hud .pnl .qrow b,html body #hud .pnl .cell small,html body #hud .pnl .grp{font-family:var(--f-ui)}

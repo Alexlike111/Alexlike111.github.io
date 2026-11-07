@@ -1,5 +1,6 @@
-// Objectives & endings (DESIGN §9). One line, always visible: the first unfinished goal of the chain. Day-1 chain: stove -> barometer -> shelter
-// (>= 2 stars) -> supplies; then the open goals: seal fat, driftwood, the ship, the radio (0/3 parts), fur clothes. Endings: «Рассвет» (day 12
+// Objectives & endings (DESIGN §9, v2.1 knowledge flow). One line, always visible: the first unfinished goal of the chain. Day-1 chain: stove ->
+// barometer -> read the keeper's log in the house -> shelter (>= 2 stars) -> read the doctor's diary at the cairn -> supplies; then the open goals:
+// seal fat (harpoon), driftwood, the ship, the radio (0/3 parts), the mast (needs the knowledge), fur clothes. Endings: «Рассвет» (day 12
 // sunrise, emitted by weather.ts) and «Ледокол» (radio repaired -> 2 game days later its searchlight appears; light the signal fire on the cape
 // hill while it is in sight -> rescued). Also: site discovery ('site_found'), run statistics for the ending card.
 import { G, toast } from './state';
@@ -11,19 +12,27 @@ import { siteAt, LOC, worldInfo, sites } from './locations';
 import { driftSnapshot } from './drift';
 import { body } from './player';
 import { TS } from '../engine/grid';
-import { itemName } from './items';
+import { knows, lore, stepLore, probeTarget, loreSave, loreLoad, noteTitle, techName } from './lore';
+import { target } from './tools';
+import { stepMine, resetMine } from './mine';
+export { knows, learn, learnAll, forgetAll, lore, readNote, TECHS, NOTES, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, probe, seenCount, markSeen } from './lore';
 
 const S = strings('quest', {
   stove: 'Растопи печь в доме (уголь из дизельной, спички)',
   baro: 'Проверь барометр на столбе у дома',
+  keeper: 'Прочти журнал смотрителя: сундук-полка в доме',
   shelter: 'Утепли жильё до ★★: иглу из блоков (плотный наст — сугроб к востоку от дома)',
+  diary: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
   supplies: 'Запасы на 12 дней: топливо {fuel} ч · еда {food} дн.',
   seal: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
+  sealLearn: 'Узнай, как вязать гарпун: журнал смотрителя в доме',
   wood: 'Собери плавник на пляже: брёвна {n}/{m}',
   ship: 'Найди шхуну «Заря» среди дрейфующих льдов',
   radio: 'Почини рацию: детали {n}/3',
   mast: 'Подними мачту и запусти рацию',
+  mastLearn: 'Узнай про мачту: записи смотрителя в доме, у стола',
   fur: 'Сшей меховую одежду (шкуры, жилы)',
+  furLearn: 'Узнай, как шить мех: ищи записи на берегу, у костей кита',
   radioOk: 'Рация починена: ледокол придёт через двое суток',
   wait: 'Рация работает. Жди ледокол: {d}',
   light: 'Ледокол на горизонте! Зажги сигнальный костёр на холме мыса',
@@ -35,6 +44,7 @@ const S = strings('quest', {
   days: '{n} дн.', hours: '{n} ч', soon: 'меньше часа',
   sunrise: 'Дожить до первого солнца',
   found: 'Место найдено: {name}',
+  jKnow: 'Новый приём: {name}', jRead: 'Записка: {title}',
   arrival: 'На горизонте шарит прожектор — ледокол!',
   dawnT: 'Рассвет', iceT: 'Ледокол',
 });
@@ -68,7 +78,7 @@ const suppliesOk = () => { const s = suppliesNow(); return s.fuelH >= 72 && s.fo
 const flags = new Set<string>();
 /** Goal flags shown by the journal (ui/devhud). parts = radio parts inserted, ending = null | 'dawn' | 'icebreaker'. */
 export const prog = { fire: false, baro: false, shelter: false, sleep: false, parts: [] as string[], mast: false, radio: false, ending: null as null | 'dawn' | 'icebreaker' };
-export interface JournalEntry { kind: 'note' | 'storm' | 'site' | 'event'; text: string; t: number }
+export interface JournalEntry { kind: 'note' | 'storm' | 'site' | 'event' | 'know'; text: string; t: number }
 export const journal: JournalEntry[] = [];
 function log(kind: JournalEntry['kind'], text: string) { if (journal.length < 200) journal.push({ kind, text, t: G.time }); }
 export const objective = () => objectiveText();
@@ -80,14 +90,16 @@ function radioParts(): number {
 export const GOALS: Goal[] = [
   { id: 'stove', text: () => S.stove, done: () => flags.has('stove') },
   { id: 'baro', text: () => S.baro, done: () => flags.has('baro') || count('barometer') > 0 },
+  { id: 'keeper', text: () => S.keeper, done: () => lore.read.has('s1') },
   { id: 'shelter', text: () => S.shelter, done: () => flags.has('shelter') },
+  { id: 'diary', text: () => S.diary, done: () => lore.read.has('n1') },
   { id: 'supplies', text: () => { const s = suppliesNow(); return fmt(S.supplies, { fuel: s.fuelH, food: s.foodDays }); }, done: () => suppliesOk() },
-  { id: 'seal', text: () => S.seal, done: () => runStats.seals > 0 },
+  { id: 'seal', text: () => (knows('harpoon') ? S.seal : S.sealLearn), done: () => runStats.seals > 0 },
   { id: 'wood', text: () => fmt(S.wood, { n: Math.min(6, count('log')), m: 6 }), done: () => count('log') >= 6 || flags.has('wood') },
   { id: 'ship', text: () => S.ship, done: () => flags.has('ship') },
   { id: 'radio', text: () => fmt(S.radio, { n: radioParts() }), done: () => radioParts() >= 3 },
-  { id: 'mast', text: () => S.mast, done: () => questState.radioFixed },
-  { id: 'fur', text: () => S.fur, done: () => flags.has('fur') },
+  { id: 'mast', text: () => (knows('mast') ? S.mast : S.mastLearn), done: () => questState.radioFixed },
+  { id: 'fur', text: () => (knows('sewing') ? S.fur : S.furLearn), done: () => flags.has('fur') },
 ];
 
 /** The line shown top-centre. */
@@ -100,7 +112,7 @@ export function objectiveText(): string {
     const d = left > 1440 ? fmt(S.days, { n: Math.ceil(left / 1440) }) : left > 60 ? fmt(S.hours, { n: Math.ceil(left / 60) }) : S.soon;
     return fmt(S.wait, { d });
   }
-  // chain first (stove, barometer, shelter); then supplies only as an emergency; then the open goals with the supply gauges alongside
+  // chain first (stove, barometer, keeper's log, shelter, diary); then supplies only as an emergency; then the open goals with the supply gauges alongside
   for (const g of GOALS) { if (g.id === 'supplies') break; if (!g.done()) return g.text(); }
   const sp = suppliesNow();
   if (sp.fuelH < 12 || sp.foodDays < 1) return fmt(S.low, { fuel: sp.fuelH, food: sp.foodDays });
@@ -122,10 +134,10 @@ let loaded: any = null;
 export function initQuest() { /* event wiring happens at import time; kept for the HUD's init call */ }
 export const takeLoaded = () => { const l = loaded; loaded = null; return l; };
 export const peekLoaded = () => loaded;
-on('new_game', () => resetQuest());
+on('new_game', () => { resetQuest(); resetMine(); });
 /** Saved with the game (save.ts): goal flags, run statistics, the icebreaker schedule, journal, and the drift of the pack ice. */
 export function questSave() {
-  return { flags: [...flags], prog: { ...prog, parts: [...prog.parts] }, stats: { ...runStats }, q: { ...questState }, journal: journal.slice(-120), drift: driftSnapshot() };
+  return { flags: [...flags], prog: { ...prog, parts: [...prog.parts] }, stats: { ...runStats }, q: { ...questState }, journal: journal.slice(-120), drift: driftSnapshot(), lore: loreSave() };
 }
 export function questLoad(s: any) {
   if (!s) return;
@@ -134,6 +146,7 @@ export function questLoad(s: any) {
   Object.assign(prog, s.prog ?? {}); prog.parts = [...(s.prog?.parts ?? [])];
   Object.assign(runStats, s.stats ?? {}); Object.assign(questState, s.q ?? {});
   for (const e of s.journal ?? []) journal.push(e);
+  loreLoad(s.lore);
   loaded = s;
 }
 on('fire_lit', (d: { kind: string }) => { runStats.fires++; if (d.kind === 'stove') { flags.add('stove'); prog.fire = true; } });
@@ -148,7 +161,8 @@ on('site_found', (d: { key: string }) => { if (d.key === 'ship') flags.add('ship
 on('crafted', (d: { id: string }) => { runStats.crafts++; if (/^fur_|^kamiks$/.test(d.id)) flags.add('fur'); });
 on('cut_block', () => { runStats.blocks++; });
 on('bear_seen', () => { runStats.bears++; });
-on('note_found', (d: { id: string }) => { runStats.notes++; log('note', itemName(d.id)); });
+on('note_read', (d: { id: string }) => { runStats.notes++; log('note', fmt(S.jRead, { title: noteTitle(d.id) })); });
+on('tech_learned', (d: { id: string; how: string }) => { if (d.how !== 'start') log('know', fmt(S.jKnow, { name: techName(d.id) })); });
 on('picked', (d: { item: string }) => { if (d.item === 'log' && count('log') >= 6) flags.add('wood'); });
 
 on('radio_fixed', () => {
@@ -173,6 +187,7 @@ function signalLit(): boolean {
 export function stepQuest(dt: number) {
   if (G.paused || !G.player) return;
   siteWatch(dt);
+  stepLore(dt); probeTarget(target()); stepMine(dt);
   const q = questState;
   if (q.ended) return;
   const t = G.time;

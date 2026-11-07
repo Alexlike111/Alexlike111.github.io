@@ -14,9 +14,9 @@ import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
 import { input } from '../engine/input';
 import { strings, fmt } from '../content/i18n';
-import { inv, weight, BELT, NSLOT, select, equip, unequip, WEAR_SLOTS, WEIGHT_MAX, WEIGHT_SOFT } from '../game/inventory';
+import { inv, BELT, select, equip, unequip } from '../game/inventory';
 import { getItem, itemName } from '../game/items';
-import { RECIPES, canCraft, craft, craftedText, type Recipe, type RecipeGroup } from '../game/recipes';
+import { RECIPES, craft, craftedText } from '../game/recipes';
 import { stationsAt } from '../game/fixtures';
 import { target } from '../game/tools';
 import { body, handsFrozen, eatSlot, respawn } from '../game/player';
@@ -26,7 +26,8 @@ import { knowsForecast, sunElevAt } from '../game/weather';
 import { toast } from '../game/state';
 import { on } from '../game/bus';
 import { objective, initQuest, prog, journal } from '../game/quest';
-import { sites } from '../game/locations';
+import { bagHtml } from './bag';
+import { renderJournalInto, journalClick, setJournalTab } from './journal';
 
 const S = strings('hud', {
   core: 'Ядро', hands: 'Руки', feet: 'Ноги', face: 'Лицо', water: 'Вода', food: 'Еда', energy: 'Силы', wet: 'Сырость', hp: 'Здоровье', co: 'CO',
@@ -158,9 +159,6 @@ body.touch-ui #hud .toast{font-size:13px;padding:2px 8px}body.touch-ui #hud .obj
 body.touch-ui #hud .pnl{font-size:12px}
 `;
 
-const GROUPS: [RecipeGroup, () => string][] = [['fire', () => S.gFire], ['food', () => S.gFood], ['wear', () => S.gWear], ['hunt', () => S.gHunt], ['build', () => S.gBuild]];
-const stName = (s: string) => (s === 'table' ? S.stTable : s === 'fire' ? S.stFire : s === 'drum' ? S.stDrum : s === 'antenna' ? S.stAntenna : '');
-const SLOT_LABEL: Record<string, () => string> = { head: () => S.slotHead, body: () => S.slotBody, hands: () => S.slotHands, feet: () => S.slotFeet };
 
 // ---- body widget ----------------------------------------------------------------------------------------------------------------
 interface Row { icon: string; bar: HTMLElement; v: HTMLElement; row: HTMLElement }
@@ -240,7 +238,7 @@ export function initHud(host: HTMLElement) {
   bw = mk('bw'); dial = mk('dial');
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
   objEl = mk('obj', stack); chip = mk('chip', stack); toastBox = document.createElement('div'); toastBox.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px'; stack.appendChild(toastBox);
-  beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', () => { jOpen = false; jEl.style.display = 'none'; }); hintEl = mk('hint'); endEl = mk('end');
+  beltEl = mk('belt'); bname = mk('bname'); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
   hintEl.innerHTML = k('WASD', S.hintMove) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('R', S.hintDome) + k('G', S.hintDrop);
@@ -283,7 +281,7 @@ export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
-  if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
+  if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
   if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
   if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
   acc += realDt; panelAcc += realDt;
@@ -370,53 +368,9 @@ export function updateHud(dt: number, realDt: number) {
 function setRow(k: string, text: string, c: string) { const r = rows[k]; r.v.textContent = text; r.v.className = 'v ' + c; }
 
 // ---- bag + crafting panel ----------------------------------------------------------------------------------------------------
-function cellHtml(i: number): string {
-  const s = inv.slots[i];
-  if (!s) return `<div class="cell empty${i < BELT ? ' belt' : ''}">${i < BELT ? `<span class="k">${i + 1}</span>` : ''}</div>`;
-  return `<button class="cell${i < BELT ? ' belt' : ''}${i === inv.sel ? ' sel' : ''}" data-a="slot" data-i="${i}" title="${itemName(s.id)}${s.id === 'snow_block' && s.dur ? ' · ' + fmt(S.dens, { d: Math.round(s.dur) }) : ''}">${i < BELT ? `<span class="k">${i + 1}</span>` : ''}${img(itemUrl(s.id))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</button>`;
-}
-function ingHtml(rec: Recipe): string {
-  return rec.variants.map(v => '<span>' + v.map(g => img(itemUrl(g.id)) + itemName(g.id) + (g.n > 1 ? ' ×' + g.n : '')).join(', ') + '</span>').join('<span class="dim">/</span>');
-}
 function renderPanel() {
-  const p = G.player;
-  const wt = weight();
-  let h = `<h3><span>${S.bag}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
-  h = '';
-  h += `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: WEIGHT_MAX })}</span></h3>`;
-  h += `<div class="wt"><i style="width:${Math.min(100, wt / WEIGHT_MAX * 100)}%;background:${wt > WEIGHT_SOFT ? '#ffc46e' : '#8fe3b0'}"></i></div>`;
-  h += `<div class="wear">`;
-  for (const sl of WEAR_SLOTS) {
-    const id = inv.wear[sl];
-    h += id ? `<button class="cell" data-a="un" data-s="${sl}" title="${itemName(id)}">${img(itemUrl(id))}<small>${SLOT_LABEL[sl]()}</small></button>` : `<div class="cell empty"><small>${SLOT_LABEL[sl]()}</small></div>`;
-  }
-  h += `</div><div class="grid">`;
-  for (let i = 0; i < NSLOT; i++) h += cellHtml(i);
-  h += `</div></div><div class="col"><h3><span>${S.craft}</span></h3>`;
-  const st = stationsAt(p.x, p.y - 8), hf = handsFrozen();
-  for (const [g, name] of GROUPS) {
-    const list = RECIPES.map((r, idx) => [r, idx] as const).filter(([r]) => r.group === g);
-    if (!list.length) continue;
-    h += `<div class="grp">${name()}</div>`;
-    for (const [r, idx] of list) {
-      const c = canCraft(r, st, hf);
-      h += `<button class="rec ${c.ok ? 'ok' : 'no'}" data-a="rec" data-r="${idx}">${img(itemUrl(r.result))}<span class="t"><div>${itemName(r.result)}${r.n > 1 ? ' ×' + r.n : ''}${r.station !== 'none' ? ` <span class="dim">· ${stName(r.station)}</span>` : ''}</div><div class="ing">${ingHtml(r)}</div>${c.ok ? '' : `<div class="why">${c.reason ?? ''}</div>`}</span>${r.fine ? img(uiUrl('fine_work'), 'fw') : ''}</button>`;
-    }
-  }
-  h += `</div></div><div style="text-align:right;margin-top:6px"><button class="cl" data-a="close">${S.close}</button></div>`;
-  const sy = panel.scrollTop; panel.innerHTML = h; panel.scrollTop = sy;
+  const sy = panel.scrollTop; panel.innerHTML = bagHtml(); panel.scrollTop = sy;      // the bag + «Что умею» panel lives in ui/bag.ts
 }
-function renderJournal() {
-  const chk = (ok: boolean, t: string) => `<div>${img(uiUrl(ok ? 'check' : 'cross'), '')}<span class="${ok ? 'good' : 'dim'}">${t}</span></div>`;
-  let h = `<h3><span>${S.jTitle}</span><span class="dim">${fmt(S.day, { d: G.day, n: G.endDay })}</span></h3><div class="cols"><div class="col"><div class="grp">${S.jGoals}</div>`;
-  h += chk(prog.fire, S.gFire2) + chk(prog.baro, S.gBaro) + chk(prog.shelter, S.gShelter) + chk(prog.sleep, S.gSleep) + chk(prog.parts.length >= 3, fmt(S.gParts, { n: prog.parts.length })) + chk(prog.mast, S.gMast) + chk(prog.radio, S.gRadio) + chk(!!prog.ending, fmt(S.gEnd, { n: G.endDay }));
-  h += `<div class="grp">${S.jSites}</div>`;
-  const found = sites.filter(x => x.found);
-  h += found.length ? found.map(x => `<div>${x.name}</div>`).join('') : `<div class="dim">${S.jNone}</div>`;
-  h += `</div><div class="col"><div class="grp">${S.jLog}</div>`;
-  h += journal.length ? journal.slice(-14).reverse().map(e => `<div>${e.kind === 'note' ? S.jNote + ' ' + e.text : e.text}</div>`).join('') : `<div class="dim">${S.jNone}</div>`;
-  h += `</div></div>`;
-  jEl.innerHTML = h;
-}
+function renderJournal() { renderJournalInto(jEl); }      // tabs Цели · Знания · Записки · Карта · Вещества live in ui/journal.ts
 export const panelIsOpen = () => panelOpen || jOpen;
 void itemName;

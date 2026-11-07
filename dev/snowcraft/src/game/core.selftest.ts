@@ -11,6 +11,7 @@ import { input, simKey, simMouse, resetInput, poll, endFrame, touch } from '../e
 import { ITEMS, getItem, itemName, densityOf, auxOfDensity, snowClass } from './items';
 import { inv, add, remove, count, weight, giveStartKit, clearInventory, equip, spawnDrop, backpacks, BELT, NSLOT } from './inventory';
 import { RECIPES, canCraft, craft } from './recipes';
+import { learnAll, loreSave, loreLoad } from './lore';
 import {
   FIXTURE_DEFS, mastUp, placeFixture, removeFixture, interact, stepFixtures, tryLight, addFuel, stationsAt, collectLights, radiantWarmth, pickupFixture, stash, planFixture, raiseMast, dryBoost,
 } from './fixtures';
@@ -87,8 +88,10 @@ registerTest('items', 'плотность снега из aux и классы', 
 
 // =====================================================================================================================
 // recipes
-registerTest('recipes', 'каждый рецепт: ингредиенты → результат, станции, тонкая работа', async () => {
-  await sandbox(() => {
+registerTest('recipes', 'каждый рецепт (приём известен): ингредиенты → результат, станции, тонкая работа', async () => {
+  const l0 = loreSave();
+  learnAll();
+  try { await sandbox(() => {
     const p = scene();
     for (const r of RECIPES) {
       for (let v = 0; v < r.variants.length; v++) {
@@ -119,7 +122,7 @@ registerTest('recipes', 'каждый рецепт: ингредиенты → �
     placeFixture('table', 247, 66, { force: true });
     if (!canCraft(r0, stationsAt(p.x, p.y - 8)).ok) throw new Error('должен получиться');
     if (canCraft(r0, stationsAt(p.x, p.y - 8), true).ok) throw new Error('обмороженные руки не должны шить');
-  });
+  }); } finally { loreLoad(l0); }
 });
 
 // =====================================================================================================================
@@ -130,6 +133,7 @@ registerTest('tools', 'время копания по материалам и и
   if (digTime(m('STONE'), 'hand') !== Infinity || digTime(m('STONE'), 'shovel') !== Infinity) throw new Error('камень руками нельзя');
   if (!isFinite(digTime(m('STONE'), 'pick'))) throw new Error('кирка по камню');
   if (!isFinite(digTime(m('COAL'), 'pick')) || !isFinite(digTime(m('SOAPSTONE'), 'pick'))) throw new Error('уголь/мыльный камень');
+  if (digTime(m('STONE'), 'axe') !== Infinity || digTime(m('STONE'), 'knife') !== Infinity) throw new Error('камень: только кирка (нет ступеней — у каждого инструмента своё дело)');
   if (!(digTime(m('LOG'), 'saw') < digTime(m('LOG'), 'axe'))) throw new Error('пила быстрее топора по дереву');
   if (digTime(m('STONE'), 'saw') !== Infinity) throw new Error('пила не берёт камень');
   if (!isFinite(digTime(m('ICE'), 'chisel')) || digTime(m('ICE'), 'hand') !== Infinity) throw new Error('лёд: пешня да, руки нет');
@@ -215,7 +219,7 @@ registerTest('tools', 'лопата: зачерпнуть, бросить куч
     s.act('dig', 1004, 273, 1.2);
     if (count('ice') <= i0) throw new Error('пешня не дала лёд');
     // axe & pick
-    for (const [tool, key, item, tx] of [['axe', 'LOG', 'log', 1014], ['pick', 'COAL', 'coal', 1018], ['pick', 'STONE', 'stone', 1022]] as [string, string, string, number][]) {
+    for (const [tool, key, item, tx] of [['axe', 'LOG', 'log', 1014], ['pick', 'COAL', 'coal', 1018], ['pick', 'METAL', 'scrap', 1022]] as [string, string, string, number][]) {
       arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); s.teleport(1000, 272);
       tileBlock(Math.floor(tx / 4), 67, 1, 1, (MAT as Record<string, number>)[key], 0, 0);
       add(tool, 1); s.selectItem(tool);

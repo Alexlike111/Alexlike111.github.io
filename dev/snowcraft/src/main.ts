@@ -16,6 +16,8 @@ import { stepParticles, clearParticles, drawParticles } from './engine/particles
 import { onBlast } from './engine/explode';
 import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from './engine/input';
 import { initTouch } from './ui/touch';
+import { initSenses, toggleSenses } from './engine/senses';
+import { initSensesUi } from './ui/sensesui';
 import { initHud, updateHud, setFreeCamLabel } from './ui/devhud';
 import { initTitle } from './ui/title';
 import { initFauna, stepFauna } from './game/fauna';
@@ -241,6 +243,7 @@ function frame(now: number) {
   const dt = Math.min(0.1, rawDt);
   poll();
   if (input.freeCamPressed) toggleFreeCam();
+  if (input.sensesPressed) { input.sensesPressed = false; if (ready && !document.body.classList.contains('title-open')) toggleSenses(); }
   const ticks = advance(dt, dt);
   updateOverlay(dt);
   void ticks;
@@ -374,6 +377,7 @@ const sc = {
   cutRegion, selected,
   mods: { fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod },
   screenToWorld, worldToScreen,
+  senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
   setQuality(q: 0 | 1 | 2) { G.quality = q; resize(); },
   viewerLight() { /* kept for old harnesses */ },
@@ -390,6 +394,7 @@ async function boot() {
   initOverlay(uiRoot, { start: (o) => { newGame(o); }, restart: () => { newGame({ seed: G.seed, diff: G.diff.level, hardcore: G.diff.hardcore }); } });
   initSfxHooks();
   initLayers();
+  initSenses(); initSensesUi(uiRoot);
   addEventListener('resize', () => { resize(); });
   newGame();
   void initTitle({ start: (o) => { newGame(o); } });

@@ -127,7 +127,9 @@ for (const prof of PROFILES) {
     // craft the lamp at a table: soapstone + fat + lichen
     tk.testkit; F.placeFixture('table', ig.L + 5, 66, { force: true });
     S.give('soapstone', 1); S.give('fat', 3); S.give('lichen', 3); S.give('matches', 5);
-    const crafted = S.craft('fat_lamp_stone');
+    const refused = S.craft('fat_lamp_stone') === false;                 // the lamp is a technique: unknown until the diary at the cairn is read
+    S.mods.quest.learn('lamp', 'note', 'n1', true);
+    const crafted = refused && S.craft('fat_lamp_stone');
     // place the lamp inside by hand, then light it with E
     const pl = S.place('fat_lamp', ig.L + 3, 67);
     const lamp = G.fixtures.find(f => f.kind === 'fat_lamp');
@@ -135,7 +137,7 @@ for (const prof of PROFILES) {
     S.mods.fixtures.interact(lamp);                       // light it
     return { crafted, placed: pl.placed, lamp: !!lamp, lit: lamp && lamp.lit, fuel: lamp && lamp.fuel, ig };
   });
-  check('fat lamp crafted at the table, placed and lit', igl.crafted && igl.placed && igl.lit, JSON.stringify(igl));
+  check('fat lamp: refused before the technique is known, crafted at the table after, placed and lit', igl.crafted && igl.placed && igl.lit, JSON.stringify(igl));
   const warm = await ev(page, () => {
     const S = window.__sc; const G = S.G; const out = [];
     for (let k = 0; k < 6; k++) { S.stepFast(420); S.evalShelter(); out.push({ t: (k + 1) * 7, temp: G.shelter && +G.shelter.temp.toFixed(1), co: G.shelter && +G.shelter.co.toFixed(1), stars: G.shelter && G.shelter.stars, closed: G.shelter && G.shelter.closed, vent: G.shelter && G.shelter.vent, notes: G.shelter && G.shelter.notes }); }
@@ -166,7 +168,10 @@ for (const prof of PROFILES) {
     inv.clearInventory(); S.give('can', 2); S.give('tea', 1); S.give('snow', 4); S.give('log', 3); S.give('lichen', 2); S.give('matches', 5); S.give('seal_meat', 2); S.give('rope', 2);
     S.give('canvas', 1); S.give('fat', 1);
     p.food = 30; p.water = 30;
-    const crafts = { camp: S.craft('campfire'), torch: S.craft('torch') };
+    const torchRefused = S.craft('torch') === false;                      // not known yet
+    S.mods.quest.learn('torch', 'note', 'n2', true);
+    S.give('log', 1);
+    const crafts = { camp: S.craft('campfire'), torch: torchRefused && S.craft('torch') };
     S.mods.player.eatSlot(inv.inv.slots.findIndex(s => s && s.id === 'can'));
     const ate = p.food > 55;
     S.mods.player.eatSlot(inv.inv.slots.findIndex(s => s && s.id === 'snow'));
@@ -194,6 +199,38 @@ for (const prof of PROFILES) {
   check('sleep in a bed: time x20 and energy restored', sleep.ok && sleep.dt > 80 && sleep.e1 > 31, JSON.stringify(sleep));
   await shot(page, prof, '06-sleep');
   await ev(page, () => { const S = window.__sc; S.G.player.sleeping = false; S.G.timeScale = 1; S.setTime(10 * 60); });
+
+  // ---- knowledge: picking up a note teaches a technique; journal tabs; bag panel shows only what is known ----
+  const know = await ev(page, () => {
+    const S = window.__sc, q = S.mods.quest, inv = S.mods.inv, p = S.G.player;
+    q.forgetAll(); inv.clearInventory(); S.give('snow_knife', 1); S.give('shovel', 1);
+    S.arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); S.teleport(1000, 272); S.step(5);
+    const had = { harpoon: q.knows('harpoon'), campfire: q.knows('campfire') };
+    inv.spawnDrop('note_s1', 1, p.x + 2, p.y - 4, 0, 0); S.stepFast(40);
+    return { had, harpoon: q.knows('harpoon'), noteInBag: inv.count('note_s1'), read: q.lore.read.has('s1'), log: q.journal.filter(e => e.kind === 'know' || e.kind === 'note').length };
+  });
+  check('picking up the keeper\'s log teaches the harpoon and the page leaves the bag', !know.had.harpoon && know.had.campfire && know.harpoon && know.noteInBag === 0 && know.read && know.log >= 2, JSON.stringify(know));
+  if (!prof.hasTouch) await page.keyboard.press('KeyJ'); else await page.evaluate(() => { document.getElementById('tb-jour').dispatchEvent(new PointerEvent('pointerdown', { pointerId: 3, pointerType: 'touch', bubbles: true, isPrimary: true })); window.__sc.step(3); });
+  await page.waitForTimeout(300);
+  const jr = await page.evaluate(() => { const j = [...document.querySelectorAll('#hud .pnl')].find(e => e.classList.contains('jr')); return j ? { shown: j.style.display, tabs: [...j.querySelectorAll('.tab')].map(b => b.textContent) } : null; });
+  check('journal opens with five tabs: Цели Знания Записки Карта Вещества', !!jr && jr.shown === 'block' && jr.tabs.join('|') === 'Цели|Знания|Записки|Карта|Вещества', JSON.stringify(jr));
+  for (const [name, cond] of [['Знания', '.card'], ['Записки', '.paper'], ['Карта', 'canvas.map'], ['Вещества', '.dim,.card']]) {
+    await page.evaluate((n) => { const j = [...document.querySelectorAll('#hud .pnl.jr')][0]; [...j.querySelectorAll('.tab')].find(b => b.textContent === n).click(); }, name);
+    await page.waitForTimeout(150);
+    check(`journal tab ${name} renders`, await page.evaluate((c) => !!document.querySelector('#hud .pnl.jr ' + c.split(',')[0]) || !!document.querySelector('#hud .pnl.jr ' + (c.split(',')[1] || 'x')), cond));
+    if (name === 'Записки' || name === 'Карта') await shot(page, prof, '06-journal-' + (name === 'Карта' ? 'map' : 'notes'));
+  }
+  await page.evaluate(() => { const j = document.querySelector('#hud .pnl.jr'); j.querySelector('[data-j=close]').click(); });
+  await page.waitForTimeout(100);
+  const bag = await ev(page, () => { const S = window.__sc; S.mods.quest.forgetAll(); S.mods.quest.learn('harpoon', 'note', 's1', true); return null; });
+  if (!prof.hasTouch) {
+    await page.keyboard.press('KeyC'); await page.waitForTimeout(300);
+    const txt = await page.evaluate(() => document.querySelector('#hud .pnl').textContent);
+    check('bag panel: known techniques with places, «?» hints, no workbench wording', /Гарпун/.test(txt) && /где угодно/.test(txt) && /у стола на станции/.test(txt) && !/Пешня/.test(txt) && !/верстак/i.test(txt) && (await page.evaluate(() => document.querySelectorAll('#hud .pnl .qrow').length)) >= 3, txt.slice(0, 200));
+    await shot(page, prof, '06-bag-knowledge');
+    await page.keyboard.press('KeyC');
+  }
+  void bag;
 
   // ---- 6. controls: keyboard path (desktop) / touch path (phone) ----
   if (!prof.hasTouch) {
