@@ -8,6 +8,7 @@ import { W, H, TW, TH, mat, aux, flags, shade, bg, awake, clearWorld, setSeed, r
 import { MAT } from '../content/materials';
 import { G } from './state';
 import { tundraSnow, stationSnow, finishSnow, makeSpawn, snowpackCfg } from './snowpack';
+import { placeStationObjects } from './stationobjects';
 import { LOC, SEA, stampLocations, resetLocations, worldInfo, Terrain, put, box, pileBlocks, snowBank, topSolid } from './locations';
 
 export { worldInfo, LOC };
@@ -95,6 +96,7 @@ export function generateWorld(seed: number): { spawnX: number; spawnY: number } 
   rockFeatures();
   if (snowpackCfg.on) tundraSnow(T, seed);            // DESIGN §13 deep snow: own hash noise, no rand() draws (the random stream below is unchanged)
   stampLocations(T);
+  placeStationObjects();                              // DESIGN §15: generator, lamps, medkit, bell, barrels, den ... (own RNG, no rand() draws)
   if (snowpackCfg.on) stationSnow(T);
   cutSealHoles();
   sastrugi();

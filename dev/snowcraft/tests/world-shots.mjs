@@ -63,7 +63,7 @@ for (const dev of DEVICES) {
       await page.waitForTimeout(120);
       await page.evaluate(() => window.__view.step(6));
       await page.waitForTimeout(250);
-      await page.screenshot({ path: `shots/world-${dev.id}-deep-${place.id}-${c.id}${zi < 0 ? '' : '-z' + zi}.png` });
+      await page.screenshot({ path: `shots/world-${dev.id}-deep-${place.id}-${c.id}${zi < 0 ? '' : '-z' + zi}.png`, timeout: 120000 });
       n++;
     }
     await page.evaluate(() => import('/src/engine/zoom.ts').then(m => m.resetZoom()));

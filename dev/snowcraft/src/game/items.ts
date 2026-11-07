@@ -77,6 +77,8 @@ def('diesel', 'Солярка', 'material', 3, 4, { fuel: { brazier: 90 } });
 def('radio_triode', 'Радиолампа', 'misc', 0.3, 1);
 def('radio_coil', 'Катушка', 'misc', 0.8, 1);
 def('battery', 'Аккумулятор', 'misc', 4, 1);
+def('sonde_balloon', 'Шар-зонд', 'misc', 1, 1, { desc: 'Метеорологический шар. На площадке зонда его привязывают к радиозонду на верёвке.' });
+def('sonde_probe', 'Радиозонд', 'misc', 0.6, 1, { desc: 'Коробка с датчиками давления и ветра. Уйдёт в небо на шаре.' });
 def('note', 'Записка', 'note', 0.01, 1);
 def('pot', 'Котелок', 'fixture', 1.5, 1, { fixture: 'pot' });
 def('flask', 'Фляга', 'tool', 0.4, 1, { tool: { kind: 'flask', dur: Infinity }, desc: 'Держит воду тёплой за пазухой.' });

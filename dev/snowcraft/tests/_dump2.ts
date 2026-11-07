@@ -1,0 +1,16 @@
+import { generateWorld } from '../src/game/worldgen';
+import { G } from '../src/game/state';
+import { W, mat } from '../src/engine/grid';
+import { WALK, MAT } from '../src/content/materials';
+generateWorld(1);
+const gy = (x: number, from = 150) => { let y = from; while (y < 400 && !WALK[mat[y * W + x]]) y++; return y; };
+const row: string[] = [];
+for (let x = 120 * 4; x < 150 * 4; x += 8) row.push(x + ':' + gy(x, 200));
+console.log('west', row.join(' '));
+const r2: string[] = [];
+for (let x = 180 * 4; x < 235 * 4; x += 8) r2.push(x + ':' + gy(x, 200));
+console.log('shed-out', r2.join(' '));
+const r3: string[] = []; for (let x = 900; x < 1060; x += 10) r3.push(x + ':' + gy(x, 200)); console.log('beach', r3.join(' '));
+const r4: string[] = []; for (let x = 1700; x < 1790; x += 6) r4.push(x + ':' + gy(x, 240)); console.log('ship', r4.join(' '));
+console.log(G.fixtures.filter(f => f.tx > 215 && f.tx < 260 && f.ty > 50).map(f => f.kind + f.tx + ',' + f.ty).join(' '));
+console.log(G.drops.filter(d => d.x > 700 && d.x < 1100).map(d => d.item + Math.round(d.x)).join(' '));

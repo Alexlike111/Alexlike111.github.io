@@ -3,6 +3,7 @@
 import { G, type Fixture, type View } from '../game/state';
 import { defSprite, outline, compose, drawSprite, spriteSize, drawFlame, hasSprite, PAL, type Rows, type Palette } from '../engine/sprites';
 import { Grid } from './grid';
+import { drawStationArt, drawChestExtras, STATION_SHEET } from './fixtures_station';
 
 const TS = 4;
 /** Outline without the bottom row so the sprite rests exactly on the footprint floor. */
@@ -239,10 +240,11 @@ function drawStove(ctx: Ctx, f: Fixture, b: Box, t: number) {
   } else { rect(ctx, '#15141a', b.x + Math.floor((b.w - 8) / 2) + 2, b.y + b.h - 5, 4, 2); }
 }
 function drawChest(ctx: Ctx, f: Fixture, b: Box) {
-  let look = String(dget(f, 'look') ?? 'wood'); if (!CHEST_LOOKS[look]) look = 'wood';
+  let look = String(dget(f, 'look') ?? 'wood'); if (!CHEST_LOOKS[look] && !hasSprite('fx.chest.' + look)) look = 'wood';
   const broken = !!dget(f, 'broken'), open = f.open === true || (!!f.items && f.items.length === 0 && dget(f, 'looted') !== false && !dget(f, 'buried'));
   const key = 'fx.chest.' + look + (broken ? '.broken' : open ? '.open' : '');
-  bc(ctx, key, b, 0, 0);
+  bc(ctx, key, b, 0, Number(dget(f, 'dy') ?? 0));
+  drawChestExtras(ctx, f, b, 0, PASS);
   if (dget(f, 'buried')) { const cx = b.x + b.w / 2; snowMound(ctx, cx - 7, b.y + b.h, 15, 8); snowMound(ctx, cx - 3, b.y + b.h - 2, 8, 4); }
 }
 function drawDrum(ctx: Ctx, f: Fixture, b: Box) {
@@ -433,7 +435,7 @@ export function drawFixtureArt(ctx: Ctx, v: View, f: Fixture, t: number, pass: 0
     case 'mast': drawMast(ctx, f, b, t); break;
     case 'sign': drawSign(ctx, f, b); break;
     case 'lantern': drawLanternFx(ctx, f, b, t); break;
-    default: drawLegacy(ctx, f, b, t);
+    default: if (!drawStationArt(ctx, v, f, t, pass)) drawLegacy(ctx, f, b, t);
   }
   PASS = 0;
 }
@@ -491,3 +493,4 @@ export const FIXTURE_SHEET: { kind: Fixture['kind']; tw: number; th: number; var
   { kind: 'workbench', tw: 3, th: 2, variants: [{ name: 'workbench', patch: {} }] },
   { kind: 'furnace', tw: 2, th: 2, variants: [{ name: 'v1', patch: {} }] },
 ];
+FIXTURE_SHEET.push(...STATION_SHEET);

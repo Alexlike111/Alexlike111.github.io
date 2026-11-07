@@ -14,6 +14,7 @@ import { MIN_PER_SEC, readBarometer } from './weather';
 import { floodEnclosure } from './shelter';
 import type { Stations } from './recipes';
 import { openContainer, stashSelected } from './search';
+import { stationInteract, stationStep, stationLights, stationLabel, stationRadio, burnMult, heatMult } from './fixtures_station';
 
 const S = strings('fix', {
   noFuel: 'Нечем топить: нужны дрова, уголь или жир',
@@ -94,6 +95,17 @@ const D: Partial<Record<FixtureKind, FixtureDef>> = {
   barometer: { size: [1, 1], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
   table: { size: [3, 2], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
   workbench: { size: [3, 2], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  // DESIGN §15: interactive objects (behaviour in fixtures_station.ts). Lamps are D-less on purpose (never picked as the E target).
+  generator: { size: [3, 2], solid: true, cap: 480, heat: 0, light: [0, 0, 0, 0] },
+  heater: { size: [2, 1], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  medkit: { size: [2, 2], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  kettle: { size: [1, 1], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  sonde: { size: [2, 4], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  gramophone: { size: [2, 1], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  hatch: { size: [1, 8], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  shutter: { size: [1, 8], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  damper: { size: [1, 1], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
+  bell: { size: [1, 2], solid: false, cap: 0, heat: 0, light: [0, 0, 0, 0] },
 };
 export const FIXTURE_DEFS = D;
 export const fixtureDef = (k: FixtureKind): FixtureDef | undefined => D[k];
@@ -103,6 +115,8 @@ const NAMES: Record<string, string> = {
   lantern: 'Фонарь', pot: 'Котелок', drying_rack: 'Сушилка', skin_bed: 'Лежанка из шкур', bed: 'Кровать', hide_door: 'Полог', door: 'Дверь',
   cache: 'Каменный тайник', chest: 'Сундук', shelf: 'Полка', snare: 'Силок', radio: 'Рация', drum: 'Бочка с соляркой', mast: 'Мачта',
   barometer: 'Барометр', table: 'Стол', workbench: 'Верстак', flag: 'Флаг', cairn: 'Тур', cart: 'Вагонетка', kennel: 'Конура', sign: 'Табличка',
+  generator: 'Дизель-генератор', ceiling_lamp: 'Лампа', heater: 'Электрообогреватель', medkit: 'Аптечка', kettle: 'Чайник', sonde: 'Площадка метеозонда',
+  gramophone: 'Патефон', hatch: 'Лестница на крышу', shutter: 'Ставни', damper: 'Печная заслонка', bell: 'Колокол',
 };
 for (const k in NAMES) registerSource('fix.name.' + k, NAMES[k]);
 export const fixtureName = (k: string) => tr('fix.name.' + k, NAMES[k] ?? k);
@@ -392,6 +406,8 @@ export function interact(f: Fixture): boolean {
       toast(S.mastNeed, 'info'); return true;
     }
     case 'sign': { const t = String(f.data?.text ?? ''); if (t) toast(fmt(S.sign, { text: t }), 'info'); return true; }
+    case 'generator': case 'heater': case 'medkit': case 'kettle': case 'sonde': case 'gramophone': case 'hatch': case 'shutter': case 'damper': case 'bell':
+      return stationInteract(f);
     case 'lantern': return false;
   }
   void dist2;
@@ -440,6 +456,13 @@ export function heated(f: Fixture): Fixture | null {
   return fixtureNear(cx, cy, 3 * TS, o => o !== f && !!o.lit && FIRE_KINDS.includes(o.kind));
 }
 function interactRadio(f: Fixture): boolean {
+  // DESIGN §15: with nothing to insert the radio is a receiver (dial minigame, needs the generator); the repair flow below is unchanged
+  const have0 = (f.data?.have as string[] | undefined) ?? [];
+  const spare = ['radio_triode', 'radio_coil', 'battery'].some(i => !have0.includes(i) && count(i) > 0);
+  if (!spare && stationRadio(f)) return true;
+  return interactRadioRepair(f);
+}
+function interactRadioRepair(f: Fixture): boolean {
   const dd = f.data ?? (f.data = {});
   if (dd.fixed) { toast(S.radioFixed, 'info'); return true; }
   const have = (dd.have as string[] | undefined) ?? (dd.have = []);
@@ -495,7 +518,7 @@ export function stepFixtures(dt: number) {
     const dd = f.data ?? (f.data = {});
     if (d.fuel && f.lit) {
       const [cx, cy] = center(f);
-      f.fuel = (f.fuel ?? 0) - gm; dd.age = Number(dd.age ?? 0) + dt;
+      f.fuel = (f.fuel ?? 0) - gm * burnMult(f); dd.age = Number(dd.age ?? 0) + dt;
       let out = (f.fuel ?? 0) <= 0;
       // the wind blows a weak or open flame out
       if (!out && d.open && isSkyOpen(cx, cy)) {
@@ -511,7 +534,7 @@ export function stepFixtures(dt: number) {
         continue;
       }
       // solid fixtures (stove, brazier) are poor conductors: the heat goes into the air tile right above them, not into the iron
-      addHeat(cx, d.solid ? f.ty * TS - 2 : cy - 2, d.heat);
+      addHeat(cx, d.solid ? f.ty * TS - 2 : cy - 2, d.heat * heatMult(f));
       if (doSmoke) smokeFx(f, cx, cy, d);
     }
     switch (f.kind) {
@@ -532,6 +555,7 @@ export function stepFixtures(dt: number) {
       case 'torch': break;
     }
   }
+  stationStep(dt, gm);
 }
 function smokeFx(f: Fixture, cx: number, cy: number, d: FixtureDef) {
   const k = d.flame ?? 0;
@@ -584,6 +608,7 @@ export function collectLights(out: Light[]): number {
     const lamp = f.kind === 'fat_lamp';
     take(cx, cy - (lamp ? 2 : 4), d.light[0] * fl, d.light[1] * fl, d.light[2] * fl, d.light[3]);
   }
+  stationLights(take);
   return n;
 }
 
@@ -594,6 +619,7 @@ export function fixtureLabel(f: Fixture): string {
   if (d?.fuel) s += ' · ' + (f.lit ? S.burning : S.out);
   if (d?.fuel) s += ' · ' + fmt(S.fuelLeft, { h: Math.round(((f.fuel ?? 0) / 60) * 10) / 10 });
   if (f.kind === 'pot') s += ' · ' + fmt(S.waterIn, { n: Number(f.data?.water ?? 0) });
+  const x = stationLabel(f); if (x) s += ' · ' + x;
   return s;
 }
 export function resetFixtures() { G.fixtures.length = 0; }

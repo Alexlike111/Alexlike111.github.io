@@ -4,6 +4,7 @@
 import { G } from './state';
 import { on } from './bus';
 import { fixtureNear } from './fixtures';
+import './stationwire';          // late-binds fauna / quest / drift for the interactive objects (fixtures_*.ts must not import them)
 
 const mods = import.meta.glob('../engine/audio.ts', { eager: true }) as Record<string, { sfx?: Record<string, (...a: any[]) => any> }>;
 const sfx = Object.values(mods)[0]?.sfx;
@@ -43,6 +44,36 @@ export function initSfxHooks() {
   on('ice_crack', (d: { vol?: number }) => call('play', 'crack_ice', { vol: d.vol ?? 0.6, pitch: 0.85 + Math.random() * 0.3 }));
   on('ice_break', () => call('play', 'splash', { vol: 1 }));
   on('icebreaker_arrived', () => call('play', 'radio_static', { vol: 0.7 }));
+  // interactive objects (DESIGN §15): game/fixtures_station.ts, fixtures_radio.ts, fixtures_world.ts
+  const at = (d: { x?: number }, vol: number, full = 40, far = 500) => vol * (d.x === undefined ? 1 : near(d.x, full, far));
+  on('gen_pull', (d: { x: number }) => call('play', 'gen_pull', { vol: at(d, 0.8, 60, 300), pitch: 0.95 + Math.random() * 0.1 }));
+  on('gen_cough', (d: { x: number }) => call('play', 'gen_cough', { vol: at(d, 0.9, 80, 500) }));
+  on('gen_start', (d: { x: number }) => call('play', 'gen_start', { vol: at(d, 1, 80, 700) }));
+  on('gen_run', (d: { x: number }) => call('play', 'gen_run', { vol: at(d, 0.7, 60, 650) }));
+  on('gen_stop', (d: { x: number; why?: string }) => call('play', d.why === 'stall' ? 'gen_stall' : 'gen_stop', { vol: at(d, 0.9, 80, 600) }));
+  on('gen_fuel', () => call('play', 'pour', { vol: 0.6, pitch: 0.7 }));
+  on('radio_on', () => call('play', 'radio_click', { vol: 0.7 }));
+  on('radio_off', () => call('play', 'radio_click', { vol: 0.5, pitch: 0.8 }));
+  on('radio_noise', (d: { vol: number }) => call('play', 'radio_static', { vol: d.vol, pitch: 0.9 + Math.random() * 0.3 }));
+  on('radio_tune', () => call('play', 'radio_tune', { vol: 0.5 }));
+  on('radio_voice', (d: { id: string }) => call('play', 'radio_voice', { vol: 0.6, pitch: d.id === 'echo' ? 0.7 : d.id === 'num' ? 1.25 : 1 }));
+  on('bell_ring', (d: { x: number }) => call('play', 'bell_ring', { vol: at(d, 1, 120, 900) }));
+  on('record', (d: { x: number; rec: number }) => call('play', 'rec_' + d.rec, { vol: at(d, 0.75, 50, 400) }));
+  on('record_stop', (d: { x: number; wind?: boolean }) => call('play', 'rec_scratch', { vol: at(d, 0.5, 50, 300), pitch: d.wind ? 0.6 : 1 }));
+  on('shutter', () => call('play', 'shutter', { vol: 0.7 }));
+  on('ladder', () => call('play', 'ladder', { vol: 0.7 }));
+  on('damper', () => call('play', 'damper', { vol: 0.7 }));
+  on('heater', () => call('play', 'damper', { vol: 0.5, pitch: 1.4 }));
+  on('medkit', () => call('play', 'medkit', { vol: 0.7 }));
+  on('kettle_boil', (d: { x: number }) => call('play', 'kettle_whistle', { vol: at(d, 0.6, 50, 300) }));
+  on('kettle_fill', () => call('play', 'pour', { vol: 0.5 }));
+  on('kettle_take', () => call('play', 'pour', { vol: 0.5, pitch: 1.2 }));
+  on('sonde_release', () => call('play', 'sonde_release', { vol: 0.9 }));
+  on('sonde_built', () => call('play', 'craft', { vol: 0.7 }));
+  on('cart_roll', (d: { x: number }) => call('play', 'cart_roll', { vol: at(d, 0.7, 60, 500) }));
+  on('cart_bump', (d: { x: number }) => call('play', 'cart_bump', { vol: at(d, 0.8, 60, 500) }));
+  on('cart_crash', (d: { x: number }) => call('play', 'cart_crash', { vol: at(d, 1, 80, 700) }));
+  on('roof_creak', () => call('play', 'roof_creak', { vol: 0.8 }));
 }
 let amb = 0;
 const testing = typeof location !== 'undefined' && /selftest/.test(location.hash + location.search);

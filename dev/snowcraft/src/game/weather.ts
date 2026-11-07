@@ -58,6 +58,9 @@ export const weatherState = { cloud: 0, windBase: 2, stormN: 0 };
 /** Dev/test override of weather globals (storm, snowfall, visibility, wind, ambientT, aurora, daylight); null = natural weather. */
 export const wx = { override: null as null | Partial<Pick<typeof G, 'storm' | 'snowfall' | 'visibility' | 'wind' | 'ambientT' | 'aurora' | 'daylight'>> };
 
+/** Hooks for the radio / weather balloon (fixtures_station.ts): a precise forecast read over the radio overrides G.forecast and counts as known. */
+export const wxHooks = { forecast: null as null | ((t: number) => void), knows: null as null | (() => boolean) };
+
 function hash(n: number) { const s = Math.sin(n * 91.7 + 12.3) * 43758.5453; return s - Math.floor(s); }
 
 /** Evaluate all weather globals for G.time (no events). */
@@ -103,6 +106,7 @@ export function applyClock() {
   G.aurora = strength * (0.7 + 0.3 * Math.sin(t / 37)) * (1 - Math.min(1, st * 1.4 + weatherState.cloud * 0.5));
   if (wx.override) Object.assign(G, wx.override);
   updateForecast(t);
+  wxHooks.forecast?.(t);
 }
 
 function updateForecast(t: number) {
@@ -119,7 +123,7 @@ function updateForecast(t: number) {
 }
 
 /** The player owns the pocket barometer or read the station one in the last 12 game hours. */
-export function knowsForecast(): boolean { return count('barometer') > 0 || G.time - baromReadAt < 12 * 60; }
+export function knowsForecast(): boolean { return count('barometer') > 0 || G.time - baromReadAt < 12 * 60 || !!wxHooks.knows?.(); }
 /** Interact with the station barometer: reveals the forecast for 12 hours. */
 export function readBarometer() { baromReadAt = G.time; toast(fmt(S.barometerRead, { t: G.forecast.text }), 'info'); emit('barometer', { text: G.forecast.text }); }
 /** Next storm that has not ended yet. */

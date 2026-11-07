@@ -9,7 +9,7 @@ import { MAT } from '../content/materials';
 
 interface Win { x: number; y: number; w: number; h: number; dir: 1 | -1; k: number }
 const wins: Win[] = [];
-const WARM_KIND: Record<string, number> = { stove: 1, brazier: 0.85, fat_lamp: 0.55, lantern: 0.35 };
+const WARM_KIND: Record<string, number> = { stove: 1, brazier: 0.85, fat_lamp: 0.55, lantern: 0.35, ceiling_lamp: 0.9, heater: 0.4 };
 let scanT = -9, lastT = 0;
 export const windowGlow = { count: 0 };
 

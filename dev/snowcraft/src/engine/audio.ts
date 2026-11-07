@@ -203,6 +203,51 @@ const thump = (v: Voice, t: number, pk: number) => {
   v.noise('lowpass', 320, 160, 0.8, t, 0.09, pk * 0.45, 0.002);
 };
 
+// ------------------------------------------------------------------ gramophone records (DESIGN §15): three tunes of our own, played by a worn music-box voice
+const NOTE_IDX: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+/** "A4:1 C#5:.5 r:1" -> [midi | -1 (rest), beats][] */
+function parseTune(src: string): [number, number][] {
+  return src.trim().split(/\s+/).map(tok => {
+    const [n, b] = tok.split(':'), beats = parseFloat(b);
+    if (n === 'r') return [-1, beats] as [number, number];
+    const m = /^([A-G])([#b]?)(\d)$/.exec(n)!;
+    return [12 * (parseInt(m[3]) + 1) + NOTE_IDX[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0), beats] as [number, number];
+  });
+}
+const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+/** Schedule a tune (melody + bass line) at spb seconds per beat; adds the worn-record crackle and rumble over the whole length. */
+function playRecord(v: Voice, melody: string, bass: string, spb: number) {
+  const t0 = v.t; let t = t0;
+  for (const [m, b] of parseTune(melody)) {
+    if (m >= 0) {
+      const f = mtof(m), d = Math.max(0.25, b * spb * 1.6);
+      v.osc('triangle', f, f, t, d, 0.2, 0.004, { filt: ['lowpass', 2600, 0.7], vib: [5.2, 9] });
+      v.osc('sine', f * 2, f * 2, t, d * 0.5, 0.05, 0.003);
+    }
+    t += b * spb;
+  }
+  const total = t - t0; t = t0;
+  for (const [m, b] of parseTune(bass)) {
+    if (m >= 0) { const f = mtof(m); v.osc('sine', f, f, t, Math.max(0.2, b * spb * 0.9), 0.17, 0.006, { filt: ['lowpass', 900, 0.7] }); v.osc('triangle', f * 2, f * 2, t, b * spb * 0.5, 0.04, 0.004); }
+    t += b * spb;
+  }
+  v.noise('highpass', 3500, 3500, 0.7, t0, total, 0.06, 0.3, { buf: 'crackle' });
+  v.noise('lowpass', 260, 260, 0.7, t0, total, 0.025, 0.4);
+}
+const REC1_MEL = 'E5:1 A5:1 G5:1 F5:1.5 E5:.5 D5:1 C5:1 E5:1 A4:1 B4:3 E5:1 A5:1 G5:1 F5:1.5 E5:.5 D5:1 C5:1 B4:1 C5:1 A4:3 A4:1 C5:1 E5:1 A5:1.5 G5:.5 F5:1 E5:1 D5:1 C5:1 B4:1 C5:1 D5:1 E5:1 G5:1 E5:1 D5:1 F5:1 D5:1 C5:1 B4:1 A4:1 A4:3';
+const REC1_BASS = 'A2:1 C4:.5 E4:.5 C4:.5 E4:.5 D3:1 F4:.5 A4:.5 F4:.5 A4:.5 A2:1 C4:.5 E4:.5 C4:.5 E4:.5 E3:1 G#3:.5 B3:.5 G#3:.5 B3:.5 A2:1 C4:.5 E4:.5 C4:.5 E4:.5 D3:1 F4:.5 A4:.5 F4:.5 A4:.5 A2:1 C4:.5 E4:.5 C4:.5 E4:.5 A2:3 A2:1 C4:.5 E4:.5 C4:.5 E4:.5 D3:1 F4:.5 A4:.5 F4:.5 A4:.5 C3:1 E4:.5 G4:.5 E4:.5 G4:.5 E3:1 G#3:.5 B3:.5 G#3:.5 B3:.5 A2:1 C4:.5 E4:.5 C4:.5 E4:.5 D3:1 F4:.5 A4:.5 F4:.5 A4:.5 E3:1 G#3:.5 B3:.5 G#3:.5 B3:.5 A2:3';
+const REC2_MEL = 'D5:2 F5:1 A5:1 G5:2 F5:1 E5:1 D5:2 C5:1 D5:1 A4:4 F5:2 E5:1 D5:1 C5:2 D5:1 E5:1 F5:2 E5:1 C5:1 D5:4';
+const REC2_BASS = 'D3:4 G3:4 D3:4 A2:4 F3:4 C3:4 Bb2:4 D3:4';
+const REC3_MEL = 'C5:.5 C5:.5 E5:.5 G5:.5 A5:1 G5:1 F5:.5 F5:.5 A5:.5 C6:.5 B5:1 G5:1 E5:.5 E5:.5 G5:.5 B5:.5 C6:1 A5:1 G5:.5 F5:.5 E5:.5 D5:.5 C5:2 ' +
+  'E5:.5 E5:.5 G5:.5 C6:.5 D6:1 C6:1 D5:.5 D5:.5 F5:.5 A5:.5 G5:1 F5:1 E5:.5 G5:.5 C6:.5 E6:.5 D6:1 B5:1 C6:.5 B5:.5 A5:.5 G5:.5 C6:2 ' +
+  'C5:.5 C5:.5 E5:.5 G5:.5 A5:1 G5:1 F5:.5 F5:.5 A5:.5 C6:.5 B5:1 G5:1 E5:.5 G5:.5 C6:.5 E6:.5 D6:1 B5:1 C6:.5 B5:.5 A5:.5 G5:.5 C6:2';
+const REC3_BASS = 'C3:.5 E4:.5 G4:.5 E4:.5 F3:.5 A4:.5 C5:.5 A4:.5 C3:.5 E4:.5 G4:.5 E4:.5 G3:.5 B4:.5 D5:.5 B4:.5 ' +
+  'C3:.5 E4:.5 G4:.5 E4:.5 F3:.5 A4:.5 C5:.5 A4:.5 G3:.5 B4:.5 D5:.5 B4:.5 C3:.5 E4:.5 C4:1 ' +
+  'C3:.5 E4:.5 G4:.5 E4:.5 G3:.5 B4:.5 D5:.5 B4:.5 C3:.5 E4:.5 G4:.5 E4:.5 G3:.5 B4:.5 D5:.5 B4:.5 ' +
+  'F3:.5 A4:.5 C5:.5 A4:.5 G3:.5 B4:.5 D5:.5 B4:.5 C3:.5 E4:.5 G4:.5 E4:.5 G3:.5 B4:.5 C4:1 ' +
+  'C3:.5 E4:.5 G4:.5 E4:.5 F3:.5 A4:.5 C5:.5 A4:.5 C3:.5 E4:.5 G4:.5 E4:.5 G3:.5 B4:.5 D5:.5 B4:.5 ' +
+  'F3:.5 A4:.5 C5:.5 A4:.5 G3:.5 B4:.5 D5:.5 B4:.5 C3:.5 E4:.5 C4:1 C3:2';
+
 // ------------------------------------------------------------------ named sounds (synthesis recipes)
 // Times are absolute AudioContext times: `t` is the voice start, offsets are added to it.
 const DEFS: Record<string, Def> = {
@@ -352,6 +397,31 @@ const DEFS: Record<string, Def> = {
   // short generic gestures, used by the game through sfxhooks
   jump: { pri: 0, f: v => { const t = v.t; v.noise('bandpass', 700, 900, 1.0, t, 0.12, 0.3, 0.02); } },
   land: { pri: 1, f: v => { const t = v.t; v.osc('sine', 110, 60, t, 0.14, 0.45); v.noise('lowpass', 500, 260, 0.7, t, 0.12, 0.3, 0.003); } },
+  // ---- DESIGN §15 interactive objects ----
+  rec_1: { rev: 0.25, f: v => playRecord(v, REC1_MEL, REC1_BASS, 0.6) },
+  rec_2: { rev: 0.35, f: v => playRecord(v, REC2_MEL, REC2_BASS, 1.0) },
+  rec_3: { rev: 0.2, f: v => playRecord(v, REC3_MEL, REC3_BASS, 0.4545) },
+  rec_scratch: { f: v => { const t = v.t; v.noise('highpass', 2500, 1200, 0.7, t, 0.5, 0.25, 0.01, { buf: 'crackle' }); v.osc('sawtooth', 220, 80, t, 0.5, 0.07, 0.01, { filt: ['lowpass', 700, 1] }); } },
+  gen_pull: { f: v => { const t = v.t; v.noise('bandpass', 1400, 600, 1.2, t, 0.3, 0.3, 0.02); for (let i = 0; i < 6; i++) v.noise('highpass', 2800, 2800, 0.7, t + i * 0.045, 0.012, 0.18, 0.001); v.osc('sine', 120, 90, t + 0.28, 0.08, 0.2); } },
+  gen_cough: { pri: 1, f: v => { const t = v.t; for (let i = 0; i < 3; i++) { v.osc('sawtooth', 58 - i * 6, 40, t + i * 0.2, 0.18, 0.42, 0.004, { filt: ['lowpass', 260, 1] }); v.noise('lowpass', 500, 200, 0.8, t + i * 0.2, 0.15, 0.3, 0.003); } v.noise('bandpass', 900, 300, 1, t + 0.7, 0.35, 0.12, 0.05); } },
+  gen_start: { pri: 2, f: v => { const t = v.t; for (let i = 0; i < 5; i++) { v.osc('sawtooth', 50 + i * 6, 44 + i * 6, t + i * 0.16, 0.14, 0.4, 0.004, { filt: ['lowpass', 300, 1] }); v.noise('lowpass', 600, 250, 0.8, t + i * 0.16, 0.1, 0.3, 0.002); } v.osc('sawtooth', 70, 78, t + 0.8, 1.6, 0.35, 0.1, { am: [19, 0.4], filt: ['lowpass', 320, 1] }); v.noise('lowpass', 700, 400, 0.7, t + 0.8, 1.6, 0.18, 0.15, { am: [19, 0.3] }); } },
+  gen_run: { pri: 1, f: v => { const t = v.t; v.osc('sawtooth', 76, 76, t, 2.6, 0.3, 0.2, { am: [20, 0.45], filt: ['lowpass', 330, 1.2] }); v.osc('sine', 38, 38, t, 2.6, 0.25, 0.2, { am: [10, 0.4] }); v.noise('lowpass', 800, 500, 0.7, t, 2.6, 0.12, 0.3, { am: [20, 0.3] }); v.noise('bandpass', 2200, 2200, 1.2, t, 2.6, 0.04, 0.3, { am: [20, 0.5] }); } },
+  gen_stop: { f: v => { const t = v.t; v.osc('sawtooth', 76, 24, t, 1.1, 0.3, 0.01, { filt: ['lowpass', 300, 1] }); v.noise('lowpass', 500, 120, 0.7, t, 0.9, 0.15, 0.02); v.osc('sine', 40, 20, t + 0.9, 0.2, 0.25); } },
+  gen_stall: { pri: 2, f: v => { const t = v.t; for (let i = 0; i < 4; i++) v.osc('sawtooth', 70 - i * 9, 40 - i * 4, t + i * 0.22, 0.2, 0.4, 0.004, { filt: ['lowpass', 280, 1] }); v.noise('bandpass', 700, 200, 1, t, 0.9, 0.2, 0.05); v.osc('sine', 38, 18, t + 0.9, 0.5, 0.3); } },
+  radio_click: { f: v => { const t = v.t; v.osc('square', 900, 600, t, 0.03, 0.15, 0.001, { filt: ['lowpass', 2500, 1] }); v.noise('bandpass', 2000, 2000, 1, t + 0.04, 0.5, 0.06, 0.02); v.osc('sine', 120, 120, t, 0.4, 0.04, 0.05); } },
+  radio_tune: { pri: 0, f: v => { const t = v.t, f = rnd(700, 1900); v.osc('sine', f, f * rnd(0.6, 1.5), t, 0.18, 0.06, 0.01); v.noise('bandpass', 1800, 2600, 1.5, t, 0.15, 0.06, 0.01); } },
+  bell_ring: { pri: 2, rev: 0.7, f: v => { const t = v.t; for (const [r, pk] of [[1, 0.34], [2.01, 0.2], [2.76, 0.16], [4.07, 0.08], [5.4, 0.05]] as [number, number][]) v.osc('sine', 392 * r, 392 * r * 0.998, t, 5.2 / (1 + r * 0.25), pk, 0.002); v.noise('highpass', 3000, 3000, 0.7, t, 0.03, 0.4, 0.001); } },
+  shutter: { f: v => { const t = v.t; v.noise('bandpass', 700, 500, 1.4, t, 0.1, 0.3, 0.003); v.osc('sine', 180, 110, t, 0.1, 0.35, 0.002); v.osc('sine', 150, 90, t + 0.12, 0.08, 0.25, 0.002); } },
+  ladder: { f: v => { const t = v.t; for (let i = 0; i < 4; i++) { v.osc('sine', 260 + i * 8, 200, t + i * 0.09, 0.07, 0.2, 0.002); v.noise('bandpass', 1100, 800, 2, t + i * 0.09, 0.05, 0.15, 0.002); } } },
+  damper: { f: v => { const t = v.t; v.osc('square', 340, 260, t, 0.04, 0.12, 0.001, { filt: ['bandpass', 800, 3] }); v.noise('bandpass', 1500, 900, 2, t, 0.06, 0.15, 0.002); v.osc('sine', 700, 600, t + 0.07, 0.08, 0.08, 0.002); } },
+  medkit: { f: v => { const t = v.t; v.noise('bandpass', 2500, 4000, 1, t, 0.25, 0.15, 0.03); v.osc('sine', 1800, 1800, t + 0.22, 0.05, 0.08, 0.002); v.noise('highpass', 3500, 3500, 0.7, t + 0.3, 0.1, 0.08, 0.01); } },
+  kettle_whistle: { pri: 1, f: v => { const t = v.t; v.osc('sine', 1900, 2300, t, 1.0, 0.12, 0.15, { vib: [6, 25] }); v.noise('bandpass', 2200, 2400, 6, t, 1.0, 0.05, 0.15); } },
+  pour: { f: v => { const t = v.t; v.noise('bandpass', 700, 1700, 1.1, t, 0.6, 0.2, 0.06); v.osc('sine', 300, 600, t, 0.55, 0.05, 0.06); } },
+  sonde_release: { pri: 1, f: v => { const t = v.t; v.noise('bandpass', 400, 2400, 0.9, t, 1.2, 0.3, 0.1); v.osc('sine', 330, 880, t, 1.0, 0.1, 0.1); v.noise('highpass', 3000, 3000, 0.7, t + 0.05, 0.04, 0.3, 0.001); } },
+  cart_roll: { pri: 0, gap: 0.2, f: v => { const t = v.t; v.noise('lowpass', 500, 380, 1.2, t, 0.5, 0.2, 0.05, { am: [16, 0.5] }); v.osc('sine', 62, 58, t, 0.5, 0.12, 0.05); v.noise('highpass', 3000, 3000, 0.7, t, 0.5, 0.05, 0.05, { buf: 'crackle' }); } },
+  cart_bump: { f: v => { const t = v.t; v.osc('sine', 150, 90, t, 0.2, 0.4); v.noise('bandpass', 1800, 900, 1.5, t, 0.1, 0.3, 0.002); bell(v, 1500, t, 0.08, 0.4); } },
+  cart_crash: { pri: 2, rev: 0.5, f: v => { const t = v.t; v.noise('lowpass', 900, 200, 0.8, t, 1.6, 0.55, 0.004); v.osc('sine', 80, 36, t, 0.7, 0.5, 0.004); for (let i = 0; i < 7; i++) { v.noise('bandpass', 2200, 800, 1.5, t + 0.05 + i * rnd(0.08, 0.2), 0.12, 0.25, 0.002); bell(v, rnd(700, 2200), t + 0.1 + i * 0.1, 0.05, 0.3); } } },
+  roof_creak: { pri: 1, rev: 0.4, f: v => { const t = v.t; v.noise('bandpass', 520, 220, 12, t, 1.6, 0.1, 0.4); v.osc('sine', 120, 90, t, 1.4, 0.12, 0.4, { vib: [3, 20] }); v.noise('lowpass', 200, 120, 0.8, t + 0.8, 0.6, 0.15, 0.1); } },
   // internal footstep / drip / creak voices (not public names)
   _step_snow: { pri: 0, gap: 0.09, f: (v, c) => {
     const t = v.t, r = rnd(0.92, 1.08);
