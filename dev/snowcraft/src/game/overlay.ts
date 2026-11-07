@@ -46,7 +46,7 @@ function cue(text: string, cls = '', ms = 3200) {
   if (!cues) return;
   // identical cue already visible: refresh it instead of stacking
   for (const c of Array.from(cues.children) as HTMLElement[]) if (c.dataset.k === text) { clearTimeout(Number(c.dataset.tm)); c.dataset.tm = String(setTimeout(() => c.remove(), ms)); return; }
-  while (cues.children.length >= 3) cues.firstElementChild?.remove();
+  while (cues.children.length >= 3) { const v = (Array.from(cues.children) as HTMLElement[]).find(c => c !== windCue); if (!v) break; v.remove(); }   // never evict the persistent wind warning
   const d = document.createElement('div'); d.className = 'cue ' + cls; d.textContent = text; d.dataset.k = text;
   d.dataset.tm = String(setTimeout(() => d.remove(), ms)); cues.appendChild(d);
 }

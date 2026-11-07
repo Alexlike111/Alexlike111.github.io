@@ -42,11 +42,11 @@ const S = strings('player', {
   nothing: 'Нечего есть и пить',
   respawn: 'Ты очнулся на станции…',
   causeCold: 'замёрз', causeFrost: 'обморожение и истощение', causeDrown: 'утонул в полынье', causeBear: 'медведь',
-  causeCo: 'угарный газ', causeCollapse: 'обвал в шахте', causeMethane: 'взрыв метана', causeFall: 'упал', causeHunger: 'голод', causeThirst: 'жажда', causeOther: 'погиб',
+  causeCo: 'угарный газ', causeCollapse: 'обвал в шахте', causeFall: 'упал', causeHunger: 'голод', causeThirst: 'жажда', causeOther: 'погиб',
 });
 export const CAUSES = {
   cold: () => S.causeCold, frost: () => S.causeFrost, drown: () => S.causeDrown, bear: () => S.causeBear, co: () => S.causeCo,
-  collapse: () => S.causeCollapse, methane: () => S.causeMethane, fall: () => S.causeFall, hunger: () => S.causeHunger, thirst: () => S.causeThirst,
+  collapse: () => S.causeCollapse, fall: () => S.causeFall, hunger: () => S.causeHunger, thirst: () => S.causeThirst,
 } as const;
 export type CauseKey = keyof typeof CAUSES;
 

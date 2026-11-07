@@ -19,7 +19,7 @@ export const NOTES: NoteDef[] = [
   { id: 'n2', who: 'doctor', teaches: ['torch'] },
   { id: 'n3', who: 'doctor', teaches: ['drying'] },
   { id: 'n4', who: 'doctor', teaches: ['hides'] },
-  { id: 'n5', who: 'doctor', teaches: ['methane'] },
+  { id: 'n5', who: 'doctor', teaches: ['timber'] },
   { id: 'n6', who: 'doctor', teaches: ['snares', 'cache'] },
   { id: 'n7', who: 'doctor', teaches: ['sewing'] },
   { id: 'n8', who: 'doctor', teaches: ['fishing', 'butchery'] },
@@ -41,7 +41,7 @@ const N = strings('note', {
   n2_t: 'Лист 3 · Шахта', n2_x: 'Октябрь. Шахтёры ушли, оставив крепь, вагонетки и мешки с углём. В штольне темно, как в мешке; выручает смолёный факел: плавник, капля жира и обрывок парусины. У портала нашли кирку — не бросайте её. Впереди завал, и камень там руками не взять.',
   n3_t: 'Лист 4 · Хижина шахтёров', n3_x: 'В хижине тепло от старой печки. Сушу рукавицы на жердях над огнём: мокрое на морозе страшнее самого мороза. Две жерди да верёвка — вот и вся сушилка; у огня вещи сохнут вдвое быстрее. Мокрый мех на теле стынет, как жесть.',
   n4_t: 'Лист 5 · Хижина шахтёров', n4_x: 'Лежанка из шкур поверх ягеля греет снизу: лёд из-под спины — главный вор тепла. Пока нет двери, вход завешиваем пологом из тюленьей шкуры: на сильном морозе он держит половину ветра. Сверху — снег, и сквозняка как не бывало.',
-  n5_t: 'Лист 6 · Забой за переборкой', n5_x: 'За досками забоя воздух сладковатый, голова идёт кругом. Шахтёр называл его «болотным газом»: над ним лампа горит голубым, а потом хлопок — и нет ни лампы, ни забоя. Огня за переборку не носить. И не выбивать стойки: над нами не камень, а щебень на досках.',
+  n5_t: 'Лист 6 · Стойки', n5_x: 'Хижина держится на двух брёвнах-стойках: слева и справа. Зимой они мёрзлые, как камень, и скрипят — значит, работают. Над нами не скала, а щебень на досках. Дрова ищи на берегу, а стойки не трогай.',
   n6_t: 'Лист 7 · Хижина шахтёров', n6_x: 'Песец за ночь вынес окорок из открытого мешка и ушёл с таким спокойным видом, будто это его дом. Теперь прячем запасы под камни: шесть валунов — и лисе не взять. Для куропаток ставим силки: верёвка да сучок, у ягеля на тундре.',
   n7_t: 'Лист 8 · Китовые кости', n7_x: 'У скелета кита каюр шьёт: рукавицы из шкуры, камики из двух шкур, нитка — жила. Надевать только сухое: хитрость в том, чтобы рука не потела. Работа тонкая, пальцы на морозе теряешь за минуты — шей у огня или в доме.',
   n8_t: 'Лист 9 · Пляж', n8_x: 'Ловим рыбу у трещины. Леска — костяной крючок да жила; рыба клюёт, когда не шумишь. Жилы берём из тюленя: его разделывают быстро, пока не остыл, — мясо, жир, шкура, жилы. Из жил выходит нитка и леска, пропадает только то, чего не заметили.',
@@ -76,11 +76,11 @@ export const TECHS: Tech[] = [
   { id: 'parka', kind: 'recipe' }, { id: 'drying', kind: 'recipe' }, { id: 'hides', kind: 'recipe' }, { id: 'cache', kind: 'recipe' },
   { id: 'sled', kind: 'recipe' }, { id: 'mast', kind: 'recipe' },
   { id: 'vault', kind: 'tip' }, { id: 'dry_mittens', kind: 'tip' }, { id: 'vent', kind: 'tip' }, { id: 'snow_roll', kind: 'tip' },
-  { id: 'methane', kind: 'tip' }, { id: 'brazier', kind: 'tip' },
+  { id: 'timber', kind: 'tip' }, { id: 'brazier', kind: 'tip' },
 ];
 export const techDef = (id: string) => TECHS.find(t => t.id === id);
 /** Techniques that also (or only) come with experience: the self-test triggers each of them. */
-export const EXPERIENCE = ['butchery', 'snow_roll', 'dry_mittens', 'vent', 'vault', 'cache', 'brazier', 'methane'];
+export const EXPERIENCE = ['butchery', 'snow_roll', 'dry_mittens', 'vent', 'vault', 'cache', 'brazier', 'timber'];
 
 const T = strings('tech', {
   campfire_n: 'Костёр', campfire_d: 'Два полена и ягель на растопку. На ветру пламя слабое — прикрывай его снегом или стеной.', campfire_h: '',
@@ -106,11 +106,11 @@ const T = strings('tech', {
   dry_mittens_n: 'Сухие варежки', dry_mittens_d: 'Руки белеют первыми. Меняй мокрые рукавицы на сухие, сушись у огня, в пургу прячь руки за пазуху.', dry_mittens_h: '',
   vent_n: 'Отдушина', vent_d: 'Голова гудит, клонит в сон — это угар. В закрытом снежном доме с огнём пробей дырку в потолке; потолок тоньше — тяга лучше.', vent_h: '',
   snow_roll_n: 'Катайся в сухом снегу', snow_roll_d: 'Провалился — не отряхивайся. Выскочи на сухой снег и катайся: порошок вытягивает воду из меха. Потом к огню.', snow_roll_h: '',
-  methane_n: 'Рудничный газ', methane_d: 'Сладковатый воздух и зелёное марево в забое. Огонь рядом — взрыв. Не выбивай стойки: над головой щебень на досках.', methane_h: '',
+  timber_n: 'Стойки кровли', timber_d: 'Мёрзлая кровля шахты держится на двух стойках. Скрип — предупреждение: одна стойка выбита, и кровля уже просела. Вторую не трогай, под щебнем не стой.', timber_h: '',
   brazier_n: 'Бочка-жаровня', brazier_d: 'Пустая бочка с выбитым дном и плавник внутри греют, как печь, но дымят.', brazier_h: '',
   howStart: 'знал с самого начала', howNote: 'из записки «{t}»', howExp: 'на опыте',
   expSeal: 'после первого тюленя', expFrost: 'после первого обморожения', expCO: 'после первой головной боли от угара', expSplash: 'после падения в воду',
-  expVault: 'после трёх рядов блоков', expMethane: 'учуял газ в забое', expBrazier: 'сделал жаровню из бочки', expFox: 'после визита лисы', expOther: 'в деле',
+  expVault: 'после трёх рядов блоков', expTimber: 'услышал, как просела кровля', expBrazier: 'сделал жаровню из бочки', expFox: 'после визита лисы', expOther: 'в деле',
   learned: 'Новый приём: {name}', noteRead: 'Прочитано: {title}',
   unknownTech: 'Ты пока не знаешь, как это делается',
 });
@@ -177,7 +177,7 @@ export function howLearned(id: string): string {
   const l = lore.known.get(id); if (!l) return '';
   if (l.how === 'start') return T.howStart;
   if (l.how === 'note') return fmt(T.howNote, { t: noteTitle(l.ref) });
-  const exp = ({ butchery: T.expSeal, dry_mittens: T.expFrost, vent: T.expCO, snow_roll: T.expSplash, vault: T.expVault, methane: T.expMethane, brazier: T.expBrazier, cache: T.expFox } as Record<string, string>)[id];
+  const exp = ({ butchery: T.expSeal, dry_mittens: T.expFrost, vent: T.expCO, snow_roll: T.expSplash, vault: T.expVault, timber: T.expTimber, brazier: T.expBrazier, cache: T.expFox } as Record<string, string>)[id];
   return exp ?? T.howExp;
 }
 
@@ -253,7 +253,6 @@ const F = strings('fact', {
   CANVAS_h: 'Парусина', CANVAS_x: 'Парусина — трут для огня, основа факела и верёвки. Ветер она режет вполсилы.',
   LICHEN_h: 'Ягель', LICHEN_x: 'Олений мох: сухой, горит сразу. Лучший трут и подстилка под шкуры.',
   GLASS_h: 'Стекло', GLASS_x: 'Стекло почти не держит тепла, но пропускает свет.',
-  METHANE_h: 'Рудничный газ', METHANE_x: 'Сладковатый, лёгкий, взрывоопасный: пламя рядом — и он вспыхивает. В закрытом забое им нельзя дышать.',
   snowLoose_h: 'Рыхлый снег: нож бессилен', snowLoose_x: 'Ниже 220 кг/м³ блок рассыпается в руках. Ищи наст в затишье, под сугробом или у гряды.',
   snowGood_h: 'Хороший наст', snowGood_x: '250–380 кг/м³: режется ножом, ложится ровно и держит свод. Самый тёплый материал на мысу.',
   snowDense_h: 'Плотный наст', snowDense_x: 'Выше 420 кг/м³: блок выходит тяжёлым, колким и хуже греет. Для стены годится, но таскать его трудно.',
@@ -261,7 +260,7 @@ const F = strings('fact', {
   none: 'Пока пусто. Ходи по миру и разглядывай снег, лёд и камень: всё, на что подолгу смотришь, записывается сюда.',
 });
 const fstr = (k: string) => (F as unknown as Record<string, string>)[k] ?? '';
-const FACT_MATS = ['SNOW', 'PACKED', 'SNOWBLOCK', 'ICE', 'WATER', 'STONE', 'HARDROCK', 'DIRT', 'GRAVEL', 'LOG', 'WOOD', 'PLANK', 'WHALEBONE', 'COAL', 'SOAPSTONE', 'METAL', 'CANVAS', 'LICHEN', 'GLASS', 'METHANE'];
+const FACT_MATS = ['SNOW', 'PACKED', 'SNOWBLOCK', 'ICE', 'WATER', 'STONE', 'HARDROCK', 'DIRT', 'GRAVEL', 'LOG', 'WOOD', 'PLANK', 'WHALEBONE', 'COAL', 'SOAPSTONE', 'METAL', 'CANVAS', 'LICHEN', 'GLASS'];
 export const FACTS: Fact[] = [
   ...FACT_MATS.map(k => ({ id: 'mat:' + k, key: k, mat: k })),
   { id: 'snow:loose', key: 'snowLoose' }, { id: 'snow:good', key: 'snowGood' }, { id: 'snow:dense', key: 'snowDense' }, { id: 'ice:thin', key: 'iceThin' },

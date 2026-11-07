@@ -2,7 +2,7 @@
 // so time-warp (sleep ×20) and dev jumps (setDay) stay consistent. Writes G.time/day/daylight/sunElev/noonElev/moon/aurora/
 // ambientT/wind/storm/snowfall/visibility/forecast. Emits 'day', 'storm_start', 'storm_end', 'ending'.
 import { G, toast } from './state';
-import { emit } from './bus';
+import { emit, on } from './bus';
 import { strings, fmt } from '../content/i18n';
 import { noise1 } from '../engine/grid';
 import { count } from './inventory';
@@ -140,6 +140,9 @@ export function initWeather(s = 1) {
   G.time = START_TIME; G.timeScale = 1; endingFired = false; hinted = new Set(); baromReadAt = -1e9; active = -1;
   applyClock(); syncFlags(); lastDay = G.day; endingFired = false;
 }
+
+/** Any ending (the icebreaker rescue included) closes the run: the dawn must not fire a second one. */
+on('ending', () => { endingFired = true; });
 
 /** Dev/test: jump to day n (1-based) at the given hour; storm/ending flags are re-synced silently. */
 export function setDay(n: number, hour = 10) {

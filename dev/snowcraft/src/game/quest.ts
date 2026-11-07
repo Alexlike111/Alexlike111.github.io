@@ -206,6 +206,6 @@ export function stepQuest(dt: number) {
   const c = body.stats; void c;
   if (G.player.core < runStats.coldest) runStats.coldest = Math.round(G.player.core * 10) / 10;
 }
-on('ending', (d: { kind: 'dawn' | 'icebreaker' }) => { if (!questState.ended) questState.ended = d.kind; prog.ending = d.kind; });
+on('ending', (d: { kind: 'dawn' | 'icebreaker' }) => { if (questState.ended) return; questState.ended = d.kind; prog.ending = d.kind; });
 export const endingTitle = (k: 'dawn' | 'icebreaker') => (k === 'dawn' ? S.dawnT : S.iceT);
 void worldInfo;

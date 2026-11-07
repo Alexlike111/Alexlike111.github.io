@@ -13,7 +13,6 @@ import { initHeat, stepHeat, addHeat } from './engine/heat';
 import { initStructure, stepStructure } from './engine/structure';
 import { stepBodies, clearBodies, drawBodies, clusterHitsBox } from './engine/bodies';
 import { stepParticles, clearParticles, drawParticles } from './engine/particles';
-import { onBlast } from './engine/explode';
 import { input, initInput, poll, endFrame, simKey, simMouse, resetInput } from './engine/input';
 import { initTouch } from './ui/touch';
 import { initSenses, toggleSenses } from './engine/senses';
@@ -29,6 +28,7 @@ import { stepQuest, takeLoaded } from './game/quest';
 import { initOverlay, updateOverlay } from './game/overlay';
 import { resetRun } from './game/runreset';
 import { seedStarterDrift } from './game/starter';
+import { purgeMethane } from './game/mine';
 import { applySave, applyQuestAgain, type SaveData } from './game/save';
 import { initWeather, stepWeather, setDay, setClock, wx } from './game/weather';
 import { initPlayer, stepPlayer, applyDifficulty, damage, die, bodyHeat, body, setRespawn } from './game/player';
@@ -93,6 +93,7 @@ function newGame(o: StartOpts = {}) {
   const t0 = performance.now();
   G.fixtures.length = 0; G.drops.length = 0; G.animals.length = 0; G.toasts.length = 0; G.lights.length = 0;
   const spawn = generateWorld(seed);
+  purgeMethane();
   seedStarterDrift(spawn.spawnX);
   genMs = performance.now() - t0;
   wx.override = null; G.storm = 0; G.timeScale = 1; G.paused = false;
@@ -114,6 +115,7 @@ function newGame(o: StartOpts = {}) {
   ready = true; shotFrames = 0;
   emit('new_game', { seed });
   if (o.save) applyQuestAgain(o.save);                 // quest.ts resets on 'new_game': lay the saved objective progress back
+  takeLoaded();                                         // the save handoff is single-use: never leak into the next New Game
   return { spawnX: sx, spawnY: sy };
 }
 
@@ -224,7 +226,7 @@ function stepSled(dt: number) {
   s.y = y;
 }
 
-let last = performance.now(), fAcc = 0, fN = 0, fMin = 1e9, ladderT = 0, ladderBad = 0;
+let last = performance.now(), fAcc = 0, fN = 0, fMax = 0, ladderT = 0, ladderBad = 0;
 function advance(dt: number, realDt: number) {
   acc += dt;
   let n = 0;
@@ -242,7 +244,7 @@ function frame(now: number) {
   const rawDt = (now - last) / 1000; last = now;
   const dt = Math.min(0.1, rawDt);
   poll();
-  if (input.freeCamPressed) toggleFreeCam();
+  if (input.freeCamPressed) { input.freeCamPressed = false; toggleFreeCam(); }
   if (input.sensesPressed) { input.sensesPressed = false; if (ready && !document.body.classList.contains('title-open')) toggleSenses(); }
   const ticks = advance(dt, dt);
   updateOverlay(dt);
@@ -259,8 +261,8 @@ function frame(now: number) {
     if (++shotFrames >= 3) shotReady = true;
   }
   // fps bookkeeping + quality ladder (SPEC §8)
-  fAcc += rawDt; fN++; if (rawDt < fMin) fMin = rawDt;
-  if (fAcc >= 1) { fpsAvg = fN / fAcc; fpsMin = 1 / fMin; fAcc = 0; fN = 0; fMin = 1e9; }
+  fAcc += rawDt; fN++; if (rawDt > fMax) fMax = rawDt;       // slowest frame -> the real minimum fps
+  if (fAcc >= 1) { fpsAvg = fN / fAcc; fpsMin = 1 / Math.max(fMax, 1e-3); fAcc = 0; fN = 0; fMax = 0; }
   if (ladder && ready) {
     ladderT += rawDt;
     if (rawDt > 0.02) ladderBad += rawDt;
@@ -276,11 +278,6 @@ function toggleFreeCam() {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // deaths from the world
-onBlast((x, y, r, power) => {
-  const p = G.player; if (!p || !p.alive) return;
-  const d = Math.hypot(p.x - x, p.y - 10 - y);
-  if (d < r * 1.3) { damage(Math.min(100, 70 * power * (1 - d / (r * 1.3)) + 10), 'methane'); addShake(5); }
-});
 on('hurt', () => { if (navigator.vibrate) { try { navigator.vibrate(30); } catch { /* ignore */ } } });
 on('died', () => { if (navigator.vibrate) { try { navigator.vibrate([80, 40, 120]); } catch { /* ignore */ } } });
 

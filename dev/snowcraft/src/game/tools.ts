@@ -32,7 +32,7 @@ const S = strings('tools', {
   looseSnow: 'рыхлый снег: бери лопатой', packed: 'наст', block: 'снежный блок',
   density: '{d} кг/м³ · {c}', iceThick: 'лёд {cm} см',
   shovelFull: 'лопата полна: вывали снег',
-  scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Вырезать блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Использовать',
+  scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Вырезать блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Использовать', feedLight: 'E: подбросить топливо / зажечь (спички)', feed: 'E: подбросить топливо',
   noSupport: 'нет опоры', span: 'слишком длинный пролёт', ok: 'держится',
   occupied: 'занято', inYou: 'мешает тебе',
   gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…',
@@ -307,7 +307,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
     T.tx = pl.tx; T.ty = pl.ty; T.tw = pl.tw; T.th = pl.th; T.ok = pl.ok; T.reason = pl.reason; T.margin = 1; T.verb = S.place;
     return finishTarget(T);
   }
-  if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
+  if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = FIXTURE_DEFS[T.fixture.kind]?.fuel && T.fixture.kind !== 'torch' ? (T.fixture.lit ? S.feed : S.feedLight) : S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
 
   if ((tk === 'knife' || tk === 'saw') && m !== 0 && (m === MAT.PACKED || m === MAT.SNOWBLOCK)) { evalCut(T, tx, ty); return finishTarget(T); }
   if (id === 'shovel' && held.load > 0 && m === 0) {
@@ -785,7 +785,7 @@ export function stepDrops(dt: number) {
       else if (dist < 20) { const k = (20 - dist) * 14; box.vx += (dx / dist) * k * dt * 3; box.vy += (dy / dist) * k * dt * 3 - 300 * dt * 0.7; }
     }
     if (picked) {
-      if (d.item === 'backpack') { if (openBackpack(d.id)) { arr.splice(i, 1); toast(S.backpack, 'good'); emit('respawn_pack', {}); continue; } else continue; }
+      if (d.item === 'backpack') { if (openBackpack(d.id)) { arr.splice(i, 1); toast(S.backpack, 'good'); emit('respawn_pack', {}); continue; } else { if (!backpacks.has(d.id)) { arr.splice(i, 1); } continue; } }
       const dur = dropDur.get(d.id);
       const left = add(d.item, d.n, dur);
       if (left < d.n) { emit('picked', { item: d.item, n: d.n - left }); if (left === 0) { toast(fmt(S.picked, { name: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : '') }), 'info'); } }

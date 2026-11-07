@@ -347,9 +347,9 @@ export function interact(f: Fixture): boolean {
     const cls = d.fuel;
     if (k === 'torch') { if (!f.lit) return tryLight(f); return true; }
     // selected fuel -> feed; unlit with fuel -> light; unlit & empty -> feed then light; nothing to do -> pick up
-    if (sel && fuelMinutes(sel.id, cls) > 0) { const u = addFuel(f, sel.id); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); return true; } }
+    if (sel && fuelMinutes(sel.id, cls) > 0) { const u = addFuel(f, sel.id); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); if (!f.lit && (count('matches') > 0 || count('flint') > 0 || sourceNear(f))) tryLight(f); return true; } }
     if (!f.lit && (f.fuel ?? 0) > 0) return tryLight(f);
-    if ((f.fuel ?? 0) < d.cap * 0.5) { const u = addFuel(f); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); return true; } }
+    if ((f.fuel ?? 0) < d.cap * 0.5) { const u = addFuel(f); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); if (!f.lit && (count('matches') > 0 || count('flint') > 0 || sourceNear(f))) tryLight(f); return true; } }
     if (!f.lit && d.portable) return pickupFixture(f);
     toast(fmt(S.fuelLeft, { h: Math.round(((f.fuel ?? 0) / 60) * 10) / 10 }), 'info');
     return true;
@@ -371,7 +371,7 @@ export function interact(f: Fixture): boolean {
         const s = items[i];
         const left = add(s.id, s.n, s.dur);
         if (left < s.n) names.push(`${itemName(s.id)}${s.n - left > 1 ? ' ×' + (s.n - left) : ''}`);
-        if (/^note/.test(s.id)) emit('note_found', { id: s.id });
+        if (/^note/.test(s.id) && left === 0) emit('note_found', { id: s.id });
         if (left <= 0) items.splice(i, 1); else s.n = left;
       }
       if (names.length) toast(fmt(S.took, { list: names.join(', ') }), 'good');

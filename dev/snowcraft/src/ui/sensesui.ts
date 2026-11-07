@@ -44,7 +44,8 @@ function build(stack: HTMLElement | null, host: HTMLElement) {
   const row = document.createElement('div'); row.className = 'sn-row';
   for (const l of LAYERS) row.appendChild(chips[l]);
   legend.appendChild(row);
-  keyEl = document.createElement('div'); keyEl.className = 'sn-key'; keyEl.innerHTML = snowSub + `<span class="sep"></span>${S.cold} → ${S.warm}`; legend.appendChild(keyEl);   // phone: the ramp words live here, per-chip sub-lines are hidden
+  keyEl = document.createElement('div'); keyEl.className = 'sn-key'; keyEl.innerHTML = `<div><span data-l="snow">${snowSub}</span><span class="sep"></span><span data-l="heat">${S.cold} → ${S.warm}</span></div>` +
+    `<div><span data-l="wind">${S.wind}: ${S.windSub}</span><span class="sep"></span><span data-l="scent">${S.scent}: ${S.scentSub}</span></div>`; legend.appendChild(keyEl);   // phone: the ramp words live here, per-chip sub-lines are hidden
   const toasts = stack?.lastElementChild ?? null;                       // legend goes under the objective + shelter chip, above the toasts
   if (stack) stack.insertBefore(legend, toasts); else host.appendChild(legend);
   const hud = (host.querySelector('#hud') as HTMLElement | null) ?? host;
@@ -55,7 +56,10 @@ function build(stack: HTMLElement | null, host: HTMLElement) {
 function sync() {
   document.body.classList.toggle('senses-on', senses.on);
   for (const l of LAYERS) chips[l]?.classList.toggle('off', !senses.layers[l]);
-  if (keyEl) keyEl.classList.toggle('nosnow', !senses.layers.snow);
+  if (keyEl) for (const line of Array.from(keyEl.children) as HTMLElement[]) {      // phone key: one span per layer, a separator only between two visible ones
+    let vis = 0; for (const sp of Array.from(line.querySelectorAll('span[data-l]')) as HTMLElement[]) { const on = senses.layers[sp.dataset.l as SensesLayer]; sp.style.display = on ? '' : 'none'; if (on) vis++; }
+    (line.querySelector('.sep') as HTMLElement).style.display = vis > 1 ? 'inline-block' : 'none'; line.style.display = vis ? '' : 'none';
+  }
   document.querySelectorAll('#tb-senses').forEach(e => e.classList.toggle('act', senses.on));
 }
 
@@ -78,6 +82,12 @@ function labels() {
     const [sx, sy] = worldToScreen(p.x, p.y + 22);                  // under the feet: the top of the screen belongs to the objective flow and the toasts
     me.style.display = 'block'; me.style.left = Math.round(sx) + 'px'; me.style.top = Math.round(sy) + 'px';
     me.style.borderColor = css(heatRamp(sh?.closed ? sh.temp : T));
+    // never over the held-item name or the belt: slide the tag above them when they would collide
+    const mr = me.getBoundingClientRect();
+    for (const sel of ['#hud .bname', '#hud .belt']) {
+      const o = document.querySelector(sel) as HTMLElement | null; if (!o || o.style.display === 'none') continue;
+      const r = o.getBoundingClientRect(); if (r.width && mr.left < r.right + 4 && mr.right > r.left - 4 && mr.top < r.bottom + 4 && mr.bottom > r.top - 4) { me.style.top = Math.round(r.top - mr.height - 6 - (sel === '#hud .belt' ? 24 : 0)) + 'px'; break; }
+    }
   } else me.style.display = 'none';
   // next to the cursor (desktop)
   if (input.hasAim && input.aimMode === 'mouse' && !G.mobile && (senses.layers.heat || senses.layers.wind)) {

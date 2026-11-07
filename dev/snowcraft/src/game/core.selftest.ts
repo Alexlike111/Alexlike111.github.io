@@ -523,7 +523,7 @@ registerTest('body', 'ветер: охлаждение по Environment Canada',
 registerTest('body', 'смерть: именованные причины, рюкзак, респаун по сложности, хардкор', async () => {
   await sandbox(() => {
     const p = scene();
-    const causes: [string, string][] = [['cold', 'замёрз'], ['frost', 'обморожение и истощение'], ['drown', 'утонул в полынье'], ['bear', 'медведь'], ['co', 'угарный газ'], ['collapse', 'обвал в шахте'], ['methane', 'взрыв метана'], ['fall', 'упал'], ['hunger', 'голод'], ['thirst', 'жажда']];
+    const causes: [string, string][] = [['cold', 'замёрз'], ['frost', 'обморожение и истощение'], ['drown', 'утонул в полынье'], ['bear', 'медведь'], ['co', 'угарный газ'], ['collapse', 'обвал в шахте'], ['fall', 'упал'], ['hunger', 'голод'], ['thirst', 'жажда']];
     for (const [k, txt] of causes) {
       G.diff.hardcore = false; if (!p.alive) respawn();
       p.hp = 5; p.hurtT = 0; damage(500, k);

@@ -198,17 +198,6 @@ add('взрыв: кратер по твёрдости, обломки возвр
   t.metric('destroyed', r.destroyed);
 }));
 
-add('метан + огонь: цепной взрыв', (t) => scratch(() => {
-  setup(800, 300, 1000, 470, -10);
-  fill(830, 380, 960, 450, MAT.STONE); fill(850, 400, 940, 430, MAT.AIR); fill(850, 400, 940, 430, MAT.METHANE);
-  let booms = 0; const off = onBlast(() => { booms++; });
-  put(880, 415, MAT.FIRE, 0, 30);
-  run(240);
-  off();
-  t.expect(booms >= 1, 'взрыва не было');
-  t.expect(count(MAT.METHANE, 830, 380, 960, 450) < 30, 'газ остался');
-}));
-
 add('лава + вода → базальт и пар; лава поджигает доски', (t) => scratch(() => {
   setup(800, 300, 1000, 470, -10);
   fill(800, 440, 1000, 470, MAT.STONE); fill(850, 436, 870, 439, MAT.LAVA); fill(851, 430, 869, 435, MAT.WATER);

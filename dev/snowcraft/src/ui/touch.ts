@@ -37,12 +37,12 @@ const CSS = `
 #touch #tb-act{width:92px;height:92px;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));font-size:15px;border-color:rgba(255,196,110,.8);background:rgba(60,34,12,.55)}
 #touch #tb-jump{width:68px;height:68px;right:calc(124px + env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px))}
 #touch #tb-take{width:60px;height:60px;right:calc(30px + env(safe-area-inset-right,0px));bottom:calc(120px + env(safe-area-inset-bottom,0px))}
-#touch #tb-belt{width:58px;height:58px;right:calc(112px + env(safe-area-inset-right,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px))}
-#touch #tb-senses{width:58px;height:58px;right:calc(104px + env(safe-area-inset-right,0px));bottom:calc(176px + env(safe-area-inset-bottom,0px));font-size:13px}
+#touch #tb-belt{width:58px;height:58px;right:calc(126px + env(safe-area-inset-right,0px));bottom:calc(96px + env(safe-area-inset-bottom,0px))}
+#touch #tb-senses{width:58px;height:58px;right:calc(112px + env(safe-area-inset-right,0px));bottom:calc(184px + env(safe-area-inset-bottom,0px));font-size:13px}
 #touch #tb-senses.act{background:rgba(40,120,96,.62);border-color:#8cf5cf;color:#eafff7}
-#touch #tb-bag{width:58px;height:50px;right:calc(144px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-jour{width:58px;height:50px;right:calc(78px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
-#touch #tb-parka{width:58px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-bag{width:64px;height:50px;right:calc(152px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-jour{width:64px;height:50px;right:calc(82px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
+#touch #tb-parka{width:64px;height:50px;right:calc(12px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px))}
 #touch .stick{position:absolute;width:${R * 2}px;height:${R * 2}px;margin:-${R}px 0 0 -${R}px;border-radius:50%;border:2px solid rgba(190,226,250,.7);background:rgba(14,26,44,.4);display:none}
 #touch .ghost{position:absolute;left:calc(104px + env(safe-area-inset-left,0px));bottom:calc(72px + env(safe-area-inset-bottom,0px));width:${R * 2}px;height:${R * 2}px;margin-left:-${R}px;border-radius:50%;border:2px dashed rgba(190,226,250,.38);display:none;align-items:center;justify-content:center;pointer-events:none;animation:scghost 2.4s ease-in-out infinite}
 #touch .ghost i{width:34px;height:34px;border-radius:50%;background:rgba(190,226,250,.22);border:2px solid rgba(190,226,250,.45)}
@@ -50,12 +50,12 @@ const CSS = `
 @keyframes scghost{0%,100%{opacity:.55}50%{opacity:1}}
 #touch .knob{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(190,226,250,.5);border:2px solid #cfeaff;display:none}
 #touch .rad{position:absolute;inset:0;pointer-events:auto;display:none;background:linear-gradient(0deg,rgba(5,9,16,.5),rgba(5,9,16,0) 45%)}
-#touch .rad .cap{position:absolute;left:0;right:0;text-align:center;font:600 13px 'Jura',system-ui,sans-serif;color:#cfeaff;text-shadow:0 1px 0 #05080f}
+#touch .rad .cap{position:absolute;width:max-content;max-width:62vw;box-sizing:border-box;text-align:right;font:700 13px 'Jura',system-ui,sans-serif;color:#e8f4ff;text-shadow:0 1px 0 #05080f;background:rgba(8,16,30,.88);border:1px solid rgba(124,198,238,.4);border-radius:4px;padding:4px 10px}
 #touch .rad .slot{position:absolute;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;color:#dff0ff;font-size:10px;text-align:center}
+  display:flex;flex-direction:column;align-items:center;justify-content:center;color:#dff0ff;font-size:13px;text-align:center}
 #touch .rad .slot.sel{border-color:#ffc46e;background:rgba(60,34,12,.9)}
 #touch .rad canvas{width:28px;height:28px;image-rendering:pixelated}
-#touch .rad .slot b{position:absolute;left:3px;top:0;font-size:10px;font-weight:400;color:#8ab0c8}
+#touch .rad .slot b{position:absolute;left:2px;top:1px;font-size:13px;line-height:1;font-weight:700;color:#cfeaff;background:rgba(5,8,15,.82);padding:1px 4px;border-radius:3px}
 #rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Jura',system-ui,sans-serif;font-weight:600}
 #rotate b{font-family:'Pixelify Sans','Jura',sans-serif;font-size:26px;margin-bottom:10px}
 `;
@@ -192,20 +192,21 @@ function toggleRadial() {
   if (!radial) return;
   if (radial.style.display === 'block') { closeRadial(); return; }
   radial.innerHTML = '';
-  // an arc of the six belt slots opening upward from the belt chip at the bottom centre (the player in the middle of the screen stays visible)
+  // an arc of the six belt slots around the Пояс button (right-hand cluster): opens up and to the left, so the thumb that pressed it stays near the choice
   const W = window.innerWidth, Hh = window.innerHeight;
-  const cx = W / 2 - 40, cy = Hh - 66, rad = Math.min(92, Hh * 0.3);
+  const br = document.getElementById('tb-belt')?.getBoundingClientRect();
+  const cx = br ? br.left + br.width / 2 : W - 150, cy = br ? br.top + br.height / 2 : Hh - 120, rad = Math.min(140, Hh * 0.36);
   for (let i = 0; i < BELT; i++) {
-    const a = Math.PI * (1.08 + 0.84 * i / (BELT - 1));        // from lower-left over the top to lower-right
+    const a = Math.PI * (0.92 + 0.62 * i / (BELT - 1));          // from the left of the button, over the top, to straight above it
     const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' sel' : '');
-    el.style.left = cx + Math.cos(a) * rad * 1.25 + 'px'; el.style.top = cy + Math.sin(a) * rad + 'px';
+    el.style.left = Math.max(30, Math.min(W - 30, cx + Math.cos(a) * rad)) + 'px'; el.style.top = Math.max(30, Math.min(Hh - 30, cy + Math.sin(a) * rad)) + 'px';
     const s = inv.slots[i];
     const n = document.createElement('b'); n.textContent = String(i + 1); el.appendChild(n);
     if (s) { const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc); el.title = itemName(s.id); }
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); closeRadial(); });
     radial.appendChild(el);
   }
-  const cap = document.createElement('div'); cap.className = 'cap'; cap.style.top = Math.max(4, cy - rad - 52) + 'px';
+  const cap = document.createElement('div'); cap.className = 'cap'; cap.style.top = Math.max(4, cy - rad - 56) + 'px'; cap.style.right = Math.max(4, W - cx - 40) + 'px';
   const sel = inv.slots[inv.sel]; cap.textContent = (sel ? itemName(sel.id) + ' · ' : '') + S.radialCap; radial.appendChild(cap);
   radial.style.display = 'block';
   clearTimeout(radialTimer); radialTimer = window.setTimeout(closeRadial, 7000);

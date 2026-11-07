@@ -10,7 +10,6 @@ import {
 } from '../content/materials';
 import { G } from '../game/state';
 import { temp, wind, drainHeat } from './heat';
-import { explode } from './explode';
 import { throwCell } from './particles';
 
 // ------------------------------------------------------------------ constants
@@ -21,7 +20,7 @@ const SAMPLE_PERIOD = 240;  // each window cell is visited by the slow stochasti
 const MAXB = 8192;          // max simultaneously burning solid cells
 const AIR = 0;
 const SNOW = MAT.SNOW, PACKED = MAT.PACKED, SNOWBLOCK = MAT.SNOWBLOCK, ICE = MAT.ICE, WATER = MAT.WATER, LAVA = MAT.LAVA, OIL = MAT.OIL;
-const FIRE = MAT.FIRE, EMBER = MAT.EMBER, ASH = MAT.ASH, SMOKE = MAT.SMOKE, STEAM = MAT.STEAM, METHANE = MAT.METHANE, BASALT = MAT.BASALT, NEEDLES = MAT.NEEDLES;
+const FIRE = MAT.FIRE, EMBER = MAT.EMBER, ASH = MAT.ASH, SMOKE = MAT.SMOKE, STEAM = MAT.STEAM, BASALT = MAT.BASALT, NEEDLES = MAT.NEEDLES;
 
 // ------------------------------------------------------------------ state
 let tickN = 0, acc = 0;
@@ -36,7 +35,6 @@ const burnIdx = new Int32Array(MAXB), burnT = new Uint16Array(MAXB);
 let nBurn = 0;
 const stamp = new Uint16Array(W * H);        // scratch visited marks for BFS (level / methane)
 let stampN = 0;
-const boomQ: number[] = [];
 let depAcc = 0;
 let prevX0 = -1, prevX1 = -1;
 let inited = false;
@@ -123,7 +121,6 @@ function igniteCell(n: number) {
   const m = mat[n];
   const f = FLAM[m];
   if (f <= 0) return;
-  if (m === METHANE) { if (boomQ.length < 64) boomQ.push(n); return; }
   const ph = PHASE[m];
   if (ph === P_LIQUID) { if (!(flags[n] & F_BURN)) { flags[n] |= F_BURN; const y = (n / W) | 0; mark(n - y * W, y); } return; }   // burning liquid keeps flowing (see burnLiquid)
   if (ph === P_SOLID) {
@@ -137,7 +134,7 @@ function igniteCell(n: number) {
 export function ignite(x: number, y: number): void {
   if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) return;
   const i = y * W + x, m = mat[i];
-  if (m === AIR || PHASE[m] === P_GAS && m !== METHANE) { if (m === AIR) setFire(i); wake(x, y); return; }
+  if (m === AIR || PHASE[m] === P_GAS) { if (m === AIR) setFire(i); wake(x, y); return; }
   igniteCell(i);
   wake(x, y);
 }
@@ -159,7 +156,7 @@ function stepFire(i: number, x: number, y: number) {
     if (nm === AIR) continue;
     if (nm === WATER) { wet = true; continue; }
     const f = FLAM[nm];
-    if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < f) igniteCell(n); }
+    if (f > 0) { if (rnd() < f) igniteCell(n); }
     else if (MELT_AT[nm] < 1e8 && PHASE[nm] !== P_LIQUID && rnd() < 0.05) { meltCell(n); a -= 3; }
   }
   if (wet && rnd() < 0.35) { extinguishSteam(i); return; }
@@ -201,7 +198,7 @@ function stepBurning(x0: number, y0: number, x1: number, y1: number) {
       }
       if (nm === WATER) { if (rnd() < 0.15) doused = true; continue; }
       const f = FLAM[nm];
-      if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < f * 0.7) igniteCell(n); }
+      if (f > 0) { if (rnd() < f * 0.7) igniteCell(n); }
       else if (MELT_AT[nm] < 1e8 && PHASE[nm] !== P_LIQUID && rnd() < 0.025) meltCell(n);
     }
     if (doused) {
@@ -223,37 +220,6 @@ function stepBurning(x0: number, y0: number, x1: number, y1: number) {
   simStats.burning = nBurn;
 }
 
-// ------------------------------------------------------------------ explosions of marsh gas
-function processBooms() {
-  let count = 0;
-  while (boomQ.length && count < 4) {
-    const n = boomQ.pop() as number;
-    if (mat[n] !== METHANE) continue;
-    count++;
-    // flood-fill the connected gas cloud (8-connected, ≤ 600 cells)
-    stampN = (stampN + 1) & 0xffff; if (stampN === 0) { stamp.fill(0); stampN = 1; }
-    const cells: number[] = [n];
-    stamp[n] = stampN;
-    let sx = 0, sy = 0;
-    for (let h = 0; h < cells.length && cells.length < 600; h++) {
-      const c = cells[h], cy = (c / W) | 0, cx = c - cy * W;
-      sx += cx; sy += cy;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
-        const j = c + dy * W + dx;
-        if (j < 0 || j >= W * H || stamp[j] === stampN || mat[j] !== METHANE) continue;
-        stamp[j] = stampN; cells.push(j);
-      }
-    }
-    const cnt = cells.length;
-    for (const c of cells) { mat[c] = FIRE; aux[c] = 10 + ((rnd() * 20) | 0); flags[c] = 0; }
-    const R = Math.sqrt(cnt / Math.PI) * 1.4 + 2, power = 0.35 + Math.min(0.65, cnt / 300);
-    simStats.booms++;
-    explode(sx / cnt, sy / cnt, R, power);
-  }
-  boomQ.length = 0;
-}
-
 // ------------------------------------------------------------------ powders
 function stepEmber(i: number, x: number, y: number): boolean {
   mark(x, y);
@@ -264,7 +230,7 @@ function stepEmber(i: number, x: number, y: number): boolean {
     if (nm === AIR) continue;
     if (nm === WATER) { mat[i] = ASH; aux[i] = 0; flags[i] = 0; if (rnd() < 0.5) { mat[n] = STEAM; aux[n] = gasLife(STEAM); } return true; }
     const f = FLAM[nm];
-    if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < f * 0.4) igniteCell(n); }
+    if (f > 0) { if (rnd() < f * 0.4) igniteCell(n); }
     else if (MELT_AT[nm] < 1e8 && PHASE[nm] !== P_LIQUID && rnd() < 0.01) meltCell(n);
   }
   if (rnd() < 0.5) a--;
@@ -329,7 +295,7 @@ function stepLava(i: number, x: number, y: number): boolean {
     if (nm === AIR || nm === LAVA) continue;
     if (nm === WATER) { mat[i] = BASALT; aux[i] = 0; flags[i] = 0; mat[n] = STEAM; aux[n] = gasLife(STEAM); flags[n] = 0; dirty(x, y); return true; }
     const f = FLAM[nm];
-    if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < Math.min(1, f * 5 + 0.05)) igniteCell(n); }
+    if (f > 0) { if (rnd() < Math.min(1, f * 5 + 0.05)) igniteCell(n); }
     else if (MELT_AT[nm] < 1e8 && PHASE[nm] !== P_LIQUID && rnd() < 0.2) {
       if (nm === SNOW) { mat[n] = STEAM; aux[n] = gasLife(STEAM); flags[n] = 0; } else meltCell(n);
       if (rnd() < 0.3) { mat[i] = BASALT; aux[i] = 0; flags[i] = 0; dirty(x, y); return true; }
@@ -346,7 +312,7 @@ function burnLiquid(i: number, x: number, y: number) {
     if (nm === AIR) { if (d === 0 ? rnd() < 0.3 : rnd() < 0.04) setFire(n); continue; }
     if (nm === WATER) { if (rnd() < 0.3) { flags[i] &= ~F_BURN; return; } continue; }
     const f = FLAM[nm];
-    if (f > 0) { if (nm === METHANE) { if (boomQ.length < 64) boomQ.push(n); } else if (rnd() < f * 0.4) igniteCell(n); }
+    if (f > 0) { if (rnd() < f * 0.4) igniteCell(n); }
   }
   if (rnd() < 0.006) { setFire(i); aux[i] = 20 + ((rnd() * 20) | 0); }
 }
@@ -569,7 +535,6 @@ function tick() {
     }
   }
 
-  if (boomQ.length) processBooms();
   snowfallTick(x0, x1);
   windLift(x0, x1);
 
@@ -612,7 +577,7 @@ function scanCell(i: number, x: number, y: number, dir: number) {
 // ------------------------------------------------------------------ public API
 export function initSim() {
   tickN = 0; acc = 0; depAcc = 0;
-  act.fill(0); surf.fill(-1); colSnow.fill(0); stamp.fill(0); stampN = 0; boomQ.length = 0;
+  act.fill(0); surf.fill(-1); colSnow.fill(0); stamp.fill(0); stampN = 0;
   nBurn = 0;
   for (let i = 0; i < W * H && nBurn < MAXB; i++) {
     if ((flags[i] & F_BURN) && BURN_LIFE[mat[i]] > 0) addBurn(i, mat[i]);

@@ -392,23 +392,18 @@ test('wind shadow behind a wall, shelter inside a room, enclosure flood fill', (
   return `wind front ${front.toFixed(1)} lee ${lee.toFixed(1)} high ${high.toFixed(1)}; shelter in ${sIn.toFixed(2)} lee ${sLee.toFixed(2)} out ${sOut.toFixed(2)}`;
 });
 
-// ------------------------------------------------------------------ 13. methane explosion
-test('methane + fire explodes (chain) and carves stone', () => {
+// ------------------------------------------------------------------ 13. gas never explodes (no methane chain in SNOWCRAFT)
+test('marsh gas next to fire does not explode (no gas-chain explosions)', () => {
   reset(800, 300, 1000, 470);
   fill(850, 380, 950, 440, MAT.STONE);
   fill(880, 400, 900, 415, MAT.METHANE);
-  fill(880, 417, 884, 419, MAT.AIR); put(890, 416, MAT.AIR);
-  fill(890, 416, 890, 416, MAT.AIR);
   initHeat(); flatTemp(0); wakeWin();
   const stone0 = count(MAT.STONE);
   let blasts = 0; onBlast(() => { blasts++; });
-  put(881, 416, MAT.FIRE, 0, 30);
-  put(881, 415, MAT.METHANE); // adjacent gas
+  put(881, 415, MAT.FIRE, 0, 30);
   run(300);
-  assert(simStats.booms >= 1 && blasts >= 1, `booms ${simStats.booms}, blasts ${blasts}`);
-  const stone1 = count(MAT.STONE);
-  assert(stone1 < stone0 - 20, `stone ${stone0} -> ${stone1}`);
-  return `${simStats.booms} gas explosion(s), stone ${stone0} -> ${stone1}`;
+  assert(blasts === 0 && count(MAT.STONE) === stone0, `blasts ${blasts}, stone ${stone0} -> ${count(MAT.STONE)}`);
+  return 'no explosion, stone intact';
 });
 
 // ------------------------------------------------------------------ 14. lava

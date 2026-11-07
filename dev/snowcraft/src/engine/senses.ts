@@ -42,9 +42,10 @@ const px = (r: number, g: number, b: number, a: number) => ((a & 255) << 24) | (
 
 /** Density ramp (kg/m3) -> [r,g,b]. Exported for the legend. */
 export function snowRamp(d: number): [number, number, number] {
-  if (d < GOOD_LO) { const t = clamp((d - 60) / 190, 0, 1); return [lerp(70, 118, t), lerp(88, 146, t), lerp(150, 214, t)]; }   // slate -> periwinkle
-  if (d <= GOOD_HI) { const t = (d - GOOD_LO) / (GOOD_HI - GOOD_LO); return [lerp(96, 150, Math.sin(t * Math.PI)), lerp(238, 255, Math.sin(t * Math.PI)), lerp(190, 222, Math.sin(t * Math.PI))]; }   // the mint band
-  const t = clamp((d - GOOD_HI) / 140, 0, 1); return [lerp(176, 232, t), lerp(146, 220, t), 255];                                    // lavender -> pale violet
+  // three bands that differ in hue AND lightness (readable against the teal night / aurora): bright periwinkle -> yellow-green lime -> pale pink-lavender
+  if (d < GOOD_LO) { const t = clamp((d - 60) / 190, 0, 1); return [lerp(92, 132, t), lerp(100, 142, t), lerp(214, 255, t)]; }
+  if (d <= GOOD_HI) { const t = (d - GOOD_LO) / (GOOD_HI - GOOD_LO), m = Math.sin(t * Math.PI); return [lerp(120, 190, m), lerp(240, 255, m), lerp(120, 150, m)]; }
+  const t = clamp((d - GOOD_HI) / 140, 0, 1); return [lerp(232, 255, t), lerp(176, 206, t), 255];
 }
 /** Temperature (deg C) -> [r,g,b]: deep blue ... ice ... soft amber ... orange. Exported for the legend. */
 export function heatRamp(T: number): [number, number, number] {
@@ -291,7 +292,8 @@ function drawInner(ctx: CanvasRenderingContext2D, v: View) {
   const px0 = p ? p.x - v.x0 : v.w / 2, py0 = p ? p.y - 10 - v.y0 : v.h / 2;
   ctx.save();
   const g = ctx.createRadialGradient(px0, py0, 12, px0, py0, Math.max(60, v.h * 0.34));
-  g.addColorStop(0, `rgba(3,8,20,${(0.2 * k).toFixed(3)})`); g.addColorStop(1, `rgba(3,8,20,${(0.44 * k).toFixed(3)})`);
+  const dk = L.heat || L.snow ? 1 : 0.5;      // wind / scent only: a lighter dimming so the world keeps its own colours
+  g.addColorStop(0, `rgba(3,8,20,${(0.2 * k * dk).toFixed(3)})`); g.addColorStop(1, `rgba(3,8,20,${(0.44 * k * dk).toFixed(3)})`);
   ctx.fillStyle = g; ctx.fillRect(0, 0, v.w, v.h);
 
   if (L.heat) {
@@ -303,7 +305,7 @@ function drawInner(ctx: CanvasRenderingContext2D, v: View) {
       bigX.drawImage(heatC, heatTx * TS - v.x0, heatTy * TS - v.y0, heatW * TS, heatH * TS);
       bigX.globalCompositeOperation = 'destination-in';
       bigX.drawImage(maskC, maskOx - v.x0, maskOy - v.y0);
-      ctx.globalAlpha = k; ctx.drawImage(bigC, 0, 0); ctx.globalAlpha = 1;
+      ctx.globalAlpha = k * (L.snow ? 0.72 : 1); ctx.drawImage(bigC, 0, 0); ctx.globalAlpha = 1;      // with snow classes on, the temperature wash steps back
     }
   }
   if (L.snow) {

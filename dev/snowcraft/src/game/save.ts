@@ -5,7 +5,7 @@
 // blocked storage just mean "no save".
 import { G } from './state';
 import { mat, aux, flags, bg } from '../engine/grid';
-import { inv, dropDur } from './inventory';
+import { inv, dropDur, backpacks } from './inventory';
 import { body } from './player';
 import { setClock } from './weather';
 import { sites } from './locations';
@@ -28,6 +28,7 @@ export function captureState() {
     body: { respawnX: body.respawnX, respawnY: body.respawnY, scar: { ...body.scar }, stats: { ...body.stats } },
     inv: JSON.parse(JSON.stringify({ slots: inv.slots, sel: inv.sel, wear: inv.wear, sled: inv.sled })),
     dropDur: G.drops.filter(d => dropDur.has(d.id)).map(d => [d.id, dropDur.get(d.id)]),
+    backpacks: [...backpacks].map(([id, slots]) => [id, JSON.parse(JSON.stringify(slots))]),
     fixtures: JSON.parse(JSON.stringify(G.fixtures)), drops: JSON.parse(JSON.stringify(G.drops)),
     sites: sites.map(s => s.found),
     quest: questSave(),
@@ -49,6 +50,7 @@ export function applySave(d: SaveData) {
   G.fixtures.length = 0; for (const f of s.fixtures) G.fixtures.push(f);
   G.drops.length = 0; for (const x of s.drops) G.drops.push(x);
   dropDur.clear(); for (const [id, v] of s.dropDur) dropDur.set(id, v);
+  backpacks.clear(); for (const [id, slots] of s.backpacks ?? []) backpacks.set(id, slots);
   G.nextId = Math.max(G.nextId, s.nextId);
   sites.forEach((x, i) => { x.found = !!s.sites?.[i]; });
   questLoad(s.quest);
@@ -80,10 +82,12 @@ async function gunzip(buf: Uint8Array, packed: boolean): Promise<Uint8Array> {
 }
 
 let saving = false;
+let saveGen = 0;     // bumped by deleteSave: a save that was in flight when the slot was deleted (hardcore death) must not land afterwards
 /** Write the current game to the slot. Resolves true on success. */
 export async function saveGame(slot = KEY): Promise<boolean> {
   if (saving || !G.player || !G.player.alive) return false;
   saving = true;
+  const gen = saveGen;
   try {
     const d = capture();
     const sz = d.grid.mat.length;
@@ -92,6 +96,7 @@ export async function saveGame(slot = KEY): Promise<boolean> {
     const packed = typeof CompressionStream !== 'undefined';
     const blob = await gz(all);
     const db = await open();
+    if (gen !== saveGen) { db.close(); return false; }
     const tx = db.transaction(STORE, 'readwrite');
     await req(tx.objectStore(STORE).put({ meta: d.meta, json: JSON.stringify(d.state), grid: blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength), packed, sz }, slot));
     db.close();
@@ -112,5 +117,6 @@ export async function loadGame(slot = KEY): Promise<SaveData | null> {
   } catch { return null; }
 }
 export async function deleteSave(slot = KEY): Promise<void> {
+  saveGen++;
   try { const db = await open(); await req(db.transaction(STORE, 'readwrite').objectStore(STORE).delete(slot)); db.close(); } catch { /* ignore */ }
 }

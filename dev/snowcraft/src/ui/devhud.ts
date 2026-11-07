@@ -47,6 +47,7 @@ const S = strings('hud', {
   stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок',
   jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
   lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
+  wThirst: 'хочется пить', wThirst2: 'жажда мучит', wHunger: 'сосёт под ложечкой', wHunger2: 'живот сводит', wTired: 'устал', wTired2: 'валишься с ног', wHurt: 'ранен', wHurt2: 'при смерти',
 });
 
 let root: HTMLElement, bw: HTMLElement, dial: HTMLElement, stack: HTMLElement, objEl: HTMLElement, chip: HTMLElement, toastBox: HTMLElement, beltEl: HTMLElement, bname: HTMLElement;
@@ -54,7 +55,8 @@ let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLEleme
 let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
 let beltKey = '', toastKey = '';
-let acc = 0, panelAcc = 0;
+let acc = 0, panelAcc = 0, rectAcc = 9;
+let avoid: DOMRect[] = [];
 let freeCam = false;
 export function setFreeCamLabel(on: boolean) { freeCam = on; }
 const DEV = new URLSearchParams(location.search).has('devhud');
@@ -88,7 +90,8 @@ const CSS = `
 #hud .dial canvas{width:112px;height:68px;image-rendering:pixelated;display:block}
 #hud .dial .day{font-weight:400;letter-spacing:.2px;font-variant-numeric:tabular-nums}
 #hud .dial .clk{font-size:12px;opacity:.85;font-variant-numeric:tabular-nums;margin-top:-1px}
-#hud .dial .line{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;margin-top:2px;white-space:nowrap}
+#hud .dial .line{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;margin-top:2px;white-space:normal;line-height:1.15;text-align:left}
+#hud .dial .line.baro span{min-width:0;overflow-wrap:anywhere}
 #hud .dial .line .ic{width:14px;height:14px}
 #hud .dial .wa{transition:transform .4s}
 /* top centre stack: objective, shelter chip, toasts in one flow, so they never overlap */
@@ -116,7 +119,7 @@ body.touch-ui #hud .bname{left:calc(50% - 40px);bottom:calc(66px + env(safe-area
 #hud .end{inset:0;background:rgba(255,220,160,.18);display:none;align-items:center;justify-content:center;font-size:30px;border:0;border-radius:0}
 #hud .pause{left:50%;top:44%;transform:translate(-50%,-50%);display:none;font-size:22px;letter-spacing:2px;padding:8px 18px}
 /* bag + craft panel */
-#hud .pnl{left:50%;top:50%;transform:translate(-50%,-50%);width:min(820px,96vw);max-height:86vh;overflow:auto;display:none;pointer-events:auto;background:rgba(8,14,26,.94);font-size:13px;padding:8px 10px}
+#hud .pnl{left:50%;top:50%;transform:translate(-50%,-50%);width:min(820px,96vw);max-height:86vh;overflow:auto;display:none;pointer-events:auto;background:rgba(8,14,26,.985);font-size:13px;padding:8px 10px}
 #hud .pnl h3{margin:0 0 4px;font-size:14px;font-weight:600;color:#ffc46e;display:flex;justify-content:space-between;align-items:center}
 #hud .pnl .cols{display:flex;gap:12px;flex-wrap:wrap}#hud .pnl .col{flex:1 1 300px;min-width:0}
 #hud .pnl .wt{height:6px;background:#16273d;border-radius:2px;position:relative;margin:3px 0 7px}
@@ -244,6 +247,7 @@ export function initHud(host: HTMLElement) {
   hintEl.innerHTML = k('WASD', S.hintMove) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + k('F', S.hintEat) + k('V', S.hintParka) + k('C', S.hintBag) + k('R', S.hintDome) + k('G', S.hintDrop);
   if (!G.mobile) hintEl.style.display = 'block';
   if (DEV) { devEl = mk('dev'); }
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); });
   deadEl.addEventListener('pointerdown', () => { if (!G.player.alive) respawn(); });
   on('ending', () => { endEl.textContent = S.ending; endEl.style.display = 'flex'; setTimeout(() => { endEl.style.display = 'none'; }, 9000); });
   beltEl.addEventListener('pointerdown', (e) => {
@@ -255,6 +259,20 @@ export function initHud(host: HTMLElement) {
   panel.addEventListener('click', onPanelClick);
 }
 const shortcut = (key: string) => key;
+
+/** Put the probe tooltip next to the cursor but out of the HUD (body figure, dial, belt) and the touch buttons: try right/below, left/below, right/above, left/above, then clamp. */
+function placeTip(sx: number, sy: number) {
+  if (rectAcc > 0.4) {
+    rectAcc = 0; avoid = [];
+    for (const el of [bw, dial, beltEl, ...Array.from(document.querySelectorAll('#touch .tb')) as HTMLElement[]]) { if (!el || el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue; const r = el.getBoundingClientRect(); if (r.width > 0) avoid.push(r); }
+  }
+  const W = window.innerWidth, H = window.innerHeight, w = tip.offsetWidth || 200, h = tip.offsetHeight || 40, g = 6;
+  const hit = (x: number, y: number) => avoid.some(r => x < r.right + g && x + w > r.left - g && y < r.bottom + g && y + h > r.top - g);
+  const cands: [number, number][] = [[sx + 16, sy + 14], [sx - w - 12, sy + 14], [sx + 16, sy - h - 12], [sx - w - 12, sy - h - 12], [sx + 16, sy + 70], [sx - w - 12, sy - h - 60]];
+  let best = cands[0];
+  for (const c of cands) { const x = Math.max(4, Math.min(W - w - 4, c[0])), y = Math.max(4, Math.min(H - h - 4, c[1])); if (!hit(x, y)) { best = [x, y]; break; } best = [x, y]; }
+  tip.style.left = best[0] + 'px'; tip.style.top = best[1] + 'px';
+}
 
 function onPanelClick(e: Event) {
   const t = (e.target as HTMLElement).closest('[data-a]') as HTMLElement | null; if (!t) return;
@@ -280,11 +298,14 @@ const fmtClock = () => { const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 
 export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
+  const titleOn = document.body.classList.contains('title-open');
+  if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
+  if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
   if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
   if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
   if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
-  acc += realDt; panelAcc += realDt;
+  acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
   for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
   const shown = G.toasts.slice(document.body.classList.contains('touch-ui') ? -1 : -2);
@@ -309,9 +330,10 @@ export function updateHud(dt: number, realDt: number) {
   const T = target();
   if (p?.alive && input.hasAim && T.lines.length && !panelOpen && (input.aimMode !== 'smart')) {
     const sx = input.aimX, sy = input.aimY;
-    tip.style.display = 'block'; tip.style.left = Math.min(window.innerWidth - 270, sx + 16) + 'px'; tip.style.top = Math.max(4, sy + 14) + 'px';
     tip.innerHTML = T.lines.map((l, i) => `<div class="${i === T.lines.length - 1 && T.reason ? 'warn' : ''}">${l}</div>`).join('');
+    tip.style.display = 'block'; placeTip(sx, sy);
   } else tip.style.display = 'none';
+  document.body.classList.toggle('panel-open', panelOpen || jOpen);
 
   if (acc < 0.1) return;
   acc = 0;
@@ -320,6 +342,9 @@ export function updateHud(dt: number, realDt: number) {
   drawFigure(p);
   setRow('core', p.core.toFixed(1) + '°', cls(p.core < 34, p.core < 36));
   setBar(rows.water, p.water, 15, 35); setBar(rows.food, p.food, 15, 35); setBar(rows.energy, p.energy, 12, 30); setBar(rows.hp, p.hp, 30, 60);
+  // the body figure + core thermometer carry the state; a vital shows up (bar + words) only inside its warning band (?devhud keeps every number)
+  const vital = (k: string, v: number, bad: number, warn: number, w1: string, w2: string) => { const r = rows[k]; r.row.style.display = DEV || v < warn ? 'flex' : 'none'; if (!DEV) r.v.textContent = v < bad ? w2 : w1; };
+  vital('water', p.water, 15, 35, S.wThirst, S.wThirst2); vital('food', p.food, 15, 35, S.wHunger, S.wHunger2); vital('energy', p.energy, 12, 30, S.wTired, S.wTired2); vital('hp', p.hp, 30, 60, S.wHurt, S.wHurt2);
   wetEl.style.display = p.wet > 0.12 ? 'flex' : 'none'; rows.wet.v.textContent = Math.round(p.wet * 100) + '%'; rows.wet.v.className = 'v ' + cls(p.wet > 0.6, p.wet > 0.25);
   if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.co + ' ' + Math.round(p.co); } else alertEl.style.display = 'none';
   subEl.textContent = fmt(S.air, { t: p.airT.toFixed(0) }) + ' · ' + fmt(S.feels, { t: p.feelT.toFixed(0) });
