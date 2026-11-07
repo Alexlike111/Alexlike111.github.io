@@ -39,7 +39,9 @@ export type FixtureKind =
   | 'campfire' | 'fat_lamp' | 'brazier' | 'pot' | 'drying_rack' | 'skin_bed' | 'hide_door' | 'cache' | 'snare' | 'torch'
   | 'stove' | 'table' | 'shelf' | 'chest' | 'radio' | 'drum' | 'bed' | 'door' | 'mast' | 'barometer' | 'flag' | 'cairn' | 'cart' | 'kennel' | 'signal_fire'
   // v1 leftovers (do not use in new code)
-  | 'workbench' | 'furnace' | 'anvil' | 'helipad' | 'sign' | 'lantern';
+  | 'workbench' | 'furnace' | 'anvil' | 'helipad' | 'sign' | 'lantern'
+  // DESIGN §15 interactive objects (game/fixtures_station.ts, stationobjects.ts)
+  | 'generator' | 'ceiling_lamp' | 'heater' | 'medkit' | 'kettle' | 'sonde' | 'gramophone' | 'hatch' | 'shutter' | 'damper' | 'bell';
 export interface Fixture {
   id: number; kind: FixtureKind;
   tx: number; ty: number; tw: number; th: number; // footprint in TILES (top-left)
