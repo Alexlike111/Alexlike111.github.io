@@ -91,6 +91,8 @@ export function makeSpawn(): { x: number; y: number } {
 }
 
 /** Pass B: the drift against the station house (its east door is buried). The thick roof snow is laid by locations.ts cabin(). */
+export const snowpackCfg = { on: true };       // tests: switch the deep snow off to prove it draws nothing from the shared random stream
+
 export function stationSnow(T: Terrain) {
   const F = LOC.station.y;                                              // pad row (floor of the house)
   const R = LOC.house.R, wall = R * 4 + 4;                              // first cell east of the east end wall
@@ -123,13 +125,13 @@ export function cornice(cx: number, topY: number, dir: 1 | -1, len: number, th: 
 
 /** Pass C: cornices and the background wall behind every new snow cell (so a trench dug into a drift shows snow behind it, not the sky). */
 export function finishSnow(T: Terrain, bergX: number) {
-  // iceberg: lips of snow on the shoulders of the crest, leaning east (the lee)
+  // iceberg: lips of snow on the shoulders of the crest, leaning east (the lee): places where the ice falls away to the east
   const bt = (x: number) => topSolid(x, 150);
-  let n = 0;
-  for (let u = -36; u <= 34 && n < 4; u++) {
+  let n = 0, last = -99;
+  for (let u = -40; u <= 40 && n < 4; u++) {
     const x = bergX + u, y = bt(x);
-    if (mat[y * W + x] !== MAT.ICE || (x % 9) !== 0) continue;
-    if (bt(x + 3) >= y + 3 && bt(x - 3) <= y + 1 && cornice(x, y, 1, 5, 4)) n++;      // falls away to the east, rises or stays level to the west
+    if (mat[y * W + x] === AIR || x - last < 14) continue;
+    if (bt(x + 4) >= y + 3 && bt(x - 4) <= y + 2 && cornice(x, y, 1, 5, 4) > 12) { n++; last = x; }
   }
   // cliff edges on the cape hill (the surface falls >= 7 cells within one column towards the east)
   for (let x = 100; x < 270; x++) {
