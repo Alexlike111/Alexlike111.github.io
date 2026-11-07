@@ -49,6 +49,7 @@ r('hot_tea', 1, [i('tea'), i('water')], 'fire', 'food', 'cooking');
 // hunting & tools
 r('harpoon', 1, [i('bone'), i('log'), i('rope'), i('scrap')], 'table', 'hunt', 'harpoon');
 r('ice_chisel', 1, [i('scrap', 2), i('log')], 'table', 'hunt', 'ice_chisel');
+r('probe_pole', 1, [i('log'), i('rope')], 'none', 'hunt', 'ice_chisel');          // DESIGN §17: the ice probe, fast to make
 r('fishing_line', 1, [i('bone'), i('sinew')], 'none', 'hunt', 'fishing', true);
 r('snare', 2, [i('rope'), i('log')], 'none', 'hunt', 'snares', true);
 r('rope', 2, [[i('canvas')], [i('sinew', 2)]], 'none', 'hunt', 'rope', true);

@@ -43,7 +43,7 @@ const S = strings('tools', {
   gotBlock: 'Блок: {c}', crumbled: 'Рассыпался…',
   torchLit: 'Факел горит', torchOut: 'Факел погас', noFlame: 'Нечем зажечь факел',
   lanternOn: 'Фонарь горит', lanternOff: 'Фонарь погашен', lanternEmpty: 'В фонаре нет солярки',
-  flareNone: 'Нет ракет', flareShot: 'Ракета в небо!',
+  flareNone: 'Нет ракет', flareShot: 'Ракета в небо!', lanternWind: 'Ветер задул фонарь!', lanternNoMatch: 'Фонарь погас: чтобы зажечь, нужны спички',
   fishCast: 'Забросил леску…', fishBite: 'Клюёт! Тяни!', fishLost: 'Сорвалась', fishGot: 'Поймал: {name}', fishNeedHole: 'Нужна лунка или полынья', fishColdHands: 'Руки стынут: ловля — тонкая работа',
   harpoon: 'Гарпун!', noAmmo: 'Нечем',
   bagged: 'Снег в сумке: {n}', barometer: 'Барометр: {t}',
@@ -76,7 +76,7 @@ export const toolState = {
   dig: { tx: -1, ty: -1, p: 0, mat: 0 }, cut: { tx: -1, ty: -1, p: 0 },
   eatP: 0, throwing: false, cool: 0, swing: 0, using: false, blockRefund: 0, blockDens: 0, tampT: 0, digSnd: 0,
   fish: { state: 'idle' as 'idle' | 'wait' | 'bite', t: 0, x: 0, y: 0, bite: 0 },
-  flares: [] as { x: number; y: number; vx: number; vy: number; t: number }[],
+  flares: [] as { x: number; y: number; vx: number; vy: number; t: number; lit?: number }[],   // t: seconds the bear is scared (60), lit: seconds of light (30)
   aimX: 0, aimY: 0, aimAng: 0,
 };
 /** Placed snow blocks sinter into the shell after a while: they lose F_PLACED and are then as sturdy as natural snow (so a door can be cut afterwards). */
@@ -637,6 +637,7 @@ function stepFishing(dt: number, T: Target, primaryPressed: boolean, sel: ItemDe
 
 // ---------------------------------------------------------------------------------------------------------------------
 // lights in hand
+let lanternBlown = false;     // the wind put the lantern out in the open: the next light needs a match (DESIGN §17)
 function stepHeldLight(dt: number, sel: ItemDef | null, primaryPressed: boolean) {
   const gm = dt * MIN_PER_SEC * G.timeScale;
   const s = selected();
@@ -658,18 +659,24 @@ function stepHeldLight(dt: number, sel: ItemDef | null, primaryPressed: boolean)
   if (sel?.id === 'lantern' && s) {
     if (primaryPressed) {
       if (held.lanternLit) { held.lanternLit = false; toast(S.lanternOff, 'info'); }
+      else if (lanternBlown && !remove('matches', 1)) toast(S.lanternNoMatch, 'warn');
       else {
+        lanternBlown = false;
         if ((s.dur ?? 0) <= 0 && remove('diesel', 1)) s.dur = 360;
         if ((s.dur ?? 0) > 0) { held.lanternLit = true; toast(S.lanternOn, 'good'); } else toast(S.lanternEmpty, 'warn');
       }
     }
     if (held.lanternLit) { s.dur = (s.dur ?? 0) - gm; if ((s.dur ?? 0) <= 0) { if (remove('diesel', 1)) s.dur = 360; else { held.lanternLit = false; toast(S.lanternEmpty, 'warn'); } } }
+    // a gust in the open (not in a shelter) puts it out: about one gust in two seconds at storm wind
+    if (held.lanternLit && G.player.shelter < 0.3 && Math.abs(G.wind) > 7 && Math.random() < dt * 0.5) { held.lanternLit = false; lanternBlown = true; toast(S.lanternWind, 'warn'); }
   }
   shelterExtra.flames = (held.torchLit ? 1.2 : 0) + (held.lanternLit ? 0.3 : 0);
-  // flares
+  // flares (DESIGN §17): fired up, they slow down under a parachute and hang over the area; lit for 30 s, the bear is scared for 60 s
   for (let i = toolState.flares.length - 1; i >= 0; i--) {
-    const f = toolState.flares[i]; f.t -= dt; f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 6 * dt;
-    if (f.t > 20 && Math.random() < 0.5) spawnFx('spark', f.x, f.y, (Math.random() - 0.5) * 10, 10, 0.6, 0xff4030);
+    const f = toolState.flares[i]; f.t -= dt; f.x += f.vx * dt; f.y += f.vy * dt;
+    f.vx *= Math.max(0, 1 - 1.6 * dt); f.vy += (1 - f.vy) * 1.6 * dt;
+    if (f.lit !== undefined) f.lit -= dt;
+    if ((f.lit ?? 0) > 0 && Math.random() < 0.5) spawnFx('spark', f.x, f.y, (Math.random() - 0.5) * 10, 10, 0.6, 0xff4030);
     if (f.t <= 0) toolState.flares.splice(i, 1);
   }
 }
@@ -683,9 +690,9 @@ export function collectHeldLights(out: Light[]) {
   if (held.torchLit) { const l = hl[1]; l.x = p.x + p.face * 5; l.y = p.y - 15; l.r = 1.0 * fl; l.g = 0.66 * fl; l.b = 0.32 * fl; l.rad = 8; out.push(l); }
   else if (held.lanternLit) { const l = hl[1]; l.x = p.x + p.face * 4; l.y = p.y - 11; l.r = 1.0; l.g = 0.82; l.b = 0.5; l.rad = 11; out.push(l); }
   for (let i = 0; i < toolState.flares.length; i++) {
-    const f = toolState.flares[i];
+    const f = toolState.flares[i]; if ((f.lit ?? 0) <= 0) continue;
     const l = flarePool[i] ?? (flarePool[i] = { x: 0, y: 0, r: 0, g: 0, b: 0, rad: 0 });
-    l.x = f.x; l.y = f.y; l.r = 1.0; l.g = 0.2; l.b = 0.12; l.rad = 22 * Math.min(1, f.t / 3); out.push(l);
+    l.x = f.x; l.y = f.y; l.r = 1.0; l.g = 0.8; l.b = 0.6; l.rad = 34 * Math.min(1, (f.lit ?? 0) / 3); out.push(l);
   }
 }
 
@@ -733,7 +740,7 @@ export function stepTools(dt: number) {
   } else toolState.eatP = 0;
   if (sel?.id === 'flare_gun' && pressed) {
     if (remove('flare', 1)) {
-      const a = toolState.aimAng; toolState.flares.push({ x: p.x, y: p.y - 14, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60 - 40, t: 28 });
+      const a = toolState.aimAng; toolState.flares.push({ x: p.x, y: p.y - 14, vx: Math.cos(a) * 60, vy: Math.sin(a) * 60 - 40, t: 60, lit: 30 });
       toast(S.flareShot, 'good'); emit('flare', { x: p.x, y: p.y - 14 }); toolState.swing = 1;
     } else toast(S.flareNone, 'warn');
   }

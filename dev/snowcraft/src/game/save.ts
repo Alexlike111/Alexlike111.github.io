@@ -3,6 +3,7 @@
 // with a version field. The world is regenerated from the seed first (so static data like shade / sites / worldInfo are in place) and then the saved
 // cells are laid over it; heat / structure caches are rebuilt by main.newGame after applySave(). Everything is try/catch: private windows and
 // blocked storage just mean "no save".
+import { huntSave, huntLoad } from './hunt';
 import { G } from './state';
 import { mat, aux, flags, bg } from '../engine/grid';
 import { inv, dropDur, backpacks } from './inventory';
@@ -34,6 +35,7 @@ export function captureState() {
     sites: sites.map(s => s.found),
     search: searchSave(),      // DESIGN §12: which containers have been searched how far / chipped free
     quest: questSave(),
+    hunt: huntSave(),          // fish stocks of holes, ptarmigan flocks, tracks (hunt.ts)
   };
 }
 export function capture(): SaveData {
@@ -57,6 +59,7 @@ export function applySave(d: SaveData) {
   sites.forEach((x, i) => { x.found = !!s.sites?.[i]; });
   questLoad(s.quest);
   searchLoad(s.search);
+  huntLoad(s.hunt);            // before initFauna: fish and flocks come back as saved
   setClock(s.time); resyncWeather();           // day, ring (G.cycle) and the ramp are derived from the clock: old saves (with endDay) load as endless
   resetShelter();
 }

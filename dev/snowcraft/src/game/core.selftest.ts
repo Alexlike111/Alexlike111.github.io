@@ -12,8 +12,9 @@ import { ITEMS, getItem, itemName, densityOf, auxOfDensity, snowClass } from './
 import { inv, add, remove, count, weight, giveStartKit, clearInventory, equip, spawnDrop, backpacks, BELT, NSLOT } from './inventory';
 import { RECIPES, canCraft, craft } from './recipes';
 import { learnAll, loreSave, loreLoad } from './lore';
+import { addHoleAt, setScanning } from './hunt';
 import {
-  FIXTURE_DEFS, mastUp, placeFixture, removeFixture, interact, stepFixtures, tryLight, addFuel, stationsAt, collectLights, radiantWarmth, pickupFixture, stash, planFixture, raiseMast, dryBoost,
+  FIXTURE_DEFS, mastUp, placeFixture, removeFixture, interact, stepFixtures, tryLight, addFuel, stationsAt, collectLights, radiantWarmth, pickupFixture, stash, planFixture, raiseMast, dryBoost, setSnareFallback,
 } from './fixtures';
 import { body, stepBody, stepPlayer, die, damage, respawn, applyDifficulty, startSleep, wake, eatSlot, eatBest, windChill, toggleParka, handsFrozen, TUNE } from './player';
 import { digTime, cutRegion, target, toolState, stepTools, stepDrops, sinterMinutes } from './tools';
@@ -240,6 +241,7 @@ registerTest('tools', 'гарпун, удочка, факел, фонарь, р�
     off(); if (!harpoon) throw new Error('событие harpoon не вышло');
     // fishing: needs water under a hole in ice
     for (let y = 272; y < 300; y++) for (let x = 1000; x < 1030; x++) { const i = y * W + x; mat[i] = MAT.WATER; aux[i] = 0; flags[i] = 0; }
+    setScanning(false); addHoleAt(1012, 274, 4);   // live fish (hunt.ts) live in a registered hole; the world scan would rebuild the hole list
     let fishing = 0; const off2 = on('fishing', () => fishing++);
     add('fishing_line', 1); s.selectItem('fishing_line'); s.act('dig', 1012, 276, 0.1);
     off2(); if (!fishing) throw new Error('fishing не вышло');
@@ -248,6 +250,7 @@ registerTest('tools', 'гарпун, удочка, факел, фонарь, р�
     if (toolState.fish.state !== 'bite') throw new Error('поклёвки нет: ' + toolState.fish.state);
     const f0 = count('fish'); s.act('dig', 1012, 276, 0.1);
     if (count('fish') <= f0) throw new Error('рыба не поймана');
+    setScanning(true);
     // torch
     add('torch', 1); s.selectItem('torch'); const m0 = count('matches'); s.act('dig', 1030, 262, 0.05);
     if (!s.mods.inv.held.torchLit || count('matches') !== m0 - 1) throw new Error('факел не зажёгся от спички');
@@ -379,7 +382,8 @@ registerTest('fixtures', 'полог/дверь, тайник/сундук, си
     // snare
     const snare = placeFixture('snare', 244, 67, { force: true })!; interact(snare); if (!snare.data!.set) throw new Error('силок не взведён');
     let caught = 0; const off = on('snare_caught', () => caught++);
-    for (let i = 0; i < 60 * 400 && !caught; i++) stepFixtures(1 / 60); off();
+    setSnareFallback(true);                     // hunt.ts turns the random catch off (a flock must flush into it); the unit test wants the fallback
+    for (let i = 0; i < 60 * 400 && !caught; i++) stepFixtures(1 / 60); off(); setSnareFallback(false);
     if (!caught) throw new Error('силок ничего не поймал за 24 мин');
     interact(snare); if (count('ptarmigan') < 1) throw new Error('добыча не выдана');
     // barometer

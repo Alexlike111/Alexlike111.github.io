@@ -4,7 +4,7 @@
 import { input, touch } from '../engine/input';
 import { G } from '../game/state';
 import { strings } from '../content/i18n';
-import { inv, select, BELT } from '../game/inventory';
+import { inv, select, beltCells } from '../game/inventory';
 import { getItem, itemName } from '../game/items';
 import { icon } from '../engine/sprites';
 import { worldToScreen } from '../engine/render';
@@ -59,6 +59,8 @@ const CSS = `
 #touch .rad .slot{position:absolute;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;background:rgba(14,26,44,.9);border:2px solid rgba(124,198,238,.6);
   display:flex;flex-direction:column;align-items:center;justify-content:center;color:#dff0ff;font-size:13px;text-align:center}
 #touch .rad .slot.sel{border-color:#ffc46e;background:rgba(60,34,12,.9)}
+#touch .rad .slot.sm{width:44px;height:44px;margin:-22px 0 0 -22px}
+#touch .rad .slot.sm canvas{width:24px;height:24px}
 #touch .rad canvas{width:28px;height:28px;image-rendering:pixelated}
 #touch .rad .slot b{position:absolute;left:2px;top:1px;font-size:13px;line-height:1;font-weight:700;color:#cfeaff;background:rgba(5,8,15,.82);padding:1px 4px;border-radius:3px}
 #rotate{position:fixed;inset:0;z-index:99;background:#05080f;color:#dff0ff;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;font-family:'Jura',system-ui,sans-serif;font-weight:600}
@@ -229,13 +231,16 @@ function toggleRadial() {
   // an arc of the six belt slots around the Пояс button (right-hand cluster): opens up and to the left, so the thumb that pressed it stays near the choice
   const W = window.innerWidth, Hh = window.innerHeight;
   const br = document.getElementById('tb-belt')?.getBoundingClientRect();
-  const cx = br ? br.left + br.width / 2 : W - 150, cy = br ? br.top + br.height / 2 : Hh - 120, rad = Math.min(140, Hh * 0.36);
-  for (let i = 0; i < BELT; i++) {
-    const a = Math.PI * (0.92 + 0.62 * i / (BELT - 1));          // from the left of the button, over the top, to straight above it
-    const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' sel' : '');
+  // the belt cells in key order: six, and the three of the belt pouch (keys 7-9) when it is carried (DESIGN §17): nine slots on a wider arc
+  const cells = beltCells(), nc = cells.length, more = nc > 6;
+  const cx = br ? br.left + br.width / 2 : W - 150, cy = br ? br.top + br.height / 2 : Hh - 120, rad = more ? Math.min(176, Hh * 0.45) : Math.min(140, Hh * 0.36);
+  for (let k = 0; k < nc; k++) {
+    const i = cells[k];
+    const a = Math.PI * (0.92 + 0.62 * k / (nc - 1));          // from the left of the button, over the top, to straight above it
+    const el = document.createElement('div'); el.className = 'slot' + (i === inv.sel ? ' sel' : '') + (more ? ' sm' : '');
     el.style.left = Math.max(30, Math.min(W - 30, cx + Math.cos(a) * rad)) + 'px'; el.style.top = Math.max(30, Math.min(Hh - 30, cy + Math.sin(a) * rad)) + 'px';
     const s = inv.slots[i];
-    const n = document.createElement('b'); n.textContent = String(i + 1); el.appendChild(n);
+    const n = document.createElement('b'); n.textContent = String(k + 1); el.appendChild(n);
     if (s) { const c = icon(getItem(s.id).icon); const cc = document.createElement('canvas'); cc.width = c.width; cc.height = c.height; cc.getContext('2d')!.drawImage(c, 0, 0); el.appendChild(cc); el.title = itemName(s.id); }
     el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); select(i); closeRadial(); });
     radial.appendChild(el);

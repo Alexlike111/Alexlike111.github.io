@@ -44,6 +44,7 @@ import { RECIPES, canCraft, craft } from './game/recipes';
 import { stationsAt } from './game/fixtures';
 import { drawPlayer, drawAnimal, drawFixture, drawFixtureEmissive, setSplitFixturePass, drawDrop, drawTarget, drawSled, type HeldInfo } from './game/draw';
 import { initSfxHooks, updateAmbient } from './game/sfxhooks';
+import './game/sfxhooks_use';
 import { runSelfTest } from './game/selftest';
 import * as testkit from './game/testkit';
 import * as fixtures from './game/fixtures';

@@ -7,7 +7,7 @@ import { G, type Fixture } from './state';
 import { TS, setCell } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { sandbox } from './testkit';
-import { emit } from './bus';
+import { emit, on } from './bus';
 import { toolState } from './tools';
 import { fauna, stepFauna, aiOf } from './fauna';
 import {
@@ -294,6 +294,29 @@ registerTest('hunt', 'далёкие лунки не держат рыбу в м
   });
   t.expect(r.far === 0 && r.farStock === 3, 'вдали рыбы быть не должно, а запас 3: ' + JSON.stringify(r));
   t.expect(r.near === 3, 'у лунки должны появиться 3 трески, а ' + r.near);
+});
+
+registerTest('hunt', 'Север стоит без дела рядом с хозяином и показывает на лунку с рыбой', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    const { hx, sy } = seaWorld(1000, 300);
+    addHoleAt(hx, sy, 4);
+    const dog = fauna.dog!; const d0 = { x: dog.x, y: dog.y };
+    const p = G.player; p.x = 1016; p.y = sy - 1; p.vx = 0;
+    dog.x = 1012; dog.y = sy - 1; dog.vx = 0;
+    const a = aiOf(dog)!; a.stay = false; a.hold = 0; a.fetch = undefined; a.pointed = false;
+    let pointed = false, at = { x: 0, y: 0 };
+    const off = on('dog_point', (d: { x: number; y: number }) => { pointed = true; at = d; });
+    let steps = 0;
+    for (; steps < 60 * 8 && !pointed; steps++) stepFauna(DT);
+    off();
+    const face = dog.face;
+    dog.x = d0.x; dog.y = d0.y; a.hold = 0; a.pointed = false;
+    return { pointed, secs: steps / 60, face, at };
+  });
+  t.expect(r.pointed, 'Север не показал на лунку за 8 с');
+  t.expect(r.pointed && r.at.x === 1000, 'показал не на ту лунку: ' + JSON.stringify(r.at));
+  t.expect(r.face === -1, 'лунка слева, а Север смотрит ' + r.face);
+  t.metric('Север показал через', +r.secs.toFixed(1), 's');
 });
 
 registerTest('hunt', 'шаг охоты: 36 рыб и 24 куропатки — не больше доли миллисекунды', async (t: TestCtx) => {

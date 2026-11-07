@@ -516,7 +516,7 @@ function stampCairn(T: Terrain) {
   // niche on the east side with the tin box
   box(cx + 5, gyA - 8, cx + 13, gyA, AIR);
   bgBox(cx + 5, gyA - 8, cx + 13, gyA, 2);
-  chest('cairn', Math.floor((cx + 6) / 4), gyA / 4 - 2, [slot('matches', 4), slot('note_n1', 1)], 2, 2, { look: 'tin' });
+  chest('cairn', Math.floor((cx + 6) / 4), gyA / 4 - 2, [slot('matches', 4), slot('smoke_flare', 1), slot('note_n1', 1)], 2, 2, { look: 'tin' });
   worldInfo.spots.cairn = { x: cx, y: gyA };
   // snow in the lee
   snowBank(cx + 16, cx + 44, cx + 22, 7, 180, 140);
@@ -537,7 +537,7 @@ function stampStation(T: Terrain) {
   addFixture('door', R, F - 6, 1, 6, { open: false, data: { side: 'east' } });
   // furniture
   addFixture('bed', L + 3, F - 1, 4, 1);
-  chest('station', L + 7, F - 2, [slot('can', 2), slot('biscuit', 4), slot('tea', 1), slot('matches', 8), slot('lantern', 1), slot('flare_gun', 1), slot('flare', 3), slot('rope', 1), slot('thermos', 1), slot('bandage', 2), slot('note_s1', 1)], 2, 2, { look: 'shelf' });
+  chest('station', L + 7, F - 2, [slot('can', 2), slot('biscuit', 4), slot('tea', 1), slot('matches', 8), slot('lantern', 1), slot('flare_gun', 1), slot('flare', 3), slot('rope', 1), slot('thermos', 1), slot('bandage', 2), slot('compass', 1), slot('whistle', 1), slot('note_s1', 1)], 2, 2, { look: 'shelf' });
   floorNote('s2', 'station', (L + 9) * 4 + 4, F * 4);
   addFixture('table', L + 9, F - 2, 3, 2);
   addFixture('radio', L + 12, F - 2, 2, 2, { data: { fixed: false, parts: 0 } });
@@ -582,7 +582,7 @@ function stampMastAndShed(T: Terrain) {
   addFixture('door', L, F - 6, 1, 6, { open: false, data: { side: 'west' } });
   addFixture('drum', L + 3, F - 2, 2, 2, { data: { fuel: 'diesel', n: 6 } });
   addFixture('drum', L + 5, F - 2, 2, 2, { data: { fuel: 'diesel', n: 8 } });
-  chest('shed', L + 8, F - 2, [slot('coal', 14), slot('axe', 1), slot('scrap', 6), slot('tin', 2), slot('rope', 1), slot('diesel', 1), slot('hand_warmer', 1), slot('spirit', 1), slot('sack', 1)], 2, 2, { look: 'bench' });
+  chest('shed', L + 8, F - 2, [slot('coal', 14), slot('axe', 1), slot('scrap', 6), slot('tin', 2), slot('rope', 1), slot('diesel', 1), slot('hand_warmer', 1), slot('spirit', 1), slot('sack', 1), slot('ice_cleats', 1)], 2, 2, { look: 'bench' });
   chest('shed', R - 3, F - 2, [slot('battery', 1)], 2, 2, { buried: true });
   worldInfo.radioParts.battery = { x: (R - 3) * 4 + 4, y: (F - 1) * 4, site: 'shed' };
   // the drift: packed in the east half, loose crown, a tongue reaching outside
@@ -803,7 +803,7 @@ function stampShip(T: Terrain) {
   LB(chimU, chimU + 2, -4, 4, M.METAL);
   st.f!.data = { smokeX: wx(chimU), smokeY: wy(chimU, -8) };
   fixOnFloor('bed', -34, FLOOR, 4, 1);
-  chestOn('ship', -6, FLOOR, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('snow_goggles', 1), slot('spirit', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
+  chestOn('ship', -6, FLOOR, [slot('barometer', 1), slot('flare', 2), slot('can', 2), slot('flint', 1), slot('snow_goggles', 1), slot('spirit', 1), slot('binoculars', 1), slot('note_n12', 1), slot('note_n13', 1)], { look: 'captain' });
   worldInfo.spots.shipCabin = { x: wx(-26), y: wy(-26, FLOOR) - 4 };
   const hold = chestOn('ship', 4, FLOOR, [slot('radio_triode', 1), slot('saw', 1), slot('scrap', 5), slot('rope', 3), slot('tin', 3), slot('flint', 1), slot('harpoon', 1), slot('canvas', 3), slot('biscuit', 3), slot('fat', 2), slot('big_pack', 1), slot('note_n11', 1)], { look: 'tool' });
   worldInfo.radioParts.triode = { x: hold.x, y: hold.y, site: 'ship' };

@@ -13,6 +13,7 @@ import { addShake } from '../engine/camera';
 import { MAT, FRIC } from '../content/materials';
 import { inv, weight, WEIGHT_SOFT, WEIGHT_MAX, WEIGHT_RUN, runLimit, overload, removeFromSlot, takeAll, giveStartKit, spawnDrop, backpacks, add, remove, count, held, clearInventory, find, select } from './inventory';
 import { getItem, itemName, type WearSlot } from './items';
+import { gearMods } from './items_b';
 import { radiantWarmth, dryBoost, nearStation } from './fixtures';
 import { H, W } from '../engine/grid';
 import { dogWarmth } from './fauna';
@@ -302,7 +303,8 @@ function stepMove(dt: number) {
   if (p.energy < 15) mult *= 0.85;
   if (p.co > 40) mult *= 0.75;
   if (body.sink > 1) mult *= 0.88;
-  const fric = FRIC[body.feetMat] || 1;
+  mult *= gearMods.speed;                // ice cleats (items_b.ts, DESIGN §17): quicker on glare ice, slower in soft snow
+  const fric = (FRIC[body.feetMat] || 1) * gearMods.fric;   // ... and grip on bare ice
   const ix = Math.abs(input.moveX) < 0.12 ? 0 : input.moveX;
   const run = input.run && !swim && p.energy > 5 && p.carry <= runLimit();       // above 140 % of the load nobody runs
   let target = ix * (run ? TUNE.run : TUNE.walk) * mult;
