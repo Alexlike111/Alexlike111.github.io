@@ -25,7 +25,7 @@ registerTest('ui', 'двери дома и дизельной проходимы
       sc.teleport(x0, F); sc.stepFast(10);
       sc.act('interact', d.tx * 4 + 2, d.ty * 4 + 12);
       const startX = G.player.x;
-      sc.key(west ? 'KeyD' : 'KeyA', true); sc.stepFast(70); sc.key(west ? 'KeyD' : 'KeyA', false);
+      sc.key(west ? 'KeyD' : 'KeyA', true); sc.stepFast(100); sc.key(west ? 'KeyD' : 'KeyA', false);
       const passed = west ? G.player.x > d.tx * 4 + 3 : G.player.x < d.tx * 4 + 1;
       t.expect(passed, `не прошёл дверь x=${d.tx * 4} (${startX.toFixed(0)} -> ${G.player.x.toFixed(0)})`);
     }

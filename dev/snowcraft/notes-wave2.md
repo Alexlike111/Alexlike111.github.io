@@ -72,3 +72,19 @@ Files: new `game/fauna.ts`, `game/drift.ts`, `game/quest.ts`, `game/overlay.ts`,
 - Audio never listened to by a person. Substitute: `[audio]` self-test renders every cue offline (no NaN / silence / clipping, passes); fauna cues are volume-scaled by distance; on-screen captions cover the sound-off case. Real-device listening and iOS resume still open.
 - Software-GL fps (3-16) not addressed (render scale is in `render.ts`, owner of render).
 - Recipe panel grouping / nearest-table marker (HUD owner). `tests/world.test.ts` shows 6 failures in the mine (rails, portal walk, bulkhead, structure of mine) caused by the concurrent `locations.ts` edits, not by this pass.
+
+## Wave 3 (integration)
+Merged: knowledge/mine/journal (lore.ts, mine.ts, journal.ts, bag.ts) + senses "Чутьё" / readability / title / windows / Q wheel (senses.ts, sensesui.ts, ui.css, windows.ts). tsc clean; sim.test 40/40; world.test 163/0; mine.test 20/20; e2e ok on desktop + phone, no console errors; in-game selftest 107/107 (shots/selftest.txt); ui-shots 10/10; world-shots runs without errors; `vite build` ok (787 kB single file).
+
+### Glue fixes
+- `[ui] двери...` selftest was flaky (once ended 1 px short of the lintel after 70 fast steps, passed on rerun): walk time raised to 100 steps in `src/ui/ui.selftest.ts`.
+- The earlier senses selftest failure did not reproduce on the merged tree.
+
+### Looked at
+ui-desktop/phone shots (day 1, night house with senses on, storm, hut): HUD flow, legend, belt, sound captions do not overlap; phone buttons do not collide (the Чутьё button sits over the right hut, acceptable).
+
+### Gaps
+- `player.ts` does not yet gate roll-in-dry-snow on `knows('snow_roll')`.
+- Fixture coal carts give a fixed 4 coal once; fish/snare timers still fallbacks; windows are single 4x4 tiles (small glow); bag close button < 48 px on phone; scent dots are cosmetic, not the bear's real field; mine shots not tuned.
+- world.test depends on the generator's random stream (apron heap must keep the same draw count).
+- No real-device audio, FPS or iOS checks.
