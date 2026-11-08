@@ -1297,5 +1297,7 @@
  "zoom.farther": "Plus loin",
  "zoom.label": "Zoom {i}/{n}",
  "zoom.title": "Zoom de la carte",
- "zoom.zoom": "Zoom"
+ "zoom.zoom": "Zoom",
+ "hunt.strikeBird": "Lagopède !",
+ "hunt.flockHint": "Des lagopèdes. Approche sans bruit et frappe — ou pose un collet"
 }

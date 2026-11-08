@@ -1297,5 +1297,7 @@
  "zoom.farther": "Farther",
  "zoom.label": "Zoom {i}/{n}",
  "zoom.title": "Map zoom",
- "zoom.zoom": "Zoom"
+ "zoom.zoom": "Zoom",
+ "hunt.strikeBird": "Ptarmigan!",
+ "hunt.flockHint": "Ptarmigan. Sneak up and strike — or set a snare"
 }

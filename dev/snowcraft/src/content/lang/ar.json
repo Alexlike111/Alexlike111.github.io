@@ -1297,5 +1297,7 @@
  "zoom.farther": "أبعد",
  "zoom.label": "التكبير {i}/{n}",
  "zoom.title": "تكبير الخريطة",
- "zoom.zoom": "التكبير"
+ "zoom.zoom": "التكبير",
+ "hunt.strikeBird": "دجاج الثلج!",
+ "hunt.flockHint": "دجاج الثلج. تسلّل واضرب — أو انصب فخًا"
 }

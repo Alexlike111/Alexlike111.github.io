@@ -121,6 +121,8 @@ SNOWY[MAT.SNOW] = 1; SNOWY[MAT.PACKED] = 1; SNOWY[MAT.SNOWBLOCK] = 1;
 const WOODY = new Uint8Array(256);
 WOODY[MAT.LOG] = WOODY[MAT.WOOD] = WOODY[MAT.PLANK] = WOODY[MAT.WHALEBONE] = 1;
 
+/** Hand tools that strike a ptarmigan on the snow with a press (hunt.ts 'strike'); the harpoon also throws at range. */
+const STRIKE_TOOLS = new Set(['snow_knife', 'axe', 'harpoon', 'pick', 'shovel']);
 function toolKindOf(id: string | undefined): string {
   if (!id) return 'hand';
   const t = getItem(id).tool;
@@ -726,6 +728,9 @@ export function stepTools(dt: number) {
   const pressed = input.primaryPressed, down = input.primary;
   const hf = handsFactor() * (p.energy < 15 ? 0.8 : 1);
   held.using = false;
+  // a hand tool's press at a ptarmigan on the snow is a strike (hunt.ts kills the nearest one at the aim point); a strike uses up the press
+  const strike = { x: p.x, y: p.y, ax: toolState.aimX, ay: toolState.aimY, hit: false };
+  if (pressed && sel && STRIKE_TOOLS.has(sel.id)) emit('strike', strike);
   stepHeldLight(dt, sel, pressed);
   stepFishing(dt, T, pressed, sel);
 
@@ -745,10 +750,11 @@ export function stepTools(dt: number) {
       toast(S.flareShot, 'good'); emit('flare', { x: p.x, y: p.y - 14 }); toolState.swing = 1;
     } else toast(S.flareNone, 'warn');
   }
-  if (sel?.id === 'harpoon' && pressed) useHarpoon(T);
+  if (sel?.id === 'harpoon' && pressed && !strike.hit) useHarpoon(T);
+  if (strike.hit) toolState.swing = Math.max(toolState.swing, 0.8);     // the arm comes down on the bird
 
   // dig / cut / place / throw
-  const act = down && T.inReach;
+  const act = down && T.inReach && !strike.hit;
   if (act) {
     const tk = toolKindOf(sel?.id);
     if (T.mode === 'cut' && T.ok) { doCut(T, dt * hf, tk); held.using = true; toolState.swing = Math.max(toolState.swing, 0.5); }

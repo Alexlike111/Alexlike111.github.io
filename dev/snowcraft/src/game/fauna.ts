@@ -50,6 +50,7 @@ const SZ: Record<string, [number, number]> = { dog: [10, 9], bear: [26, 15], sea
 // the ring ramp (seasons.ts, DESIGN §18): the bear gets faster and bolder every ring
 const bearRamp = () => Math.max(0.5, Math.min(1.5, ramp.bear ?? 1));
 
+export { huntInfo, getSites, getHoles } from './hunt';   // dev API (__sc.mods.fauna): the hunt's stocks and flocks
 export const fauna = { dog: null as Animal | null, bear: null as Animal | null, sealCd: new Map<number, number>(), bearActiveDay: 2, bearSmell: 0, bearMode: '', sealsCaught: 0 };
 
 // ---------------------------------------------------------------------------------------------------------------------

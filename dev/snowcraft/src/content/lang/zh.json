@@ -1297,5 +1297,7 @@
  "zoom.farther": "拉远",
  "zoom.label": "缩放 {i}/{n}",
  "zoom.title": "地图缩放",
- "zoom.zoom": "缩放"
+ "zoom.zoom": "缩放",
+ "hunt.strikeBird": "雷鸟！",
+ "hunt.flockHint": "雷鸟。悄悄靠近再出手——或者设个套索"
 }

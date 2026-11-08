@@ -1297,5 +1297,7 @@
  "zoom.farther": "Lebih jauh",
  "zoom.label": "Zoom {i}/{n}",
  "zoom.title": "Zoom peta",
- "zoom.zoom": "Zoom"
+ "zoom.zoom": "Zoom",
+ "hunt.strikeBird": "Ptarmigan!",
+ "hunt.flockHint": "Ptarmigan. Mendekat diam-diam lalu pukul — atau pasang jerat"
 }

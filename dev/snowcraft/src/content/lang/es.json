@@ -1297,5 +1297,7 @@
  "zoom.farther": "Más lejos",
  "zoom.label": "Zoom {i}/{n}",
  "zoom.title": "Zoom del mapa",
- "zoom.zoom": "Zoom"
+ "zoom.zoom": "Zoom",
+ "hunt.strikeBird": "¡Perdiz blanca!",
+ "hunt.flockHint": "Perdices blancas. Acércate sin ruido y golpea — o pon una trampa"
 }

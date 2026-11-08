@@ -4,16 +4,20 @@
 // directly with stepHunt / stepFauna, so nothing depends on the order of the other tests or on the real game loop.
 import { registerTest, type TestCtx } from './selftest';
 import { G, type Fixture } from './state';
-import { TS, setCell } from '../engine/grid';
+import { TS, W, setCell } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { sandbox } from './testkit';
 import { emit, on } from './bus';
-import { toolState } from './tools';
+import { toolState, stepTools } from './tools';
+import { add, clearInventory, inv, select } from './inventory';
+import { input } from '../engine/input';
+import { worldToScreen } from '../engine/render';
 import { fauna, stepFauna, aiOf } from './fauna';
 import {
   initHunt, stepHunt, setScanning, addHoleAt, addSiteAt, getHoles, getSites, huntInfo, huntSave, huntLoad, trackStep, dragMarks,
   huntDropNear, huntVisible, iceAboveAt,
 } from './hunt';
+import type { Animal } from './state';
 
 const DT = 1 / 60;
 const fishOf = () => G.animals.filter(e => e.kind === 'fish');
@@ -42,6 +46,20 @@ function landWorld(cx: number, g: number) {
     setCell(x, y, m, 0, 0);
   }
 }
+/** Tundra like landWorld, with lichen (row g-1) only over the patches: each patch is w cells wide and centred on its x in patches. */
+function tundraWorld(cx: number, g: number, half: number, patches: number[], w: number) {
+  // the scan reads 210 cells either side of the player: clear the real map's lichen there first (the sandbox restores it afterwards)
+  for (let y = 200; y <= 340; y++) for (let x = cx - 215; x <= cx + 215; x++) setCell(x, y, MAT.AIR, 0, 0);
+  for (let y = g - 12; y <= g + 30; y++) for (let x = cx - half; x <= cx + half; x++) {
+    let m = MAT.AIR;
+    if (y >= g + 4) m = MAT.STONE;
+    else if (y >= g) m = MAT.DIRT;
+    else if (y === g - 1 && patches.some(px => Math.abs(x - px) <= w / 2)) m = MAT.LICHEN;
+    setCell(x, y, m, 0, 0);
+  }
+}
+/** The scan reads the window the camera shows: give it the whole strip of tundra. */
+function scanWindow() { G.win.x0 = 0; G.win.x1 = W - 1; G.win.y0 = 200; G.win.y1 = 340; }
 function prep() {
   setScanning(false); initHunt();
   G.timeScale = 1; G.storm = 0; G.toasts.length = 0;
@@ -319,7 +337,7 @@ registerTest('hunt', 'Север стоит без дела рядом с хоз
   t.metric('Север показал через', +r.secs.toFixed(1), 's');
 });
 
-registerTest('hunt', 'шаг охоты: 36 рыб и 24 куропатки — не больше доли миллисекунды', async (t: TestCtx) => {
+registerTest('hunt', 'шаг охоты: 24 трески и 6 куропаток (лимит) — не больше доли миллисекунды', async (t: TestCtx) => {
   const ms = await inSandbox(() => {
     seaWorld(1000, 300);
     for (const x of [990, 1010, 1030, 1050]) addHoleAt(x, 300, 6);
@@ -334,7 +352,126 @@ registerTest('hunt', 'шаг охоты: 36 рыб и 24 куропатки — 
   });
   t.metric('шаг охоты, мкс', +(ms.per * 1000).toFixed(1), 'µs');
   t.metric('рыб / куропаток', ms.fish * 100 + ms.birds, '');
-  t.expect(ms.fish === 24 && ms.birds === 24, 'в мире должно быть 24 трески и 24 куропатки, а ' + ms.fish + ' и ' + ms.birds);
+  t.expect(ms.fish === 24 && ms.birds === 6, 'в мире должно быть 24 трески и 6 куропаток, а ' + ms.fish + ' и ' + ms.birds);
   t.expect(ms.per < 1.5, 'шаг охоты медленнее 1.5 мс: ' + ms.per.toFixed(2));
 });
 
+registerTest('hunt', 'одно пятно ягеля — один участок и стая не больше 4 куропаток (20 столбцов ягеля — не 20 участков)', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    tundraWorld(1000, 300, 60, [1000], 20);
+    G.player.x = 1000; G.player.y = 299; G.player.vx = 0;
+    scanWindow(); setScanning(true);
+    for (let i = 0; i < 60 * 3; i++) stepHunt(DT);            // the scan (every 2 s), then the flock comes
+    const s = getSites();
+    return { sites: s.length, max: s[0]?.max ?? -1, birds: birdsOf().length };
+  });
+  t.expect(r.sites === 1, 'участков на одном пятне должно быть 1, а ' + r.sites);
+  t.expect(r.max >= 2 && r.max <= 4, 'стая из 2–4 куропаток, а ' + r.max);
+  t.expect(r.birds <= 4, 'куропаток на пятне: ' + r.birds);
+});
+
+registerTest('hunt', '200 клеток тундры с пятью пятнами: участков 3–5 (не ближе 45 клеток), живых куропаток рядом с игроком не больше 6', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    const cx = 1000;
+    tundraWorld(cx, 300, 100, [cx - 80, cx - 40, cx, cx + 40, cx + 80], 20);
+    G.player.x = cx; G.player.y = 299; G.player.vx = 0;
+    scanWindow(); setScanning(true);
+    let most = 0;
+    for (let i = 0; i < 60 * 12; i++) { stepHunt(DT); if (i % 30 === 0) most = Math.max(most, birdsOf().length); }
+    const near = birdsOf().filter(b => Math.abs(b.x - cx) < 140).length;
+    return { sites: getSites().length, birds: birdsOf().length, most, near };
+  });
+  t.expect(r.sites >= 3 && r.sites <= 5, 'участков должно быть 3–5 (пятна ближе 45 клеток — одна стая), а ' + r.sites);
+  t.expect(r.most <= 6 && r.birds <= 6, 'живых куропаток больше 6: ' + r.most + ' / ' + r.birds);
+  t.expect(r.most >= 4, 'куропатки должны появляться у игрока: ' + r.most);
+});
+
+registerTest('hunt', 'стоящий игрок куропаток не спугивает; идущий — в 10 клетках спугивает, в 20 нет; бегущий — в 35 спугивает', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    landWorld(1000, 300);
+    addSiteAt(1000, 299, 4);
+    const site = getSites()[0];
+    const out: Record<string, number> = {};
+    const place = (x: number, vx: number) => { G.player.x = x; G.player.y = 299; G.player.vx = vx; };
+    const flying = () => birdsOf().filter(b => b.state === 'fly').length;
+    const settle = () => { for (let i = 0; i < 60 * 8; i++) stepHunt(DT); site.flushCd = 0; };   // they land and walk home; the cooldown is reset for the next case
+    place(1010, 0);
+    for (let i = 0; i < 60 * 3; i++) stepHunt(DT);
+    out.stillAt10 = flying();
+    place(1010, 27); stepHunt(DT); out.walkAt10 = flying();
+    settle();
+    place(1020, 27); stepHunt(DT); out.walkAt20 = flying();
+    settle();
+    place(1035, 46); stepHunt(DT); out.runAt35 = flying();
+    return out;
+  });
+  t.expect(r.stillAt10 === 0, 'стоящий игрок спугнул стаю: ' + r.stillAt10);
+  t.expect(r.walkAt10 > 0, 'идущий игрок в 10 клетках не спугнул стаю');
+  t.expect(r.walkAt20 === 0, 'идущий игрок спугнул стаю с 20 клеток');
+  t.expect(r.runAt35 > 0, 'бегущий игрок в 35 клетках не спугнул стаю');
+});
+
+registerTest('hunt', 'удар ножом: куропатка в 14 клетках от игрока и в 20 от прицела падает добычей на снег; в 30 клетках — ничего', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    landWorld(1000, 300);
+    addSiteAt(1000, 299, 4);
+    G.player.x = 992; G.player.y = 299; G.player.vx = 0;
+    for (let i = 0; i < 60 * 3; i++) stepHunt(DT);            // the flock on the snow
+    clearInventory(); add('snow_knife', 1); select(inv.slots.findIndex(s => s && s.id === 'snow_knife'));
+    const drops = () => G.drops.filter(d => d.item === 'ptarmigan').length;
+    const hits = () => G.toasts.filter(x => /Куропатка!/.test(x.text)).length;
+    const aim0 = { hasAim: input.hasAim, aimMode: input.aimMode, aimX: input.aimX, aimY: input.aimY };
+    const press = (b: Animal, px: number) => {                 // the mouse on the bird, LMB pressed for one frame
+      G.player.x = px; G.player.y = 299; G.player.vx = 0;
+      const [sx, sy] = worldToScreen(b.x, b.y);
+      input.hasAim = true; input.aimMode = 'mouse'; input.aimX = sx; input.aimY = sy;
+      input.primaryPressed = true; stepTools(DT); input.primaryPressed = false;
+    };
+    const b0 = birdsOf()[0], n0 = birdsOf().length, d0 = drops(), h0 = hits();
+    press(b0, b0.x - 8);
+    const n1 = birdsOf().length, d1 = drops(), h1 = hits();
+    const b1 = birdsOf()[0], n2 = birdsOf().length, d2 = drops();
+    press(b1, b1.x - 30);
+    const n3 = birdsOf().length, d3 = drops();
+    Object.assign(input, aim0);
+    return { n0, n1, n2, n3, d0, d1, d2, d3, h0, h1 };
+  });
+  t.expect(r.n1 === r.n0 - 1, 'удар должен убить одну куропатку: ' + r.n0 + ' → ' + r.n1);
+  t.expect(r.d1 === r.d0 + 1, 'после удара одна куропатка на снегу, а ' + (r.d1 - r.d0));
+  t.expect(r.h1 === r.h0 + 1, 'после удара нет подсказки «Куропатка!»');
+  t.expect(r.n3 === r.n2 && r.d3 === r.d2, 'на 30 клеток удар не должен ничего делать: ' + JSON.stringify(r));
+});
+
+registerTest('hunt', 'подсказка «Куропатки…» один раз, когда стая в 60 клетках; помнится в сохранении', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    landWorld(1000, 300);
+    addSiteAt(1000, 299, 4);
+    const hints = () => G.toasts.filter(x => /Подкрадись/.test(x.text)).length;
+    const walk = (x: number) => { G.player.x = x; G.player.y = 299; G.player.vx = 0; for (let i = 0; i < 60 * 2; i++) stepHunt(DT); };
+    walk(1000 - 70); const far = hints();
+    walk(1000 - 40); const near = hints();
+    walk(1000 - 70); walk(1000 - 40); const again = hints();
+    const saved = JSON.parse(JSON.stringify(huntSave())) as ReturnType<typeof huntSave>;
+    initHunt(); huntLoad(saved); initHunt();                  // a new session of the same game
+    G.toasts.length = 0; walk(1000 - 40);
+    return { far, near, again, saved: saved.hint ?? -1, afterLoad: hints() };
+  });
+  t.expect(r.far === 0, 'подсказка показана на 70 клетках');
+  t.expect(r.near === 1, 'подсказка должна появиться в 60 клетках, а ' + r.near);
+  t.expect(r.again === 1, 'подсказка повторилась: ' + r.again);
+  t.expect(r.saved === 1, 'подсказка не записана в сохранение: ' + r.saved);
+  t.expect(r.afterLoad === 0, 'после загрузки подсказка повторилась');
+});
+
+registerTest('hunt', 'старое сохранение с 12 участками на одном пятне грузится как один участок; стаи не больше 4', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    const sites: number[][] = [];
+    for (let i = 0; i < 12; i++) sites.push([1000 + i * 2, 299, 6, 6, 0]);
+    sites.push([1200, 299, 6, 6, 0]);                         // another patch, far away: kept
+    huntLoad({ holes: [], sites, tracks: [], caught: 0, birds: 0 }); initHunt();
+    const s = getSites();
+    return { n: s.length, max: s.map(q => q.max), stock: s.map(q => q.stock) };
+  });
+  t.expect(r.n === 2, 'участков должно остаться 2 (пятно и дальний), а ' + r.n);
+  t.expect(r.max.every(m => m <= 4) && r.stock.every((k, i) => k <= r.max[i]), 'стаи больше 4: ' + JSON.stringify(r));
+});

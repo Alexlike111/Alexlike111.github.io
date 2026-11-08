@@ -1297,5 +1297,7 @@
  "zoom.farther": "दूर",
  "zoom.label": "ज़ूम {i}/{n}",
  "zoom.title": "नक़्शे का ज़ूम",
- "zoom.zoom": "ज़ूम"
+ "zoom.zoom": "ज़ूम",
+ "hunt.strikeBird": "बर्फ़ीला तीतर!",
+ "hunt.flockHint": "बर्फ़ीले तीतर। चुपके से पास जाओ और वार करो — या फंदा लगाओ"
 }

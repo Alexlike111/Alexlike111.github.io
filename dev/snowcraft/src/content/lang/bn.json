@@ -1297,5 +1297,7 @@
  "zoom.farther": "দূরে",
  "zoom.label": "স্কেল {i}/{n}",
  "zoom.title": "মানচিত্রের স্কেল",
- "zoom.zoom": "স্কেল"
+ "zoom.zoom": "স্কেল",
+ "hunt.strikeBird": "তিতির!",
+ "hunt.flockHint": "তিতির। চুপিচুপি কাছে যাও আর আঘাত করো — অথবা ফাঁদ পাতো"
 }

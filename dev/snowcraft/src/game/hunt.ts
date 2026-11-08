@@ -1,10 +1,13 @@
 // Live hunting (DESIGN §14 «Live hunting»). Cod swim under the ice near every open hole or lead. A line cast into the water draws the nearest
 // fish to the bait, it circles and bites: we set toolState.fish ourselves (the fake timer in tools.ts is off, setFishingFallback(false)).
-// Ptarmigan flocks feed on the lichen of the tundra, flush when the player comes close, and fall to a harpoon or a snare; the husky brings them
+// Ptarmigan flocks feed on the lichen of the tundra, flush when a walking or running player comes close, and fall to a strike with a hand tool,
+// a harpoon or a snare; the husky brings them
 // back (fauna.ts). Tracks in the snow (fox, ptarmigan, bear, seal drag) fade over game hours, faster in a storm.
 // Stocks (fish per hole, birds per lichen patch) are kept while the player is far and regrow with the game clock; the animals themselves
 // exist only near the player (sleep far away). Kept in G.animals as kind 'fish' (state 'hidden': drawn by our own layer) and 'ptarmigan'.
-// Emits: 'fish_bite' {x,y}, 'bird_flush' {x,y}, 'bird_caught' {how:'harpoon'|'snare', x, y}. Listens: 'fishing' {x,y}, 'fish_caught' {n}, 'animal_hit'.
+// Emits: 'fish_bite' {x,y}, 'bird_flush' {x,y}, 'bird_caught' {how:'harpoon'|'snare'|'strike', x, y}. Listens: 'fishing' {x,y}, 'fish_caught' {n},
+// 'animal_hit', 'strike' {x,y,ax,ay,hit} (tools.ts asks: a hand tool's press at a bird on the snow; the handler sets hit = true when a bird dies).
+// One flock per lichen patch: a site is kept at least SITE_GAP cells from the next one; a flock is 2–4 birds; at most BIRD_CAP birds are alive.
 import { G, newId, toast, type Animal, type Drop, type View } from './state';
 import { on, emit } from './bus';
 import { strings } from '../content/i18n';
@@ -25,6 +28,8 @@ const S = strings('hunt', {
   birdGot: 'Добыча: куропатка',
   snareBird: 'В силке куропатка',
   dogBird: 'Север принёс куропатку',
+  strikeBird: 'Куропатка!',
+  flockHint: 'Куропатки. Подкрадись и ударь — или поставь силок',
 });
 
 export type TrackKind = 'fox' | 'ptarmigan' | 'bear' | 'seal';
@@ -34,11 +39,17 @@ export interface Track { kind: TrackKind; x: number; y: number; dir: 1 | -1; age
 interface FishAI { hole: Hole; ph: 'school' | 'gather' | 'approach' | 'circle' | 'bite' | 'away'; t: number; tx: number; ty: number; ang: number; spd: number; face: 1 | -1; vis: boolean; visT: number; biter: boolean }
 interface BirdAI { site: Site; mode: 'peck' | 'walk' | 'fly'; t: number; t0: number; tx: number; dir: 1 | -1; fly0: number; snT: number }
 interface Cast { x: number; y: number; t: number; approach: boolean; hinted: boolean; biter: number; rescanT: number }
-/** Persisted with the save (see huntSave / huntLoad): [x, y, max, stock, regen] per hole and site, [kind, x, y, dir, age] per track. */
-export interface HuntSave { holes: number[][]; sites: number[][]; tracks: (string | number)[][]; caught: number; birds: number }
+/** Persisted with the save (see huntSave / huntLoad): [x, y, max, stock, regen] per hole and site, [kind, x, y, dir, age] per track.
+ *  hint: 1 once the «flock within 60 cells» toast was shown (once per game). */
+export interface HuntSave { holes: number[][]; sites: number[][]; tracks: (string | number)[][]; caught: number; birds: number; hint?: number }
 
 const ACT_R = 150, ACT_BIRD = 140;           // cells: creatures exist within this distance of the player
-const FISH_CAP = 36, BIRD_CAP = 24, HOLE_CAP = 40, SITE_CAP = 14, TRACK_CAP = 360;
+const FISH_CAP = 36, BIRD_CAP = 6, HOLE_CAP = 40, SITE_CAP = 14, TRACK_CAP = 360;
+const SITE_GAP = 45;                         // cells: one flock per lichen patch (no second site this close)
+const FLOCK_MIN = 2, FLOCK_MAX = 3;          // birds per flock
+const FLUSH_WALK = 14, FLUSH_RUN = 40;       // cells: a walking player flushes the flock within 14, a running one within 40; standing still never does
+const STRIKE_R = 14, STRIKE_AIM = 20;        // a hand-tool strike: the bird within 14 cells of the player and within 20 of the aim point
+const HINT_R = 60;                           // cells: the flock hint (once per game)
 const CAST_R = 60;                           // a cast draws fish within this distance
 const TRACK_LIFE = 360, TRACK_FADE = 120;    // game minutes (6 h), last 2 h fade
 const FISH_REGROW = 20, BIRD_REGROW = 15;    // game minutes per +1 stock
@@ -50,6 +61,7 @@ const lastTrack = new Map<number, { x: number; y: number }>();
 const huntDrops = new Set<number>();
 let cast: Cast | null = null;
 let scanT = 0, actT = 0, fishCaught = 0, birdsTaken = 0, pending: HuntSave | null = null, layersOn = false;
+let hintSeen = false;
 let scanOn = true;
 
 // ---------------------------------------------------------------------------------------------------------------------------------- helpers
@@ -85,10 +97,11 @@ function closeHole(h: Hole) {
   for (const id of h.ents.slice()) removeFish(id);
   holes.splice(holes.indexOf(h), 1);
 }
+/** One flock per lichen patch: a lichen column closer than SITE_GAP to a site is the same patch (the slopes of the tundra are not a reason for a second flock). */
+const nearSite = (x: number, y: number) => sites.some(s => dist(s.x, s.y, x, y) < SITE_GAP);
 function addSite(x: number, y: number) {
-  if (sites.length >= SITE_CAP) return;
-  for (const s of sites) if (Math.abs(s.x - x) < 30 && Math.abs(s.y - y) < 6) return;
-  const max = 3 + Math.floor(Math.random() * 4);
+  if (sites.length >= SITE_CAP || nearSite(x, y)) return;
+  const max = FLOCK_MIN + Math.floor(Math.random() * (FLOCK_MAX - FLOCK_MIN + 1));
   sites.push({ id: newId(), x, y, max, stock: max, regen: 0, ents: [], flushCd: 0 });
 }
 function closeSite(s: Site) {
@@ -291,26 +304,41 @@ function snareNear(x: number, y: number): Record<string, unknown> | null {
   }
   return null;
 }
-/** A bird gone for good: shot (harpoon: it drops, the husky can fetch it) or caught in a snare (the snare keeps it). */
-function birdGone(e: Animal, how: 'harpoon' | 'snare') {
+/** A bird gone for good: shot or struck (it drops, the husky can fetch it) or caught in a snare (the snare keeps it). */
+function birdGone(e: Animal, how: 'harpoon' | 'snare' | 'strike') {
   const a = birdAI.get(e.id);
   if (a) a.site.stock = Math.max(0, a.site.stock - 1);
   removeBird(e.id);
   birdsTaken++;
-  if (how === 'harpoon') {
+  if (how !== 'snare') {
     const d = spawnDrop('ptarmigan', 1, e.x, e.y - 2, 0, -16, undefined, true);
     if (d) huntDrops.add(d.id);
-    toast(S.birdGot, 'good');
+    toast(how === 'strike' ? S.strikeBird : S.birdGot, 'good');
   } else if (G.player && dist(e.x, e.y, G.player.x, G.player.y) < 60) toast(S.snareBird, 'good');
   burstFx('dust', e.x, e.y - 2, 6, 14, 0.5, 0xeef4fa);
+  if (how === 'strike') burstFx('flake', e.x, e.y - 3, 8, 12, 0.7, 0xf4f8fc);     // feathers
   emit('bird_caught', { how, x: e.x, y: e.y });
 }
+/** A hand tool's press at a bird on the snow: the nearest bird within STRIKE_AIM of the aim point, and within STRIKE_R of the player, dies. */
+function strikeBird(px: number, py: number, ax: number, ay: number): boolean {
+  let best: Animal | null = null, bd = STRIKE_AIM;
+  for (const e of G.animals) {
+    if (e.kind !== 'ptarmigan' || e.state === 'hidden' || e.state === 'dead') continue;
+    const a = birdAI.get(e.id); if (!a || a.mode === 'fly') continue;
+    if (dist(e.x, e.y, px, py) > STRIKE_R) continue;
+    const d = dist(e.x, e.y, ax, ay); if (d < bd) { bd = d; best = e; }
+  }
+  if (!best) return false;
+  birdGone(best, 'strike');
+  return true;
+}
+on('strike', (d: { x: number; y: number; ax: number; ay: number; hit: boolean }) => { if (strikeBird(d.x, d.y, d.ax, d.ay)) d.hit = true; });
 function stepBirds(dt: number, p: { x: number; y: number; vx: number; alive: boolean }) {
   for (const s of sites.slice()) {
     s.flushCd = Math.max(0, s.flushCd - dt);
     if (!p.alive || s.flushCd > 0 || !s.ents.length) continue;
-    const d = dist(s.x, s.y, p.x, p.y), spd = Math.abs(p.vx);
-    if ((spd > 30 && d < 40) || (spd > 4 && d < 25) || d < 6) flush(s, p);
+    const d = dist(s.x, s.y, p.x, p.y), spd = Math.abs(p.vx);          // walk 27 cells/s, run 46: standing still (spd 0) never flushes
+    if ((spd > 30 && d < FLUSH_RUN) || (spd > 4 && d < FLUSH_WALK)) flush(s, p);
   }
   for (const e of G.animals.slice()) {
     if (e.kind !== 'ptarmigan') continue;
@@ -360,7 +388,7 @@ function syncCreatures(p: { x: number; y: number }) {
   }
   for (const s of sites) if (dist(s.x, s.y, p.x, p.y) >= ACT_BIRD && s.ents.length) for (const id of s.ents.slice()) removeBird(id);
   let b = birdAI.size;
-  for (const s of sites.filter(q => dist(q.x, q.y, p.x, p.y) < ACT_BIRD)) {
+  for (const s of sites.filter(q => dist(q.x, q.y, p.x, p.y) < ACT_BIRD).sort((q, r) => dist(q.x, q.y, p.x, p.y) - dist(r.x, r.y, p.x, p.y))) {
     while (s.ents.length > s.stock) removeBird(s.ents[s.ents.length - 1]);
     while (s.ents.length < s.stock && b < BIRD_CAP) { if (!spawnBird(s)) break; b++; }
   }
@@ -446,22 +474,33 @@ export function initHunt() {
   for (let i = G.animals.length - 1; i >= 0; i--) if (G.animals[i].kind === 'fish' || G.animals[i].kind === 'ptarmigan') G.animals.splice(i, 1);
   holes.length = 0; sites.length = 0; fishAI.clear(); birdAI.clear(); lastTrack.clear(); huntDrops.clear(); tracks.length = 0;
   cast = null; toolState.fish.state = 'idle'; toolState.fish.bite = 0;
-  fishCaught = 0; birdsTaken = 0; scanT = 0; actT = 0;
+  fishCaught = 0; birdsTaken = 0; scanT = 0; actT = 0; hintSeen = false;
   if (pending) {
     const d = pending;
     for (const [x, y, max, stock, regen] of d.holes) holes.push({ id: newId(), x, y, max, stock, regen, ents: [] });
-    for (const [x, y, max, stock, regen] of d.sites) sites.push({ id: newId(), x, y, max, stock, regen, ents: [], flushCd: 0 });
+    // old saves kept a site per lichen column (a crowd of flocks on one patch) and flocks of up to 6: one site per patch, flocks of at most FLOCK_MAX
+    for (const [x, y, max0, stock0, regen] of d.sites) {
+      if (nearSite(x, y)) continue;
+      const max = Math.min(max0, FLOCK_MAX);
+      sites.push({ id: newId(), x, y, max, stock: Math.min(stock0, max), regen, ents: [], flushCd: 0 });
+    }
     for (const [kind, x, y, dir, age] of d.tracks) addTrack(kind as TrackKind, x as number, y as number, dir as 1 | -1, age as number);
     fishCaught = d.caught ?? 0; birdsTaken = d.birds ?? 0;
+    hintSeen = d.hint === 1;
   }
   pending = null;
+}
+/** The first time a flock with birds left is within HINT_R cells: one toast on how to hunt them (once per game, kept in the save). */
+function flockHint(p: { x: number; y: number }) {
+  if (hintSeen) return;
+  for (const s of sites) if (s.stock > 0 && dist(s.x, s.y, p.x, p.y) < HINT_R) { hintSeen = true; toast(S.flockHint, 'info'); return; }
 }
 /** Advance the hunt: scan the world every 2 s, create and remove creatures every 0.5 s, regrow stocks, move fish and birds. */
 export function stepHunt(dt: number) {
   const p = G.player; if (!p) return;
   const gm = dt * MIN_PER_SEC * G.timeScale;
   scanT -= dt; if (scanT <= 0) { scanT = 2; if (scanOn) scanWorld(p.x); }
-  actT -= dt; if (actT <= 0) { actT = 0.5; syncCreatures(p); }
+  actT -= dt; if (actT <= 0) { actT = 0.5; syncCreatures(p); flockHint(p); }
   regrow(gm);
   stepFish(dt);
   stepCast(dt);
@@ -511,7 +550,7 @@ export function huntSave(): HuntSave {
     holes: holes.map(h => [h.x, h.y, h.max, h.stock, Math.round(h.regen)]),
     sites: sites.map(s => [s.x, s.y, s.max, s.stock, Math.round(s.regen)]),
     tracks: tracks.map(t => [t.kind, Math.round(t.x), Math.round(t.y), t.dir, Math.round(t.age)]),
-    caught: fishCaught, birds: birdsTaken,
+    caught: fishCaught, birds: birdsTaken, hint: hintSeen ? 1 : 0,
   };
 }
 /** Stash a saved hunt; initHunt (called from initFauna after applySave) restores it. */

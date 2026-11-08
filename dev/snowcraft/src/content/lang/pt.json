@@ -1297,5 +1297,7 @@
  "zoom.farther": "Mais longe",
  "zoom.label": "Zoom {i}/{n}",
  "zoom.title": "Zoom do mapa",
- "zoom.zoom": "Zoom"
+ "zoom.zoom": "Zoom",
+ "hunt.strikeBird": "Lagópode!",
+ "hunt.flockHint": "Lagópodes. Aproxime-se em silêncio e ataque — ou arme uma armadilha"
 }
