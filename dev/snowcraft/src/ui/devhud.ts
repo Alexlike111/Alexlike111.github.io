@@ -1,5 +1,5 @@
 // HUD (DESIGN §10): body figure with per-extremity frost tint + core thermometer; vitals appear only inside their warning band, with a plain word;
-// sun-clock semicircle (day, clock; ring and night only from ring 2); wind and barometer rows only when they matter; one top-centre stack (objective line, shelter chip, toasts: they can never overlap), belt with icons
+// sun-clock semicircle (day, clock; ring and night only from ring 2); wind and barometer rows only when they matter; one top-centre stack (objective line, shelter chip; desktop: belt top-left, vitals top-right, toasts bottom-left, see ui.css), belt with icons), belt with icons
 // (count badge top-right, name only for the active slot), bag + crafting panel (icon grid, clothing slots, weight bar, recipes grouped by DESIGN
 // categories), death card, ending card. One pixel font (Pixelify Sans) shared with the touch controls. `?devhud` adds the old numeric readout.
 // File name kept for main.ts; the old developer list lives behind the flag.
@@ -329,7 +329,7 @@ export function initHud(host: HTMLElement) {
   arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
-  // key hints: four keys at first (WASD, Space, ЛКМ, E); F / C / J join when first needed; the rest is behind «?» (H toggles it too)
+  // key hints (desktop): only the «?» chip sits at the bottom-left; the full list (renderHints) opens above it with «?», H or the sc:keys event
   try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
 

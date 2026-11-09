@@ -926,7 +926,7 @@ export function stepDrops(dt: number) {
   const arr = G.drops;
   stepSearch(dt); stepNearby(dt); stepInteractHold(dt);
   const alive = !!p && p.alive && autoPickup.on;
-  const px = p ? p.x : 0, py = p ? p.y - 8 : 0;
+  const px = p ? p.x : 0, py = p ? p.y - 4 : 0;          // the middle of the body: a thing at the feet is 4 cells from it
   for (let i = arr.length - 1; i >= 0; i--) {
     const d = arr[i];
     d.age += dt;
@@ -939,9 +939,9 @@ export function stepDrops(dt: number) {
       const inBox = Math.abs(dx) <= AUTO_DX && Math.abs(dy) <= AUTO_DY;
       // a thrown drop is armed once the player has walked out of the box: dropping it must not hand it straight back
       if (!inBox && thrown.has(d.id)) armedThrown.add(d.id);
-      if (inBox && autoPickable(d) && huntDropNear(d.x, d.y, 0.5)?.id !== d.id) {       // a shot bird lying on the snow is the husky's
+      if (inBox && autoPickable(d)) {
         const dist = Math.hypot(dx, dy), pickR = isNote(d.item) ? NOTE_R : 5.5;
-        if (dist < 10) {
+        if (dist < 10 && huntDropNear(d.x, d.y, 0.5)?.id !== d.id) {       // a shot bird lying on the snow is the husky's
           const ok = autoWeightOk(d);
           if (ok === 'weight') { if (dist < pickR) tooHeavyToast(d.item); }
           else if (ok === 'ok') {

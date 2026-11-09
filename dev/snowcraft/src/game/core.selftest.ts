@@ -17,7 +17,7 @@ import {
   FIXTURE_DEFS, mastUp, placeFixture, removeFixture, interact, stepFixtures, tryLight, addFuel, stationsAt, collectLights, radiantWarmth, pickupFixture, stash, planFixture, raiseMast, dryBoost, setSnareFallback,
 } from './fixtures';
 import { body, stepBody, stepPlayer, die, damage, respawn, applyDifficulty, startSleep, wake, eatSlot, eatBest, windChill, toggleParka, handsFrozen, TUNE } from './player';
-import { digTime, cutRegion, target, toolState, stepTools, stepDrops, sinterMinutes } from './tools';
+import { digTime, cutRegion, target, toolState, stepTools, stepDrops, sinterMinutes, autoPickup } from './tools';
 import { gradeShelter, floodEnclosure, evalShelterNow, finishStormReport, coNow } from './shelter';
 import { initWeather, setDay, setClock, wx, STORMS, sunElevAt, noonElevAt, stormIntensity, applyClock, stepWeather, knowsForecast, readBarometer, MIN_PER_SEC, nextStorm } from './weather';
 import { sandbox, arena, igloo, tileBlock, count as cellCount, put } from './testkit';
@@ -273,14 +273,14 @@ registerTest('tools', 'гарпун, удочка, факел, фонарь, р�
 registerTest('tools', 'выпавшие предметы притягиваются, рюкзак возвращает вещи', async () => {
   await sandbox(() => {
     const p = scene();
-    clearInventory(); spawnDrop('biscuit', 3, p.x + 10, p.y - 4, 0, 0);
+    autoPickup.on = true;                                   // TERRARIA_CONTROLS: loose items in the auto box fly into the pack
+    clearInventory(); spawnDrop('biscuit', 3, p.x + 7, p.y - 4, 0, 0);
     steps(120);
     if (count('biscuit') !== 3) throw new Error('магнит: ' + count('biscuit'));
-    // DESIGN §12: heavy things (a sack of coal) are never picked up by walking over them: they wait for E
+    // a heavy-ish sack of coal is taken by walking over it too, while the pack is under the run limit (controls.selftest.ts has the weight rules)
     spawnDrop('coal', 3, p.x + 4, p.y - 4, 0, 0); steps(120);
-    if (count('coal') !== 0) throw new Error('тяжёлое подобралось само: ' + count('coal'));
+    if (count('coal') !== 3) throw new Error('уголь не подобран ходьбой: ' + count('coal'));
     input.interactPressed = true; steps(3);
-    if (count('coal') !== 3) throw new Error('E не взяло уголь: ' + count('coal'));
     clearInventory();
     add('axe', 1); add('rope', 2);
     die('тест'); steps(5);

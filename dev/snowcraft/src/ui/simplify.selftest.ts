@@ -1,6 +1,6 @@
 // Self-tests of the «simpler for a new player» pass: the first-minute screen shows only what matters (no wind or barometer rows, no season
-// label before ring 2), the key hints start with four keys and grow when needed (« ?» and H show the rest), the tooltip has no digits, the
-// objective line is short, and at most two toasts are on screen. Each test restores what it changes.
+// label before ring 2), the key hints stay behind the «?» chip (H and «?» show the full list), the tooltip has no digits, the objective line is
+// short, and at most two toasts (three on desktop) are on screen. Each test restores what it changes.
 import { registerTest } from '../game/selftest';
 import { G, toast } from '../game/state';
 import { emit } from '../game/bus';
@@ -38,19 +38,16 @@ registerTest('simplify', 'первая минута: без строки вет�
   });
 });
 
-registerTest('simplify', 'подсказки: сначала четыре клавиши; F, C и J появляются по событию, потом их становится больше', async t => {
+registerTest('simplify', 'подсказки: внизу экрана только «?»; голод, первая вещь и первая цель не добавляют строку клавиш', async t => {
   if (G.mobile) { t.log('телефон: строки клавиш нет'); return; }
   const sc = t.sc; resetHintsForTest(); sc.step(12); await t.wait(80);
-  const first = shownKeys();
-  t.expect(JSON.stringify(first) === JSON.stringify(['WASD', 'Space', 'ЛКМ', 'E']), 'в начале не четыре клавиши: ' + first.join(' '));
+  t.expect(shownKeys().length === 0, 'в строке внизу есть клавиши: ' + shownKeys().join(' '));
   const food0 = G.player.food;
-  G.player.food = 20; sc.step(12); await t.wait(80);                  // first hunger: the eat key
-  t.expect(shownKeys().includes('F'), 'голод не открыл F: ' + shownKeys().join(' '));
+  G.player.food = 20; sc.step(12); await t.wait(80);                  // first hunger
   G.player.food = food0;
-  emit('picked', { item: 'log', n: 1 }); sc.step(12); await t.wait(80);   // the first thing in the bag: C
-  t.expect(shownKeys().includes('C'), 'первая вещь не открыла C: ' + shownKeys().join(' '));
-  emit('goal_done', { id: 'coal' }); sc.step(12); await t.wait(80);      // the first goal: J
-  t.expect(shownKeys().includes('J') && shownKeys().length === 7, 'первая цель не открыла J: ' + shownKeys().join(' '));
+  emit('picked', { item: 'log', n: 1 }); sc.step(12); await t.wait(80);   // the first thing in the bag
+  emit('goal_done', { id: 'coal' }); sc.step(12); await t.wait(80);      // the first goal
+  t.expect(shownKeys().length === 0, 'после событий в строке появились клавиши: ' + shownKeys().join(' '));
   resetHintsForTest();
 });
 
@@ -65,7 +62,7 @@ registerTest('simplify', '«?» и клавиша H открывают полн�
   btn()?.click(); sc.step(12); await t.wait(60);
   t.expect(open(), '«?» не открыл полный список');
   const all = full.textContent ?? '';
-  for (const k of ['V', 'R', 'G', 'Q', 'X', 'Shift', '1–9', 'H']) t.expect(all.includes(k), 'в полном списке нет «' + k + '»');
+  for (const k of ['V', 'R', 'G', 'Q', 'X', 'Shift', '1–6', 'H', 'P', 'J', 'Ctrl', 'ПКМ']) t.expect(all.includes(k), 'в полном списке нет «' + k + '»');
   btn()?.click(); sc.step(12); await t.wait(60);
   t.expect(!open(), '«?» не закрыл список');
   sc.key('KeyH', true); sc.step(3); sc.key('KeyH', false); sc.step(12); await t.wait(60);
@@ -123,7 +120,8 @@ registerTest('simplify', 'тосты: на экране не больше дву
   toast('Сказка номер один', 'info'); toast('Опасно: лёд!', 'bad'); toast('Сказка два', 'info'); toast('Сказка три', 'info'); toast('Сделано!', 'good');
   t.sc.step(14); await t.wait(80);
   const shown = [...document.querySelectorAll('#hud .toast')].map(e => e.textContent ?? '');
-  t.expect(shown.length === 2, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
+  const touch = document.body.classList.contains('touch-ui');
+  t.expect(shown.length === (touch ? 2 : 3), 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
   t.expect(shown.includes('Опасно: лёд!'), 'предупреждение вытеснено: ' + shown.join(' | '));
   G.toasts.length = 0; t.sc.step(6);
 });

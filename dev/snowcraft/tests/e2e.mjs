@@ -310,6 +310,11 @@ for (const prof of PROFILES) {
     check('real keyboard events move the player', k > 10 && moved > 1060, JSON.stringify({ k, moved }));
     await page.keyboard.press('KeyC'); await page.waitForTimeout(300);
     check('C opens the bag / craft panel', await page.evaluate(() => { const p = document.querySelector('#hud .pnl'); return !!p && p.style.display === 'block'; }));
+    // desktop layout (TERRARIA_CONTROLS.md): the belt sits top-left, the bag opens right under it, the bottom of the screen is empty
+    check('desktop: the bag opens under the belt (top-left), belt and bag do not overlap the vitals column', await page.evaluate(() => {
+      const b = document.querySelector('#hud .belt').getBoundingClientRect(), p = document.querySelector('#hud .pnl:not(.jr)').getBoundingClientRect(), v = document.querySelector('#hud .vit').getBoundingClientRect();
+      return p.left < 40 && Math.abs(p.top - b.bottom) <= 12 && p.right <= v.left && b.right <= innerWidth / 2;
+    }), JSON.stringify(await page.evaluate(() => ({ vw: innerWidth, vh: innerHeight }))));
     await shot(page, prof, '07-craft-panel');
     await page.keyboard.press('KeyC');
   } else {

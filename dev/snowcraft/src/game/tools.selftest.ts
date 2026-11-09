@@ -7,7 +7,7 @@ import { W, mat, aux, F_PLACED } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { add, count, clearInventory, inv, placeInto } from './inventory';
 import { auxOfDensity } from './items';
-import { target } from './tools';
+import { target, autoPickup } from './tools';
 import { nearestDrop, PICK_R } from './nearby';
 import { sandbox, arena, tileBlock } from './testkit';
 import { wx } from './weather';
@@ -126,7 +126,7 @@ registerTest('tools', 'E: записка подбирается с 4 клето�
   try {
     await sandbox(() => {
       const { p, s } = flat();
-      void s;
+      void s; autoPickup.on = true;                       // walking over notes picks them up (the test ground switches auto-pickup off)
       let found = 0;
       const off = on('note_found', () => { found++; });
       try {

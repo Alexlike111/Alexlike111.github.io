@@ -14,6 +14,7 @@ import { setDay, wx } from './weather';
 import { arena, sandbox } from './testkit';
 import { body } from './player';
 import { nearbyList, autoPickable, takeNear } from './nearby';
+import { autoPickup } from './tools';
 import { closeBox, resetSearch, searchSave, searchLoad, openContainer, takeAllFound, phase } from './search';
 
 const sc = () => (window as unknown as { __sc: any }).__sc;
@@ -152,8 +153,9 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
     const p = scene(); clearInventory();
     const mk = (id: string, n: number, dx: number) => { const d = spawnDrop(id, n, p.x + dx, p.y - 3, 0, 0, undefined, true)!; d.age = 2; return d; };
     const log = mk('log', 1, 8), bis = mk('biscuit', 2, -4);
-    t.expect(autoPickable(bis) && !autoPickable(log), 'правила автоподбора: сухари да, бревно нет');
-    t.expect(!autoPickable(mk('coal', 4, 40)) && !autoPickable(mk('shovel', 1, 40)) && !autoPickable(mk('wool_hat', 1, 40)), 'уголь, лопата, шапка — только по E');
+    t.expect(autoPickable(bis) && autoPickable(log), 'правила автоподбора: сухари и бревно — да (тяжёлое берётся, пока рюкзак под пределом)');
+    t.expect(autoPickable(mk('coal', 4, 40)) && autoPickable(mk('shovel', 1, 40)) && autoPickable(mk('wool_hat', 1, 40)), 'уголь, лопата, шапка — тоже, если влезают');
+    t.expect(!autoPickable(mk('sled', 1, 40)) && !autoPickable(mk('backpack', 1, 40)) && !autoPickable(mk('pot', 1, 40)), 'сани, рюкзак и котелок (набор для установки) — не автоподбор');
     const list = nearbyList();
     t.expect(list.length >= 2 && list[0].item === 'biscuit', 'ближайшее первым: ' + list.map(n => n.label + ':' + n.dist.toFixed(0)).join());
     // in front beats behind at the same distance
@@ -161,15 +163,18 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
     const back = mk('rope', 1, -6), front = mk('rope', 1, 6); void back;
     t.expect(nearbyList()[0].id === front.id, 'впереди ближе, чем сзади');
     G.drops.length = 0;
-    // walking over: the biscuits go in, the log stays; no room / too heavy: nothing is picked
+    // walking over (TERRARIA_CONTROLS auto-pickup): the biscuits and the log go in; no room: nothing is picked
+    autoPickup.on = true;
     mk('biscuit', 2, 0); mk('log', 1, 1); steps(40);
-    t.expect(count('biscuit') === 2 && count('log') === 0 && G.drops.some(d => d.item === 'log'), 'ходьба: сухари взяты, бревно нет');
+    t.expect(count('biscuit') === 2 && count('log') === 1, 'ходьба: сухари и бревно взяты сами');
     clearInventory(); for (let i = 0; i < NSLOT; i++) inv.slots[i] = { id: i < BELT ? 'tin' : 'scrap', n: i < BELT ? 8 : 12 };
     G.drops.length = 0; const full = mk('rope', 1, 0); steps(40);
     t.expect(count('rope') === 0 && G.drops.includes(full), 'нет места: не подбирается');
-    clearInventory(); inv.slots[P0] = { id: 'stone', n: 15 };                      // 60 kg: right at the comfortable load
-    G.drops.length = 0; const w = mk('can', 4, 0); steps(40);
-    t.expect(count('can') === 0 && G.drops.includes(w), 'вес на пределе: лёгкое не подбирается само');
+    // the weight limit (WEIGHT_MAX) is checked by controls.selftest.ts; here: a log is not taken over the run limit
+    clearInventory(); for (let i = 0; i < 14; i++) add('log', 1);                  // 84 kg: over WEIGHT_RUN, heavy things wait
+    G.drops.length = 0; const w = mk('log', 1, 0); steps(40);
+    t.expect(count('log') === 14 && G.drops.includes(w), 'тяжёлое сверх WEIGHT_RUN не подбирается само');
+    autoPickup.on = false;
     clearInventory();
     // E: a single thing is taken at once, the nearest of several on a quick tap, the list opens when E is held
     G.drops.length = 0; mk('log', 1, 6);

@@ -1,4 +1,5 @@
-// Compass HUD (DESIGN §17, «Ориентиры»), agent U2. A small dial in the lower right corner (under the touch buttons on a phone): the needle points at
+// Compass HUD (DESIGN §17, «Ориентиры»), agent U2. A small plate: desktop = under the vitals column in the top-right corner (devhud .vit, TERRARIA_CONTROLS);
+// phone = top-left under the body panel. The needle points at
 // the selected target (station, ship, signal hill, smoke, marks) and the line beside it gives the name and the distance in metres. Pure DOM: game/useitems_b.ts feeds it every frame
 // with showCompass(view) or showCompass(null) (no compass carried). In a storm or whiteout the plate gets darker and the letters bigger, so it stays
 // readable over the snow (it sits in the HUD layer, above the world canvas and its weather).

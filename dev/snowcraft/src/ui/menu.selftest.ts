@@ -36,7 +36,7 @@ function reset(paused: boolean) {
   G.paused = paused;
 }
 
-registerTest('menu', 'на ПК ⚙ и ⛶ видны в правом верхнем углу, по 40 px, левее солнечных часов', async t => {
+registerTest('menu', 'на ПК ⚙ и ⛶ видны в правом верхнем углу, по 40 px; плашка тела и часов стоит под ними', async t => {
   if (document.body.classList.contains('touch-ui')) { t.log('касание: пропуск (на телефоне кнопки в сенсорном слое)'); return; }
   const g = $<HTMLElement>('#sc-menubtn'), f = $<HTMLElement>('#sc-fsbtn');
   t.expect(!!g && !!f, 'кнопок нет в DOM');
@@ -51,7 +51,7 @@ registerTest('menu', 'на ПК ⚙ и ⛶ видны в правом верхн
   if (dial && dial.offsetParent !== null) {
     const rd = dial.getBoundingClientRect();
     const hit = rf.left < rd.right && rf.right > rd.left && rf.top < rd.bottom && rf.bottom > rd.top;
-    t.expect(!hit, 'кнопка ⛶ налезает на солнечные часы');
+    t.expect(!hit && rd.top >= rf.bottom - 1, 'кнопка ⛶ налезает на солнечные часы или часы не под кнопками');
   }
   t.expect(g.getAttribute('aria-label') === 'Настройки', 'aria-label ⚙: ' + g.getAttribute('aria-label'));
 });

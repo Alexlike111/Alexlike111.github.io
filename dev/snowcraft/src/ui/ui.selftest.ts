@@ -39,7 +39,7 @@ registerTest('ui', 'двери дома и дизельной проходимы
   });
 });
 
-registerTest('ui', 'верхняя полоса HUD (цель, чип укрытия) и тосты над поясом не налезают друг на друга', async t => {
+registerTest('ui', 'верхняя полоса HUD (цель, чип укрытия) и тосты не налезают друг на друга; на ПК тосты слева внизу, на телефоне над поясом', async t => {
   const sc = t.sc;
   const prev = G.shelter;
   G.shelter = { closed: true, tiles: 40, temp: -24, windIn: 0, vent: true, co: 8, stars: 2, notes: [] };
@@ -51,13 +51,15 @@ registerTest('ui', 'верхняя полоса HUD (цель, чип укрыт
   const toasts = ([...document.querySelectorAll('#hud .tbox .toast')] as HTMLElement[]).filter(vis);
   const belt = document.querySelector('#hud .belt') as HTMLElement | null;
   t.expect(top.length >= 2, 'элементов в верхней полосе: ' + top.length);
-  t.expect(toasts.length >= 1 && toasts.length <= 2, 'тостов на экране: ' + toasts.length);
+  const touch = document.body.classList.contains('touch-ui');
+  t.expect(toasts.length >= 1 && toasts.length <= (touch ? 2 : 3), 'тостов на экране: ' + toasts.length);
   const r = [...top, ...toasts, ...(belt ? [belt] : [])].map(k => k.getBoundingClientRect());
   for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++) {
     const o = !(r[i].right <= r[j].left || r[j].right <= r[i].left || r[i].bottom <= r[j].top + 0.5 || r[j].bottom <= r[i].top + 0.5);
     t.expect(!o, `элементы ${i} и ${j} пересекаются`);
   }
-  if (belt && toasts.length) t.expect(toasts.every(x => x.getBoundingClientRect().bottom <= belt.getBoundingClientRect().top + 0.5), 'тост лежит на поясе');
+  if (touch && belt && toasts.length) t.expect(toasts.every(x => x.getBoundingClientRect().bottom <= belt.getBoundingClientRect().top + 0.5), 'тост лежит на поясе');
+  if (!touch) t.expect(toasts.every(x => x.getBoundingClientRect().left < innerWidth / 3 && x.getBoundingClientRect().bottom > innerHeight * 0.6), 'тост не в левом нижнем углу');
   G.shelter = prev; G.toasts.length = 0; sc.step(12);
 });
 
@@ -125,12 +127,13 @@ registerTest('ui', 'ночью силуэт скалы читается на ф�
 });
 
 // ---- playability wave (G5): hints, phone touch, toasts, sound hooks. Each test restores the touch / panel state it changes.
-registerTest('ui', 'подсказки: в строке первые четыре клавиши, полный список (за «?») содержит Shift, J и 1–9', async t => {
+registerTest('ui', 'подсказки: внизу только «?»; полный список (за «?» и H) называет новые клавиши: ПКМ, P, Ctrl, Shift+ЛКМ, J, 1–6', async t => {
   resetHintsForTest(); t.sc.step(12); await t.wait(60);                 // the box is redrawn by the HUD tick
-  const hint = document.querySelector('#hud .hint')?.textContent ?? '';
-  for (const k of ['WASD', 'Space', 'ЛКМ', 'E']) t.expect(hint.includes(k), 'в подсказках нет «' + k + '»');
+  const q = document.querySelector('#hud .hint .q') as HTMLElement | null;
+  t.expect(!!q && q.textContent === '?', 'нет кнопки «?»');
   const full = document.querySelector('#hud .hfull') as HTMLElement | null;
-  t.expect(!!full && /Shift/.test(full.textContent ?? '') && /J/.test(full.textContent ?? '') && /1–9/.test(full.textContent ?? ''), 'в полном списке нет Shift, J или 1–9');
+  const all = full?.textContent ?? '';
+  t.expect(!!full && /ПКМ/.test(all) && /P/.test(all) && /Ctrl/.test(all) && /Shift\+ЛКМ/.test(all) && /J/.test(all) && /1–6/.test(all), 'в полном списке нет новых клавиш: ' + all.slice(0, 120));
 });
 
 registerTest('ui', 'телефон: прицел касанием смещён вверх от пальца на 48 px', async t => {
@@ -207,7 +210,7 @@ registerTest('ui', 'тосты: до двух, предупреждения пе
   toast('инфо A', 'info'); toast('Предупреждение', 'warn'); toast('инфо B', 'info'); toast('инфо A', 'info'); toast('инфо C', 'info');
   sc.step(14); await t.wait(60);
   const shown = [...document.querySelectorAll('#hud .toast')].map(e => e.textContent);
-  t.expect(shown.length === 2, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');
+  t.expect(shown.length === 3, 'тостов на экране: ' + shown.length + ' (' + shown.join(' | ') + ')');     // desktop: three at most
   t.expect(shown.includes('Предупреждение'), 'предупреждение вытеснено: ' + shown.join(' | '));
   t.expect(shown.filter(x => x === 'инфо A').length <= 1, 'дубль «инфо A» не схлопнут');
   G.toasts.length = 0; sc.step(6);

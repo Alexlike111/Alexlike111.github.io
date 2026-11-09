@@ -116,5 +116,6 @@ registerTest('hudmode', 'короткое окно: одна плашка тел
     t.expect(getComputedStyle(topl).display === 'contents', 'высокое окно: .topl должен быть прозрачным: ' + getComputedStyle(topl).display);
     t.log('окно высокое: плашка проверена как раздельные панели');
   }
-  t.expect(document.querySelectorAll('#hud .tbox .toast').length <= (short ? 1 : 2), 'тостов больше допустимого');
+  const touch = document.body.classList.contains('touch-ui');
+  t.expect(document.querySelectorAll('#hud .tbox .toast').length <= (touch ? (short ? 1 : 2) : 3), 'тостов больше допустимого');
 });
