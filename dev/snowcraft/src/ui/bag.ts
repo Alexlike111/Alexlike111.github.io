@@ -213,7 +213,7 @@ export function bagHtml(): string {
   const wt = weight(), lv = loadLevel(wt);
   let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
   h += `<div class="wt"><i style="width:${Math.min(100, wt / weightMax() * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
-  h += `<div class="top"><div class="wear">`;
+  h += `<div class="pk"><div class="top"><div class="wear">`;   // .pk: the desktop layout puts the wear column beside the grid (ui.css); the phone keeps the row above it
   for (let k = 0; k < WEAR_SLOTS.length; k++) {
     const sl = WEAR_SLOTS[k], id = inv.wear[sl], here = ui.sel && ui.sel.z === 'wear' && ui.sel.i === k;
     h += `<div class="cell${id ? '' : ' empty'}${here ? ' sel' : ''}" data-z="wear" data-i="${k}"${id ? ` title="${itemName(id)}"` : ''}>${id ? img(itemUrl(id)) : ''}<small>${SLOT_LABEL[sl]()}</small></div>`;
@@ -222,7 +222,7 @@ export function bagHtml(): string {
   h += `<div class="grid" data-z="inv" data-i="-1">`;
   for (let i = 0; i < NSLOT; i++) h += cellHtml('inv', i);
   for (let i = NSLOT; i < TOTAL; i++) if (slotUsable(i)) h += cellHtml('inv', i);
-  h += `</div>`;
+  h += `</div></div>`;     // the grid and .pk
   h += `</div><div class="col">`;
   if (boxOpen.box) h += boxHtml();
   if (sledOpen()) {            // the sled (dragged or parked beside you) is a second pack: it sits on top of the right column

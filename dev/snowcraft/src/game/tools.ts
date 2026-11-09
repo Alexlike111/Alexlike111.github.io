@@ -26,9 +26,11 @@ import { MIN_PER_SEC } from './weather';
 import { dogInteract } from './fauna';
 import { stepSearch } from './search';
 import { stepUseItems, useSlot, holdSlot, usable, holdable } from './useitems';
-import { nearbyList, takeNear, autoPickable, stepNearby, isBoxFixture, nearUi, aim, PICK_R, NOTE_R, isNote, type Near } from './nearby';
-import { thrown } from './inventory';
+import { nearbyList, takeNear, autoPickable, autoWeightOk, stepNearby, isBoxFixture, nearUi, aim, PICK_R, NOTE_R, isNote, AUTO_DX, AUTO_DY, type Near } from './nearby';
+import { thrown, armedThrown } from './inventory';
 import { isKeyDown } from '../engine/input';
+import { huntDropNear } from './hunt';
+import '../ui/floater';           // the «+2 Уголь» pickup texts: listens to 'pickup_float' (side effect only)
 
 const S = strings('tools', {
   // tooltip and refusal words: a verb or 2–4 plain words, no numbers
@@ -52,7 +54,7 @@ const S = strings('tools', {
   equipped: 'Надето: {name}', sled: 'Запрячься в нарты', cantEat: 'Не хочется',
   handsFrozen: 'Руки не слушаются',
   domeOn: 'Купол: блоки внутрь', domeOff: 'Обычная укладка', smartOn: 'Умный курсор', smartOff: 'Свободный курсор',
-  picked: 'Взял: {name}', backpack: 'Вещи вернулись',
+  tooHeavy: 'Слишком тяжело', backpack: 'Вещи вернулись',
   sledDown: 'Нарты оставлены', sledUp: 'Запрягся в нарты',
   denseGood: 'годится для блоков', denseBad: 'слишком рыхлый',
 });
@@ -79,7 +81,11 @@ export const toolState = {
   fish: { state: 'idle' as 'idle' | 'wait' | 'bite', t: 0, x: 0, y: 0, bite: 0 },
   flares: [] as { x: number; y: number; vx: number; vy: number; t: number; lit?: number }[],   // t: seconds the bear is scared (60), lit: seconds of light (30)
   aimX: 0, aimY: 0, aimAng: 0,
+  rmbTamp: false,            // decided on the RMB press: no interactable in reach, so holding RMB with the shovel tamps (else RMB interacts)
 };
+/** Auto-pickup (TERRARIA_CONTROLS): loose items within AUTO_DX/AUTO_DY cells fly into the pack. Off in tests that need an item to stay on the ground
+ *  (testkit.ts arena / sandbox switch it off; the real game keeps it on). */
+export const autoPickup = { on: true };
 /** Placed snow blocks sinter into the shell after a while: they lose F_PLACED and are then as sturdy as natural snow (so a door can be cut afterwards). */
 export const sinterQ: { x0: number; y0: number; w: number; t: number }[] = [];
 export const sinterMinutes = (dens: number) => (dens < 250 ? 60 : dens <= 380 ? 36 : 26);
@@ -780,8 +786,9 @@ export function stepTools(dt: number) {
     // progress decays when not working
     toolState.dig.p = Math.max(0, toolState.dig.p - dt * 1.5); toolState.cut.p = Math.max(0, toolState.cut.p - dt * 1.5);
   }
-  // tamp snow with the shovel (RMB hold / Q? / E fallback handled below)
-  if (sel?.id === 'shovel' && input.secondaryHeld && T.inReach) { tamp(dt, T); held.using = true; }
+  // RMB (TERRARIA_CONTROLS): interacts with what is in reach; only when nothing is (decided on the press) does holding it tamp the snow with the shovel
+  if (input.secondaryPressed) toolState.rmbTamp = !interactReady(T, sel?.id ?? null);
+  if (sel?.id === 'shovel' && input.secondaryHeld && T.inReach && toolState.rmbTamp) { tamp(dt, T); held.using = true; }
 
   // interact (E)
   if (input.interactPressed) interactAction(T, sel0 ? sel0.id : null);
@@ -809,7 +816,8 @@ function pickUsableFixture(x: number, y: number, face: number): Fixture | null {
   return best;
 }
 
-function interactAction(T: Target, selId: string | null) {
+/** The fixture E / RMB acts on: the one at the cursor within reach, else the nearest in reach (doors last). */
+function fixtureForInteract(T: Target): Fixture | null {
   const p = G.player;
   let f: Fixture | null = null;
   if (T.fixture && Math.hypot(T.fixture.tx * TS + T.fixture.tw * 2 - p.x, T.fixture.ty * TS + T.fixture.th * 2 - (p.y - 8)) < 56) f = T.fixture;
@@ -817,6 +825,20 @@ function interactAction(T: Target, selId: string | null) {
   const alt = pickUsableFixture(p.x, p.y - 8, p.face);
   const isDoor = (o: Fixture | null) => !!o && (o.kind === 'door' || o.kind === 'hide_door');
   if (!f || (isDoor(f) && alt && !isDoor(alt))) f = alt ?? f;
+  return f;
+}
+/** Is there anything RMB would act on right now (a fixture, a container or a loose item in reach, a sled to hitch, snow to bag)? */
+function interactReady(T: Target, selId: string | null): boolean {
+  const p = G.player;
+  if (fixtureForInteract(T)) return true;
+  if (nearbyList().length) return true;
+  if (sledNear(p.x, p.y - 4)) return true;
+  return selId === 'shovel' && held.load >= 8;
+}
+function interactAction(T: Target, selId: string | null) {
+  const p = G.player;
+  const f = fixtureForInteract(T);
+  const isDoor = (o: Fixture | null) => !!o && (o.kind === 'door' || o.kind === 'hide_door');
   // DESIGN §12: containers, lying things, a backpack and a parked sled are chosen through the nearby list (E = the nearest one in front, E held = the list);
   // the item under the cursor goes first (nearby.aim), a note wins a tie
   const near = nearbyList();
@@ -877,45 +899,66 @@ function dropAction(T: Target) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // drops
-/** Put what fits of a loose drop into the bag. Returns what is left (0 = all taken) and leaves the remainder in d.n. */
+/** Put what fits of a loose drop into the bag. Returns what is left (0 = all taken) and leaves the remainder in d.n. The pickup text is the floater's. */
 function takeDrop(d: Drop): number {
   const dur = dropDur.get(d.id);
   const left = add(d.item, d.n, dur);
   if (left < d.n) {
     emit('picked', { item: d.item, n: d.n - left });
-    if (left === 0 && !quietDrops.has(d)) toast(fmt(S.picked, { name: itemName(d.item) + (d.n > 1 ? ' ×' + d.n : '') }), 'info');
+    emit('pickup_float', { x: d.x, y: d.y - 4, id: d.item, n: d.n - left });
   }
   if (isNote(d.item) && left === 0) emit('note_found', { id: d.item });
   if (left > 0) d.n = left;
   return left;
 }
 const box = { x: 0, y: 0, vx: 0, vy: 0, w: 3, h: 3, onGround: false };
+/** «Слишком тяжело» once per item id per 5 s (the auto-pickup refusal). */
+const heavyAt = new Map<string, number>();
+function tooHeavyToast(id: string) {
+  const t = G.realTime;
+  if (t - (heavyAt.get(id) ?? -99) < 5) return;
+  heavyAt.set(id, t); toast(S.tooHeavy, 'warn');
+}
+/** Walking-over pickup of loose drops (TERRARIA_CONTROLS): everything in the auto box that autoPickable accepts flies in and is taken within the pick radius;
+ *  the weight decides (WEIGHT_MAX, heavy things only under WEIGHT_RUN). Items the husky fetches (hunt drops) are left to him. */
 export function stepDrops(dt: number) {
   const p = G.player;
   const arr = G.drops;
   stepSearch(dt); stepNearby(dt); stepInteractHold(dt);
+  const alive = !!p && p.alive && autoPickup.on;
+  const px = p ? p.x : 0, py = p ? p.y - 8 : 0;
   for (let i = arr.length - 1; i >= 0; i--) {
     const d = arr[i];
     d.age += dt;
     if (d.item === 'backpack' && d.age > 5 && !backpacks.has(d.id)) { arr.splice(i, 1); continue; }       // an emptied / orphaned backpack vanishes
     box.x = d.x; box.y = d.y; box.vx = d.vx; box.vy = d.vy + 300 * dt; box.onGround = false;
     if (box.vy > 200) box.vy = 200;
-    // magnet
     let picked = false;
-    // DESIGN §12: only small light things are picked up by walking over them (and only if there is room and weight); the rest waits for E
-    if (p && p.alive && d.age > 0.35 && autoPickable(d)) {
-      const dx = p.x - d.x, dy = p.y - 8 - d.y, dist = Math.hypot(dx, dy);
-      if (dist < (isNote(d.item) ? NOTE_R : 5.5)) picked = true;
-      else if (dist < 20) { const k = (20 - dist) * 14; box.vx += (dx / dist) * k * dt * 3; box.vy += (dy / dist) * k * dt * 3 - 300 * dt * 0.7; }
+    if (alive) {
+      const dx = px - d.x, dy = py - d.y;
+      const inBox = Math.abs(dx) <= AUTO_DX && Math.abs(dy) <= AUTO_DY;
+      // a thrown drop is armed once the player has walked out of the box: dropping it must not hand it straight back
+      if (!inBox && thrown.has(d.id)) armedThrown.add(d.id);
+      if (inBox && autoPickable(d) && huntDropNear(d.x, d.y, 0.5)?.id !== d.id) {       // a shot bird lying on the snow is the husky's
+        const dist = Math.hypot(dx, dy), pickR = isNote(d.item) ? NOTE_R : 5.5;
+        if (dist < 10) {
+          const ok = autoWeightOk(d);
+          if (ok === 'weight') { if (dist < pickR) tooHeavyToast(d.item); }
+          else if (ok === 'ok') {
+            if (dist < pickR) picked = true;
+            else { const k = (10 - dist) * 14; box.vx += (dx / dist) * k * dt * 3; box.vy += (dy / dist) * k * dt * 3 - 300 * dt * 0.7; }
+          }
+        }
+      }
     }
     if (picked) {
       const left = takeDrop(d);
-      if (left <= 0) { dropDur.delete(d.id); arr.splice(i, 1); continue; }
+      if (left <= 0) { dropDur.delete(d.id); thrown.delete(d.id); armedThrown.delete(d.id); arr.splice(i, 1); continue; }
     }
     const r = moveBox(box as never, dt, { stepUp: 0 });
     void r;
     d.x = box.x; d.y = box.y; d.vx = box.onGround ? box.vx * 0.8 : box.vx; d.vy = box.onGround ? 0 : box.vy;
-    if (d.item === 'backpack' ? d.y > H - 2 : (d.age > 900 || d.y > H - 2)) { dropDur.delete(d.id); if (d.item === 'backpack') backpacks.delete(d.id); arr.splice(i, 1); }
+    if (d.item === 'backpack' ? d.y > H - 2 : (d.age > 900 || d.y > H - 2)) { dropDur.delete(d.id); thrown.delete(d.id); armedThrown.delete(d.id); if (d.item === 'backpack') backpacks.delete(d.id); arr.splice(i, 1); }
   }
   if (arr.length > MAX_DROPS) arr.length = MAX_DROPS;
 }

@@ -15,6 +15,7 @@ import { getItem, itemName } from './items';
 import { handsFactor, handsFrozen } from './player';
 import { worldInfo } from './worldgen';
 import { FIXTURE_DEFS } from './fixtures';
+import { onEscape } from '../engine/input';
 
 const S = strings('search', {
   searching: 'Обыскиваю…', more: '… ещё что-то на дне', done: 'Обыскано', empty: 'Пусто', frozen: 'Крышка вмёрзла: нужна пешня, кирка или топор',
@@ -139,6 +140,8 @@ export function openContainer(f: Fixture): boolean {
   if (open.box) closeBox();
   begin(makeBox(f)); return true;
 }
+/** Esc closes an open container first (TERRARIA_CONTROLS). */
+onEscape(() => { if (!open.box) return false; closeBox(); return true; });
 export function openPack(dropId: number): boolean {
   if (open.box && open.box.key === 'b' + dropId) { closeBox(); return true; }
   const b = makePackBox(dropId); if (!b) return false;

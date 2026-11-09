@@ -40,12 +40,13 @@ function press(code: string) {
   const hot = HOT[code]; if (hot !== undefined) input.hotbar = hot;
   switch (code) {
     case 'Space': case 'KeyW': case 'ArrowUp': input.jumpPressed = true; break;
-    case 'KeyE': input.interactPressed = true; break;
+    case 'KeyE': input.interactPressed = true; break;        // E: alias of the right mouse button (interact)
     case 'KeyF': input.eatPressed = true; break;
     case 'KeyC': case 'KeyI': input.craftPressed = true; break;
     case 'KeyJ': input.journalPressed = true; break;
     case 'KeyM': input.journalPressed = true; input.mapPressed = true; break;
-    case 'Escape': input.pausePressed = true; break;
+    case 'Escape': if (!closeOverlay()) input.craftPressed = true; break;      // Esc closes the open panel first; only with nothing open it toggles the inventory
+    case 'KeyP': input.pausePressed = true; break;                              // pause + the settings panel (ui/menu.ts)
     case 'KeyR': input.smartToggle = true; break;
     case 'KeyV': input.ventPressed = true; break;
     case 'KeyG': input.dropPressed = true; break;
@@ -57,6 +58,25 @@ function press(code: string) {
 }
 const ZOOM_CODES = new Set(['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'Digit0', 'Numpad0']);
 const titleUp = () => document.body.classList.contains('title-open');
+
+// ---- Esc: close the topmost open thing (TERRARIA_CONTROLS). A module that shows a panel registers a closer: it shuts the panel and returns true
+// when the panel was open; Esc then does nothing else. Registration order is the order of the checks.
+const closers: (() => boolean)[] = [];
+/** Register a closer for Esc. It must return true only when it has just closed something. */
+export function onEscape(fn: () => boolean) { closers.push(fn); }
+function closeOverlay(): boolean { for (const f of closers) { if (f()) return true; } return false; }
+
+// ---- Left Ctrl tap (keydown + keyup within 400 ms, nothing else pressed or clicked or wheeled in between) toggles the smart cursor
+const CTRL_TAP_MS = 400;
+let ctrlT0 = 0, ctrlClean = false;
+function keyDown(code: string) {
+  if (code === 'ControlLeft') { ctrlT0 = performance.now(); ctrlClean = true; } else ctrlClean = false;
+  keys.add(code); press(code);
+}
+function keyUp(code: string) {
+  if (code === 'ControlLeft') { if (ctrlClean && performance.now() - ctrlT0 <= CTRL_TAP_MS) input.smartToggle = true; ctrlClean = false; }
+  keys.delete(code);
+}
 function zoomKey(dir: number) { if (!titleUp()) stepZoom(dir); }
 let zoomAcc = 0, zoomT = 0;
 
@@ -67,15 +87,16 @@ export function initInput(canvas: HTMLElement) {
     if (((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') && e.code !== 'Escape') return;       // Esc still reaches the game (the zoom slider in the pause settings keeps focus)
     if (BLOCK.has(e.code) || e.code === 'F2' || ((e.ctrlKey || e.metaKey) && ZOOM_CODES.has(e.code))) e.preventDefault();     // Ctrl +/- must zoom the game, not the page
     if (e.repeat) return;
-    keys.add(e.code); press(e.code);
+    keyDown(e.code);
   });
-  addEventListener('keyup', (e) => { keys.delete(e.code); });
-  addEventListener('blur', () => { keys.clear(); mouse.primary = mouse.secondary = false; });
+  addEventListener('keyup', (e) => { keyUp(e.code); });
+  addEventListener('blur', () => { keys.clear(); mouse.primary = mouse.secondary = false; ctrlClean = false; });
   const target: EventTarget = document.getElementById('stage') ?? canvas;
   target.addEventListener('contextmenu', (e) => e.preventDefault());
   target.addEventListener('pointerdown', (ev) => {
     const e = ev as PointerEvent;
     if (e.pointerType === 'touch') return;                  // ui/touch.ts
+    ctrlClean = false;
     input.aimX = e.clientX; input.aimY = e.clientY; input.hasAim = true; input.aimMode = 'mouse'; input.anyKey = true; input.touchActive = false;
     if (e.button === 0) { mouse.primary = true; input.primaryPressed = true; }
     else if (e.button === 2) { mouse.secondary = true; input.secondaryPressed = true; input.interactPressed = true; }
@@ -92,6 +113,7 @@ export function initInput(canvas: HTMLElement) {
   });
   target.addEventListener('wheel', (ev) => {
     const e = ev as WheelEvent; e.preventDefault();
+    ctrlClean = false;                                     // a wheel (also Ctrl+wheel = zoom) is not a Ctrl tap
     if (e.ctrlKey || e.metaKey) {                          // Ctrl+wheel (also a trackpad pinch, which arrives as ctrl+wheel): one zoom step per notch
       if (titleUp()) return;
       zoomAcc += e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
@@ -127,12 +149,12 @@ export function endFrame() {
 }
 /** Test/dev helper: reset all held state. */
 export function resetInput() {
-  keys.clear(); mouse.primary = mouse.secondary = false; wheelAcc = 0;
+  keys.clear(); mouse.primary = mouse.secondary = false; wheelAcc = 0; ctrlClean = false;
   touch.x = touch.y = 0; touch.run = touch.jumpHeld = touch.primary = touch.down = touch.smart = touch.aimed = false;
   endFrame(); poll();
 }
 /** Test helper: simulate a key being held or tapped without DOM events. */
-export function simKey(code: string, down: boolean) { if (down) { if (!keys.has(code)) { keys.add(code); press(code); } } else keys.delete(code); }
+export function simKey(code: string, down: boolean) { if (down) { if (!keys.has(code)) keyDown(code); } else keyUp(code); }
 export function simMouse(btn: 0 | 2, down: boolean, sx?: number, sy?: number) {
   if (sx !== undefined && sy !== undefined) { input.aimX = sx; input.aimY = sy; input.hasAim = true; input.aimMode = 'mouse'; }
   if (btn === 0) { mouse.primary = down; if (down) input.primaryPressed = true; } else { mouse.secondary = down; if (down) { input.secondaryPressed = true; input.interactPressed = true; } }

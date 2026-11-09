@@ -12,13 +12,14 @@ import { inv, backpacks, dropDur } from './inventory';
 import { body, applyDifficulty } from './player';
 import { resetShelter } from './shelter';
 import { setClock, wx } from './weather';
-import { toolState } from './tools';
+import { toolState, autoPickup } from './tools';
 import { auxOfDensity } from './items';
 
 export interface ArenaOpts { halfW?: number; up?: number; depth?: number; dens?: number; loose?: number; ice?: boolean }
 /** Flat test ground: air above (x±halfW, topY-up .. topY), `loose` rows of SNOW, then PACKED of the given density down `depth` cells, stone below. */
 export function arena(cx: number, topY: number, o: ArenaOpts = {}) {
   const halfW = o.halfW ?? 70, up = o.up ?? 60, depth = o.depth ?? 36, loose = o.loose ?? 0, dens = o.dens ?? 300;
+  autoPickup.on = false;             // test ground: loose items stay where they lie (a test that needs auto-pickup switches it on again)
   const x0 = cx - halfW, x1 = cx + halfW;
   for (let y = topY - up; y < topY + depth + 10; y++) for (let x = x0; x <= x1; x++) {
     const i = y * W + x;
@@ -75,8 +76,9 @@ export function restore(s: Snap) {
 }
 /** Run a scenario on a snapshot of the real game; everything is restored afterwards. */
 export async function sandbox<T>(fn: () => Promise<T> | T): Promise<T> {
-  const s = snapshot();
-  try { return await fn(); } finally { restore(s); }
+  const s = snapshot(), ap = autoPickup.on;
+  autoPickup.on = false;
+  try { return await fn(); } finally { restore(s); autoPickup.on = ap; }
 }
 void applyDifficulty;
 

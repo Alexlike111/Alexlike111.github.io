@@ -46,7 +46,8 @@ const S = strings('hud', {
   fine: 'тонкая работа: голые руки', needs: 'нужно: {s}', variant: 'вариант',
   gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
   stNone: '', stTable: 'стол', stFire: 'огонь', stDrum: 'бочка', stAntenna: 'мачта',
-  stove: 'печь', hintMove: 'ход', hintAct: 'действие', hintTake: 'взять', hintEat: 'еда', hintParka: 'парка', hintBag: 'сумка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс', hintJournal: 'журнал', hintSense: 'чутьё', hintHelp: 'подсказки', hintPause: 'пауза', hintMore: 'Все клавиши',
+  stove: 'печь', hintMove: 'ход', hintEat: 'еда', hintParka: 'парка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс (держи)', hintJournal: 'журнал', hintSense: 'чутьё', hintHelp: 'подсказки', hintMore: 'Все клавиши',
+  rmb: 'ПКМ', kUse: 'использовать', kInteract: 'взаимодействовать', kSlot: 'слот', kInv: 'инвентарь', kPause: 'пауза / настройки', kMoveItem: 'переложить', kSmart: 'умный курсор', kZoom: 'масштаб', kBelt: 'пояс (держи)',
   jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
   lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
   wThirst: 'Хочется пить', wHunger: 'Голодно', wTired: 'Устал', wHurt: 'Плохо', wWet: 'Мокро',
@@ -61,7 +62,6 @@ let beltKey = '', toastKey = '';
 let bot: HTMLElement, objTxt: HTMLElement;                       // the bottom stack (toasts, held-item name, belt) and the objective's text span
 let objKey = '', objShow = 0, objPin = false;                    // objective: shown for 6 s (first goal) / 3 s (a change) / while pinned by a tap, then folded to the «Цель» pill
 let lastSel = -2, bnameT = 0, bnameTxt = '';                     // held-item name: 1.5 s after the selection changes only
-let hintHidden = false, hintAutoDone = false;                    // the key box (desktop) folds itself after 90 s of play; H brings it back
 let acc = 0, panelAcc = 0, rectAcc = 9;
 let avoid: DOMRect[] = [];
 let freeCam = false;
@@ -313,7 +313,9 @@ export function initHud(host: HTMLElement) {
   root = document.createElement('div'); root.id = 'hud'; host.appendChild(root);
   const mk = (cls: string, parent: HTMLElement = root) => { const d = document.createElement('div'); d.className = 'p ' + cls; parent.appendChild(d); return d; };
   // the body widget and the dial: separate panels on a tall window, one chip on a short one (CSS: .topl is display:contents unless H < 340)
-  const topl = document.createElement('div'); topl.className = 'topl'; root.appendChild(topl);
+  // desktop: the top-right column (vitals, then the day chip, then the compass plate); touch keeps them absolute (.vit is display:contents there)
+  const vit = document.createElement('div'); vit.className = 'vit'; root.appendChild(vit);
+  const topl = document.createElement('div'); topl.className = 'topl'; vit.appendChild(topl);
   bw = mk('bw', topl); dial = mk('dial', topl);
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
   objEl = mk('obj', stack); objEl.innerHTML = '<b>' + S.objTitle + '</b><span class="ot"></span>'; objTxt = objEl.querySelector('.ot') as HTMLElement;
@@ -328,14 +330,12 @@ export function initHud(host: HTMLElement) {
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
   // key hints: four keys at first (WASD, Space, ЛКМ, E); F / C / J join when first needed; the rest is behind «?» (H toggles it too)
-  try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); if (r && Array.isArray(r.learned)) hintMem.learned = r.learned.filter((x: unknown) => typeof x === 'string').slice(0, 12); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
+  try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
 
   if (DEV) { devEl = mk('dev'); }
-  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); shownKeys.clear(); playSec = 0; hintHidden = false; hintAutoDone = false; objKey = ''; });
-  on('picked', () => reveal('C')); on('crafted', () => reveal('C'));                  // the first thing in the bag: the bag key
-  on('goal_done', () => reveal('J')); on('note_read', () => reveal('J'));                // the first goal or note: the journal key
-  on('tech_learned', (d: { how: string }) => { if (d.how !== 'start') reveal('J'); });
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; });
+  window.addEventListener('sc:keys', () => toggleFull());                             // the settings panel (ui/menu.ts) can open the full key list the same way as «?» / H
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
@@ -347,29 +347,26 @@ const shortcut = (key: string) => key;
 
 // ---- key hints (see initHud): what is shown, what the player has learned (kept in localStorage, never throws) ----
 const HKEY = 'sc.hints';
-const hintMem = { learned: [] as string[], full: false };
-const shownKeys = new Set<string>();      // progressive keys shown in this game
-const hkPrev = new Set<string>();         // F / C / J held last frame
-let hPrev = false, playSec = 0, hintKey = '';
+const hintMem = { learned: [] as string[], full: false };   // learned: kept from older saves, no longer shown
+let hPrev = false, hintKey = '';
+const toastSeen = new WeakSet<object>();  // desktop toasts: the 0.5 s extra life is given once per toast
 function saveHints() { try { localStorage.setItem(HKEY, JSON.stringify(hintMem)); } catch { /* storage blocked: the hints simply come back next time */ } }
-function reveal(k: string) { if (!shownKeys.has(k) && !hintMem.learned.includes(k)) shownKeys.add(k); }
-function learn(k: string) { shownKeys.delete(k); if (!hintMem.learned.includes(k)) { hintMem.learned.push(k); saveHints(); } }
 function toggleFull() { hintMem.full = !hintMem.full; saveHints(); hintKey = ''; }
+/** Desktop: the key row is gone from the bottom of the screen. Only the small «?» chip stays there; «?» / H / the settings panel open the full list above it. */
 function renderHints() {
-  // «Чутьё» (sensesui.ts) appends its Q / X chips to the box: they belong to the «?» list, so they are taken out here
+  // «Чутьё» (sensesui.ts) appends its Q / X chips to the box: they belong to the full list, so they are taken out here
   for (const n of Array.from(hintEl.children)) if (n !== fullEl && n !== mainEl) n.remove();
-  const extra = ['F', 'C', 'J'].filter(k => shownKeys.has(k) && !hintMem.learned.includes(k));
-  const key = extra.join('') + '|' + hintMem.full + '|' + !!G.mobile;
+  const key = hintMem.full + '|' + !!G.mobile;
   if (key === hintKey) return;
   hintKey = key;
   const k = (kb: string, label: string) => `<span><kbd>${kb}</kbd>${label}</span>`;
-  const labels: Record<string, string> = { F: S.hintEat, C: S.hintBag, J: S.hintJournal };
-  mainEl.innerHTML = k('WASD', S.hintMove) + k('Space', S.hintJump) + k(S.lmb, S.hintAct) + k('E', S.hintTake) + extra.map(x => k(x, labels[x])).join('') +
-    `<button class="q" data-h="more" title="${S.hintMore}">?</button>`;
-  // the «?» list: every key that is not already in the row above it
-  const rest: [string, string][] = [['F', S.hintEat], ['C', S.hintBag], ['J', S.hintJournal], ['Shift', S.hintRun], ['V', S.hintParka], ['R', S.hintDome], ['G', S.hintDrop], ['Q', S.hintBelt], ['X', S.hintSense], ['1–9', S.hintBelt], ['H', S.hintHelp], ['Esc', S.hintPause]];
-  const row = ['WASD', 'Space', S.lmb, 'E', ...extra];
-  fullEl.innerHTML = rest.filter(([kb]) => !row.includes(kb)).map(([kb, label]) => k(kb, label)).join('');
+  mainEl.innerHTML = `<button class="q" data-h="more" title="${S.hintMore}">?</button>`;
+  const list: [string, string][] = [
+    ['WASD', S.hintMove], ['Space', S.hintJump], ['Shift', S.hintRun], [S.lmb, S.kUse], [S.rmb, S.kInteract], ['колесо · 1–6', S.kSlot],
+    ['Esc · I · C', S.kInv], ['P', S.kPause], ['Shift+' + S.lmb, S.kMoveItem], ['Ctrl', S.kSmart], ['J', S.hintJournal], ['G', S.hintDrop], ['Ctrl+колесо', S.kZoom],
+    ['F', S.hintEat], ['V', S.hintParka], ['X', S.hintSense], ['R', S.hintDome], ['Q', S.kBelt], ['H', S.hintHelp],
+  ];
+  fullEl.innerHTML = list.map(([kb, label]) => k(kb, label)).join('');
   fullEl.classList.toggle('on', hintMem.full && !G.mobile);
 }
 
@@ -439,11 +436,7 @@ export function updateHud(dt: number, realDt: number) {
   if (!root) return;
   const p = G.player;
   const titleOn = document.body.classList.contains('title-open');
-  if (p?.alive && !G.paused && !titleOn) playSec += realDt;
-  if (playSec >= 180) { reveal('F'); reveal('C'); reveal('J'); }                    // after 3 minutes of play the three keys show
-  if (!hintAutoDone && playSec >= 90) { hintAutoDone = true; hintHidden = true; }           // the key box folds itself after 90 s of play (desktop)
-  for (const k of ['F', 'C', 'J']) { const d = isKeyDown('Key' + k); if (d && !hkPrev.has(k)) learn(k); if (d) hkPrev.add(k); else hkPrev.delete(k); }
-  const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) { if (hintHidden) hintHidden = false; else toggleFull(); } hPrev = hDown;
+  const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) toggleFull(); hPrev = hDown;   // H: the full key list (the «?» chip does the same)
   if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
   if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
@@ -452,9 +445,10 @@ export function updateHud(dt: number, realDt: number) {
   if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
   if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
-  // toasts: a short stack in the top-centre flow (below the objective and the shelter chip)
-  for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
-  const shown = pickToasts(shortScreen() ? 1 : 2);                      // at most two at once (one on a short window)
+  // toasts: desktop = a small stack at the bottom-left (three at most, 4 s, the last second fades); phone = two (one on a short window) in the bottom stack
+  const touch = document.body.classList.contains('touch-ui');
+  for (let i = G.toasts.length - 1; i >= 0; i--) { const t = G.toasts[i]; if (!touch && !toastSeen.has(t)) { toastSeen.add(t); t.t += 0.5; } t.t -= realDt; if (t.t <= 0) G.toasts.splice(i, 1); }
+  const shown = pickToasts(touch ? (shortScreen() ? 1 : 2) : 3);
   const tk = shown.map(t => t.text + t.kind).join('|');
   if (tk !== toastKey) {
     toastKey = tk; toastBox.innerHTML = '';
@@ -464,6 +458,7 @@ export function updateHud(dt: number, realDt: number) {
       toastBox.appendChild(d);
     }
   }
+  if (!touch) for (let i = 0; i < shown.length; i++) { const el = toastBox.children[i] as HTMLElement | undefined; if (el) el.style.opacity = String(Math.max(0, Math.min(1, shown[i].t))); }
   // death card
   if (p && !p.alive) {
     // first moments of the death: just the cause; then overlay.ts shows the death card (stats, «Новая игра» / «Заново тот же мир» / back to the station)
@@ -494,12 +489,11 @@ export function updateHud(dt: number, realDt: number) {
   // the body figure + core thermometer carry the state; a vital shows up (bar + words) only inside its warning band (?devhud keeps every number)
   const vital = (k: string, v: number, warn: number, word: string) => { const r = rows[k]; r.row.style.display = DEV || v < warn ? 'flex' : 'none'; if (!DEV) r.v.textContent = word; };
   vital('water', p.water, 35, S.wThirst); vital('food', p.food, 35, S.wHunger); vital('energy', p.energy, 30, S.wTired); vital('hp', p.hp, 60, S.wHurt);
-  if (p.food < 35) reveal('F');                                                       // first hunger: the eat key appears
   wetEl.style.display = DEV || p.wet > 0.25 ? 'flex' : 'none'; rows.wet.v.textContent = DEV ? Math.round(p.wet * 100) + '%' : S.wWet; rows.wet.v.className = 'v ' + cls(p.wet > 0.6, p.wet > 0.25);
   if (p.co > 5) { alertEl.style.display = 'flex'; (alertEl.lastElementChild as HTMLElement).textContent = S.coWarn; } else alertEl.style.display = 'none';
   subEl.textContent = fmt(S.feels, { t: p.feelT.toFixed(0) });
   renderHints();
-  hintEl.style.display = G.mobile || hintHidden ? 'none' : 'block';
+  hintEl.style.display = G.mobile ? 'none' : 'block';
   // warnings (cold, hunger / thirst / tiredness / hurt, storm or a strong wind, CO, wet) bring the panels back to full opacity
   const warnNow = p.core < 36 || p.frost.hands >= 40 || p.frost.feet >= 40 || p.frost.face >= 40 || p.food < 35 || p.water < 35 || p.energy < 30 || p.hp < 60 || G.storm > 0.2 || Math.abs(G.wind) >= 12 || p.co > 5 || p.wet > 0.25;
   document.body.classList.toggle('hud-calm', !warnNow);
@@ -549,7 +543,7 @@ export function updateHud(dt: number, realDt: number) {
       h += '</div>';
     });
     beltEl.innerHTML = h;
-
+    root.classList.toggle('belt9', cells.length > 6);      // the pouch's three extra cells: the desktop layout makes the belt narrower (ui.css)
   }
   if (panelOpen && panelAcc > 0.35) { panelAcc = 0; renderPanel(); }
   if (devEl) devEl.textContent = `core ${p.core.toFixed(2)} hands ${p.frost.hands | 0} feet ${p.frost.feet | 0} face ${p.frost.face | 0}\nwater ${p.water | 0} food ${p.food | 0} energy ${p.energy | 0} wet ${(p.wet * 100) | 0}% hp ${p.hp | 0} co ${p.co | 0}\nsun ${G.sunElev.toFixed(1)}° wind ${G.wind.toFixed(1)} storm ${G.storm.toFixed(2)}`;
@@ -564,5 +558,5 @@ function renderPanel() {
 function renderJournal() { renderJournalInto(jEl); }      // tabs Цели · Знания · Записки · Карта · Вещества live in ui/journal.ts
 export const panelIsOpen = () => panelOpen || jOpen;
 /** Tests: a fresh first minute for the key hints (nothing revealed, the full list closed). */
-export function resetHintsForTest() { shownKeys.clear(); hintMem.learned = []; hintMem.full = false; playSec = 0; hintKey = ''; hintHidden = false; hintAutoDone = false; objKey = ''; }
+export function resetHintsForTest() { hintMem.full = false; hintKey = ''; objKey = ''; }
 void itemName;

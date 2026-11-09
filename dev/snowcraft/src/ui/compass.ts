@@ -46,7 +46,7 @@ body.ui-min #compass .tx b{display:none}
 `;
 
 function build() {
-  const host = document.getElementById('hud') ?? document.body;
+  const host = document.querySelector<HTMLElement>('#hud .vit') ?? document.getElementById('hud') ?? document.body;   // desktop: the plate sits under the vitals column (ui.css)
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   el = document.createElement('div'); el.id = 'compass'; el.setAttribute('aria-hidden', 'true');
   el.innerHTML = `<svg viewBox="0 0 48 48">

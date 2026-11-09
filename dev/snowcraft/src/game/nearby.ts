@@ -8,14 +8,14 @@ import { emit } from './bus';
 import { strings, fmt } from '../content/i18n';
 import { TS } from '../engine/grid';
 import { addLayer } from '../engine/render';
-import { inv, add, dropDur, backpacks, weight, unitWeight, fitByWeight, roomFor, thrown, hitchSled, sledNear, WEIGHT_SOFT } from './inventory';
+import { inv, add, dropDur, backpacks, weight, unitWeight, fitByWeight, roomFor, thrown, armedThrown, hitchSled, sledNear, runLimit } from './inventory';
 import { getItem, itemName } from './items';
 import { FIXTURE_DEFS } from './fixtures';
 import { openContainer, openPack, boxTitle } from './search';
+import { onEscape } from '../engine/input';
 
 const S = strings('near', {
-  picked: 'Взял: {name}', heavy: 'Не поднять: слишком тяжело', full: 'В сумке нет места', sled: 'Нарты', pack: 'Твой рюкзак', sledUp: 'Запрягся в нарты',
-  partial: 'Взял часть: {name}',
+  heavy: 'Не поднять: слишком тяжело', full: 'В сумке нет места', sled: 'Нарты', pack: 'Твой рюкзак', sledUp: 'Запрягся в нарты',
 });
 export type NearKind = 'drop' | 'pack' | 'box' | 'sled';
 export interface Near { kind: NearKind; id: number; x: number; y: number; dist: number; rank?: number; label: string; item?: string; n?: number; w: number; heavy: boolean; f?: Fixture }
@@ -31,23 +31,34 @@ export const aim = { x: 0, y: 0, on: false };
 export const isNote = (item: string) => /^note/.test(item);
 /** Items that may be picked up from the ground (a dead player's backpack goes through its own path). */
 export const pickable = (d: Drop) => d.item !== 'backpack';
-export const AUTO_UNIT_MAX = 0.9;       // kg per item and
-export const AUTO_STACK_MAX = 2;        // kg per drop for walking-over pickup
+/** Auto-pickup box around the player (cells, TERRARIA_CONTROLS): horizontal and vertical half-size. Nothing outside it is pulled in. */
+export const AUTO_DX = 10, AUTO_DY = 14;
+/** Seconds a dropped item lies before it can be picked up (it is still falling before that); a thrown one waits 1.4 s (dropRef / dropAction set age -1.4). */
+export const AUTO_DELAY = 0.6;
 
 const BOXES = new Set(['chest', 'shelf', 'cache', 'cairn', 'cart']);
 export const isBoxFixture = (f: Fixture) => BOXES.has(f.kind) || !!FIXTURE_DEFS[f.kind]?.storage;
 
-/** May this drop be picked up by merely walking over it? */
+/** Heavy things (a log, a sack, a block, a tool, a full stack): they auto-pick too, but not while the pack is over WEIGHT_RUN. */
+export const isHeavy = (d: Drop) => { const u = unitWeight(d.item, dropDur.get(d.id)); return u > 0.9 || u * d.n > 2 || getItem(d.item).kind === 'tool'; };
+/**
+ * May this loose drop be taken without E (TERRARIA_CONTROLS, tools.ts stepDrops calls it for drops inside the auto box)? Kind, delay, the
+ * thrown rule and the slots. Not checked here: the weight (see autoWeightOk), the hunt drops the husky fetches (tools.ts), the box itself.
+ * Fixtures (a kit to place), backpacks and sleds are never auto-picked: they need E or the panel.
+ */
 export function autoPickable(d: Drop): boolean {
-  if (d.item === 'backpack' || thrown.has(d.id)) return false;
-  const it = getItem(d.item), dur = dropDur.get(d.id), unit = unitWeight(d.item, dur);
-  if (it.kind === 'note') return roomFor(d.item, d.n) >= d.n;
-  if (it.kind === 'tool' || it.kind === 'fixture' || it.kind === 'wear' || it.kind === 'block') return false;
-  if (unit > AUTO_UNIT_MAX || unit * d.n > AUTO_STACK_MAX) return false;
-  if (weight() + unit * d.n > WEIGHT_SOFT) return false;
+  const it = getItem(d.item);
+  if (d.item === 'backpack' || d.item === 'sled' || it.kind === 'fixture') return false;
+  const dur = dropDur.get(d.id);
+  if (d.age < AUTO_DELAY && !thrown.has(d.id)) return false;
+  if (thrown.has(d.id) && (d.age < 0 || !armedThrown.has(d.id))) return false;
   return roomFor(d.item, d.n, dur) >= d.n;
 }
-const isHeavy = (d: Drop) => { const u = unitWeight(d.item, dropDur.get(d.id)); return u > AUTO_UNIT_MAX || u * d.n > AUTO_STACK_MAX || getItem(d.item).kind === 'tool'; };
+/** The weight rule of the auto-pickup: the whole drop must fit under WEIGHT_MAX (+ bonus); heavy things need the pack under WEIGHT_RUN. */
+export function autoWeightOk(d: Drop): 'ok' | 'heavy' | 'weight' {
+  if (isHeavy(d) && weight() > runLimit()) return 'heavy';
+  return fitByWeight(d.item, d.n, dropDur.get(d.id)) >= d.n ? 'ok' : 'weight';
+}
 
 /** Everything in reach, nearest first (things behind the player count as a bit further). */
 export function nearbyList(): Near[] {
@@ -88,9 +99,9 @@ export function pickDrop(d: Drop, quiet = false): number {
   const got = k - left; if (got <= 0) return 0;
   d.n -= got;
   emit('picked', { item: d.item, n: got });
-  if (!quiet) toast(fmt(d.n > 0 ? S.partial : S.picked, { name: itemName(d.item) + (got > 1 ? ' ×' + got : '') }), 'info');
+  emit('pickup_float', { x: d.x, y: d.y - 4, id: d.item, n: got });       // the «+2 Уголь» text (ui/floater.ts) replaces the old «Взял» toast
   if (/^note/.test(d.item) && d.n <= 0) emit('note_found', { id: d.item });
-  if (d.n <= 0) { dropDur.delete(d.id); thrown.delete(d.id); const i = G.drops.indexOf(d); if (i >= 0) G.drops.splice(i, 1); }
+  if (d.n <= 0) { dropDur.delete(d.id); thrown.delete(d.id); armedThrown.delete(d.id); const i = G.drops.indexOf(d); if (i >= 0) G.drops.splice(i, 1); }
   return got;
 }
 /** Act on one entry of the nearby list (drops go into the pack, a container / backpack opens its search panel, the sled is hitched). */
@@ -107,6 +118,7 @@ export function takeNear(n: Near): boolean {
 // ---- highlight in the world ---------------------------------------------------------------------------------------------------------
 /** The «Рядом» list is open (tools.ts sets it when E is held, the phone button toggles it; ui/bag.ts draws it). */
 export const nearUi = { open: false };
+onEscape(() => { if (!nearUi.open) return false; nearUi.open = false; return true; });
 export const hi = { list: [] as Near[], best: null as Near | null, acc: 0 };
 export function stepNearby(dt: number) {
   hi.acc += dt; if (hi.acc < 0.1) return; hi.acc = 0;

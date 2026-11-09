@@ -1,7 +1,8 @@
 // Settings menu (owner: «не могу найти настройки и кнопку полноэкранного режима»). On a desktop window two small buttons sit at the top-right,
 // left of the sun dial: ⚙ opens the settings panel, ⛶ toggles fullscreen (Shift+Enter does the same). On touch devices ui/touch.ts draws its own ⚙
-// and dispatches window 'sc:menu', which opens the same panel. Esc works as before: devhud.ts toggles G.paused, and the panel follows that pause.
+// and dispatches window 'sc:menu', which opens the same panel. The panel follows the pause (P: devhud.ts toggles G.paused).
 // The panel pauses the game; closing resumes it, unless the game was already paused before the panel opened (a rotation pause, a manual pause).
+// P (devhud.ts toggles the pause) opens it too; Esc closes it (TERRARIA_CONTROLS: Esc is the inventory, P the pause).
 // Rows: Продолжить · Полный экран · Масштаб (zoomui.ts) · Звук (on/off + volume) · Язык · Качество · Интерфейс (full / minimal, see hudmode.ts).
 // Choices live in localStorage (try/catch everywhere): sc.vol {v,m}, sc.q 0|1|2, sc.lang, sc.ui. The URL ?q= still wins over sc.q.
 import { G, toast } from '../game/state';
@@ -11,6 +12,7 @@ import { resize } from '../engine/render';
 import { saveGame } from '../game/save';
 import { mountZoomControl } from './zoomui';
 import { getUiMode, setUiMode, type UiMode } from './hudmode';
+import { onEscape } from '../engine/input';
 
 const S = strings('menu', {
   btn: 'Настройки', fsBtn: 'Полный экран (Shift+Enter)', title: 'Настройки', cont: 'Продолжить', close: 'Закрыть',
@@ -19,7 +21,7 @@ const S = strings('menu', {
   ui: 'Интерфейс', uiFull: 'Полный', uiMin: 'Минимум',
   fsNo: 'Полный экран здесь недоступен. Открой игру отдельной вкладкой или нажми значок ⤢ вверху страницы',
   langNote: 'Язык: {name}. Страница перезагрузится, чтобы применить его',
-  hint: 'Esc — настройки и пауза · Shift+Enter — полный экран',
+  hint: 'P — настройки и пауза · Esc — закрыть · Shift+Enter — полный экран',
 });
 
 const KEY = { vol: 'sc.vol', q: 'sc.q', lang: 'sc.lang' } as const;
@@ -281,6 +283,7 @@ export function initMenu(hostEl: HTMLElement) {
   applyStored();
   build();
   window.addEventListener('sc:menu', () => { if (!titleOn()) toggleMenu(); });        // the touch layer's ⚙
+  onEscape(() => { if (!open) return false; closeMenu(); return true; });              // Esc closes the panel (P / ⚙ open it; Esc no longer opens it)
   document.addEventListener('fullscreenchange', () => { fsNote(false); sync(); });
   document.addEventListener('webkitfullscreenchange', () => { fsNote(false); sync(); });
   addEventListener('keydown', (e) => {

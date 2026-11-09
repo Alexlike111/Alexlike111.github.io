@@ -305,6 +305,8 @@ export interface BoxAdapter { size(): number; get(i: number): Slot | null; set(i
 export const boxZone: { cur: BoxAdapter | null } = { cur: null };
 /** Ids of drops the player threw away on purpose: they are never picked up again by walking over them (only with E). */
 export const thrown = new Set<number>();
+/** Thrown drops the player has walked out of the auto-pickup radius (nearby.ts autoPickable): only then may walking back pick them up. */
+export const armedThrown = new Set<number>();
 
 /** The sled can be used from the panel when it is dragged or stands next to the player. */
 export function sledOpen(): boolean {
