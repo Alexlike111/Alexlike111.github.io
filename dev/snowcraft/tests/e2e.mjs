@@ -275,7 +275,10 @@ for (const prof of PROFILES) {
     q.forgetAll(); inv.clearInventory(); S.give('snow_knife', 1); S.give('shovel', 1);
     S.arena(1000, 272, { dens: 300, loose: 0, depth: 40, up: 70 }); S.teleport(1000, 272); S.step(5);
     const had = { harpoon: q.knows('harpoon'), campfire: q.knows('campfire') };
+    // the note is taken by walking over it (auto-pickup): the arena switched it off, so it is on for this step only
+    const ap = S.mods.tools.autoPickup.on; S.mods.tools.autoPickup.on = true;
     inv.spawnDrop('note_s1', 1, p.x + 2, p.y - 4, 0, 0); S.stepFast(40);
+    S.mods.tools.autoPickup.on = ap;
     return { had, harpoon: q.knows('harpoon'), noteInBag: inv.count('note_s1'), read: q.lore.read.has('s1'), log: q.journal.filter(e => e.kind === 'know' || e.kind === 'note').length };
   });
   check('picking up the keeper\'s log teaches the harpoon and the page leaves the bag', !know.had.harpoon && know.had.campfire && know.harpoon && know.noteInBag === 0 && know.read && know.log >= 2, JSON.stringify(know));

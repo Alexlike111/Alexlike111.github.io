@@ -12,7 +12,7 @@ import '@fontsource/jura/cyrillic-400.css';
 import '@fontsource/jura/latin-600.css';
 import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
-import { input, isKeyDown } from '../engine/input';
+import { input, isKeyDown, onEscape } from '../engine/input';
 import { strings, fmt } from '../content/i18n';
 import { inv, BELT, select, equip, unequip, beltCells } from '../game/inventory';
 import { getItem, itemName, stackIcon, snowClass, snowClassName } from '../game/items';
@@ -335,7 +335,13 @@ export function initHud(host: HTMLElement) {
 
   if (DEV) { devEl = mk('dev'); }
   on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; });
-  window.addEventListener('sc:keys', () => toggleFull());                             // the settings panel (ui/menu.ts) can open the full key list the same way as «?» / H
+  window.addEventListener('sc:keys', () => { if (!hintMem.full) toggleFull(); });     // the settings panel (ui/menu.ts) opens the full key list as «?» / H do (it never closes it)
+  // Esc closes the journal first, then the inventory panel (TERRARIA_CONTROLS); with neither open Esc opens the inventory (input.ts)
+  onEscape(() => {
+    if (jOpen) { jOpen = false; jEl.style.display = 'none'; return true; }
+    if (panelOpen) { panelOpen = false; panel.style.display = 'none'; return true; }
+    return false;
+  });
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
@@ -442,8 +448,7 @@ export function updateHud(dt: number, realDt: number) {
   if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
   if (bagWantsOpen() && !titleOn) { jOpen = false; jEl.style.display = 'none'; if (!panelOpen) setPanelOpen(true); }      // a container was opened: show its panel
   if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
-  if (input.pausePressed && jOpen) { jOpen = false; jEl.style.display = 'none'; input.pausePressed = false; }
-  if (input.pausePressed) { if (panelOpen) { panelOpen = false; panel.style.display = 'none'; } else G.paused = !G.paused; }
+  if (input.pausePressed) { jOpen = false; jEl.style.display = 'none'; panelOpen = false; panel.style.display = 'none'; G.paused = !G.paused; }   // P: always the pause and the settings panel (ui/menu.ts opens it with the pause); the journal and the inventory go
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: desktop = a small stack at the bottom-left (three at most, 4 s, the last second fades); phone = two (one on a short window) in the bottom stack
   const touch = document.body.classList.contains('touch-ui');

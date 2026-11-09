@@ -74,16 +74,34 @@ registerTest('menu', 'клик по ⚙ открывает панель с па�
   } finally { reset(was); }
 });
 
-registerTest('menu', 'Esc открывает панель (пауза), второй Esc закрывает и игра идёт дальше', async t => {
+registerTest('menu', 'P открывает панель (пауза), Esc закрывает её и игра идёт дальше', async t => {
   const was = G.paused;
   try {
     reset(false);
+    t.sc.key('KeyP', true); t.sc.key('KeyP', false);
+    await t.frames(4);
+    t.expect(panelShown() && G.paused, 'P не открыл панель с паузой');
     t.sc.key('Escape', true); t.sc.key('Escape', false);
     await t.frames(4);
-    t.expect(panelShown() && G.paused, 'первый Esc не открыл панель с паузой');
-    t.sc.key('Escape', true); t.sc.key('Escape', false);
-    await t.frames(4);
-    t.expect(!panelShown() && !G.paused, 'второй Esc не закрыл панель и не снял паузу');
+    t.expect(!panelShown() && !G.paused, 'Esc не закрыл панель и не снял паузу');
+  } finally { reset(was); }
+});
+
+registerTest('menu', '«Клавиши» в настройках закрывает панель и открывает полный список клавиш', async t => {
+  const was = G.paused;
+  try {
+    reset(false);
+    $<HTMLElement>('#sc-menubtn')?.click(); await t.frames(2);
+    const b = ctl<HTMLButtonElement>('[data-k=keys]');
+    t.expect(!!b && (b.textContent ?? '').trim() === 'Клавиши', 'нет кнопки «Клавиши» в панели');
+    if (G.mobile || document.body.classList.contains('touch-ui')) {        // a phone has no keys: the row is hidden, nothing to open
+      t.expect(!!b && b.offsetParent === null, '«Клавиши» видны на телефоне');
+    } else {
+      b?.click(); await t.wait(300); await t.frames(2);      // the HUD key box is redrawn every 0.1 s of game time (devhud.ts)
+      t.expect(!panelShown() && !G.paused, '«Клавиши» не закрыла панель и не сняла паузу');
+      const full = $('.hfull');
+      t.expect(!!full && full.classList.contains('on'), 'полный список клавиш не открылся');
+    }
   } finally { reset(was); }
 });
 

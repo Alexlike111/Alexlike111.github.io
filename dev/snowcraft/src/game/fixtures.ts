@@ -49,7 +49,7 @@ const S = strings('fix', {
   drumBrazier: 'Бочка стала жаровней',
   drumDieselW5: 'Налил солярки',
   drumEmpty: 'В бочке пусто',
-  drumFullW5: 'Сначала слей солярку (E)',
+  drumFullW5: 'Сначала слей солярку (действие)',
   potFull: 'Котелок полон',
   fuelBack: 'Топливо вернулось в сумку',
   mastUp: 'Мачта стоит',

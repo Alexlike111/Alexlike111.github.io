@@ -1,11 +1,12 @@
 // Plays the first day of SNOWCRAFT like a player: real keyboard and mouse events (Playwright), time advanced synchronously with window.__sc.step(n).
 //   node tests/play/play3.cjs <abs path to a built index.html> [out dir]   (NODE_PATH=/opt/node-tools/node_modules if playwright is global; SHOTS=1 saves the screenshots, DBG=1 prints the probes)
-// Steps: coal (E) -> dig the buried door with the shovel -> light the stove (matches) -> barometer -> keeper's log in the shelf chest (search panel, take all)
-//        -> shovel + knife: cut snow blocks out of the drift -> place blocks (the blocks must land on the BELT) -> C bag -> Ctrl+wheel zoom.
+// Steps: coal (walk over it: auto-pickup, no key) -> dig the buried door with the shovel -> light the stove (matches, RMB) -> barometer (RMB) -> keeper's log
+//        in the shelf chest (RMB opens the search panel, take all) -> shovel + knife: cut snow blocks out of the drift -> place blocks (the blocks must land on
+//        the BELT) -> Esc opens the inventory, I closes it -> Ctrl+wheel zoom.
 // Long walks are shortened with teleport() (walking itself is proven by shots/play/play2.cjs); everything that matters (E, LMB, keys, panels) is real input.
 // Determinism (the run must not depend on the machine's load):
-//   - E is a quick press (keyboard.press): a held E is a «hold» in the game (3+ things in reach open the «Рядом» list after 0.4 s of real time), and
-//     the length of a Playwright down/up pair depends on the load, so a slow pair turned a tap into a hold;
+//   - RMB and the keys are quick presses (down, two steps, up): a held right button or key is a «hold» in the game (3+ things in reach open the «Рядом»
+//     list after 0.4 s of real time), and the length of a Playwright down/up pair depends on the load, so a slow pair turned a tap into a hold;
 //   - the page's clock is paused after the start (Playwright clock API): the game's own loop (requestAnimationFrame, real time) would otherwise run
 //     between the steps, and the weather, storms, drift, fauna, snow and the aim (camera follow) would move with the wall clock. From here only
 //     window.__sc.step moves the game, so the run is the same on every machine;
@@ -37,15 +38,17 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
   const T = () => ev(() => { const t = window.__sc.mods.tools.target(); return { ok: t.ok, mode: t.mode, verb: t.verb, reason: t.reason }; });
   const solid = async (tx, ty) => { let n = 0; for (const [i, j] of [[1, 1], [2, 2], [1, 3], [3, 1]]) { const m = await cell(tx * 4 + i, ty * 4 + j); if (m >= 1 && m <= 3) n++; } return n >= 2; };
   const tp = (x, y) => ev(([x, y]) => window.__sc.teleport(x, y), [x, y]);
+  // the right mouse button (interact, TERRARIA_CONTROLS): aim at the world point, press, release; a quick press like a player's click
+  const rclick = async (x, y) => { const [sx, sy] = await w2s(x, y); await p.mouse.move(sx, sy); await step(2); await p.mouse.down({ button: 'right' }); await step(2); await p.mouse.up({ button: 'right' }); await step(6); };
 
   const walk = async (x, tol = 6) => { let last = (await st()).x, stuck = 0;
     for (let f = 0; f < 1200; f += 6) { const s = await st(), dx = x - s.x; if (Math.abs(dx) < tol) break; const k = dx > 0 ? 'd' : 'a';
       await p.keyboard.down(k); await step(6); await p.keyboard.up(k); const nx = (await st()).x; stuck = Math.abs(nx - last) < 0.4 ? stuck + 1 : 0; last = nx;
       if (stuck >= 2) { await p.keyboard.down(' '); await step(8); await p.keyboard.up(' '); stuck = 0; } } };
-  // 1. coal: walk with real keys to the arrow target, E
+  // 1. coal: walk with real keys to the arrow target; the coal is taken by walking over it (auto-pickup), no key
   ok(/уголь/.test(await obj()), 'first objective: ' + await obj());
-  { await walk((await tgt())[0]); await tap('e', 10); }
-  ok((await inv('coal')) > 0 && /Откопай/.test(await obj()), 'E picked the coal; next: ' + await obj());
+  { await walk((await tgt())[0], 2); await step(10); }
+  ok((await inv('coal')) > 0 && /Откопай/.test(await obj()), 'walking over the coal picked it up (auto); next: ' + await obj());
   // 2. the buried door: shovel (slot 2 is selected), LMB on the tiles under the feet and in the door front
   { await walk(694, 2);
     for (let it = 0; it < 150 && /Откопай/.test(await obj()); it++) {
@@ -58,22 +61,22 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
       if (!did) { await p.keyboard.down('a'); await step(10); await p.keyboard.up('a'); }
       if (it === 0) await shot('door-pit');
     }
-    // the door itself: stand in front of it and press E (the closed door in front wins over everything beside it)
+    // the door itself: stand in front of it (the closed door in front wins over everything beside it)
     ok(/печь/.test(await obj()), 'the door is dug out, next: ' + await obj()); }
-  // 3. the stove: stand at the stove, matches (key 3), E. The kettle, damper and shutter next to it must not steal E.
-  { const t = await tgt(); await tp(t[0] + 5, 272); await step(20); await ev(() => { window.__sc.G.player.face = -1; }); await tap('3', 4); await tap('e', 20); await step(30);
-    ok(/барометр/.test(await obj()), 'E at the stove lit it, next: ' + await obj()); await shot('stove'); }
-  // 4. barometer: west of the house, the cursor on the instrument, E
-  { const t = await tgt(); await tp(t[0] - 6, 272); await step(30); await hover(t[0], t[1]); await tap('e', 20); await step(20);
-    ok(/журнал/.test(await obj()), 'barometer read, next: ' + await obj()); }
-  // 5. the shelf chest: cursor on it, E opens the search panel, wait until it is searched, «Взять всё»
-  { await tp(638, 272); await step(30); await hover(641, 268); await tap('e', 10); await step(30);
+  // 3. the stove: stand at the stove, matches (key 3), RMB on the stove. The kettle, damper and shutter next to it must not steal the click.
+  { const t = await tgt(); await tp(t[0] + 5, 272); await step(20); await ev(() => { window.__sc.G.player.face = -1; }); await tap('3', 4); await rclick(t[0], t[1]); await step(30);
+    ok(/барометр/.test(await obj()), 'RMB at the stove lit it, next: ' + await obj()); await shot('stove'); }
+  // 4. barometer: west of the house, the cursor on the instrument, RMB
+  { const t = await tgt(); await tp(t[0] - 6, 272); await step(30); await rclick(t[0], t[1]); await step(20);
+    ok(/журнал/.test(await obj()), 'barometer read (RMB), next: ' + await obj()); }
+  // 5. the shelf chest: cursor on it, RMB opens the search panel, wait until it is searched, «Взять всё»
+  { await tp(638, 272); await step(30); await rclick(641, 268); await step(30);
     ok(await ev(() => /Обыскиваю/.test(document.body.innerText)), 'search panel open with «Обыскиваю…»'); await shot('search');
     for (let i = 0; i < 40 && (await ev(() => /Обыскиваю/.test(document.body.innerText))); i++) await step(30);
     const all = p.getByText('Взять всё'); if (await all.count()) { await all.first().click(); await step(10); }
     const close = p.getByText('Закрыть ящик'); if (await close.count()) { await close.first().click(); await step(10); }
-    ok(/★|иглу/.test(await obj()), 'keeper log read (E on the box + take all), next: ' + await obj()); }
-  if (await ev(() => document.body.classList.contains('panel-open'))) { await tap('c', 10); await step(10); }          // «Закрыть ящик» leaves the bag itself open: C closes it
+    ok(/★|иглу/.test(await obj()), 'keeper log read (RMB on the box + take all), next: ' + await obj()); }
+  if (await ev(() => document.body.classList.contains('panel-open'))) { await tap('Escape', 10); await step(10); }          // «Закрыть ящик» leaves the bag itself open: Esc closes it
   // 6. blocks: in a pit of the lee snow field west of the station shovel the crown, knife-cut blocks, place them on the ground
   { await tp(528, 236); await step(40);
     let s = await st(), ptx = Math.floor(s.x / 4), fty = Math.floor((s.y - 1) / 4);
@@ -101,9 +104,9 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     for (let k = 0; k < 16 && placed < 1; k++) { const s2 = await st(), x = s2.x + (k % 2 ? 1 : -1) * (8 + (k >> 1) * 6); let y = 150; while (y < 290 && (await cell(x, y)) === 0) y++; await hover(x, y - 2); const t = await T(); probes.push(Math.round(x) + ',' + y + ' ' + JSON.stringify(t));
       if (t.mode === 'place' && t.ok) { await p.mouse.down(); await step(4); await p.mouse.up(); await step(6); if ((await inv('snow_block')) < b0) placed++; } }
     ok(placed >= 1, 'a block was placed on the ground with LMB' + (placed >= 1 ? '' : ' | player ' + JSON.stringify(await st()) + ' | probes ' + probes.join(' ; '))); await shot('blocks'); }
-  // 7. the bag (C) and the zoom (Ctrl + wheel)
-  { await tap('c', 10); await step(20); ok(await ev(() => document.body.classList.contains('panel-open')), 'C opens the bag'); await shot('bag'); await tap('c', 10); await step(10);
-    ok(!(await ev(() => document.body.classList.contains('panel-open'))), 'C closes the bag');
+  // 7. the inventory (Esc opens it, I closes it), the zoom (Ctrl + wheel)
+  { await tap('Escape', 10); await step(20); ok(await ev(() => document.body.classList.contains('panel-open')), 'Esc opens the inventory'); await shot('bag'); await tap('i', 10); await step(10);
+    ok(!(await ev(() => document.body.classList.contains('panel-open'))), 'I closes the inventory');
     const z0 = await ev(() => window.__sc.zoom.index()); await p.mouse.move(640, 300); await p.keyboard.down('Control'); await p.mouse.wheel(0, -120); await step(10); await p.keyboard.up('Control'); await step(10);
     ok((await ev(() => window.__sc.zoom.index())) !== z0, 'Ctrl+wheel changes the zoom ' + z0 + ' -> ' + await ev(() => window.__sc.zoom.index())); }
   ok(errs.length === 0, 'no console errors ' + JSON.stringify(errs.slice(0, 3)));

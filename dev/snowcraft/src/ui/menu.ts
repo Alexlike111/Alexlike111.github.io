@@ -22,6 +22,7 @@ const S = strings('menu', {
   fsNo: 'Полный экран здесь недоступен. Открой игру отдельной вкладкой или нажми значок ⤢ вверху страницы',
   langNote: 'Язык: {name}. Страница перезагрузится, чтобы применить его',
   hint: 'P — настройки и пауза · Esc — закрыть · Shift+Enter — полный экран',
+  controls: 'Управление', keys: 'Клавиши',
 });
 
 const KEY = { vol: 'sc.vol', q: 'sc.q', lang: 'sc.lang' } as const;
@@ -73,7 +74,7 @@ body.touch-ui #sc-menu .hint{display:none}
 const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M18.56 10.21L21.09 10.56L21.09 13.44L18.56 13.79L17.91 15.37L19.44 17.41L17.41 19.44L15.37 17.91L13.79 18.56L13.44 21.09L10.56 21.09L10.21 18.56L8.63 17.91L6.59 19.44L4.56 17.41L6.09 15.37L5.44 13.79L2.91 13.44L2.91 10.56L5.44 10.21L6.09 8.63L4.56 6.59L6.59 4.56L8.63 6.09L10.21 5.44L10.56 2.91L13.44 2.91L13.79 5.44L15.37 6.09L17.41 4.56L19.44 6.59L17.91 8.63ZM15.2 12A3.2 3.2 0 1 0 8.8 12A3.2 3.2 0 1 0 15.2 12Z"/></svg>';
 const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 
-let host: HTMLElement | null = null, panel: HTMLElement | null = null, gear: HTMLElement | null = null, fsBtn: HTMLElement | null = null;
+let host: HTMLElement | null = null, panel: HTMLElement | null = null, gear: HTMLElement | null = null, fsBtn: HTMLElement | null = null, keysRow: HTMLElement | null = null;
 let open = false, ownPause = false, wasPaused = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -226,6 +227,10 @@ function build() {
   const fs = btn('', '', 'fs'); fs.addEventListener('click', () => { void toggleFullscreen(); });
   g.append(cont, fs);
 
+  const keysBtn = btn(S.keys, '', 'keys');      // the full key list (devhud.ts shows it on «sc:keys», as «?» / H do); the panel closes first
+  keysBtn.addEventListener('click', () => { closeMenu(); window.dispatchEvent(new Event('sc:keys')); });
+  keysRow = cell(S.controls, keysBtn); g.appendChild(keysRow);      // a phone has no keys: sync() hides the row there
+
   const zw = document.createElement('div'); zw.className = 'w'; mountZoomControl(zw); g.appendChild(zw);
 
   const mute = btn('', '', 'sound');
@@ -265,6 +270,7 @@ function sync() {
   const ui = getUiMode();
   for (const b of Array.from(panel.querySelectorAll<HTMLElement>('[data-k=q]'))) b.classList.toggle('on', Number(b.dataset.v) === G.quality);
   for (const b of Array.from(panel.querySelectorAll<HTMLElement>('[data-k=ui]'))) b.classList.toggle('on', b.dataset.v === ui);
+  if (keysRow) keysRow.style.display = G.mobile || document.body.classList.contains('touch-ui') ? 'none' : '';
 }
 
 /** Start-up: the stored language, sound and quality win over the defaults (?q= still wins over sc.q). */

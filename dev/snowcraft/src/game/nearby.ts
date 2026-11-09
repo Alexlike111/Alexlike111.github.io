@@ -1,7 +1,7 @@
 // Nearby things (DESIGN §12): lying drops (dropped items, coal sacks, driftwood pieces, notes), containers, a parked sled and a dead player's backpack
-// that are within reach are highlighted in the world. E takes the NEAREST one in front of the player; when several are near, a «Рядом» list (E held, or the
+// that are within reach are highlighted in the world. RMB (E too) takes the NEAREST one in front of the player; when several are near, a «Рядом» list (E held, or the
 // phone button) lets you choose. Small light things are picked up by walking over them, but only if the pack has room and the weight allows; heavy things
-// (logs, sacks, blocks, tools, clothes, a backpack) never auto-pick: they need E.
+// (logs, sacks, blocks, tools, clothes, a backpack) never auto-pick: they need RMB.
 // Playtest ONB-2 / F1: a loose item right at the feet (PICK_R) wins over a door; the item under the cursor (AIM_R) wins over a nearer one; a note wins a tie.
 import { G, toast, type Drop, type Fixture } from './state';
 import { emit } from './bus';
@@ -124,10 +124,38 @@ export function stepNearby(dt: number) {
   hi.acc += dt; if (hi.acc < 0.1) return; hi.acc = 0;
   hi.list = nearbyList(); hi.best = hi.list[0] ?? null;
 }
-const E_GLYPH = ['1111', '1000', '1110', '1000', '1111'];
+// The interact marker over the best target (TERRARIA_CONTROLS): on desktop a mouse 7×9 px with the right button filled (RMB interacts);
+// on touch a plain yellow dot (there is no right button, the «Взять» / «Действие» buttons do the work).
+const MOUSE: string[] = [
+  '.#####.',
+  '#..#FF#',
+  '#..#FF#',
+  '#######',
+  '#.....#',
+  '#.....#',
+  '#.....#',
+  '#.....#',
+  '.#####.',
+];
+const DOT: string[] = [
+  '.###.',
+  '#####',
+  '#####',
+  '#####',
+  '.###.',
+];
+const MARK_INK = '#1b1726', MARK_LIGHT = '#eaf6ff', MARK_ACC = '#ffd98a';
+/** Draws a pixel glyph from char rows (`#` light, `F` accent, `.` transparent); the cells are one canvas pixel each. */
+function drawGlyph(ctx: CanvasRenderingContext2D, rows: string[], x: number, y: number) {
+  for (let gy = 0; gy < rows.length; gy++) for (let gx = 0; gx < rows[gy].length; gx++) {
+    const c = rows[gy][gx]; if (c === '.') continue;
+    ctx.fillStyle = c === 'F' ? MARK_ACC : c === '#' ? MARK_LIGHT : MARK_INK;
+    ctx.fillRect(x + gx, y + gy, 1, 1);
+  }
+}
 function drawHi(ctx: CanvasRenderingContext2D, v: { x0: number; y0: number; t: number }) {
   if (!hi.list.length || !G.player?.alive) return;
-  const t = v.t;
+  const t = v.t, touch = G.mobile || document.body.classList.contains('touch-ui');
   for (let i = 0; i < hi.list.length && i < 8; i++) {
     const n = hi.list[i]; const best = i === 0;
     const x = Math.round(n.x - v.x0), y = Math.round(n.y - v.y0);
@@ -139,11 +167,19 @@ function drawHi(ctx: CanvasRenderingContext2D, v: { x0: number; y0: number; t: n
     const corner = (cx: number, cy: number, sx: number, sy: number) => { ctx.fillRect(sx > 0 ? cx : cx - 2, cy, 3, 1); ctx.fillRect(cx, sy > 0 ? cy : cy - 2, 1, 3); };
     corner(l, top, 1, 1); corner(r, top, -1, 1); corner(l, bot, 1, -1); corner(r, bot, -1, -1);
     if (best) {
-      const bob = Math.round(Math.sin(t * 4) * 1.2), kx = x - 3, ky = top - 10 + bob;
-      ctx.globalAlpha = 1; ctx.fillStyle = '#1b1726'; ctx.fillRect(kx - 1, ky - 1, 8, 9);
-      ctx.fillStyle = '#ffd98a'; ctx.fillRect(kx, ky, 6, 7);
-      ctx.fillStyle = '#1b1726'; for (let gy = 0; gy < 5; gy++) for (let gx = 0; gx < 4; gx++) if (E_GLYPH[gy][gx] === '1') ctx.fillRect(kx + 1 + gx * 1, ky + 1 + gy, 1, 1);
-      ctx.fillStyle = '#ffd98a'; ctx.fillRect(kx + 2, ky + 8, 2, 1);
+      const bob = Math.round(Math.sin(t * 4) * 1.2);
+      ctx.globalAlpha = 1;
+      if (touch) {                                     // a plain hand dot: a 5×5 yellow dot on a dark edge, a pointer below
+        const dx = x - 2, dy = top - 7 + bob;
+        ctx.fillStyle = MARK_INK; ctx.fillRect(dx - 1, dy - 1, 7, 7);
+        drawGlyph(ctx, DOT, dx, dy);
+        ctx.fillStyle = MARK_INK; ctx.fillRect(x, dy + 6, 1, 1);
+      } else {                                         // the mouse: a dark plate (9×11), the glyph, a pointer below
+        const kx = x - 3, ky = top - 10 + bob;
+        ctx.fillStyle = MARK_INK; ctx.fillRect(kx - 1, ky - 1, 9, 11);
+        drawGlyph(ctx, MOUSE, kx, ky);
+        ctx.fillStyle = MARK_ACC; ctx.fillRect(kx + 3, ky + 10, 1, 1);
+      }
     }
   }
   ctx.globalAlpha = 1;
