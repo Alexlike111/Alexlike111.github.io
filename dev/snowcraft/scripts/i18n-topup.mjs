@@ -11,7 +11,8 @@ for (const c of codes) {
     fs.writeFileSync(path.join(todo, c + '.json'), JSON.stringify(need, null, 1) + '\n'); console.log(c, Object.keys(need).length, 'to translate');
   } else if (mode === 'apply') {
     const d = path.join(todo, c + '_done.json'); const done = fs.existsSync(d) ? JSON.parse(fs.readFileSync(d, 'utf8')) : {};
-    const out = {}; for (const k of Object.keys(src)) { const v = typeof done[k] === 'string' && done[k].trim() ? done[k] : t[k]; if (typeof v === 'string') out[k] = v; }
+    const want = JSON.parse(fs.readFileSync(path.join(todo, c + '.json'), 'utf8'));   // only keys that were asked for (stale entries of older rounds are ignored)
+    const out = {}; for (const k of Object.keys(src)) { const v = k in want && typeof done[k] === 'string' && done[k].trim() ? done[k] : t[k]; if (typeof v === 'string') out[k] = v; }
     fs.writeFileSync(f, JSON.stringify(out, null, 1) + '\n'); console.log(c, 'applied', Object.keys(done).length, 'total', Object.keys(out).length);
   } else { console.error('usage: todo | apply'); process.exit(2); }
 }
