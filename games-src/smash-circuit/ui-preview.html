@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>Smash Circuit - UI preview (dev only)</title>
+    <style>
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #1b2a3a; overscroll-behavior: none; }
+      body { user-select: none; -webkit-user-select: none; touch-action: none; }
+      #app { position: fixed; inset: 0; overflow: hidden; }
+      /* stand-in for the 3D scene so overlaps with the "car area" are visible */
+      #scene { position: absolute; inset: 0; background:
+        repeating-linear-gradient(135deg, rgba(255,255,255,.05) 0 28px, transparent 28px 56px),
+        linear-gradient(#7fd6ff 0%, #bdeaa0 40%, #58c46a 100%); }
+      #scene svg { position: absolute; left: 50%; top: 50%; width: min(22vw, 17vh); transform: translate(-50%, -50%); filter: drop-shadow(0 12px 8px rgba(0,0,0,.35)); }
+      #scene .road { position: absolute; left: 50%; top: -10%; bottom: -10%; width: min(46vw, 40vh); transform: translateX(-50%) skewX(-4deg); background: #6b7289; border-left: 8px solid #fff; border-right: 8px solid #fff; }
+      #ui { position: absolute; inset: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body oncontextmenu="return false">
+    <div id="app">
+      <div id="scene">
+        <div class="road"></div>
+        <svg viewBox="0 0 40 80" aria-hidden="true"><rect x="6" y="2" width="28" height="76" rx="11" fill="#ff5a36" stroke="#14213d" stroke-width="2"/><rect x="12" y="30" width="16" height="26" rx="5" fill="#2a3a5c"/><rect x="0" y="10" width="7" height="14" rx="3" fill="#14213d"/><rect x="33" y="10" width="7" height="14" rx="3" fill="#14213d"/><rect x="0" y="54" width="7" height="15" rx="3" fill="#14213d"/><rect x="33" y="54" width="7" height="15" rx="3" fill="#14213d"/></svg>
+      </div>
+      <div id="ui"></div>
+    </div>
+    <script type="module" src="/src/ui/preview.ts"></script>
+  </body>
+</html>

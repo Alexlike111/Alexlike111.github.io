@@ -1,0 +1,119 @@
+/* In-race HUD extras (src/ui/hud.ts): minimap, gap chips, position flash, smash floats + combo, takedown banner.
+   Everything here ignores touches. The map lives in the top-right column (under pause + coins), the gaps in the top-left
+   column (under the damage card), so neither can reach the touch controls at the bottom in any scheme / orientation. */
+
+/* ---- minimap ---- */
+.ui-root .hx-map {
+  --mm: clamp(64px, min(27vw, 17.5vh), 124px);
+  width: var(--mm); height: var(--mm); flex: none; pointer-events: none;
+  background: rgba(16, 27, 58, 0.8); border: 0.14em solid var(--ink); border-radius: 0.9em;
+  box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.3), inset 0 0 0 0.1em var(--panel-line); overflow: hidden;
+}
+.ui-root .hx-map[hidden] { display: none; }
+.ui-root .hx-map canvas { display: block; width: 100%; height: 100%; }
+
+/* ---- gap chips ---- */
+.ui-root .hx-gaps { display: flex; flex-direction: column; gap: 0.25em; pointer-events: none; }
+.ui-root .hx-gaps[hidden], .ui-root .hx-gap[hidden] { display: none; }
+/* short landscape screens: the two chips sit side by side so the column stays clear of the slide-steer pad (667x375) */
+@media (orientation: landscape) and (max-height: 420px) { .ui-root .hx-gaps { flex-direction: row; gap: 0.35em; } }
+.ui-root .hx-gap {
+  --gc: #e9eefc; display: flex; align-items: center; gap: 0.4em; padding: 0.15em 0.55em 0.2em 0.45em; border-radius: 0.7em;
+  background: var(--panel); border: 0.13em solid var(--ink); box-shadow: 0 0.16em 0 rgba(0, 0, 0, 0.3);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.ui-root .hx-gap[data-mood="good"] { --gc: #5fe08a; }
+.ui-root .hx-gap[data-mood="bad"] { --gc: #ff7a6b; }
+.ui-root .hx-gap .ar { width: 0; height: 0; flex: none; border-left: 0.36em solid transparent; border-right: 0.36em solid transparent; }
+.ui-root .hx-gap.up .ar { border-bottom: 0.62em solid var(--gc); }
+.ui-root .hx-gap.dn .ar { border-top: 0.62em solid var(--gc); }
+.ui-root .hx-gap b { font: 900 italic 1.05em/1 var(--display); color: var(--gc); min-width: 2.2em; }
+.ui-root .hx-gap small { font: 800 0.7em/1 var(--body); opacity: 0.85; max-width: 7em; overflow: hidden; white-space: nowrap; }
+
+/* ---- overlay: floats, banners, edge pulse ---- */
+.ui-root .hx { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.ui-root .hx > * { position: absolute; }
+.ui-root .hx [hidden] { display: none; }
+
+.ui-root .hx-flash { inset: 0; opacity: 0; }
+.ui-root .hx-flash[data-kind="good"] { box-shadow: inset 0 0 5em 0.6em rgba(95, 224, 138, 0.55); }
+.ui-root .hx-flash[data-kind="slam"] { box-shadow: inset 0 0 6em 1em rgba(255, 90, 54, 0.7); }
+.ui-root .hx-flash.go { animation: hx-flash 0.45s ease-out both; }
+@keyframes hx-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* position change: "OVERTAKE!  P3 -> P2" */
+.ui-root .hx-ovt, .ui-root .hx-slam, .ui-root .hx-combo { left: 50%; top: 27%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 0.1em; white-space: nowrap; text-align: center; }
+.ui-root .hx-ovt small { font: 900 italic 0.95em/1 var(--display); letter-spacing: 0.08em; color: #fff; text-shadow: 0 0.1em 0 var(--ink); }
+.ui-root .hx-ovt b {
+  display: flex; align-items: center; gap: 0.35em; padding: 0.1em 0.7em 0.18em; border-radius: 0.8em;
+  font: 900 italic 2.2em/1 var(--display); color: #fff; background: var(--panel); border: 0.13em solid var(--ink);
+  box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.35);
+}
+.ui-root .hx-ovt b span:first-child { opacity: 0.6; font-size: 0.7em; }
+.ui-root .hx-ovt b span:last-child { color: var(--yellow); -webkit-text-stroke: 0.05em var(--ink); paint-order: stroke fill; }
+.ui-root .hx-ovt b i { width: 0.9em; height: 0.5em; background: currentColor; clip-path: polygon(0 30%, 55% 30%, 55% 0, 100% 50%, 55% 100%, 55% 70%, 0 70%); opacity: 0.9; }
+.ui-root .hx-ovt em { font: 800 normal 0.8em/1 var(--body); color: #fff; text-shadow: 0 0.1em 0 var(--ink); }
+.ui-root .hx-ovt[data-dir="up"] small { color: #7dffa6; }
+.ui-root .hx-ovt[data-dir="up"] b { border-color: #7dffa6; box-shadow: 0 0.2em 0 rgba(0, 0, 0, 0.35), 0 0 1.2em rgba(95, 224, 138, 0.7); }
+.ui-root .hx-ovt[data-dir="down"] small { color: #ff9a8c; }
+.ui-root .hx-ovt[data-dir="down"] b { font-size: 1.6em; }
+.ui-root .hx-ovt[data-dir="down"] b span:last-child { color: #ff9a8c; }
+.ui-root .hx-ovt.go { animation: hx-ovt 0.42s cubic-bezier(.2, 1.6, .4, 1) both; }
+@keyframes hx-ovt { 0% { opacity: 0; transform: translateX(-50%) scale(1.9); } 60% { opacity: 1; } 100% { opacity: 1; transform: translateX(-50%) scale(1); } }
+
+/* takedown / SLAM */
+.ui-root .hx-slam { top: 37%; }
+.ui-root .hx-slam b {
+  font: 900 italic 3.4em/1 var(--display); color: #fff; letter-spacing: 0.02em; -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.06em 0 var(--ink), 0 0.12em 0 var(--orange-d), 0 0 0.6em rgba(255, 90, 54, 0.9);
+}
+.ui-root .hx-slam span { font: 800 0.95em/1 var(--body); color: #fff; text-shadow: 0 0.1em 0 var(--ink); }
+.ui-root .hx-slam em { font: 900 italic 1.3em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.06em var(--ink); paint-order: stroke fill; font-style: normal; }
+.ui-root .hx-slam.go { animation: hx-slam 0.5s cubic-bezier(.2, 1.7, .4, 1) both; }
+@keyframes hx-slam {
+  0% { opacity: 0; transform: translateX(-50%) scale(2.4) rotate(-6deg); }
+  45% { opacity: 1; transform: translateX(-50%) scale(0.92) rotate(2deg); }
+  70% { transform: translateX(-50%) scale(1.06) rotate(-1deg); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1) rotate(0); }
+}
+
+/* smash combo */
+.ui-root .hx-combo { top: 58%; gap: 0.15em; }
+.ui-root .hx-combo b {
+  font: 900 italic 2.4em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.07em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.06em 0 var(--ink);
+}
+.ui-root .hx-combo[data-tier="2"] b { color: #ffa63a; font-size: 2.5em; }
+.ui-root .hx-combo[data-tier="3"] b { color: #ff5a36; font-size: 2.6em; text-shadow: 0 0.06em 0 var(--ink), 0 0 0.6em rgba(255, 90, 54, 0.85); }
+.ui-root .hx-combo span { font: 900 0.8em/1 var(--body); letter-spacing: 0.12em; color: #fff; text-shadow: 0 0.1em 0 var(--ink); text-transform: uppercase; }
+.ui-root .hx-combo i { display: block; width: 7em; height: 0.32em; border-radius: 0.2em; background: #fff; border: 0.08em solid var(--ink); transform-origin: left center; transition: transform 0.1s linear; }
+.ui-root .hx-combo.go { animation: hx-combo 0.3s cubic-bezier(.2, 1.7, .4, 1) both; }
+@keyframes hx-combo { 0% { transform: translateX(-50%) scale(1.5); } 100% { transform: translateX(-50%) scale(1); } }
+
+/* world floats: "+N" at the smashed object */
+.ui-root .hx-float {
+  transform: translate(-50%, -50%); font: 900 italic 1.5em/1 var(--display); color: var(--yellow); -webkit-text-stroke: 0.08em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 0.08em 0 var(--ink); white-space: nowrap;
+}
+.ui-root .hx-float.warm { color: #ffb347; font-size: 1.75em; }
+.ui-root .hx-float.hot { color: #ff6a3d; font-size: 2.1em; }
+.ui-root .hx-float.dim { color: #cdd6ee; font-size: 1.2em; }
+.ui-root .hx-float.go { animation: hx-float 0.9s ease-out both; }
+@keyframes hx-float {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.5); }
+  15% { opacity: 1; transform: translate(-50%, -70%) scale(1.25); }
+  100% { opacity: 0; transform: translate(-50%, -260%) scale(1); }
+}
+
+/* the legacy aggregated pill is replaced by the combo banner + floats */
+.ui-root .smashfloat { display: none !important; }
+
+/* short landscape phones: banners a little smaller so they never reach the item button or the stick */
+@media (max-height: 460px) {
+  .ui-root .hx-ovt b { font-size: 1.8em; }
+  .ui-root .hx-slam b { font-size: 2.6em; }
+  .ui-root .hx-combo b { font-size: 1.7em; }
+  .ui-root .hx-combo[data-tier="2"] b { font-size: 1.9em; }
+  .ui-root .hx-combo[data-tier="3"] b { font-size: 2.1em; }
+  .ui-root .hx-combo { top: 52%; }
+}

@@ -1,0 +1,71 @@
+/* Leaderboard modal (src/ui/leaderboard.ts). Uses the .ui-root tokens and the shared .panel / .btn / .title classes. */
+.ui-root .lb-layer {
+  position: absolute; inset: 0; z-index: 15; pointer-events: auto;
+  display: grid; place-items: center;
+  padding: max(0.8em, var(--sat)) max(0.8em, var(--sar)) max(0.8em, var(--sab)) max(0.8em, var(--sal));
+  background: rgba(8, 14, 32, 0.66);
+}
+.ui-root .lb-card {
+  width: min(100%, 31em); max-height: 100%; display: flex; flex-direction: column; gap: 0.6em; padding: 0.8em 0.9em 0.9em;
+  overflow: hidden;
+}
+.ui-root .lb-head { display: flex; align-items: center; gap: 0.6em; flex: none; }
+.ui-root .lb-trophy { display: grid; place-items: center; color: var(--yellow); }
+.ui-root .lb-trophy .ic { width: 1.9em; height: 1.9em; }
+.ui-root .lb-titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.2em; }
+.ui-root .lb-titles .title { text-align: left; }
+.ui-root .lb-titles small { color: var(--yellow); letter-spacing: 0.04em; }
+.ui-root .lb-x { flex: none; }
+
+.ui-root .lb-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.4em; flex: none; }
+.ui-root .lb-tab {
+  appearance: none; cursor: pointer; pointer-events: auto; touch-action: manipulation; font: inherit;
+  min-height: max(2.6em, 44px); padding: 0.3em 0.4em; color: #fff; background: rgba(255, 255, 255, 0.08);
+  border: 0.14em solid var(--ink); border-radius: 0.8em; box-shadow: 0 0.18em 0 var(--ink);
+  font: 900 italic 0.82em/1.1 var(--display); text-transform: uppercase; letter-spacing: 0.03em;
+  display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; overflow-wrap: anywhere;   /* long track names wrap on a phone instead of being cut */
+}
+.ui-root .lb-tab.on { color: var(--ink); background: linear-gradient(var(--yellow), #ffa51f); }
+.ui-root .lb-tab:focus-visible { outline: 0.2em solid #fff; outline-offset: 0.1em; }
+
+.ui-root .lb-body { flex: 1 1 auto; min-height: 9em; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.ui-root .lb-msg {
+  min-height: 9em; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.7em;
+  text-align: center; font-weight: 800; opacity: 0.92;
+}
+.ui-root .lb-spin {
+  width: 1.8em; height: 1.8em; border-radius: 50%; border: 0.28em solid rgba(255, 255, 255, 0.25); border-top-color: var(--yellow);
+  animation: lb-spin 0.8s linear infinite;
+}
+@keyframes lb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-root .lb-spin { animation-duration: 2.4s; } }
+
+.ui-root .lb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3em; }
+.ui-root .lb-row {
+  display: grid; grid-template-columns: 2.2em minmax(0, 1fr) auto; align-items: center; gap: 0.6em;
+  padding: 0.35em 0.7em; border-radius: 0.7em; background: rgba(255, 255, 255, 0.07);
+  border: 0.12em solid transparent; font-variant-numeric: tabular-nums;
+}
+.ui-root .lb-row.p1 .lb-rank { color: #ffd54a; }
+.ui-root .lb-row.p2 .lb-rank { color: #dfe6f2; }
+.ui-root .lb-row.p3 .lb-rank { color: #ff9a62; }
+.ui-root .lb-row.me { background: rgba(255, 201, 60, 0.2); border-color: var(--yellow); }
+.ui-root .lb-rank { font: 900 italic 1.05em/1 var(--display); text-align: center; }
+.ui-root .lb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-root .lb-name em {
+  margin-left: 0.5em; padding: 0.05em 0.5em; border-radius: 1em; font: 900 italic 0.7em/1.4 var(--display);
+  text-transform: uppercase; color: var(--ink); background: var(--yellow); vertical-align: 0.1em;
+}
+.ui-root .lb-time { font: 900 1em/1 var(--display); letter-spacing: 0.02em; }
+
+/* the extra row on the track-select bar and the results button */
+.ui-root .pr-btn.pr-lb { grid-column: 1 / -1; min-height: max(2.8em, 44px); grid-template-rows: auto; justify-content: center; text-align: center; }
+.ui-root .res-pair.has-lb { display: flex; }
+.ui-root .res-pair.has-lb > .btn { flex: 1 1 0; min-width: 0; }
+.ui-root .res-pair.has-lb > .btn.round { flex: none; }
+
+@media (max-height: 460px) {
+  .ui-root .lb-card { gap: 0.4em; padding: 0.55em 0.7em 0.7em; }
+  .ui-root .lb-body, .ui-root .lb-msg { min-height: 5em; }
+  .ui-root .lb-row { padding: 0.2em 0.6em; }
+}
