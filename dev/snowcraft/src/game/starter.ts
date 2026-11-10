@@ -2,8 +2,7 @@
 // of ~250-340 kg/m3 (the ideal block class) while the rest of the snowpack nearby is loose (< 220, crumbles when cut).
 // The slab sits east of the barometer post (x 714-728), clear of the coal sacks of the diesel shed (x 740-756): before, it buried them (ONB-1).
 // The start kit's matches go onto the belt (ONB-3), so the first fire needs no digging through the pack.
-import { W, H, mat, aux, flags, shade, edited } from '../engine/grid';
-import { LOC } from './locations';
+import { W, mat, aux, flags, shade, edited } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { DOOR } from './snowpack';
 import { G, toast } from './state';
@@ -16,9 +15,7 @@ const S = strings('starter', {
   matchesBeltTouch: 'Спички в поясе: слот {k}',
 });
 
-let spawnAt = LOC.spawn.x;                                  // the spawn column of this game (seedStarterDrift)
 export function seedStarterDrift(spawnX: number) {
-  spawnAt = spawnX;
   // DESIGN §13: the spawn stands on the wind-slab lee drift of the house (snowpack.ts, aux 140-200 = 290-380 kg/m3): the first knife cut works right there. The old
   // extra slab east of the spawn buried the coal sacks in front of the generator shed (x 740-756), so it is only a fallback now (and sits clear of them).
   if (DOOR.crest > 0) { liftBuriedCoal(spawnX); return; }
@@ -61,17 +58,4 @@ export function beltMatches(): number {
   toast(fmt(touch ? S.matchesBeltTouch : S.matchesBelt, { k: to + 1 }), 'info');
   return to;
 }
-/** ONB (playtest v13): three coal sacks lie in plain view on the walkable ground between the spawn and the house door, within 40 cells of the spawn.
- *  The diesel shed's sacks used to sit 45-60 cells out behind the station wall (the novice never reached them): the three nearest of them are moved
- *  onto the surface of the spawn's yard (snow buries nothing: the sack goes to the first free cell above the drift). */
-export function placeOnboardingCoal(spawnX: number) {
-  const sacks = G.drops.filter(d => d.item === 'coal' && d.x > spawnX + 40 && d.x < LOC.station.x1 && d.x < spawnX + 140).sort((a, b) => a.x - b.x).slice(0, 3);
-  // not under the radio mast (x 708 on the house roof: its fixture takes the E press before a sack at 8-16 cells: playtest v13), so 8, 28 and 31 cells out
-  const xs = [spawnX + 8, spawnX + 28, spawnX + 31];
-  sacks.forEach((d, k) => {
-    const x = Math.floor(xs[k]);
-    let top = 150; while (top < H - 1 && mat[top * W + x] === MAT.AIR) top++;          // the first solid cell from above: the surface
-    d.x = x + 0.5; d.y = top - 1; d.vx = 0; d.vy = 0;
-  });
-}
-on('new_game', () => { beltMatches(); placeOnboardingCoal(spawnAt); });
+on('new_game', () => { beltMatches(); });

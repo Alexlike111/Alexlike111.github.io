@@ -463,11 +463,8 @@ function chips(tx: number, ty: number, m: number, n = 5) {
   burstFx('chip', tx * TS + 2, ty * TS + 2, n, 28, 0.5, (rgb[0] << 16) | (rgb[1] << 8) | rgb[2], 12);
 }
 
-let farT = -9;
-function farClick() {
-  const t = G.realTime; if (t >= farT && t - farT < 0.8) return;     // (a restored clock counts as a new moment)
-  farT = t; toast(S.far, 'info'); emit('deny', { reason: S.far });
-}
+/** A press out of reach: the line says why and the quiet refusal sound plays (one per press). */
+function farClick() { toast(S.far, 'info'); emit('deny', { reason: S.far }); }
 function finishDig(T: Target, tk: string) {
   const tx = T.tx, ty = T.ty, m = tileMaterial(tx, ty);
   if (m === 0) return;

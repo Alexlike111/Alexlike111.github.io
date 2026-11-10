@@ -16,6 +16,7 @@ import './items';
 import { sandbox } from './testkit';
 import { def } from './itemreg';
 import { journal } from './quest';
+import { MIN_PER_SEC } from './weather';
 
 registerTest('useitems', 'каркас: use() срабатывает, событие use_item, подсказка один раз, состояние в сохраняемом объекте', async () => {
   await sandbox(() => {
@@ -65,7 +66,7 @@ registerTest('useitems', 'термос: налить у огня, три гло�
     // heat runs out: refill, wait 6+ game hours
     add('water', 2); stepUseItems(1); useSlot(i); useSlot(i);
     inv.slots[i]!.dur = 2 * 1000 + 360;
-    for (let k = 0; k < 160; k++) stepUseItems(1);
+    for (let k = 0; k < Math.ceil(360 / MIN_PER_SEC) + 5; k++) stepUseItems(1);      // 360 game minutes of heat (the clock runs MIN_PER_SEC per second)
     if ((inv.slots[i]!.dur ?? 0) % 1000 > 0) throw new Error('термос должен остыть за 6 ч: ' + inv.slots[i]!.dur);
     const c1 = P().core; sget('thPool'); stepUseItems(1); useSlot(i); for (let k = 0; k < 70; k++) stepUseItems(1);
     if (P().core > c1 + 0.05) throw new Error('остывший не греет');
@@ -131,7 +132,7 @@ registerTest('useitems', 'жир-мазь: -40 % обморожения на ~2 
     stepUseItems(0.1); if (mods.frostHands !== 1) throw new Error('до мази эффекта нет');
     if (!useSlot(i)) throw new Error('намазаться');
     stepUseItems(0.1); if (Math.abs(mods.frostHands - 0.6) > 0.01 || Math.abs(mods.frostFace - 0.6) > 0.01) throw new Error('-40 %: ' + mods.frostHands);
-    stepUseItems(30); stepUseItems(30); stepUseItems(0.1);
+    stepUseItems(50); stepUseItems(50); stepUseItems(0.1);                       // 2 game hours = 120 / MIN_PER_SEC seconds
     if (mods.frostHands !== 1) throw new Error('через два часа мазь должна сойти');
   });
 });

@@ -330,7 +330,7 @@ registerTest('fixtures', 'ветер задувает слабое пламя н
     scene({ T: -20, wind: 16 });
     const f = placeFixture('campfire', 250, 67, { force: true, fuel: 15, lit: true })!;
     let out = 0; const off = on('fire_out', () => out++);
-    for (let i = 0; i < 60 * 12; i++) { stepFixtures(1 / 60); if (!f.lit) break; }
+    for (let i = 0; i < 60 * 24; i++) { stepFixtures(1 / 60); if (!f.lit) break; }      // 24 s = 28.8 game minutes at MIN_PER_SEC 1.2 (was 12 s at 2.4)
     off(); if (f.lit) throw new Error('слабый огонь при 16 м/с должен погаснуть');
   });
 });
@@ -389,7 +389,7 @@ registerTest('fixtures', 'полог/дверь, тайник/сундук, си
     const snare = placeFixture('snare', 244, 67, { force: true })!; interact(snare); if (!snare.data!.set) throw new Error('силок не взведён');
     let caught = 0; const off = on('snare_caught', () => caught++);
     setSnareFallback(true);                     // hunt.ts turns the random catch off (a flock must flush into it); the unit test wants the fallback
-    for (let i = 0; i < 60 * 400 && !caught; i++) stepFixtures(1 / 60); off(); setSnareFallback(false);
+    for (let i = 0; i < 60 * 800 && !caught; i++) stepFixtures(1 / 60); off(); setSnareFallback(false);      // up to 960 game minutes (800 s at MIN_PER_SEC 1.2)
     if (!caught) throw new Error('силок ничего не поймал за 24 мин');
     interact(snare); if (count('ptarmigan') < 1) throw new Error('добыча не выдана');
     // barometer
@@ -434,8 +434,8 @@ registerTest('fixtures', 'кровать: сон ускоряет время ×2
     evalShelterNow();
     interact(bed);
     if (!p.sleeping || G.timeScale !== 20) throw new Error('не уснул: ' + p.sleeping + ' ' + G.timeScale);
-    const t0 = G.time; steps(60);
-    if (!(G.time - t0 > 40)) throw new Error('время не ускорилось ×20 (60 тиков = 48 мин): ' + (G.time - t0));
+    const t0 = G.time; steps(Math.round(60 * 2.4 / MIN_PER_SEC));      // 48 game minutes at ×20 (the clock was 2.4 min/s before v13)
+    if (!(G.time - t0 > 40)) throw new Error('время не ускорилось ×20 (48 мин): ' + (G.time - t0));
     if (!(p.energy > 40)) throw new Error('энергия не растёт во сне');
     p.core = 35.0; steps(5); if (p.sleeping) throw new Error('должен проснуться от холода');
     if ((G.timeScale as number) !== 1) throw new Error('timeScale не вернулся');

@@ -22,24 +22,19 @@ import { MAT } from '../content/materials';
 import { DOOR } from './snowpack';
 import { knows, lore, stepLore, probeTarget, loreSave, loreLoad, noteTitle, techName } from './lore';
 import { target } from './tools';
-import { boxFree } from '../engine/phys';
 import { stepMine, resetMine } from './mine';
 export { knows, learn, learnAll, forgetAll, lore, readNote, TECHS, NOTES, techName, techDesc, techHint, howLearned, noteTitle, noteText, noteWho, FACTS, factHead, factText, probe, seenCount, markSeen } from './lore';
 
 const S = strings('quest', {
   // HUD line (one short sentence); the long text (…D) is for the journal's «Цели» tab (goalDetail)
   coal: 'Подбери уголь у дизельной', coalD: 'Подбери уголь у дизельной: подойди, он сам подберётся',
-  coalM: ' · {m} м',
   buried: ' · копай снег', buriedD: ' · уголь под снегом: копай лопатой (действие)',
-  door: 'Откопай дверь лопатой (слот 2)', doorD: 'Откопай дверь дома: лопата (слот 2), копай вниз у стены — ступенями, чтобы выбраться',
+  door: 'Откопай дверь дома лопатой', doorD: 'Откопай дверь дома: лопата (слот 2), копай вниз у стены — ступенями, чтобы выбраться',
   stove: 'Растопи печь спичками', stoveD: 'Растопи печь спичками: войди в дом, встань у печи и зажги её (действие)',
   baro: 'Проверь барометр у столба', baroD: 'Проверь барометр: подойди к столбу западнее дома (действие)',
   keeper: 'Прочти журнал смотрителя', keeperD: 'Прочти журнал смотрителя: сундук-полка в доме',
   shelter: 'Построй иглу из снежных блоков', shelterN: 'Построй иглу из снега · Блоков {n}/10', shelterD: 'Утепли жильё до ★★: иглу из снежных блоков вне станции (плотный наст — снежное поле к западу, у холма)',
-  fish: 'Поймай рыбу или куропатку', fishD: 'Поймай рыбу в лунке или куропатку: подкрадись медленно и ударь (или поставь силок)',
-  sleep: 'Переночуй в тепле', sleepD: 'Переночуй в тепле: в укрытии ★★ или в доме у печи (сон не меньше 3 ч)',
   warm: 'Согрейся: печка в доме', warmD: 'Тебе холодно на улице: иди в дом к печке (стрелка на дверь станции), растопи её',
-  winFish: 'Улов на ужин! Голод отступил', winSleep: 'Выспался в тепле: силы вернулись',
   diary: 'Найди дневник доктора', diaryD: 'Прочти дневник доктора в жестянке у старого тура на западе от станции',
   supplies: 'Запаси топливо и еду', suppliesD: 'Запасы: топливо {fuel} ч · еда {food} дн. (цель: 72 ч и 8 дн.)',
   seal: 'Добудь жир: тюлень у лунки', sealD: 'Найди жир: тюлени у лунок на льду (стой тихо, бей гарпуном)',
@@ -81,9 +76,9 @@ const S = strings('quest', {
   arrival: 'Ледокол на горизонте!',
 });
 
-export interface Goal { id: string; text: () => string; done: () => boolean; win?: () => string /* own toast when it turns done */ }
+export interface Goal { id: string; text: () => string; done: () => boolean }
 const done = new Set<string>();
-export const runStats = { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0, birds: 0, blocksOut: 0 };
+export const runStats = { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0, blocksOut: 0 };
 export const questState = {
   icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '' as '' | 'dawn' | 'icebreaker' /* legacy: never set, the game is endless */, radioFixed: false, lit: false,
   crateRing: -1,      // ring of the icebreaker's last supply drop (one per ring)
@@ -133,34 +128,7 @@ function nearestCoal(): { x: number; y: number } | null {
 }
 /** Snow (loose or packed) in the cell: a sack in it is buried (a fallen mast beam is not snow). */
 const buriedAt = (x: number, y: number) => { const i = Math.floor(y) * W + Math.floor(x); return i >= 0 && i < mat.length && (mat[i] === MAT.SNOW || mat[i] === MAT.PACKED); };
-/** The coal sack the walker can reach fastest (a wall in between skips it), with its distance in cells: refreshed by coalWatch (0.5 s). */
-let coalSpot: { x: number; y: number; d: number } | null = null;
-/** Walk the body box (8 wide, 20 high, feet-centre) along the ground from (x0, y0) to column x1: steps up to 6 cells up or down, no wall. Returns the stand row or null. */
-function walkTo(x0: number, y0: number, x1: number): number | null {
-  const dir = x1 >= x0 ? 1 : -1, n = Math.round(Math.abs(x1 - x0));
-  let y = Math.round(y0);
-  for (let k = 0; k <= n; k++) {
-    const x = Math.round(x0 + dir * k);
-    let stand = -1;
-    for (let yy = y + 6; yy >= y - 6; yy--) if (boxFree(x, yy, 8, 20) && !boxFree(x, yy + 1, 8, 20)) { stand = yy; break; }
-    if (stand < 0) return null;
-    y = stand;
-  }
-  return y;
-}
-function coalWatch() {
-  const p = G.player; coalSpot = null;
-  if (!p || !p.alive) return;
-  const cs = G.drops.filter(d => d.item === 'coal').map(d => ({ d, dd: Math.hypot(d.x - p.x, d.y - p.y) })).filter(c => c.dd < 400).sort((a, b) => a.dd - b.dd);
-  for (const { d, dd } of cs) {
-    const y = walkTo(p.x, p.y, d.x);
-    if (y !== null && Math.abs(y - d.y) <= 8) { coalSpot = { x: d.x, y: d.y, d: dd }; return; }
-  }
-}
-function coalText(): string {
-  const p = G.player, c = coalSpot ?? (p ? (() => { const n = nearestCoal(); return n ? { ...n, d: Math.hypot(n.x - p.x, n.y - p.y) } : null; })() : null);
-  return S.coal + (c ? fmt(S.coalM, { m: Math.max(1, Math.round(c.d * 0.09)) }) : '') + (c && buriedAt(c.x, c.y) ? S.buried : '');
-}
+function coalText(): string { const c = nearestCoal(); return S.coal + (c && buriedAt(c.x, c.y) ? S.buried : ''); }
 /** Inside the house (the warm room, same box as the door watch) or in a closed shelter. */
 function indoors(): boolean {
   const p = G.player; if (!p) return false;
@@ -174,7 +142,7 @@ function coldGoal(): boolean {
   for (const f of G.fixtures) if (f.lit && Math.hypot((f.tx + f.tw / 2) * TS - p.x, (f.ty + f.th / 2) * TS - p.y) < 30) return false;
   return true;
 }
-/** The station's nearest door (the warm room): the arrow of the cold, sleep and fire goals. */
+/** The station's nearest door (the warm room): the arrow of the cold goal. */
 function stationDoor(): { x: number; y: number } | null {
   const p = G.player; if (!p) return null;
   let best: { x: number; y: number } | null = null, bd = Infinity;
@@ -196,9 +164,6 @@ export const GOALS: Goal[] = [
   { id: 'baro', text: () => S.baro, done: () => flags.has('baro') || count('barometer') > 0 },
   { id: 'keeper', text: () => S.keeper, done: () => lore.read.has('s1') },
   { id: 'shelter', text: () => fmt(S.shelterN, { n: Math.min(10, runStats.blocksOut) }), done: () => flags.has('shelter') },
-  // two short mini-goals after the igloo, before the diary: a catch and a warm night (each with its own win toast)
-  { id: 'fish', text: () => S.fish, done: () => runStats.fish > 0 || runStats.birds > 0, win: () => S.winFish },
-  { id: 'sleep', text: () => S.sleep, done: () => flags.has('warmsleep'), win: () => S.winSleep },
   { id: 'diary', text: () => S.diary, done: () => lore.read.has('n1') },
   { id: 'supplies', text: () => S.supplies, done: () => suppliesOk() },
   { id: 'seal', text: () => (knows('harpoon') ? S.seal : S.sealLearn), done: () => runStats.seals > 0 },
@@ -283,7 +248,7 @@ const DETAIL: Record<string, () => string> = {
   coal: () => S.coalD + (nearestCoal() && buriedAt(nearestCoal()!.x, nearestCoal()!.y) ? S.buriedD : ''),
   door: () => S.doorD, stove: () => S.stoveD, baro: () => S.baroD, keeper: () => S.keeperD, shelter: () => S.shelterD, diary: () => S.diaryD,
   supplies: () => { const s = suppliesNow(); return fmt(S.suppliesD, { fuel: s.fuelH, food: s.foodDays }); },
-  fish: () => S.fishD, sleep: () => S.sleepD, warm: () => S.warmD,
+  warm: () => S.warmD,
   seal: () => (knows('harpoon') ? S.sealD : S.sealLearnD), wood: () => fmt(S.woodD, { n: Math.min(6, count('log')), m: 6 }), ship: () => S.shipD,
   radio: () => fmt(S.radioD, { n: radioParts() }), mast: () => (knows('mast') ? S.mastD : S.mastLearnD), fur: () => (knows('sewing') ? S.furD : S.furLearnD),
   storm: () => S.stormD, parka: () => S.parkaD, seals3: () => fmt(S.seals3D, { n: Math.min(3, runStats.seals) }), storm2: () => S.storm2D,
@@ -313,9 +278,8 @@ export function objectiveTarget(): { x: number; y: number } | null {
   const fixture = (kind: string) => { const f = G.fixtures.find(o => o.kind === kind); return f ? { x: (f.tx + f.tw / 2) * TS, y: (f.ty + f.th / 2) * TS } : null; };
   const note = (id: string) => { const n = worldInfo.notes.find(o => o.id === id); return n ? { x: n.x, y: n.y } : null; };
   switch (key) {
-    case 'coal': return coalSpot ? { x: Math.round(coalSpot.x), y: Math.round(coalSpot.y) } : pick(G.drops.filter(d => d.item === 'coal'));
-    case 'warm': case 'sleep': return stationDoor();
-    case 'fish': return pick(worldInfo.sealHoles);
+    case 'coal': return pick(G.drops.filter(d => d.item === 'coal'));
+    case 'warm': return stationDoor();
     case 'door': return DOOR.crest > 0 ? { x: DOOR.x0 + 2, y: DOOR.y1 - 6 } : null;
     case 'stove': return fixture('stove');
     case 'shelter': return SNOW_FIELD;
@@ -339,8 +303,7 @@ export function objectiveTarget(): { x: number; y: number } | null {
 export function resetQuest() {
   done.clear(); flags.clear(); wins.clear(); journal.length = 0;
   Object.assign(prog, { fire: false, baro: false, shelter: false, sleep: false, mast: false, radio: false, ending: null }); prog.parts.length = 0;
-  Object.assign(runStats, { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0, birds: 0, blocksOut: 0 });
-  coalSpot = null;
+  Object.assign(runStats, { seals: 0, storms: 0, bestStars: 0, stormStars: 0, fires: 0, crafts: 0, blocks: 0, bears: 0, notes: 0, coldest: 99, placed: 0, hunted: 0, fish: 0, blocksOut: 0 });
   Object.assign(questState, { icebreakerAt: -1, iceArrivedAt: -1, iceDeadline: -1, rescueAt: -1, ended: '', radioFixed: false, lit: false, crateRing: -1 });
   craftedIds.clear();
   siteAcc = 0; winAcc = 0; lastDone = null; doorAcc = 0; doorT = 0; doorHinted = false;
@@ -375,14 +338,13 @@ on('shelter', (d: { stars: number; closed: boolean }) => {
   runStats.bestStars = Math.max(runStats.bestStars, d.closed ? d.stars : 0);
 });
 on('seal_caught', () => { runStats.seals++; runStats.hunted++; });
-on('bird_caught', () => { runStats.birds++; });
 on('fish_caught', () => { runStats.fish++; runStats.hunted++; });
-on('snare_caught', () => { runStats.hunted++; runStats.birds++; });
+on('snare_caught', () => { runStats.hunted++; });
 on('storm_end', (d: { report?: { stars: number; text?: string } }) => {
   runStats.storms++;
   if (d.report) { runStats.bestStars = Math.max(runStats.bestStars, d.report.stars); runStats.stormStars = Math.max(runStats.stormStars, d.report.stars); if (d.report.text) log('storm', d.report.text); }
 });
-on('slept', (d: { hours: number }) => { if (d.hours >= 3) { prog.sleep = true; if (indoors()) flags.add('warmsleep'); } });
+on('slept', (d: { hours: number }) => { if (d.hours >= 3) prog.sleep = true; });
 on('radio_part', (d: { id: string }) => { if (!prog.parts.includes(d.id)) prog.parts.push(d.id); });
 on('mast_up', () => { prog.mast = true; });
 on('site_found', (d: { key: string }) => { if (d.key === 'ship') flags.add('ship'); log('site', fmt(S.found, { name: sites.find(x => x.key === d.key)?.name ?? d.key })); });
@@ -452,7 +414,6 @@ let winAcc = 0;
 let lastDone: Map<string, boolean> | null = null;
 function goalWatch(dt: number) {
   winAcc += dt; if (winAcc < 0.5) return; winAcc = 0;
-  coalWatch();
   const now = new Map<string, boolean>();
   for (const g of GOALS) now.set(g.id, g.done());
   if (lastDone) {
@@ -460,8 +421,7 @@ function goalWatch(dt: number) {
     for (const g of GOALS) {
       if (!now.get(g.id) || lastDone.get(g.id)) continue;
       emit('goal_done', { id: g.id });
-      if (g.win) toast(g.win(), 'good');                         // a mini-goal has its own win toast
-      else if (first) { first = false; toast(S.done, 'good'); }  // the goal line shows what is next: no repeat in a toast
+      if (first) { first = false; toast(S.done, 'good'); }      // the goal line shows what is next: no repeat in a toast
     }
   }
   lastDone = now;

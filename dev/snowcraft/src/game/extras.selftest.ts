@@ -65,13 +65,13 @@ registerTest('extras', 'пешня в сундуке на пляже, раньш
   t.expect(!!c && c.x < 1200, `пешня лежит на x=${c?.x}, нужно раньше корабля (x≈1750)`);
 });
 
-registerTest('extras', 'длинные ноги: бревна между станцией и шахтой, банка с рукавицей, кострище на припае', (t) => {
+registerTest('extras', 'длинные ноги: бревна между станцией и шахтой, банка с рукавицей, кострище на льду', (t) => {
   const wood = G.drops.filter(d => d.item === 'log' && d.x >= 330 && d.x <= 410 && d.n === 3);
   const tin = G.drops.filter(d => (d.item === 'wool_mittens' || d.item === 'can') && d.x >= 490 && d.x <= 610);
-  const ring = G.fixtures.filter(f => f.kind === 'campfire' && f.tx * 4 >= 1190 && f.tx * 4 <= 1340);
+  const ring = G.fixtures.filter(f => f.kind === 'campfire' && f.tx * 4 >= 1470 && f.tx * 4 <= 1640);
   t.expect(wood.length === 1, `стопка плавника 3 шт. между шахтой и станцией: ${wood.length}`);
   t.expect(tin.some(d => d.item === 'wool_mittens') && tin.some(d => d.item === 'can'), `рукавица и банка: ${tin.map(d => d.item).join(',')}`);
-  t.expect(ring.length === 1, `кострище на припае между пляжем и кораблём: ${ring.length}`);
+  t.expect(ring.length === 1, `кострище на льду между припаем и кораблём (x 1470–1640): ${ring.length}`);
 });
 
 registerTest('extras', 'записка «Впереди завал» лежит у завала на спуске (x 230–260), а не у портала', (t) => {

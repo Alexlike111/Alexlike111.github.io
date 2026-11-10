@@ -3,7 +3,7 @@
 // picked up again after the player walked away and back, and a refused sleep changes no time.
 import { registerTest } from './selftest';
 import { G } from './state';
-import { W, mat } from '../engine/grid';
+import { W, mat, aux } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { add, count, clearInventory, spawnDrop, held, thrown } from './inventory';
 import { target, autoPickup } from './tools';
@@ -18,6 +18,7 @@ const sc = () => (window as unknown as { __sc: any }).__sc;
 
 /** Flat ground: `loose` rows of loose snow over packed snow; the player stands at x=1000 on the surface. */
 function ground(loose = 24, dens = 300) {
+  held.load = 0;                                   // the blade is not state of the sandbox: a load left by an earlier test would make RMB bag it
   wx.override = { ambientT: -30, wind: 0, storm: 0, snowfall: 0 };
   Object.assign(G, wx.override);
   arena(1000, 272, { dens, depth: 40, up: 70, loose });
@@ -130,6 +131,20 @@ registerTest('digging', 'сон: отказ (холодно) не меняет �
     if (ok || p.sleeping) throw new Error('сон при 34 °C не должен начаться');
     if (G.time !== t0 || G.timeScale !== ts0) throw new Error('отказ сна сдвинул время: ' + t0 + ' → ' + G.time);
     p.core = 36.4;
+  });
+});
+
+registerTest('digging', 'наст: лопата с ПКМ уплотняет рыхлый снег, нож режет блок из наста', async () => {
+  await sandbox(() => {
+    const { s } = ground(24);
+    clearInventory();
+    add('shovel', 1); add('snow_knife', 1); s.selectItem('shovel');
+    const packed = () => { let n = 0; for (let y = 272; y < 296; y++) for (let x = 1000; x < 1016; x++) if (mat[y * W + x] === MAT.PACKED) n++; return n; };
+    const p0 = packed();
+    s.render(0); s.aim(1008, 274); s.stepFast(2);
+    { s.render(0); const [sx, sy] = s.worldToScreen(1008, 274); s.mouse(2, true, sx, sy); }      // RMB held with the shovel: the snow is pressed down
+    s.stepFast(150); s.mouse(2, false); s.stepFast(2);
+    if (packed() - p0 < 8) { let sn = 0, mx = 0; for (let y = 272; y < 296; y++) for (let x = 1000; x < 1016; x++) { if (mat[y * W + x] === MAT.SNOW) { sn++; mx = Math.max(mx, aux[y * W + x]); } } throw new Error('ПКМ с лопатой не уплотнил снег: ' + (packed() - p0) + ' клеток, цель ' + JSON.stringify([target().mode, target().reason, target().tx, target().ty]) + ' снег ' + sn + ' макс ' + mx + ' ' + JSON.stringify([sc().ready, input.secondaryHeld]) ); }
   });
 });
 

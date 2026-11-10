@@ -153,13 +153,13 @@ export function placeExtras() {
   lichenPatch(1292, 12);
 
   // v13 long walks (playtest: 60–90 game minutes of empty legs). Cheap finds with a use and no enemies: a driftwood stack and a lost tin with a mitten
-  // between the station and the mine (x 330–600), an old campfire ring with two logs on the fast ice between the beach and the ship (x 1100–1650).
+  // between the station and the mine (x 330–600), an old campfire ring with two logs on the pack ice between the fast ice and the ship (x 1470–1640).
   const dropOn = (item: string, n: number, x: number, floorRow: number) => { G.drops.push({ id: newId(), item, n, x, y: floorRow - 3, vx: 0, vy: 0, age: 0 }); };
   const wood = pickSpot(336, 400, [368], used, 40, rnd);
   if (wood) { dropOn('log', 3, wood.x + 3, wood.B); used.push(wood.x); }
   const tin = pickSpot(500, 600, [550], used, 40, rnd);
   if (tin) { dropOn('wool_mittens', 1, tin.x + 2, tin.B); dropOn('can', 1, tin.x + 6, tin.B); used.push(tin.x); }
-  const ring = pickSpot(1200, 1330, [1280], used, 40, rnd);
+  const ring = pickSpot(1470, 1640, [1560], used, 40, rnd);       // the pack ice (the holes and chests of the fast ice leave no room)
   if (ring && !nearHole(ring.x)) {
     addFixture('campfire', ring.x >> 2, (ring.B >> 2) - 1, 2, 1, {});
     dropOn('log', 2, ring.x + 6, ring.B); used.push(ring.x);

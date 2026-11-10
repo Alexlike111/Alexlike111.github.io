@@ -443,10 +443,11 @@ registerTest('hunt', 'подкрадывание пешком: идём к ст�
     clearInventory(); add('snow_knife', 1); select(inv.slots.findIndex(s => s && s.id === 'snow_knife'));
     const aim0 = { hasAim: input.hasAim, aimMode: input.aimMode, aimX: input.aimX, aimY: input.aimY };
     const drops = () => G.drops.filter(d => d.item === 'ptarmigan').length;
-    const d0 = drops(), n1b = birdsOf().length;
+    const d0 = drops();
     const [sx, sy] = worldToScreen(b.x, b.y);
     input.hasAim = true; input.aimMode = 'mouse'; input.aimX = sx; input.aimY = sy;
     input.primaryPressed = true; stepTools(DT); input.primaryPressed = false;
+    const n1b = birdsOf().length;
     Object.assign(input, aim0);
     site.flushCd = 0;
     return { ok: true, stopAt, flushedAt, n0, n1: n1b, d0, d1: drops(), flushedEarly };
