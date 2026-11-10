@@ -1,6 +1,8 @@
 # SNOWCRAFT 0.14.0: status against the project rules and Playgama requirements (lead, measured)
 
-Not ready for the sandbox: one hard blocker (sound) and verify-build was not run.
+UPDATE: on the owner's explicit instruction the archive was uploaded (Playgama build check PASSED), placeholder covers were uploaded and the SANDBOX WAS PUBLISHED: https://playgama.ai/play/q4wus3iavhanwx (game id cmwajeosz1jkfog0hdkosflqm, archive id cmwam8ifv1oc8og0hc426xycr). Catalog/moderation: not submitted; blockers for them: code-synthesized sound, AI-art risk, certification in the QA tool, verify-build not run.
+
+Original assessment (before the upload): one hard blocker (sound) and verify-build was not run.
 
 | Project rule (owner's list) | Status | Evidence |
 |---|---|---|

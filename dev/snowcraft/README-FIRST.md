@@ -9,4 +9,4 @@ Inside:
 - design/, playtest/, DESIGN.md, SPEC.md: design documents, audits, the «from scratch» plan, playtest reports and the fix list.
 - source/: the full source tree (npm install; npm run build; npm run build:pg for the Playgama archive; tests: see HANDOFF.md).
 
-Hard facts: not ready for the sandbox (code-synthesized sound; verify-build not run). A DRAFT game exists on Playgama (id cmwajeosz1jkfog0hdkosflqm); nothing uploaded, published or submitted. Top backlog: (1) real audio, (2) «from scratch» redesign (design/from-scratch.md), (3) wire cell fire (design/noita-audit.md).
+Hard facts: the SANDBOX IS PUBLISHED (https://playgama.ai/play/q4wus3iavhanwx, game id cmwajeosz1jkfog0hdkosflqm, archive id cmwam8ifv1oc8og0hc426xycr, build check PASSED, placeholder covers uploaded). Not submitted to moderation, not in the catalog; blockers for those: code-synthesized sound, AI-art risk, QA-tool certification, verify-build not run. Top backlog: (1) real audio, (2) «from scratch» redesign (design/from-scratch.md), (3) wire cell fire (design/noita-audit.md).
