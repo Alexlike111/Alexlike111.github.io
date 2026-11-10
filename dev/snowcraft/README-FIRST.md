@@ -1,6 +1,6 @@
 # SNOWCRAFT hand-off archive (version 0.14.0)
 
-Open in this order: 1) playgama/status-0.14.0.md (what is done, what blocks) 2) HANDOFF.md (the whole picture) 3) playgama/risks.md and compliance-matrix.md.
+Paste HANDOFF-PROMPT.md into the publishing thread first. Then open in this order: 1) playgama/status-0.14.0.md (what is done, what blocks) 2) HANDOFF.md (the whole picture) 3) playgama/risks.md and compliance-matrix.md.
 
 Inside:
 - release/snowcraft-playgama-v0.14.0.zip: the Playgama archive (index.html, Bridge 2.4.1, config). release/snowcraft-preview-v0.14.0.html: single-file preview that runs anywhere.
