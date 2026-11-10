@@ -149,7 +149,7 @@ registerTest('layout', 'ПК: «?» открывает полный список
   const open = () => !!full && getComputedStyle(full).display !== 'none';
   t.expect(!open(), 'полный список открыт в начале');
   const txt = full?.textContent ?? '';
-  for (const k of ['ЛКМ', 'ПКМ', 'Esc', 'P', 'Shift+ЛКМ', 'Ctrl', 'J', 'G', 'Ctrl+колесо', 'колесо', 'F', 'V', 'X', 'R', 'Q', 'H'])
+  for (const k of ['ЛКМ', 'ПКМ', 'I / Tab', 'P', 'M', 'Shift+ЛКМ', 'Ctrl', 'J', 'G', 'Ctrl+колесо', 'колесо', 'F', 'V', 'X', 'R', 'Q', 'H'])
     t.expect(txt.includes(k), 'в полном списке нет «' + k + '»');
   (document.querySelector('#hud .hint .q') as HTMLElement | null)?.click(); t.sc.step(8); await t.wait(60);
   t.expect(open(), '«?» не открыл полный список');

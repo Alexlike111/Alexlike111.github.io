@@ -16,7 +16,7 @@ import { G } from '../game/state';
 import { strings, fmt, LANGS, LANG_NAMES, getLang, type Lang } from '../content/i18n';
 import { chooseLanguage } from './menu';
 import { on } from '../game/bus';
-import { peekSave, loadGame, saveGame, deleteSave, type SaveMeta, type SaveData } from '../game/save';
+import { peekSave, loadGame, saveGame, deleteSave, autosaveDue, type SaveMeta, type SaveData } from '../game/save';
 import { wx, setDay } from '../game/weather';
 import { cycleOf, loadBest } from '../game/seasons';
 import { placeFixture } from '../game/fixtures';
@@ -211,7 +211,7 @@ function backdrop() {
 
 function startAutosave() {
   const run = () => { if (!titleOpen() && G.player?.alive && !G.paused) void saveGame(); };
-  setInterval(run, 30000);
+  setInterval(() => { if (autosaveDue()) run(); }, 30000);     // Playgama build: periodic saves only after 2 game hours of change (save.ts)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') run(); });
   on('slept', () => setTimeout(run, 400));
   on('died', () => { if (G.diff.hardcore) void deleteSave(); });

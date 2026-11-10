@@ -123,14 +123,14 @@ export function showInterstitial(placement: string): Promise<void> {
 }
 /** The death card's buttons (overlay.ts) go through this: the new run (or the return to the station) waits for the interstitial. */
 export function gateRun(kind: 'new_run' | 'game_over', go: () => void): void {
-  if (!__PG__ || !b || performance.now() - deathAt < DEATH_CARD_MS) { go(); return; }
+  if (!b || performance.now() - deathAt < DEATH_CARD_MS) { go(); return; }
   void showInterstitial(kind).then(go, go);
 }
 
 // ---- lifecycle messages --------------------------------------------------------------------------------------------------------
 /** game_ready once, when the first interactive frame (the title screen) is up. */
 export function gameReady(): void {
-  if (!__PG__ || !b || gameReadySent) return;
+  if (!b || gameReadySent) return;
   gameReadySent = true;
   try { void Promise.resolve(b.platform.sendMessage('game_ready')).catch(() => { /* ignore */ }); } catch { /* ignore */ }
 }

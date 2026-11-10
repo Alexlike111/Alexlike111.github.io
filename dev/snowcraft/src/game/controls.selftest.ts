@@ -1,5 +1,5 @@
 // Self-tests of the desktop controls (TERRARIA_CONTROLS): the right mouse button interacts (chest, stove) and only tamps snow with the shovel when nothing is
-// in reach; Esc closes the open panels before it opens the inventory (I and C open it too); P pauses and opens the settings panel; a Left Ctrl tap toggles the
+// in reach; the game does not use Esc (the browser keeps it): I, C and Tab open and close the inventory, J the journal, P the pause and settings; a Left Ctrl tap toggles the
 // smart cursor, Ctrl+wheel does not; loose items within the auto box are taken by walking over them (1.4 s for dropped ones, the weight limit, one
 // «Слишком тяжело» per 5 s); a pickup shows one floater text per burst.
 import { registerTest } from './selftest';
@@ -36,9 +36,7 @@ function scene() {
 function clean() {
   const s = sc();
   if (menuOpen()) closeMenu();
-  for (let i = 0; i < 3 && panelIsOpen(); i++) s.tap('Escape');
-  if (panelIsOpen()) s.tap('KeyJ');                       // a journal that Esc did not shut
-  if (panelIsOpen()) s.tap('KeyI');
+  for (let i = 0; i < 3 && panelIsOpen(); i++) s.tap('KeyI');     // I shuts the inventory, and over the journal it takes its place (then I again shuts it)
   G.paused = false;
 }
 /** Scenario wrapper: a snapshot of the game, the container and lore state kept, the panels closed afterwards. */
@@ -63,7 +61,7 @@ function snowScore(x0: number, y0: number, x1: number, y1: number): number {
 const floaters = () => Array.from(document.querySelectorAll<HTMLElement>('#sc-floats .sc-float')).map(e => e.textContent ?? '');
 const toastsWith = (text: string) => G.toasts.filter(t => t.text === text).length;
 
-registerTest('controls', 'ПКМ открывает сундук (как E); Esc закрывает открытый контейнер', async (t: TestCtx) => {
+registerTest('controls', 'ПКМ открывает сундук (как E); Esc ничего не делает; ПКМ по тому же сундуку закрывает его', async (t: TestCtx) => {
   await run(async () => {
     scene();
     const chest = placeFixture('chest', 247, 66, { force: true, items: [{ id: 'coal', n: 3 }] })!;
@@ -71,7 +69,9 @@ registerTest('controls', 'ПКМ открывает сундук (как E); Esc
     await t.wait(80); steps(3);
     t.expect(isOpen(), 'ПКМ по сундуку не открыл контейнер');
     sc().tap('Escape'); steps(2);
-    t.expect(!isOpen(), 'Esc не закрыл открытый сундук');
+    t.expect(isOpen(), 'Esc закрыл открытый сундук (игра не должна использовать Esc)');
+    rmb(chest.tx * TS + 4, chest.ty * TS + 4, true); steps(3); rmb(0, 0, false); steps(2);
+    t.expect(!isOpen(), 'второй ПКМ по тому же сундуку не закрыл его');
   });
 });
 
@@ -108,42 +108,44 @@ registerTest('controls', 'ПКМ по пустому снегу с лопато�
   });
 });
 
-registerTest('controls', 'Esc открывает инвентарь, второй Esc закрывает; I и C тоже открывают и закрывают', async (t: TestCtx) => {
+registerTest('controls', 'I, C и Tab открывают и закрывают инвентарь; Esc не открывает и не закрывает его', async (t: TestCtx) => {
   await run(async () => {
     scene(); clean();
     const s = sc();
     s.tap('Escape'); steps(2);
-    t.expect(panelIsOpen(), 'Esc не открыл инвентарь');
-    s.tap('Escape'); steps(2);
-    t.expect(!panelIsOpen(), 'второй Esc не закрыл инвентарь');
+    t.expect(!panelIsOpen(), 'Esc открыл инвентарь (он должен молчать)');
     s.tap('KeyI'); steps(2); const i1 = panelIsOpen(); s.tap('KeyI'); steps(2);
     t.expect(i1 && !panelIsOpen(), 'I открывает и закрывает инвентарь');
     s.tap('KeyC'); steps(2); const c1 = panelIsOpen(); s.tap('KeyC'); steps(2);
     t.expect(c1 && !panelIsOpen(), 'C открывает и закрывает инвентарь');
+    s.tap('Tab'); steps(2); const t1 = panelIsOpen(); s.tap('Tab'); steps(2);
+    t.expect(t1 && !panelIsOpen(), 'Tab открывает и закрывает инвентарь');
   });
 });
 
-registerTest('controls', 'Esc сначала закрывает журнал, и инвентарь не открывается', async (t: TestCtx) => {
+registerTest('controls', 'J открывает журнал, и Esc его не закрывает; J закрывает его, инвентарь при этом не открывается', async (t: TestCtx) => {
   await run(async () => {
     scene(); clean();
     const s = sc();
     s.tap('KeyJ'); steps(2);
     t.expect(panelIsOpen(), 'J не открыл журнал');
     s.tap('Escape'); steps(2);
-    t.expect(!panelIsOpen(), 'Esc при открытом журнале не закрыл его (или открыл инвентарь поверх)');
+    t.expect(panelIsOpen(), 'Esc закрыл журнал');
+    s.tap('KeyJ'); steps(2);
+    t.expect(!panelIsOpen(), 'второй J не закрыл журнал');
   });
 });
 
-registerTest('controls', 'P ставит игру на паузу и открывает панель настроек; Esc закрывает панель и снимает паузу', async (t: TestCtx) => {
+registerTest('controls', 'P ставит игру на паузу и открывает панель настроек; Esc ничего не делает; второй P снимает паузу', async (t: TestCtx) => {
   await run(async () => {
     scene(); clean();
     const s = sc();
     s.tap('KeyP'); steps(2); await t.frames(3);
     t.expect(G.paused && menuOpen(), 'P не поставил паузу с панелью настроек');
     s.tap('Escape'); steps(2); await t.frames(3);
-    t.expect(!menuOpen() && !G.paused, 'Esc не закрыл панель настроек и не снял паузу');
-    s.tap('KeyP'); steps(2); await t.frames(3); s.tap('KeyP'); steps(2); await t.frames(3);
-    t.expect(!G.paused && !menuOpen(), 'второй P не вернул игру');
+    t.expect(G.paused && menuOpen(), 'Esc снял паузу или закрыл панель настроек');
+    s.tap('KeyP'); steps(2); await t.frames(3);
+    t.expect(!G.paused && !menuOpen(), 'второй P не снял паузу и не закрыл панель');
   });
 });
 

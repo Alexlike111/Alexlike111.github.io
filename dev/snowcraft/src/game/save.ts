@@ -96,12 +96,15 @@ class ByteOut {
   bytes(): Uint8Array { return this.a.slice(0, this.n); }
 }
 /** The cells of `live` that differ from `ref`, per layer: varint count, then (varint index gap, value byte). Deterministic, no allocation per cell. */
+let lastDeltaCells = 0;
 export function encodeDelta(live: Arr4, ref: Arr4): Uint8Array {
   const out = new ByteOut();
+  lastDeltaCells = 0;
   for (const k of LAYERS) {
     const L = live[k], R = ref[k];
     let cnt = 0;
     for (let i = 0; i < L.length; i++) if (L[i] !== R[i]) cnt++;
+    lastDeltaCells += cnt;
     out.varint(cnt);
     let prev = 0;
     for (let i = 0; i < L.length; i++) if (L[i] !== R[i]) { out.varint(i - prev); out.byte(L[i]); prev = i; }
@@ -173,6 +176,8 @@ export function autosaveDue(): boolean {
 }
 
 /** Write the current game to the slot. Resolves true on success. At most one save per MIN_GAP_MS: a call inside that gap is dropped (the last save is seconds old). */
+/** Self-tests only: forget the last save start so a test can save right away. */
+export function resetSaveGapForTests(): void { lastStart = -Infinity; }
 export function saveGame(slot = KEY): Promise<boolean> {
   if (Date.now() - lastStart < MIN_GAP_MS) return Promise.resolve(false);
   lastStart = Date.now();
@@ -204,7 +209,8 @@ async function saveRemote(slot: string): Promise<boolean> {
   const gen = saveGen;
   try {
     const delta = encodeDelta({ mat, aux, flags, bg }, base);
-    const raw = pack(JSON.stringify(captureState()), delta);
+    const json = JSON.stringify(captureState());
+    const raw = pack(json, delta);
     const z = typeof CompressionStream !== 'undefined';
     const packed = z ? await gz(raw) : raw;
     const b64 = toB64(packed);
@@ -218,7 +224,7 @@ async function saveRemote(slot: string): Promise<boolean> {
     const removes: string[] = [];
     for (let i = n; i < prev; i++) removes.push(k.chunk(i));
     const ok = await storeWriteBatch(sets, removes);
-    lastSaveInfo = { cells: 0, jsonBytes: 0, rawBytes: raw.length, packedBytes: packed.length, b64Chars: b64.length, chunks: n };
+    lastSaveInfo = { cells: lastDeltaCells, jsonBytes: json.length, rawBytes: raw.length, packedBytes: packed.length, b64Chars: b64.length, chunks: n };
     if (ok) lastSavedTime = G.time;
     return ok;
   } catch { return false; } finally { saving = false; }

@@ -45,6 +45,7 @@ body.sc-menu-open #hud .pause{display:none !important}
 #sc-menu{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;display:none;box-sizing:border-box;width:min(640px,92vw);max-width:92vw;max-height:86vh;overflow:auto;overscroll-behavior:contain;
   padding:10px 12px 12px;background:rgba(8,16,30,.95);border:1px solid rgba(124,198,238,.5);border-radius:8px;box-shadow:0 0 0 1px #05080f,0 12px 40px rgba(0,0,0,.5);
   font-family:'Jura',system-ui,sans-serif;font-weight:600;color:#e8f4ff;text-shadow:0 1px 0 #05080f;pointer-events:auto;touch-action:pan-y;-webkit-user-select:none;user-select:none}
+#sc-veil{position:fixed;inset:0;z-index:48;display:none;background:rgba(3,6,12,.46);cursor:pointer;touch-action:none}
 #sc-menu h4{margin:0 44px 8px 2px;font:700 17px 'Jura',system-ui,sans-serif;letter-spacing:.06em;color:#ffc46e}
 #sc-menu .mx{position:absolute;top:4px;right:4px;width:44px;height:44px;padding:0;font:700 20px/1 'Jura',system-ui,sans-serif}
 #sc-menu .mg{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;align-items:center}
@@ -83,7 +84,7 @@ export const speakerSvg = (muted: boolean) => (muted ? SPK_OFF : SPK_ON);
 const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 
 let host: HTMLElement | null = null, panel: HTMLElement | null = null, gear: HTMLElement | null = null, fsBtn: HTMLElement | null = null, keysRow: HTMLElement | null = null;
-let muteBtn: HTMLElement | null = null;
+let muteBtn: HTMLElement | null = null, veil: HTMLElement | null = null;
 let memVol: { v: number; m: boolean } | null = null;       // the last choice, kept when the storage is blocked (private window): the mute then still holds
 let open = false, ownPause = false, wasPaused = false;
 
@@ -174,6 +175,7 @@ const rotateOn = () => (document.getElementById('rotate')?.style.display ?? '').
 function showPanel(on: boolean) {
   if (!panel) return;
   panel.style.display = on ? 'block' : 'none';
+  if (veil) veil.style.display = on ? 'block' : 'none';     // the dark area: a click closes the panel (as ✕ does)
   document.body.classList.toggle('sc-menu-open', on);       // hides the «ПАУЗА» caption under the panel (devhud.ts)
   open = on;
   if (on) sync();
@@ -193,7 +195,7 @@ export function closeMenu() {
 export function menuOpen() { return open; }
 function toggleMenu() { if (open) closeMenu(); else openMenu(); }
 
-/** Per frame: a pause that starts while the menu is shut (Esc, devhud.ts) opens it; a resume (Esc again, rotation) shuts it. */
+/** Per frame: a pause that starts while the menu is shut (P, devhud.ts) opens it; a resume (P again, rotation) shuts it. */
 function watch() {
   const p = G.paused;
   if (open && !p) showPanel(false);
@@ -272,6 +274,8 @@ function build() {
   const hint = document.createElement('div'); hint.className = 'hint w'; hint.textContent = S.hint; g.appendChild(hint);
 
   panel.append(x, h, g);
+  veil = document.createElement('div'); veil.id = 'sc-veil'; veil.setAttribute('aria-hidden', 'true'); veil.addEventListener('click', closeMenu);
+  document.body.appendChild(veil);
   muteBtn = btn('', '', ''); muteBtn.id = 'sc-mutebtn'; muteBtn.setAttribute('aria-label', S.mute); muteBtn.title = S.mute + ' (M)';
   muteBtn.addEventListener('click', toggleMute);
   host.append(gear, fsBtn, muteBtn, panel);

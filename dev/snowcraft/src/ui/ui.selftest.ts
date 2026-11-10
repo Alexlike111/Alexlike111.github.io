@@ -98,7 +98,7 @@ registerTest('ui', 'сохранение: мир, тело, предметы и 
   const back = await loadGame('selftest');
   t.expect(!!back, 'чтение не удалось');
   if (back) {
-    let diff = 0; for (let i = 0; i < mat.length; i += 7) if (back.grid.mat[i] !== mat[i]) diff++;
+    let diff = 0; for (let i = 0; i < mat.length; i += 7) if (back.grid!.mat[i] !== mat[i]) diff++;
     t.expect(diff < 200, 'сетка отличается в ' + diff + ' ячейках (мир мог двигаться)');
     t.expect(back.state.fixtures.length === G.fixtures.length, 'предметов расстановки: ' + back.state.fixtures.length + ' vs ' + G.fixtures.length);
     t.expect(Math.abs(back.state.player.core - G.player.core) < 0.5, 'температура тела');

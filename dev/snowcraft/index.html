@@ -9,7 +9,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>SNOWCRAFT</title>
   <meta name="description" content="SNOWCRAFT: пиксельная песочница выживания во льдах. Каждый пиксель — вещество." />
-  <style>html,body{margin:0;height:100%;background:#0b1220;color:#e6eef7;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}</style>
+  <style>
+    /* no page scroll, no bounce, no long-press menu / magnifier / text selection on the game (requirements 1.4.5, 1.6.3); text fields and the self-test report stay selectable */
+    html,body{margin:0;height:100%;background:#0b1220;color:#e6eef7;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    #stage{position:fixed;inset:0;overflow:hidden}                /* the field is clipped to the window: the document never grows past it */
+    #stage canvas{display:block}
+    #stage,#ui{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+    input,textarea,select,[contenteditable],[data-allow-select]{-webkit-user-select:text;user-select:text}
+  </style>
 </head>
 <body>
   <div id="stage"><canvas id="world"></canvas></div>

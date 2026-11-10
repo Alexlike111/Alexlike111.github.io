@@ -179,5 +179,24 @@ html body:not(.touch-ui) #hud .pnl:not(.jr) .grid.sledg{grid-template-columns:re
   html body:not(.touch-ui) #hud .vit .topl .dial .clk::before{content:'· '}
   html body:not(.touch-ui) #hud .stk{top:calc(8px + var(--sa-t))}
 }
+/* ---------- wave 5 (PG2): long press / selection / bounce, ✕ on every panel, the dark area closes a modal ----------
+   The game field never selects text, opens the browser menu or the iOS magnifier; the panels keep their own scroll (pan-y).
+   The panels keep a gutter on the right for the ✕ (.px, absolute in the panel's top-right corner). */
+#stage,#ui,#hud,#touch,#hud .p,#hud .belt,#hud .sl,#hud .tip,#hud .arw,#touch .tb,#touch .stick,#touch .knob,#wheel,#ov,#ov .cue,#nearbtn,#sc-menubtn,#sc-fsbtn,#sc-mutebtn,#rotate{
+  -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+#hud,#touch,#hud .p,#hud .belt,#hud .sl,#touch .tb,#wheel,#ov{touch-action:none}
+html body #hud .pnl,html body.touch-ui #hud .pnl{padding-right:42px;touch-action:pan-y}
+html body #hud .nearl{padding-right:42px}
+html body #hud .px{position:absolute;top:4px;right:4px;z-index:2;width:34px;height:34px;box-sizing:border-box;margin:0;padding:0;display:flex;align-items:center;justify-content:center;
+  font:700 16px/1 var(--f-ui);color:#e8f6ff;text-shadow:none;background:rgba(19,36,58,.94);border:1px solid rgba(124,198,238,.6);border-radius:4px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+html body #hud .px:hover,html body #hud .px:focus-visible{border-color:#ffc46e;color:#fff;outline:none}
+html body.touch-ui #hud .px{width:44px;height:44px;top:3px;right:3px}
+/* the key list: the ✕ floats at its right edge, the rows wrap around it */
+html body #hud .hint .hx{float:right;width:30px;height:30px;margin:0 0 4px 8px;padding:0;font:700 14px/1 var(--f-ui);color:#e8f6ff;text-shadow:none;background:#13243a;border:1px solid rgba(124,198,238,.6);border-radius:4px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
+html body #hud .hint .hx:hover,html body #hud .hint .hx:focus-visible{border-color:#ffc46e;outline:none}
+/* the dark backdrop of the journal (a click closes it) */
+html body #hud .scrim{position:fixed;inset:0;padding:0;margin:0;border:0;border-radius:0;box-shadow:none;background:rgba(3,6,12,.46);pointer-events:auto;cursor:pointer;touch-action:none}
+/* the speaker button: the same 40 px square as ⚙ and ⛶; on a phone it is the touch row's square (touch.ts) */
+#sc-mutebtn{touch-action:manipulation}
 /* small screens (1024 px wide and less): the bag's right column wraps below the grid when the window is narrow */
 @media (max-width:1100px){ html body:not(.touch-ui) #hud .pnl:not(.jr) .cols{flex-wrap:wrap} }

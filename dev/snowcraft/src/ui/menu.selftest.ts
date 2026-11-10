@@ -74,7 +74,7 @@ registerTest('menu', 'клик по ⚙ открывает панель с па�
   } finally { reset(was); }
 });
 
-registerTest('menu', 'P открывает панель (пауза), Esc закрывает её и игра идёт дальше', async t => {
+registerTest('menu', 'P открывает панель (пауза), Esc её не трогает, второй P закрывает и игра идёт дальше', async t => {
   const was = G.paused;
   try {
     reset(false);
@@ -83,7 +83,10 @@ registerTest('menu', 'P открывает панель (пауза), Esc зак
     t.expect(panelShown() && G.paused, 'P не открыл панель с паузой');
     t.sc.key('Escape', true); t.sc.key('Escape', false);
     await t.frames(4);
-    t.expect(!panelShown() && !G.paused, 'Esc не закрыл панель и не снял паузу');
+    t.expect(panelShown() && G.paused, 'Esc закрыл панель (игра не использует Esc)');
+    t.sc.key('KeyP', true); t.sc.key('KeyP', false);
+    await t.frames(4);
+    t.expect(!panelShown() && !G.paused, 'второй P не закрыл панель и не снял паузу');
   } finally { reset(was); }
 });
 

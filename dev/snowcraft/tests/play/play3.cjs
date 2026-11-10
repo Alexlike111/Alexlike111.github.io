@@ -2,7 +2,7 @@
 //   node tests/play/play3.cjs <abs path to a built index.html> [out dir]   (NODE_PATH=/opt/node-tools/node_modules if playwright is global; SHOTS=1 saves the screenshots, DBG=1 prints the probes)
 // Steps: coal (walk over it: auto-pickup, no key) -> dig the buried door with the shovel -> light the stove (matches, RMB) -> barometer (RMB) -> keeper's log
 //        in the shelf chest (RMB opens the search panel, take all) -> shovel + knife: cut snow blocks out of the drift -> place blocks (the blocks must land on
-//        the BELT) -> Esc opens the inventory, I closes it -> Ctrl+wheel zoom.
+//        the BELT) -> Tab opens the inventory, I closes it -> Ctrl+wheel zoom (the game does not use Esc).
 // Long walks are shortened with teleport() (walking itself is proven by shots/play/play2.cjs); everything that matters (E, LMB, keys, panels) is real input.
 // Determinism (the run must not depend on the machine's load):
 //   - RMB and the keys are quick presses (down, two steps, up): a held right button or key is a «hold» in the game (3+ things in reach open the «Рядом»
@@ -76,7 +76,7 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     const all = p.getByText('Взять всё'); if (await all.count()) { await all.first().click(); await step(10); }
     const close = p.getByText('Закрыть ящик'); if (await close.count()) { await close.first().click(); await step(10); }
     ok(/★|иглу/.test(await obj()), 'keeper log read (RMB on the box + take all), next: ' + await obj()); }
-  if (await ev(() => document.body.classList.contains('panel-open'))) { await tap('Escape', 10); await step(10); }          // «Закрыть ящик» leaves the bag itself open: Esc closes it
+  if (await ev(() => document.body.classList.contains('panel-open'))) { await tap('i', 10); await step(10); }          // «Закрыть ящик» leaves the bag itself open: I closes it
   // 6. blocks: in a pit of the lee snow field west of the station shovel the crown, knife-cut blocks, place them on the ground
   { await tp(528, 236); await step(40);
     let s = await st(), ptx = Math.floor(s.x / 4), fty = Math.floor((s.y - 1) / 4);
@@ -104,8 +104,8 @@ const fails = []; const ok = (c, m) => { console.log((c ? '  ok   ' : '  FAIL ')
     for (let k = 0; k < 16 && placed < 1; k++) { const s2 = await st(), x = s2.x + (k % 2 ? 1 : -1) * (8 + (k >> 1) * 6); let y = 150; while (y < 290 && (await cell(x, y)) === 0) y++; await hover(x, y - 2); const t = await T(); probes.push(Math.round(x) + ',' + y + ' ' + JSON.stringify(t));
       if (t.mode === 'place' && t.ok) { await p.mouse.down(); await step(4); await p.mouse.up(); await step(6); if ((await inv('snow_block')) < b0) placed++; } }
     ok(placed >= 1, 'a block was placed on the ground with LMB' + (placed >= 1 ? '' : ' | player ' + JSON.stringify(await st()) + ' | probes ' + probes.join(' ; '))); await shot('blocks'); }
-  // 7. the inventory (Esc opens it, I closes it), the zoom (Ctrl + wheel)
-  { await tap('Escape', 10); await step(20); ok(await ev(() => document.body.classList.contains('panel-open')), 'Esc opens the inventory'); await shot('bag'); await tap('i', 10); await step(10);
+  // 7. the inventory (Tab opens it, I closes it), the zoom (Ctrl + wheel)
+  { await tap('Tab', 10); await step(20); ok(await ev(() => document.body.classList.contains('panel-open')), 'Tab opens the inventory'); await shot('bag'); await tap('i', 10); await step(10);
     ok(!(await ev(() => document.body.classList.contains('panel-open'))), 'I closes the inventory');
     const z0 = await ev(() => window.__sc.zoom.index()); await p.mouse.move(640, 300); await p.keyboard.down('Control'); await p.mouse.wheel(0, -120); await step(10); await p.keyboard.up('Control'); await step(10);
     ok((await ev(() => window.__sc.zoom.index())) !== z0, 'Ctrl+wheel changes the zoom ' + z0 + ' -> ' + await ev(() => window.__sc.zoom.index())); }
