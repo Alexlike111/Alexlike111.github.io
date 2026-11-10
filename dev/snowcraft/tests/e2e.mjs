@@ -318,16 +318,21 @@ for (const prof of PROFILES) {
       const b = document.querySelector('#hud .belt').getBoundingClientRect(), p = document.querySelector('#hud .pnl:not(.jr)').getBoundingClientRect(), v = document.querySelector('#hud .vit').getBoundingClientRect();
       return p.left < 40 && Math.abs(p.top - b.bottom) <= 12 && p.right <= v.left && b.right <= innerWidth / 2;
     }), JSON.stringify(await page.evaluate(() => ({ vw: innerWidth, vh: innerHeight }))));
+    { const dr = await page.evaluate(() => ({ w: innerWidth, b: ['sc-menubtn', 'sc-fsbtn', 'sc-mutebtn'].map(id => { const r = document.getElementById(id).getBoundingClientRect(); return { id, l: r.left, r: r.right, t: r.top, b: r.bottom }; }) }));
+      check('desktop: ⚙, ⛶ and the speaker stand in one row without overlap', dr.b.every((a, i) => dr.b.every((b, j) => j <= i || a.r <= b.l || b.r <= a.l)) && dr.b.every(r => r.l >= 0 && r.r <= dr.w), JSON.stringify(dr)); }
     await shot(page, prof, '07-craft-panel');
     await page.keyboard.press('KeyC');
   } else {
     await ev(page, () => window.__sc.step(4));                       // the HUD drops `panel-open` on its next update: do not rely on the wall-clock wait after closing the journal
     const t = await ev(page, () => {
-      const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka', 'tb-bag', 'tb-jour', 'tb-menu'];
-      const rects = ids.map(i => { const r = document.getElementById(i).getBoundingClientRect(); return { i, w: Math.round(r.width), h: Math.round(r.height) }; });
-      return { rects, portraitOverlay: getComputedStyle(document.getElementById('rotate')).display, body: document.body.className, pnl: [...document.querySelectorAll('#hud .pnl')].map(e => e.className + ':' + e.style.display) };
+      const ids = ['tb-act', 'tb-jump', 'tb-take', 'tb-belt', 'tb-senses', 'tb-parka', 'tb-bag', 'tb-jour', 'tb-menu', 'tb-mute'];
+      const rects = ids.map(i => { const r = document.getElementById(i).getBoundingClientRect(); return { i, w: Math.round(r.width), h: Math.round(r.height), l: r.left, t: r.top, r: r.right, b: r.bottom }; });
+      return { w: innerWidth, rects, portraitOverlay: getComputedStyle(document.getElementById('rotate')).display, body: document.body.className, pnl: [...document.querySelectorAll('#hud .pnl')].map(e => e.className + ':' + e.style.display) };
     });
     check('touch buttons present, >= 34 px (icons; the size follows the window)', t.rects.every(r => r.w >= 34 && r.h >= 34), JSON.stringify(t));
+    { const top = t.rects.filter(r => ['tb-menu', 'tb-mute', 'tb-jour', 'tb-bag'].includes(r.i));
+      const clash = top.some((a, i) => top.some((b, j) => j > i && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b));
+      check('phone top row (⚙, speaker, journal, bag) does not overlap and stays on screen', !clash && top.every(r => r.l >= 0 && r.r <= t.w), JSON.stringify(top)); }
     check('no rotate overlay in landscape', t.portraitOverlay === 'none');
     // stick: synthetic touch pointer events
     const st = await ev(page, () => {

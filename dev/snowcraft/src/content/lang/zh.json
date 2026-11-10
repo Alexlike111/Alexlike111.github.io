@@ -506,7 +506,6 @@
  "menu.fs": "全屏",
  "menu.fsBtn": "全屏（Shift+Enter）",
  "menu.fsNo": "这里无法全屏。请在单独标签页中打开游戏，或点击页面顶部的 ⤢ 图标",
- "menu.hint": "P — 设置与暂停 · Esc — 关闭 · Shift+Enter — 全屏",
  "menu.keys": "按键",
  "menu.lang": "语言",
  "menu.langNote": "语言：{name}。页面将重新加载以应用设置",

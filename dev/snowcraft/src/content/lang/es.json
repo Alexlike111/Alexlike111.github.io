@@ -506,7 +506,6 @@
  "menu.fs": "Pantalla completa",
  "menu.fsBtn": "Pantalla completa (Shift+Enter)",
  "menu.fsNo": "La pantalla completa no está disponible aquí. Abre el juego en una pestaña aparte o pulsa el icono ⤢ arriba de la página",
- "menu.hint": "P — ajustes y pausa · Esc — cerrar · Shift+Enter — pantalla completa",
  "menu.keys": "Teclas",
  "menu.lang": "Idioma",
  "menu.langNote": "Idioma: {name}. La página se recargará para aplicarlo",

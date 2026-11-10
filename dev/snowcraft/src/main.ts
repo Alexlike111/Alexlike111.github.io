@@ -3,6 +3,7 @@
 // Order inside one 60 Hz step: weather -> player -> tools -> drops -> fixtures -> shelter -> sim -> heat -> structure -> bodies -> particles.
 import { storeGet, storeSet, storeRemove, storeInit, storeKind } from './platform/store';
 import { initPlatform, gameReady, pgLanguage, gateRun } from './platform/bridge';
+import { PG } from './platform/pg';
 import { G, toast, DIFFS } from './game/state';
 import { on, emit } from './game/bus';
 import { generateWorld } from './game/worldgen';
@@ -39,6 +40,7 @@ import { seedStarterDrift } from './game/starter';
 import { purgeMethane } from './game/mine';
 import { applySave, applyQuestAgain, snapshotBase, type SaveData } from './game/save';
 import * as saveMod from './game/save';
+import { sfx as audioSfx } from './engine/audio';
 import { initWeather, stepWeather, setDay, setClock, wx } from './game/weather';
 import { stepUnstuck } from './game/unstuck';
 import { initPlayer, stepPlayer, applyDifficulty, damage, die, bodyHeat, body, setRespawn } from './game/player';
@@ -107,9 +109,9 @@ function newGame(o: StartOpts = {}) {
   const t0 = performance.now();
   G.fixtures.length = 0; G.drops.length = 0; G.animals.length = 0; G.toasts.length = 0; G.lights.length = 0;
   const spawn = generateWorld(seed);
+  if (storeKind() === 'bridge') snapshotBase();        // the base of this run (a pure function of the seed): the Bridge save stores only the cells that differ from it
   purgeMethane();
   seedStarterDrift(spawn.spawnX);
-  if (storeKind() === 'bridge') snapshotBase();        // the deterministic base of this run: the Bridge save stores only the cells that differ from it
   genMs = performance.now() - t0;
   wx.override = null; G.storm = 0; G.timeScale = 1; G.paused = false;
   initWeather(seed);
@@ -389,7 +391,7 @@ const sc = {
   },
   selftest: (filter?: string) => runSelfTest(filter),
   cutRegion, selected,
-  mods: { i18n: i18nMod, fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, seasons: seasonsMod, overlay: overlayMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod, save: saveMod },
+  mods: { i18n: i18nMod, fixtures, shelter, player: playerMod, tools: toolsMod, weather: weatherMod, seasons: seasonsMod, overlay: overlayMod, inv: invMod, fauna: faunaMod, drift: driftMod, quest: questMod, save: saveMod, audio: audioSfx },
   screenToWorld, worldToScreen,
   senses: (on?: boolean) => { toggleSenses(on); },
   freeCam: (on?: boolean) => { if (on === undefined || on !== freeCam) toggleFreeCam(); },
@@ -403,11 +405,11 @@ window.__sc = sc;
 
 // ---------------------------------------------------------------------------------------------------------------------
 async function boot() {
-  if (__PG__) await initPlatform();                    // Playgama build: Bridge first (initialize, storage backend, events) — before any storage read or UI
+  if (PG) await initPlatform();                    // Playgama build: Bridge first (initialize, storage backend, events) — before any storage read or UI
   const keys = ['sc.lang', 'sc.vol', 'sc.q', 'sc.ui', 'sc.zoom', 'sc.best', 'sc.stickHint', 'sc.hints'];
-  if (__PG__) keys.push('sc.save.meta');               // the save's small meta goes into the same one startup read (Continue reads its chunks)
+  if (PG) keys.push('sc.save.meta');               // the save's small meta goes into the same one startup read (Continue reads its chunks)
   await storeInit(keys);       // settings come from the storage backend (Bridge in the Playgama build) before any UI reads them
-  if (__PG__) {
+  if (PG) {
     // Playgama build: the language comes only from the Bridge: the stored player choice, else platform.language, else English (never navigator.language)
     i18nMod.setLang(pgLanguage(storeGet('sc.lang')));
   } else { // language: ?lang=xx, else the stored choice, else Russian for the automated tests (navigator.webdriver) and for #selftest (the checks read the Russian wording), else the browser's
@@ -430,7 +432,7 @@ async function boot() {
   initSenses(); initSensesUi(uiRoot);
   addEventListener('resize', () => { resize(); });
   newGame();
-  void initTitle({ start: (o) => { newGame(o); } }).then(() => { if (__PG__) gameReady(); });   // game_ready: the first interactive frame (the title) is up
+  void initTitle({ start: (o) => { newGame(o); } }).then(() => { if (PG) gameReady(); });   // game_ready: the first interactive frame (the title) is up
   sc.ready = true;
   requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
   void DIFFS; void toast; void addHeat; void screenToWorld;

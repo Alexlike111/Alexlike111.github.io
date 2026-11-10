@@ -125,7 +125,7 @@ registerTest('playgama', 'список «Рядом» и ✕ в нём; ✕ ящ
       t.expect(!!f && openContainer(f!), 'сундук не открылся');
       t.sc.step(3); await t.frames(1);
       t.expect(isOpen() && panelIsOpen(), 'сундук не открыл панель');
-      $<HTMLElement>('#hud .pnl:not(.jr) > .px')?.click(); t.sc.step(4); await t.frames(1);
+      $<HTMLElement>('#hud .pnl:not(.jr) > .px')?.click(); t.sc.step(40); await t.frames(1);       // the box closes after the panel's grace time (search.ts stepSearch)
       t.expect(!isOpen() && !panelIsOpen(), '✕ панели не закрыл сундук');
     } finally { closeBox(); searchLoad(was); }
   });
@@ -167,3 +167,4 @@ registerTest('playgama', 'видимые кнопки и панели HUD не �
   t.expect(off.length === 0, `за краем окна: ${off.join(', ')}`);
   t.metric('видимых элементов HUD', items.length);
 });
+

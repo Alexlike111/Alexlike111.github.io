@@ -177,13 +177,13 @@ body.touch-ui #hud .bw .rows{min-width:0;gap:1px;flex:1}
 body.touch-ui #hud .bw .r{height:13px;gap:3px}
 body.touch-ui #hud .bw .ic{width:12px;height:12px}
 body.touch-ui #hud .bw .bar{display:none}
-body.touch-ui #hud .bw .v{min-width:0;text-align:left;font-size:11px}
-body.touch-ui #hud .bw .sub{font-size:11px;margin-top:0;white-space:nowrap}
+body.touch-ui #hud .bw .v{min-width:0;text-align:left;font-size:12px}
+body.touch-ui #hud .bw .sub{font-size:12px;margin-top:0;white-space:nowrap}
 body.touch-ui #hud .dial{left:142px;right:auto;top:8px;width:84px;padding:2px 3px}
 body.touch-ui #hud .dial canvas{width:62px;height:38px}
-body.touch-ui #hud .dial .day{font-size:11px;line-height:1.15}
+body.touch-ui #hud .dial .day{font-size:12px;line-height:1.15}
 body.touch-ui #hud .dial .clk{font-size:12px;opacity:.85;margin-top:-1px}
-body.touch-ui #hud .dial .line{font-size:11px}
+body.touch-ui #hud .dial .line{font-size:12px}
 body.touch-ui #hud .dial .line.wind{display:none!important}
 body.touch-ui #hud .stk{left:234px;right:calc(var(--trow) + 10px + env(safe-area-inset-right,0px));transform:none;max-width:none}
 body.touch-ui #hud .obj{font-size:13px;padding:3px 8px}
@@ -375,6 +375,8 @@ function renderHints() {
   ];
   fullEl.insertAdjacentHTML('beforeend', list.map(([kb, label]) => k(kb, label)).join(''));
   fullEl.classList.toggle('on', hintMem.full && !G.mobile);
+  document.body.classList.toggle('keys-open', hintMem.full && !G.mobile);
+  root.style.setProperty('--keys-h', (hintMem.full && !G.mobile ? fullEl.offsetHeight : 0) + 'px');     // the toasts clear the list (ui.css)
 }
 
 /** Put the probe tooltip next to the cursor but out of the HUD (body figure, dial, belt) and the touch buttons: try right/below, left/below, right/above, left/above, then clamp. */

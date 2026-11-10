@@ -6,7 +6,7 @@
 //    are stored: per array a varint count, then (varint gap, value byte) pairs. The delta + the JSON state go through gzip and base64 and are
 //    split into chunks of ≤150 KB under sc.save.<n>, with a small JSON meta under sc.save.meta (what the Continue button needs). One storage
 //    call writes meta + all chunks; stale chunks of a longer older save are removed in one more call.
-// Saves never run more often than once per 20 s (MIN_GAP_MS); the periodic autosave in title.ts asks autosaveDue() (PG build: 2 game hours
+// Saves of one slot never start more often than once per 20 s (MIN_GAP_MS); the periodic autosave in title.ts asks autosaveDue() (PG build: 2 game hours
 // passed since the last save). Everything is try/catch: blocked storage just means "no save".
 import { huntSave, huntLoad } from './hunt';
 import { G } from './state';
@@ -19,6 +19,7 @@ import { questSave, questLoad } from './quest';
 import { resetShelter } from './shelter';
 import { searchSave, searchLoad } from './search';
 import { storeGet, storeReadMany, storeWriteBatch, storeKind } from '../platform/store';
+import { PG } from '../platform/pg';
 
 export const SAVE_VERSION = 1;
 const DB = 'snowcraft', STORE = 'save';
@@ -66,7 +67,10 @@ export function snapshotBase(): void { base = { mat: mat.slice(), aux: aux.slice
 /** Lay a loaded save over a freshly generated world (call between generateWorld/initPlayer and initSim). */
 export function applySave(d: SaveData) {
   const s = d.state;
-  if (d.delta) applyDelta(d.delta, { mat, aux, flags, bg });        // the live grid is the regenerated base here
+  if (d.delta && base) {                                              // Bridge save: the regenerated base of the seed, then the saved cells
+    mat.set(base.mat); aux.set(base.aux); flags.set(base.flags); bg.set(base.bg);
+    applyDelta(d.delta, { mat, aux, flags, bg });
+  } else if (d.delta) applyDelta(d.delta, { mat, aux, flags, bg });
   else if (d.grid) { mat.set(d.grid.mat); aux.set(d.grid.aux); flags.set(d.grid.flags); bg.set(d.grid.bg); }
   Object.assign(G.player, s.player);
   Object.assign(body.scar, s.body.scar); Object.assign(body.stats, s.body.stats); body.respawnX = s.body.respawnX; body.respawnY = s.body.respawnY;
@@ -148,7 +152,7 @@ function fromB64(s: string): Uint8Array {
 // ---- common -----------------------------------------------------------------------------------------------------------------------
 let saving = false;
 let saveGen = 0;     // bumped by deleteSave: a save that was in flight when the slot was deleted (hardcore death) must not land afterwards
-let lastStart = -Infinity;
+const lastStart = new Map<string, number>();     // per slot: the start time of the last save
 async function gz(buf: Uint8Array): Promise<Uint8Array> {
   if (typeof CompressionStream === 'undefined') return buf;
   const cs = new Blob([buf as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'));
@@ -177,24 +181,25 @@ export function autosaveDue(): boolean {
 
 /** Write the current game to the slot. Resolves true on success. At most one save per MIN_GAP_MS: a call inside that gap is dropped (the last save is seconds old). */
 /** Self-tests only: forget the last save start so a test can save right away. */
-export function resetSaveGapForTests(): void { lastStart = -Infinity; }
+export function resetSaveGapForTests(): void { lastStart.clear(); }
 export function saveGame(slot = KEY): Promise<boolean> {
-  if (Date.now() - lastStart < MIN_GAP_MS) return Promise.resolve(false);
-  lastStart = Date.now();
-  if (!__PG__ && !remote()) return saveIdb(slot);
+  const now = Date.now();
+  if (now - (lastStart.get(slot) ?? -Infinity) < MIN_GAP_MS) return Promise.resolve(false);
+  lastStart.set(slot, now);
+  if (!PG && !remote()) return saveIdb(slot);
   return saveRemote(slot);
 }
 export async function peekSave(slot = KEY): Promise<SaveMeta | null> {
-  if (!__PG__ && !remote()) return peekIdb(slot);
+  if (!PG && !remote()) return peekIdb(slot);
   const m = readMeta(slot);
   return m && m.v === SAVE_VERSION ? m : null;
 }
 export async function loadGame(slot = KEY): Promise<SaveData | null> {
-  if (!__PG__ && !remote()) return loadIdb(slot);
+  if (!PG && !remote()) return loadIdb(slot);
   return loadRemote(slot);
 }
 export async function deleteSave(slot = KEY): Promise<void> {
-  if (!__PG__ && !remote()) return deleteIdb(slot);
+  if (!PG && !remote()) return deleteIdb(slot);
   saveGen++;
   const m = readMeta(slot), k = keysOf(slot);
   const removes = [k.meta];

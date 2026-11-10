@@ -506,7 +506,6 @@
  "menu.fs": "Plein écran",
  "menu.fsBtn": "Plein écran (Shift+Entrée)",
  "menu.fsNo": "Plein écran indisponible ici. Ouvre le jeu dans un onglet à part ou clique sur l'icône ⤢ en haut de la page",
- "menu.hint": "P — réglages et pause · Esc — fermer · Shift+Enter — plein écran",
  "menu.keys": "Touches",
  "menu.lang": "Langue",
  "menu.langNote": "Langue : {name}. La page va se recharger pour l'appliquer",

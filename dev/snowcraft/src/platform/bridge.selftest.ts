@@ -143,11 +143,15 @@ registerTest('bridge', 'сбой рекламы не задерживает иг
   });
 });
 
-registerTest('bridge', 'экран смерти: переход в новую игру ждёт рекламу только после показа карточки', async (t: TestCtx) => {
+registerTest('bridge', 'кнопки экрана смерти: новая игра ждёт рекламу и стартует после её закрытия', async (t: TestCtx) => {
   let went = 0;
   await withBridge({}, async (f) => {
-    gateRun('new_run', () => { went++; });                  // no death yet: the run starts at once, no ad
-    t.expect(went === 1 && f.calls.ads.length === 0, 'без смерти реклама не должна идти');
+    gateRun('new_run', () => { went++; });                  // the death card's button: the ad comes first, the run starts when it is closed
+    t.expect(f.calls.ads.includes('new_run') && went === 0, 'новая игра стартовала до рекламы');
+    f.fireAd('interstitial_state_changed', 'opened');
+    f.fireAd('interstitial_state_changed', 'closed');
+    await tick(0);
+    t.expect(went === 1, 'после закрытия рекламы новая игра должна стартовать');
   });
 });
 
@@ -168,6 +172,7 @@ registerTest('save', 'сохранение Bridge: дельта к базе, з�
     await sandbox(async () => {
       t.sc.start({ seed: 5, diff: 1 });
       await t.frames(5);
+      G.paused = true;                                      // the grid must not move between the save and the comparison
       const { MAT } = await import('../content/materials');
       const p = G.player;
       for (let k = 0; k < 400; k++) { const i = (Math.floor(p.y) - 3 + (k % 20)) * W + Math.floor(p.x) - 10 + Math.floor(k / 20); mat[i] = k % 3 ? MAT.SNOWBLOCK : MAT.SNOW; aux[i] = (k * 7) & 255; }
@@ -178,6 +183,7 @@ registerTest('save', 'сохранение Bridge: дельта к базе, з�
       const d = await loadGame();
       t.expect(!!d && !!d.delta, 'загрузка не вернула дельту');
       t.sc.start({ seed: 5, diff: 1, save: d! });
+      G.paused = true;
       let diff = 0;
       for (let i = 0; i < mat.length; i++) if (mat[i] !== live.mat[i] || aux[i] !== live.aux[i] || flags[i] !== live.flags[i]) diff++;
       for (let i = 0; i < bg.length; i++) if (bg[i] !== live.bg[i]) diff++;
@@ -200,13 +206,16 @@ registerTest('save', 'части сохранения: лишние части �
     await sandbox(async () => {
       t.sc.start({ seed: 6, diff: 1 });
       await t.frames(3);
+      G.paused = true;
       const p = G.player; let seed = 12345;
-      const rnd = () => (seed = (seed * 1103515245 + 12345) >>> 0) & 255;
+      const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed >>> 24; };   // high entropy: gzip must not hide the size
       const cells: number[] = [];
-      for (let k = 0; k < 90000; k++) { const i = ((Math.floor(p.y) - 40 + Math.floor(k / 300)) % H) * W + Math.floor(p.x) - 150 + (k % 300); cells.push(i); mat[i] = rnd() % 14; aux[i] = rnd(); }
+      for (let k = 0; k < 200000; k++) { const i = ((Math.floor(p.y) - 60 + Math.floor(k / 400)) % H) * W + Math.floor(p.x) - 200 + (k % 400); cells.push(i); mat[i] = rnd() % 14; aux[i] = rnd(); }
       resetSaveGapForTests();
+      G.paused = true;
       t.expect(await saveGame(), 'первое сохранение не прошло');
       const many = lastSaveInfo.chunks;
+      t.metric('chunk test cells', lastSaveInfo.cells, 'cells'); t.metric('chunk test packed', lastSaveInfo.packedBytes, 'B'); t.metric('chunk test b64', lastSaveInfo.b64Chars, 'chars');
       t.expect(many >= 2, 'большое сохранение должно делиться на части: ' + many);
       for (const i of cells) { mat[i] = 0; aux[i] = 0; }
       resetSaveGapForTests();

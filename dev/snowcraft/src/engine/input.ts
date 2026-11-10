@@ -77,7 +77,8 @@ export function initInput(canvas: HTMLElement) {
   if (inited) return;
   inited = true; canvasEl = canvas;
   addEventListener('keydown', (e) => {
-    if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;       // the settings slider and the text fields keep their keys
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;       // the settings slider, the language list and the text fields keep their keys (and Tab moves their focus)
     if (BLOCK.has(e.code) || e.code === 'F2' || ((e.ctrlKey || e.metaKey) && ZOOM_CODES.has(e.code))) e.preventDefault();     // Tab, arrows, Space: no focus jumps / scrolling; Ctrl +/- must zoom the game, not the page
     if (e.repeat) return;
     keyDown(e.code);

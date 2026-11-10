@@ -130,7 +130,7 @@ body.touch-ui #hud .pnl .bfoot .bh{font-size:11px}
 body.touch-ui #hud .pnl .grid.sledg .cell{min-height:44px}
 /* phone (810×253 and up): the panel starts below the top-right row (Сумка, Журнал, ⚙ stay tappable: the second tap on Сумка closes it), fills the rest
    and scrolls inside its box; the sort buttons sit in the pack header; the two columns share the width */
-body.touch-ui #hud .pnl{left:6px;right:6px;top:calc(var(--sa-t, 0px) + 46px);bottom:4px;transform:none;width:auto;max-width:none;max-height:none;height:auto;box-sizing:border-box;padding:5px 7px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+body.touch-ui #hud .pnl{left:6px;right:6px;top:calc(var(--sa-t, 0px) + var(--u, 36px) + 14px);bottom:4px;transform:none;width:auto;max-width:none;max-height:none;height:auto;box-sizing:border-box;padding:5px 7px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 body.touch-ui #hud .pnl h3{margin:0 0 3px;font-size:13px;gap:6px;align-items:center}
 body.touch-ui #hud .pnl h3 .hsorts{display:inline-flex;gap:4px;margin-left:auto}
 body.touch-ui #hud .pnl h3 .hsorts .mini{min-height:30px;padding:2px 6px;font-size:12px}

@@ -121,8 +121,8 @@ html body:not(.touch-ui) #hud .bot{left:0;top:0;right:0;bottom:0;transform:none;
 html body:not(.touch-ui) #hud .belt{position:absolute;left:calc(8px + var(--sa-l));top:calc(8px + var(--sa-t));padding:4px;gap:4px}
 html body:not(.touch-ui) #hud .belt .sl{width:46px;height:46px}
 html body:not(.touch-ui) #hud .belt .sl .ic{width:28px;height:28px}
-html body:not(.touch-ui) #hud .belt .sl .k{left:2px;top:0;font-size:10px}
-html body:not(.touch-ui) #hud .belt .sl .n{font-size:11px}
+html body:not(.touch-ui) #hud .belt .sl .k{left:2px;top:0;font-size:12px}
+html body:not(.touch-ui) #hud .belt .sl .n{font-size:12px}
 html body:not(.touch-ui) #hud.belt9 .belt .sl{width:40px;height:40px}
 html body:not(.touch-ui) #hud.belt9 .belt .sl .ic{width:26px;height:26px}
 html body:not(.touch-ui) #hud .bname{position:absolute;left:calc(8px + var(--sa-l));top:calc(var(--belt-b) + 4px + var(--sa-t));font-size:14px}
@@ -158,7 +158,7 @@ html body:not(.touch-ui) #hud .hint{left:calc(8px + var(--sa-l));bottom:calc(8px
 html body:not(.touch-ui) #hud .hint .q{background:rgba(8,14,26,.8);border-color:rgba(124,198,238,.45)}
 html body:not(.touch-ui) #hud .hint .hfull{font-size:12px;line-height:1.9;margin-bottom:6px;padding:6px 8px 4px;background:rgba(8,14,26,.86);border:1px solid rgba(124,198,238,.38);border-radius:4px;border-bottom:1px solid rgba(124,198,238,.38)}
 /* the bag (C / Esc / I): anchored top-left right under the belt; the wear column sits beside the grid; the crafting list (or the container) beside that */
-html body:not(.touch-ui) #hud .pnl:not(.jr){left:calc(12px + var(--sa-l));top:calc(var(--belt-b) + 8px + var(--sa-t));transform:none;width:min(780px,calc(100vw - 196px - 12px - var(--sa-l)));max-width:none;max-height:min(86vh,calc(100vh - var(--belt-b) - 16px));box-sizing:border-box}
+html body:not(.touch-ui) #hud .pnl:not(.jr){left:calc(12px + var(--sa-l));top:calc(var(--belt-b) + 8px + var(--sa-t));transform:none;width:min(780px,calc(100vw - 196px - 12px - var(--sa-l)));max-width:none;max-height:min(86vh,calc(100vh - var(--belt-b) - 60px));box-sizing:border-box}
 html body:not(.touch-ui) #hud .pnl:not(.jr) .cols{flex-wrap:nowrap;align-items:flex-start;gap:14px}
 html body:not(.touch-ui) #hud .pnl:not(.jr) .col:first-child{flex:0 0 auto}
 html body:not(.touch-ui) #hud .pnl:not(.jr) .col:last-child{flex:1 1 300px;min-width:0}
@@ -170,6 +170,13 @@ html body:not(.touch-ui) #hud .pnl:not(.jr) .pk .sorts{flex-direction:column;mar
 html body:not(.touch-ui) #hud .pnl:not(.jr) .pk .grid{order:1;flex:none;grid-template-columns:repeat(6,44px);gap:4px}
 html body:not(.touch-ui) #hud .pnl:not(.jr) .pk .grid .cell{width:44px;height:44px;min-height:0;aspect-ratio:auto}
 html body:not(.touch-ui) #hud .pnl:not(.jr) .grid.sledg{grid-template-columns:repeat(6,44px)}
+/* a narrow desktop window (W <= 1100, H >= 500): the belt and the vitals column leave no band for the goal line, so the goal sits under the belt, left of the vitals
+   (a short window keeps the top-centre goal: under the belt it would sit on the player's head, see the «Чутьё» legend in senses.selftest.ts) */
+@media (max-width:1100px) and (min-height:500px){
+  html body:not(.touch-ui) #hud .stk{left:calc(8px + var(--sa-l));right:auto;top:calc(var(--belt-b) + 36px + var(--sa-t));transform:none;max-width:calc(100vw - var(--vit-r) - 24px);align-items:flex-start}
+  html body:not(.touch-ui) #hud .stk .p{text-align:left}
+  html body:not(.touch-ui) #hud .obj{max-width:calc(100vw - var(--vit-r) - 24px)}
+}
 /* a short desktop window (H < 340): the vitals are one chip (figure, temperature, the clock) in the top-right column */
 @media (max-height:339px){
   html body:not(.touch-ui) #hud .vit{top:calc(52px + var(--sa-t))}
@@ -185,12 +192,20 @@ html body:not(.touch-ui) #hud .pnl:not(.jr) .grid.sledg{grid-template-columns:re
 #stage,#ui,#hud,#touch,#hud .p,#hud .belt,#hud .sl,#hud .tip,#hud .arw,#touch .tb,#touch .stick,#touch .knob,#wheel,#ov,#ov .cue,#nearbtn,#sc-menubtn,#sc-fsbtn,#sc-mutebtn,#rotate{
   -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 #hud,#touch,#hud .p,#hud .belt,#hud .sl,#touch .tb,#wheel,#ov{touch-action:none}
-html body #hud .pnl,html body.touch-ui #hud .pnl{padding-right:42px;touch-action:pan-y}
+/* the panels are border-box (the journal included) so the gutter for the ✕ fits the window; the phone's ✕ is 44 px: a wider gutter there */
+html body #hud .pnl{box-sizing:border-box;padding-right:42px;touch-action:pan-y}
+html body.touch-ui #hud .pnl{padding-right:50px}
+html body #hud .pnl.jr{max-width:calc(100vw - 16px)}
 html body #hud .nearl{padding-right:42px}
 html body #hud .px{position:absolute;top:4px;right:4px;z-index:2;width:34px;height:34px;box-sizing:border-box;margin:0;padding:0;display:flex;align-items:center;justify-content:center;
   font:700 16px/1 var(--f-ui);color:#e8f6ff;text-shadow:none;background:rgba(19,36,58,.94);border:1px solid rgba(124,198,238,.6);border-radius:4px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
 html body #hud .px:hover,html body #hud .px:focus-visible{border-color:#ffc46e;color:#fff;outline:none}
 html body.touch-ui #hud .px{width:44px;height:44px;top:3px;right:3px}
+/* the toasts stand over the open panels (a transient message must read; pointer-events none, so the panel under them still works) */
+html body #hud .bot .tbox{z-index:2}
+body.touch-ui #hud .bot .tbox{position:relative}
+/* the key list is open: the toasts step above it */
+html body.keys-open:not(.touch-ui) #hud .bot .tbox{bottom:calc(46px + var(--keys-h,0px) + 8px + var(--sa-b))}
 /* the key list: the ✕ floats at its right edge, the rows wrap around it */
 html body #hud .hint .hx{float:right;width:30px;height:30px;margin:0 0 4px 8px;padding:0;font:700 14px/1 var(--f-ui);color:#e8f6ff;text-shadow:none;background:#13243a;border:1px solid rgba(124,198,238,.6);border-radius:4px;cursor:pointer;pointer-events:auto;touch-action:manipulation}
 html body #hud .hint .hx:hover,html body #hud .hint .hx:focus-visible{border-color:#ffc46e;outline:none}

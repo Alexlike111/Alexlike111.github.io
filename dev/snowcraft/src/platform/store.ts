@@ -2,7 +2,9 @@
 // Playgama rule 3.2.1: progress and settings are saved ONLY through the Bridge storage module — never localStorage / IndexedDB / cookies.
 // So: reads are synchronous from an in-memory cache that storeInit() fills once at boot; writes update the cache at once and reach the backend
 // (the Bridge in the Playgama build, localStorage in the plain preview/artifact build and in the tests) coalesced into one call.
-// In the PG build the localStorage backend is not even compiled in (__PG__ is a compile-time constant, see globals.d.ts).
+// In the PG build the localStorage backend is not even compiled in (PG is a compile-time constant, see globals.d.ts).
+import { PG } from './pg';
+
 export interface StoreBackend {
   /** true: writes go through immediately (localStorage); false: batched after a short delay (the Bridge: «write only on meaningful change, all keys in one call») */
   immediate: boolean;
@@ -15,7 +17,7 @@ const cache = new Map<string, string>();
 const dirty = new Set<string>(), removed = new Set<string>();
 let timer = 0;
 
-const localBackend: StoreBackend | null = __PG__ ? null : {
+const localBackend: StoreBackend | null = PG ? null : {
   immediate: true,
   async get(keys) { return keys.map(k => { try { return localStorage.getItem(k); } catch { return null; } }); },
   async set(keys, values) { keys.forEach((k, i) => { try { localStorage.setItem(k, values[i]); } catch { /* blocked: the value lives in the cache until the page closes */ } }); },

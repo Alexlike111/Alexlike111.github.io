@@ -3,11 +3,12 @@
 // store backend, reads platform.language and platform.isAudioEnabled, and wires the pause / audio / interstitial events and page visibility.
 // Everything here is a no-op when there is no window.bridge (preview build, tests without a fake bridge). attachBridge() is the same wiring for any
 // bridge-shaped object (tests use a fake one). detachBridge() undoes it.
-import { getStoreBackend, setStoreBackend, type StoreBackend } from './store';
+import { getStoreBackend, setStoreBackend, flush, type StoreBackend } from './store';
 import { G } from '../game/state';
 import { on } from '../game/bus';
 import { sfx } from '../engine/audio';
 import { LANGS, type Lang } from '../content/i18n';
+import { PG } from './pg';
 
 type AnyBridge = any;
 const AD_WAIT_MS = 15000;      // an ad that is still not closed after this long does not hold the game (rule: a failed ad never blocks)
@@ -33,7 +34,7 @@ let deathAt = -1e9;
 
 /** Playgama build: the SDK is loaded by a plain <script> before the game. Resolves when the Bridge is ready (or missing). Never throws. */
 export async function initPlatform(): Promise<void> {
-  if (!__PG__) return;
+  if (!PG) return;
   const w = window as unknown as { bridge?: AnyBridge };
   if (!w.bridge) return;                                // SDK file missing: the game runs with its memory backend, without Bridge events
   try { await attachBridge(w.bridge); } catch { /* the game continues without the Bridge */ }
@@ -55,9 +56,13 @@ export async function attachBridge(bridge: AnyBridge): Promise<void> {
   offs.push(sub(bridge.platform, E.AUDIO_STATE_CHANGED, (e: unknown) => { audioEnabled = !!e; apply(); }));
   offs.push(sub(bridge.advertisement, E.INTERSTITIAL_STATE_CHANGED, onAdState));
   if (typeof document !== 'undefined') {
-    const vis = () => { pageHidden = document.hidden; apply(); };
+    // settings writes are batched (store.ts): push them out before the page can go away (hidden tab, reload, close)
+    const vis = () => { pageHidden = document.hidden; if (pageHidden) void flush(); apply(); };
     document.addEventListener('visibilitychange', vis);
     offs.push(() => document.removeEventListener('visibilitychange', vis));
+    const hide = () => { void flush(); };
+    addEventListener('pagehide', hide);
+    offs.push(() => removeEventListener('pagehide', hide));
   }
   offs.push(on('died', () => { deathAt = performance.now(); }));
   apply();
