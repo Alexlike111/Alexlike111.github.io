@@ -1,0 +1,33 @@
+{
+  "game": "SNOWCRAFT",
+  "version": "0.14.0",
+  "builtAt": "2026-11-10T11:20:35Z",
+  "commit": "b8d2456",
+  "branch": "claude/gracious-newton-yc3hi1",
+  "producedBy": "game-build chat (this passport is hand-written from measured results; the project's verify-build tool and handoff/RELEASE-CHECKLIST.md were NOT available in this chat)",
+  "archive": { "file": "release/snowcraft-playgama-v0.14.0.zip", "bytes": 742520, "sha256": "d441ac1c2d7cf245854815c37c963d58cb19c0a0f7ac6251eefdb71bafe79f7d", "files": ["index.html", "playgama-bridge.js", "playgama-bridge-config.json"] },
+  "verifyBuild": "NOT_RUN",
+  "bridge": { "version": "2.4.1", "initializedInLiveTest": true, "sdkFirstScriptInHead": true, "configNextToIndex": true, "gameReadySent": "planned in code (bridge.selftest), not observed on the real platform", "languageFrom": "bridge platform.language (stored player choice wins), fallback en" },
+  "checks": {
+    "htmlZip": "PASS",
+    "bridgeAtLeast_2_4_1": "PASS",
+    "noEscKey": "PASS",
+    "noGoogleFontsOrExternalRequests": "PASS",
+    "noLocalStorageOrIndexedDbInGameBundle": "PASS",
+    "soundNotCodeSynthesized": "FAIL (all audio is procedural Web Audio, src/engine/audio.ts; 99 cues listed in playgama/risks.md)",
+    "interstitialViaBridge": "PASS in code (after the death card and before a new run); not observed on the platform",
+    "rewardedOnlyOptIn": "N/A (no rewarded ads in the game)",
+    "muteButton": "PASS (desktop row and phone top row, key M)",
+    "squareWindow600x600": "PASS (no scroll, fills area)"
+  },
+  "live": {
+    "desktop_1280x720": { "bridgeInit": true, "errors": 0, "externalRequests": 0, "pageScroll": false, "escOpensPanel": false },
+    "phone_landscape_844x390": { "bridgeInit": true, "errors": 0, "externalRequests": 0, "pageScroll": false },
+    "phone_portrait_390x844": { "bridgeInit": true, "errors": 0, "note": "landscape-only game: rotate placeholder is shown", "pageScroll": false },
+    "square_600x600": { "bridgeInit": true, "errors": 0, "pageScroll": false }
+  },
+  "tests": { "tsc": "clean", "sim": "40/40", "world": "191/191", "mine": "20/20", "inGameSelfTest": "324/324 (desktop)" },
+  "reference": { "playgamaApplicationId": "cmwajeosz1jkfog0hdkosflqm", "status": "DRAFT (created in this chat on the owner's yes; form filled; NO archive uploaded, NOT published, NOT submitted)" },
+  "blockers": ["sound is code-synthesized (rule 3.3.2)", "AI-generated art without human refinement (rule 4.3.1, risk)", "verify-build not run", "FPS/memory on real phones not measured (owner measures)"],
+  "readyForSandbox": false
+}

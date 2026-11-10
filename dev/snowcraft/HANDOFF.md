@@ -1,3 +1,5 @@
+> **Status at 0.14.0 (read first):** see `playgama/status-0.14.0.md` and `verify/snowcraft-v0.14.0.json`. The build is NOT ready for the sandbox: all sound is code-synthesized (Playgama rule 3.3.2) and the project's verify-build was not run. A DRAFT game already exists on Playgama (id `cmwajeosz1jkfog0hdkosflqm`, form filled, nothing uploaded or published): reuse it. The older text below was written while the platform work was still in progress; where it conflicts, the status file wins.
+
 # SNOWCRAFT · handoff for the Playgama publishing chat
 
 Single entry point. Read this file first, then the files in `playgama/`. Repo root: `/home/user/Alexlike111.github.io/dev/snowcraft`. Branch: `claude/gracious-newton-yc3hi1`. Snapshot: 2026-11-10 (last commit `52396c7`). Paths below are relative to the repo root unless they are absolute.

@@ -1,0 +1,11 @@
+{
+    "advertisement": {
+        "minimumDelayBetweenInterstitial": 60,
+        "interstitial": {
+            "placements": [
+                { "id": "game_over" },
+                { "id": "new_run" }
+            ]
+        }
+    }
+}
