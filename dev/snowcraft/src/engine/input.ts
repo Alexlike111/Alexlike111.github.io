@@ -42,10 +42,10 @@ function press(code: string) {
     case 'Space': case 'KeyW': case 'ArrowUp': input.jumpPressed = true; break;
     case 'KeyE': input.interactPressed = true; break;        // E: alias of the right mouse button (interact)
     case 'KeyF': input.eatPressed = true; break;
-    case 'KeyC': case 'KeyI': input.craftPressed = true; break;
+    case 'KeyC': case 'KeyI': case 'Tab': input.craftPressed = true; break;   // the inventory: I, C or Tab (Tab is blocked for the page below)
     case 'KeyJ': input.journalPressed = true; break;
-    case 'KeyM': input.journalPressed = true; input.mapPressed = true; break;
-    case 'Escape': if (!closeOverlay()) input.craftPressed = true; break;      // Esc closes the open panel first; only with nothing open it toggles the inventory
+    case 'KeyM': window.dispatchEvent(new Event('sc:mutekey')); break;        // mute (ui/menu.ts owns the sound state; the mute button shows it)
+    // Escape is not bound: the browser reserves it for leaving full screen (TERRARIA_CONTROLS, requirement 1.5.2)
     case 'KeyP': input.pausePressed = true; break;                              // pause + the settings panel (ui/menu.ts)
     case 'KeyR': input.smartToggle = true; break;
     case 'KeyV': input.ventPressed = true; break;
@@ -58,13 +58,6 @@ function press(code: string) {
 }
 const ZOOM_CODES = new Set(['Equal', 'Minus', 'NumpadAdd', 'NumpadSubtract', 'Digit0', 'Numpad0']);
 const titleUp = () => document.body.classList.contains('title-open');
-
-// ---- Esc: close the topmost open thing (TERRARIA_CONTROLS). A module that shows a panel registers a closer: it shuts the panel and returns true
-// when the panel was open; Esc then does nothing else. Registration order is the order of the checks.
-const closers: (() => boolean)[] = [];
-/** Register a closer for Esc. It must return true only when it has just closed something. */
-export function onEscape(fn: () => boolean) { closers.push(fn); }
-function closeOverlay(): boolean { for (const f of closers) { if (f()) return true; } return false; }
 
 // ---- Left Ctrl tap (keydown + keyup within 400 ms, nothing else pressed or clicked or wheeled in between) toggles the smart cursor
 const CTRL_TAP_MS = 400;
@@ -84,15 +77,16 @@ export function initInput(canvas: HTMLElement) {
   if (inited) return;
   inited = true; canvasEl = canvas;
   addEventListener('keydown', (e) => {
-    if (((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') && e.code !== 'Escape') return;       // Esc still reaches the game (the zoom slider in the pause settings keeps focus)
-    if (BLOCK.has(e.code) || e.code === 'F2' || ((e.ctrlKey || e.metaKey) && ZOOM_CODES.has(e.code))) e.preventDefault();     // Ctrl +/- must zoom the game, not the page
+    if ((e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT') return;       // the settings slider and the text fields keep their keys
+    if (BLOCK.has(e.code) || e.code === 'F2' || ((e.ctrlKey || e.metaKey) && ZOOM_CODES.has(e.code))) e.preventDefault();     // Tab, arrows, Space: no focus jumps / scrolling; Ctrl +/- must zoom the game, not the page
     if (e.repeat) return;
     keyDown(e.code);
   });
   addEventListener('keyup', (e) => { keyUp(e.code); });
   addEventListener('blur', () => { keys.clear(); mouse.primary = mouse.secondary = false; ctrlClean = false; });
   const target: EventTarget = document.getElementById('stage') ?? canvas;
-  target.addEventListener('contextmenu', (e) => e.preventDefault());
+  // the browser menu never opens on the game (requirement 1.4.5): a right click is the interact button, a long press is not a menu
+  addEventListener('contextmenu', (e) => { const t = e.target as HTMLElement | null; if (!t?.closest?.('input,textarea,[data-allow-menu]')) e.preventDefault(); });
   target.addEventListener('pointerdown', (ev) => {
     const e = ev as PointerEvent;
     if (e.pointerType === 'touch') return;                  // ui/touch.ts

@@ -85,7 +85,7 @@ html body.touch-ui #hud .sn-tx b{font-size:12.5px}
 html body.touch-ui #hud .sn-key{display:block}
 html body.touch-ui #hud .bw .rows,html body.touch-ui #hud .belt,html body.touch-ui #hud .dial .day,html body.touch-ui #hud .pnl h3{font-family:var(--f-ui)}
 /* while the bag / journal / menu are open the right-hand cluster steps aside (Сумка, Журнал and ⚙ stay); the stick hint steps aside too */
-body.panel-open #touch .tb:not(#tb-bag):not(#tb-jour):not(#tb-menu){display:none}
+body.panel-open #touch .tb:not(#tb-bag):not(#tb-jour):not(#tb-menu):not(#tb-mute){display:none}
 body.panel-open #touch .ghost{display:none !important}
 /* senses on a phone: the legend takes the chip's place (the same numbers hang above the player), so the flow stays clear of the player's head */
 html body.touch-ui.senses-on #hud .chip{display:none !important}

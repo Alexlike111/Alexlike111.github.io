@@ -2,7 +2,8 @@
 // left of the sun dial: ⚙ opens the settings panel, ⛶ toggles fullscreen (Shift+Enter does the same). On touch devices ui/touch.ts draws its own ⚙
 // and dispatches window 'sc:menu', which opens the same panel. The panel follows the pause (P: devhud.ts toggles G.paused).
 // The panel pauses the game; closing resumes it, unless the game was already paused before the panel opened (a rotation pause, a manual pause).
-// P (devhud.ts toggles the pause) opens it too; Esc closes it (TERRARIA_CONTROLS: Esc is the inventory, P the pause).
+// P (devhud.ts toggles the pause) opens it too; P or ✕ closes it. Esc is not used by the game (the browser keeps it for full screen).
+// The speaker button (next to ⚙ / ⛶ on desktop, in the touch top row on a phone) and the M key toggle the same mute state as the «Звук» row here.
 // Rows: Продолжить · Полный экран · Масштаб (zoomui.ts) · Звук (on/off + volume) · Язык · Качество · Интерфейс (full / minimal, see hudmode.ts).
 // Choices live in localStorage (try/catch everywhere): sc.vol {v,m}, sc.q 0|1|2, sc.lang, sc.ui. The URL ?q= still wins over sc.q.
 import { storeGet, storeSet, storeRemove } from '../platform/store';
@@ -13,7 +14,6 @@ import { resize } from '../engine/render';
 import { saveGame } from '../game/save';
 import { mountZoomControl } from './zoomui';
 import { getUiMode, setUiMode, type UiMode } from './hudmode';
-import { onEscape } from '../engine/input';
 
 const S = strings('menu', {
   btn: 'Настройки', fsBtn: 'Полный экран (Shift+Enter)', title: 'Настройки', cont: 'Продолжить', close: 'Закрыть',
@@ -22,7 +22,8 @@ const S = strings('menu', {
   ui: 'Интерфейс', uiFull: 'Полный', uiMin: 'Минимум',
   fsNo: 'Полный экран здесь недоступен. Открой игру отдельной вкладкой или нажми значок ⤢ вверху страницы',
   langNote: 'Язык: {name}. Страница перезагрузится, чтобы применить его',
-  hint: 'P — настройки и пауза · Esc — закрыть · Shift+Enter — полный экран',
+  hint: 'P — настройки и пауза · M — звук · Shift+Enter — полный экран',
+  mute: 'Звук',
   controls: 'Управление', keys: 'Клавиши',
 });
 
@@ -31,13 +32,15 @@ const DEF_VOL = { v: 80, m: false };
 const MUSIC_RATIO = 0.45 / 0.8;             // audio.ts defaults: music 0.45 under master 0.8
 
 const CSS = `
-#sc-menubtn,#sc-fsbtn{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));z-index:49;width:40px;height:40px;box-sizing:border-box;margin:0;padding:0;display:flex;align-items:center;justify-content:center;
+#sc-menubtn,#sc-fsbtn,#sc-mutebtn{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));z-index:49;width:40px;height:40px;box-sizing:border-box;margin:0;padding:0;display:flex;align-items:center;justify-content:center;
   background:rgba(8,16,30,.55);border:1px solid rgba(124,198,238,.45);border-radius:6px;color:#dff0ff;opacity:.72;cursor:pointer;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent;box-shadow:0 0 0 1px #05080f}
 #sc-menubtn{right:calc(202px + env(safe-area-inset-right,0px))}     /* left of the sun dial (#hud .dial: 142 px wide at the right edge) */
 #sc-fsbtn{right:calc(158px + env(safe-area-inset-right,0px))}
-#sc-menubtn svg,#sc-fsbtn svg{width:24px;height:24px;display:block;pointer-events:none}
-#sc-menubtn:hover,#sc-fsbtn:hover,#sc-menubtn:focus-visible,#sc-fsbtn:focus-visible,#sc-fsbtn.on{opacity:1;border-color:#ffc46e;color:#fff;outline:none}
-body.touch-ui #sc-menubtn,body.touch-ui #sc-fsbtn,body.title-open #sc-menubtn,body.title-open #sc-fsbtn{display:none !important}
+#sc-mutebtn{right:calc(102px + env(safe-area-inset-right,0px))}     /* desktop: next to ⛶ and ⚙ (ui.css keeps the same row) */
+#sc-menubtn svg,#sc-fsbtn svg,#sc-mutebtn svg{width:24px;height:24px;display:block;pointer-events:none}
+#sc-menubtn:hover,#sc-fsbtn:hover,#sc-mutebtn:hover,#sc-menubtn:focus-visible,#sc-fsbtn:focus-visible,#sc-mutebtn:focus-visible,#sc-fsbtn.on{opacity:1;border-color:#ffc46e;color:#fff;outline:none}
+#sc-mutebtn.muted{color:#ff9a88;border-color:rgba(255,154,136,.6)}
+body.touch-ui #sc-menubtn,body.touch-ui #sc-fsbtn,body.touch-ui #sc-mutebtn,body.title-open #sc-menubtn,body.title-open #sc-fsbtn,body.title-open #sc-mutebtn{display:none !important}
 body.sc-menu-open #hud .pause{display:none !important}
 #sc-menu{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;display:none;box-sizing:border-box;width:min(640px,92vw);max-width:92vw;max-height:86vh;overflow:auto;overscroll-behavior:contain;
   padding:10px 12px 12px;background:rgba(8,16,30,.95);border:1px solid rgba(124,198,238,.5);border-radius:8px;box-shadow:0 0 0 1px #05080f,0 12px 40px rgba(0,0,0,.5);
@@ -73,9 +76,15 @@ body.touch-ui #sc-menu .hint{display:none}
 }`;
 
 const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M18.56 10.21L21.09 10.56L21.09 13.44L18.56 13.79L17.91 15.37L19.44 17.41L17.41 19.44L15.37 17.91L13.79 18.56L13.44 21.09L10.56 21.09L10.21 18.56L8.63 17.91L6.59 19.44L4.56 17.41L6.09 15.37L5.44 13.79L2.91 13.44L2.91 10.56L5.44 10.21L6.09 8.63L4.56 6.59L6.59 4.56L8.63 6.09L10.21 5.44L10.56 2.91L13.44 2.91L13.79 5.44L15.37 6.09L17.41 4.56L19.44 6.59L17.91 8.63ZM15.2 12A3.2 3.2 0 1 0 8.8 12A3.2 3.2 0 1 0 15.2 12Z"/></svg>';
+// speaker: on = the cone with two waves; off = the cone with a cross (the same drawing for the touch button, see touch.ts)
+const SPK_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 9.2h3.6L11.5 5v14l-4.9-4.2H3z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M15.2 9.2a3.8 3.8 0 0 1 0 5.6M18.2 6.2a7.6 7.6 0 0 1 0 11.6"/></svg>';
+const SPK_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 9.2h3.6L11.5 5v14l-4.9-4.2H3z"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M15.5 9.5l5.5 5M21 9.5l-5.5 5"/></svg>';
+export const speakerSvg = (muted: boolean) => (muted ? SPK_OFF : SPK_ON);
 const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
 
 let host: HTMLElement | null = null, panel: HTMLElement | null = null, gear: HTMLElement | null = null, fsBtn: HTMLElement | null = null, keysRow: HTMLElement | null = null;
+let muteBtn: HTMLElement | null = null;
+let memVol: { v: number; m: boolean } | null = null;       // the last choice, kept when the storage is blocked (private window): the mute then still holds
 let open = false, ownPause = false, wasPaused = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -88,9 +97,19 @@ export function readVol(): { v: number; m: boolean } {
     const j = JSON.parse(getItem(KEY.vol) ?? 'null');
     if (j && typeof j.v === 'number' && Number.isFinite(j.v)) return { v: Math.max(0, Math.min(100, Math.round(j.v))), m: !!j.m };
   } catch { /* bad JSON: defaults */ }
-  return { ...DEF_VOL };
+  return memVol ? { ...memVol } : { ...DEF_VOL };
 }
-function writeVol(x: { v: number; m: boolean }) { setItem(KEY.vol, JSON.stringify(x)); applyVol(x); }
+function writeVol(x: { v: number; m: boolean }) {
+  memVol = { ...x };
+  setItem(KEY.vol, JSON.stringify(x)); applyVol(x);
+  window.dispatchEvent(new Event('sc:mute'));           // the speaker buttons (desktop row, touch top row) redraw
+}
+/** Is the game muted (the «Звук» row, the speaker button and the M key share this state). */
+export const isMuted = (): boolean => readVol().m;
+/** Bridge audio state (PG rule 3.3.4): the platform mutes or unmutes the game. The choice is stored like the «Звук» row's. */
+export function setMuteFromPlatform(on: boolean) { const c = readVol(); if (c.m !== !!on) writeVol({ v: c.v, m: !!on }); sync(); }
+/** Mute toggle: the speaker button, the M key and the «Звук» row all call this. */
+export function toggleMute() { const c = readVol(); writeVol({ v: c.v, m: !c.m }); sync(); }
 export function applyVol(x: { v: number; m: boolean }) {
   try { sfx.setVolume(x.v / 100, (x.v / 100) * MUSIC_RATIO); sfx.setMuted(x.m); } catch { /* audio is optional */ }
 }
@@ -235,7 +254,7 @@ function build() {
   const zw = document.createElement('div'); zw.className = 'w'; mountZoomControl(zw); g.appendChild(zw);
 
   const mute = btn('', '', 'sound');
-  mute.addEventListener('click', () => { const c = readVol(); writeVol({ v: c.v, m: !c.m }); sync(); });
+  mute.addEventListener('click', toggleMute);
   const rng = document.createElement('input'); rng.type = 'range'; rng.min = '0'; rng.max = '100'; rng.step = '5'; rng.dataset.k = 'vol';
   rng.setAttribute('aria-label', S.volume);
   rng.addEventListener('input', () => { writeVol({ v: Number(rng.value), m: readVol().m }); });
@@ -253,7 +272,9 @@ function build() {
   const hint = document.createElement('div'); hint.className = 'hint w'; hint.textContent = S.hint; g.appendChild(hint);
 
   panel.append(x, h, g);
-  host.append(gear, fsBtn, panel);
+  muteBtn = btn('', '', ''); muteBtn.id = 'sc-mutebtn'; muteBtn.setAttribute('aria-label', S.mute); muteBtn.title = S.mute + ' (M)';
+  muteBtn.addEventListener('click', toggleMute);
+  host.append(gear, fsBtn, muteBtn, panel);
 }
 
 /** Show the current values on the controls (cheap; called on open and after every change). */
@@ -266,6 +287,7 @@ function sync() {
   const vol = readVol();
   const mute = panel.querySelector('[data-k=sound]') as HTMLElement;
   mute.textContent = vol.m ? S.off : S.on; mute.setAttribute('aria-pressed', String(!vol.m));
+  if (muteBtn) { muteBtn.innerHTML = speakerSvg(vol.m); muteBtn.classList.toggle('muted', vol.m); muteBtn.setAttribute('aria-pressed', String(!vol.m)); }
   (panel.querySelector('[data-k=vol]') as HTMLInputElement).value = String(vol.v);
   (panel.querySelector('[data-k=lang]') as HTMLSelectElement).value = getLang();
   const ui = getUiMode();
@@ -290,7 +312,8 @@ export function initMenu(hostEl: HTMLElement) {
   applyStored();
   build();
   window.addEventListener('sc:menu', () => { if (!titleOn()) toggleMenu(); });        // the touch layer's ⚙
-  onEscape(() => { if (!open) return false; closeMenu(); return true; });              // Esc closes the panel (P / ⚙ open it; Esc no longer opens it)
+  window.addEventListener('sc:mutekey', toggleMute);                                  // the M key (input.ts)
+  window.addEventListener('sc:mute', sync);
   document.addEventListener('fullscreenchange', () => { fsNote(false); sync(); });
   document.addEventListener('webkitfullscreenchange', () => { fsNote(false); sync(); });
   addEventListener('keydown', (e) => {

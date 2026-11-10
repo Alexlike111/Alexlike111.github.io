@@ -1,7 +1,8 @@
-// All persistent key-value data of the game (settings, hints memory, records, language choice…) goes through this module.
+// All persistent key-value data of the game (settings, hints memory, records, language choice, the save in the PG build) goes through this module.
 // Playgama rule 3.2.1: progress and settings are saved ONLY through the Bridge storage module — never localStorage / IndexedDB / cookies.
 // So: reads are synchronous from an in-memory cache that storeInit() fills once at boot; writes update the cache at once and reach the backend
 // (the Bridge in the Playgama build, localStorage in the plain preview/artifact build and in the tests) coalesced into one call.
+// In the PG build the localStorage backend is not even compiled in (__PG__ is a compile-time constant, see globals.d.ts).
 export interface StoreBackend {
   /** true: writes go through immediately (localStorage); false: batched after a short delay (the Bridge: «write only on meaningful change, all keys in one call») */
   immediate: boolean;
@@ -14,17 +15,27 @@ const cache = new Map<string, string>();
 const dirty = new Set<string>(), removed = new Set<string>();
 let timer = 0;
 
-const localBackend: StoreBackend = {
+const localBackend: StoreBackend | null = __PG__ ? null : {
   immediate: true,
   async get(keys) { return keys.map(k => { try { return localStorage.getItem(k); } catch { return null; } }); },
   async set(keys, values) { keys.forEach((k, i) => { try { localStorage.setItem(k, values[i]); } catch { /* blocked: the value lives in the cache until the page closes */ } }); },
   async remove(keys) { for (const k of keys) { try { localStorage.removeItem(k); } catch { /* ignore */ } } },
 };
-let backend: StoreBackend = localBackend;
+// PG build without a Bridge (the SDK script did not load): values live in memory for the page's lifetime only
+const memoryBackend: StoreBackend = {
+  immediate: true,
+  async get(keys) { return keys.map(k => cache.get(k) ?? null); },
+  async set() { /* the cache already holds the values */ },
+  async remove() { /* the cache already dropped them */ },
+};
+let backend: StoreBackend = localBackend ?? memoryBackend;
 
 /** The Playgama build installs the Bridge backend here (src/platform/bridge.ts) before storeInit(). */
 export function setStoreBackend(b: StoreBackend) { backend = b; }
-export const storeBackendIsLocal = () => backend === localBackend;
+export function getStoreBackend(): StoreBackend { return backend; }
+export const storeBackendIsLocal = () => localBackend !== null && backend === localBackend;
+/** 'local' = localStorage (preview build), 'bridge' = any other backend (the Bridge, or the memory fallback of the PG build). */
+export const storeKind = (): 'local' | 'bridge' => (storeBackendIsLocal() ? 'local' : 'bridge');
 
 /** Keys the game reads synchronously later; call once at boot and await it before the UI is built. Never throws. */
 export async function storeInit(keys: string[]): Promise<void> {
@@ -64,4 +75,18 @@ export async function storeGetNow(k: string): Promise<string | null> {
 export async function storeRemoveNow(k: string): Promise<void> {
   cache.delete(k); dirty.delete(k);
   try { await backend.remove([k]); } catch { /* ignore */ }
+}
+/** Read keys that are not cached (the save chunks), one backend call. Never throws: null for every key on failure. */
+export async function storeReadMany(keys: string[]): Promise<(string | null)[]> {
+  try { const v = await backend.get(keys); return keys.map((_, i) => (typeof v[i] === 'string' ? v[i] : null)); } catch { return keys.map(() => null); }
+}
+/** One save written in ONE backend call (sets) plus one call for the keys to drop (removes). Keeps the cache in step. Resolves false on failure. */
+export async function storeWriteBatch(sets: [string, string][], removes: string[]): Promise<boolean> {
+  for (const [k, v] of sets) { cache.set(k, v); dirty.delete(k); removed.delete(k); }
+  for (const k of removes) { cache.delete(k); dirty.delete(k); }
+  try {
+    if (sets.length) await backend.set(sets.map(s => s[0]), sets.map(s => s[1]));
+    if (removes.length) await backend.remove(removes);
+    return true;
+  } catch { return false; }
 }

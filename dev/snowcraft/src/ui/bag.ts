@@ -117,7 +117,7 @@ const CSS = `
 body.touch-ui #hud .pnl{max-height:calc(100vh - 12px - env(safe-area-inset-bottom,0px));padding:6px 8px}
 body.touch-ui #hud .pnl .cell{min-height:48px;aspect-ratio:auto;height:48px}
 body.touch-ui #hud .pnl .wear .cell{height:50px}
-body.bag-open #touch .tb:not(#tb-bag),body.bag-open #touch .ghost,body.bag-open #touch .stick,body.bag-open #touch .knob,body.bag-open #nearbtn{display:none!important}
+body.bag-open #touch .tb:not(#tb-bag):not(#tb-mute):not(#tb-menu),body.bag-open #touch .ghost,body.bag-open #touch .stick,body.bag-open #touch .knob,body.bag-open #nearbtn{display:none!important}
 body.touch-ui #hud .pnl .wt{margin:2px 0 4px}body.touch-ui #hud .pnl .wtxt{margin:-2px 0 4px}body.touch-ui #hud .pnl .top{margin-bottom:4px}
 body.touch-ui #hud .pnl .srchbar{margin:0 0 3px}
 body.touch-ui #hud .pnl .grid{gap:3px}
@@ -234,7 +234,7 @@ export function bagHtml(): string {
   const wt = weight(), lv = loadLevel(wt);
   const sorts = `<button class="mini" data-act="sort" data-m="kind" title="${S.sortTitle}">${S.sortKind}</button><button class="mini" data-act="sort" data-m="weight" title="${S.sortTitle}">${S.sortWeight}</button>`;
   const phone = touchy();
-  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span>${phone ? `<span class="hsorts">${sorts}</span>` : ''}<span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
+  let h = `<button class="px" data-act="close" aria-label="${S.close}" title="${S.close}">✕</button><div class="cols"><div class="col"><h3><span>${S.pack}</span>${phone ? `<span class="hsorts">${sorts}</span>` : ''}<span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
   h += `<div class="wt"><i style="width:${Math.min(100, wt / weightMax() * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
   h += `<div class="pk"><div class="top"><div class="wear">`;   // .pk: the desktop layout puts the wear column beside the grid (ui.css); the phone keeps the row above it
   for (let k = 0; k < WEAR_SLOTS.length; k++) {
@@ -443,6 +443,7 @@ export function attachBag(panel: HTMLElement, setOpen: (v: boolean) => void, cra
   const btn = document.createElement('div'); btn.id = 'nearbtn'; document.body.appendChild(btn);
   btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); nearUi.open = !nearUi.open; });
   list.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('.nx')) { nearUi.open = false; return; }      // the list's ✕
     const row = (e.target as HTMLElement).closest('.nr') as HTMLElement | null; if (!row) return;
     const cur = nearbyList(); const n = cur[+row.dataset.i!]; if (n) takeNear(n);
     nearUi.open = cur.length > 2 ? nearUi.open : false;
@@ -462,7 +463,7 @@ export function attachBag(panel: HTMLElement, setOpen: (v: boolean) => void, cra
     const k = cur.map(n => n.kind + n.id + n.label).join('|');
     if (k !== listKey) {
       listKey = k;
-      let h = `<h3><span>${S.near}</span><span class="dim">${cur.length}</span></h3>`;
+      let h = `<button class="px nx" data-x="near" aria-label="${S.close}" title="${S.close}">✕</button><h3><span>${S.near}</span><span class="dim">${cur.length}</span></h3>`;
       cur.slice(0, 8).forEach((n, i) => {
         const ic = img(itemUrl(n.item ?? (n.kind === 'sled' ? 'sled' : 'cache')));
         const act = n.kind === 'drop' ? S.takeOne : n.kind === 'sled' ? S.hitch : S.open;

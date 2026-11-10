@@ -11,10 +11,11 @@ import { getItem, itemName } from '../game/items';
 import { icon } from '../engine/sprites';
 import { worldToScreen } from '../engine/render';
 import { stepZoom } from '../engine/zoom';
+import { isMuted, toggleMute, speakerSvg } from './menu';
 
 const S = strings('touch', {
   action: 'Действие', jump: 'Прыжок', take: 'Взять', belt: 'Пояс', bag: 'Сумка', journal: 'Журнал', parka: 'Парка', menu: 'Меню',
-  senses: 'Чутьё', rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
+  senses: 'Чутьё', mute: 'Звук', rotate: 'Поверни телефон', rotateHint: 'SNOWCRAFT играется в альбомной ориентации',
   moveHint: 'тяни: ходьба', radialCap: 'Выбери предмет · тап мимо — закрыть', wheelCap: 'Мышь к предмету · отпусти Q', wheelEmpty: 'пусто',
 });
 
@@ -45,7 +46,7 @@ let R = 56;                                     // stick radius px (follows the 
 const AIM_LIFT = 48;                            // the aim cursor sits this many CSS px above the finger (the finger hides the spot it aims at)
 
 const CSS = `
-:root{--u:clamp(36px,13vh,60px);--R:clamp(34px,15vh,56px);--trow:calc(var(--u)*3 + 24px)}
+:root{--u:clamp(36px,13vh,60px);--R:clamp(34px,15vh,56px);--trow:calc(var(--u)*4 + 30px)}
 #touch{position:fixed;inset:0;z-index:30;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none;font-family:'Jura',system-ui,sans-serif;font-weight:700;
   padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0)}
 #touch .tb{box-sizing:border-box;position:absolute;pointer-events:auto;touch-action:none;display:flex;align-items:center;justify-content:center;color:#dff0ff;
@@ -63,11 +64,13 @@ const CSS = `
 #touch #tb-senses{width:var(--u);height:var(--u);right:calc(12px + var(--u)*.3 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.6 + env(safe-area-inset-bottom,0px))}
 #touch #tb-senses.act{background:rgba(40,120,96,.62);border-color:#8cf5cf;color:#eafff7}
 #touch #tb-parka{width:var(--u);height:var(--u);right:calc(18px + var(--u)*1.675 + env(safe-area-inset-right,0px));bottom:calc(24px + var(--u)*2.6 + env(safe-area-inset-bottom,0px))}
-/* top-right row: Сумка, Журнал, ⚙ меню (icon-only squares) */
-#touch #tb-bag,#touch #tb-jour,#touch #tb-menu{width:var(--u);height:var(--u);top:calc(8px + env(safe-area-inset-top,0px));border-radius:10px}
+/* top-right row: ⚙ меню, the speaker (mute), Журнал, Сумка (icon-only squares; the speaker sits left of the gear) */
+#touch #tb-bag,#touch #tb-jour,#touch #tb-menu,#touch #tb-mute{width:var(--u);height:var(--u);top:calc(8px + env(safe-area-inset-top,0px));border-radius:10px}
 #touch #tb-menu{right:calc(12px + env(safe-area-inset-right,0px))}
-#touch #tb-jour{right:calc(18px + var(--u) + env(safe-area-inset-right,0px))}
-#touch #tb-bag{right:calc(24px + var(--u)*2 + env(safe-area-inset-right,0px))}
+#touch #tb-mute{right:calc(18px + var(--u) + env(safe-area-inset-right,0px))}
+#touch #tb-mute.muted{color:#ff9a88;border-color:rgba(255,154,136,.7)}
+#touch #tb-jour{right:calc(24px + var(--u)*2 + env(safe-area-inset-right,0px))}
+#touch #tb-bag{right:calc(30px + var(--u)*3 + env(safe-area-inset-right,0px))}
 /* the walking stick is FIXED in the bottom-left corner and always visible; the knob follows the thumb */
 #touch .stick{position:absolute;left:calc(18px + env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));width:calc(var(--R)*2);height:calc(var(--R)*2);box-sizing:border-box;border-radius:50%;border:2px solid rgba(190,226,250,.55);background:rgba(14,26,44,.35)}
 #touch .knob{position:absolute;width:calc(var(--R)*.95);height:calc(var(--R)*.95);margin:calc(var(--R)*-.475) 0 0 calc(var(--R)*-.475);border-radius:50%;background:rgba(190,226,250,.45);border:2px solid #cfeaff;box-sizing:border-box}
@@ -131,6 +134,12 @@ export function initTouch(uiRoot: HTMLElement) {
   // top-right row: Сумка, Журнал, ⚙ меню (the settings panel is agent M's: it listens for 'sc:menu')
   const bag = btn('tb-bag', 'bag', S.bag, true);
   hold(bag, () => { input.craftPressed = true; }, () => {});
+  // the speaker: the same mute state as the «Звук» row of the settings panel (menu.ts); its drawing follows the state
+  const mute = document.createElement('div'); mute.id = 'tb-mute'; mute.className = 'tb sq'; mute.setAttribute('role', 'button'); mute.setAttribute('aria-label', S.mute); mute.title = S.mute;
+  layer!.appendChild(mute);
+  const paintMute = () => { mute.innerHTML = speakerSvg(isMuted()); mute.classList.toggle('muted', isMuted()); };
+  paintMute(); window.addEventListener('sc:mute', paintMute);
+  hold(mute, () => { toggleMute(); }, () => {});
   const jour = btn('tb-jour', 'journal', S.journal, true);
   hold(jour, () => { input.journalPressed = true; }, () => {});
   const menu = btn('tb-menu', 'menu', S.menu, true);

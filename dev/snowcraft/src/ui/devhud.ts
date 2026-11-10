@@ -13,7 +13,7 @@ import '@fontsource/jura/cyrillic-400.css';
 import '@fontsource/jura/latin-600.css';
 import '@fontsource/jura/cyrillic-600.css';
 import { G } from '../game/state';
-import { input, isKeyDown, onEscape } from '../engine/input';
+import { input, isKeyDown } from '../engine/input';
 import { strings, fmt } from '../content/i18n';
 import { inv, BELT, select, equip, unequip, beltCells } from '../game/inventory';
 import { getItem, itemName, stackIcon, snowClass, snowClassName } from '../game/items';
@@ -48,7 +48,7 @@ const S = strings('hud', {
   gFire: 'Огонь', gFood: 'Еда и вода', gWear: 'Одежда', gHunt: 'Охота', gBuild: 'Стройка',
   stNone: '', stTable: 'стол', stFire: 'огонь', stDrum: 'бочка', stAntenna: 'мачта',
   stove: 'печь', hintMove: 'ход', hintEat: 'еда', hintParka: 'парка', hintDome: 'купол/курсор', hintDrop: 'бросить', hintJump: 'прыжок', hintRun: 'бег', hintBelt: 'пояс (держи)', hintJournal: 'журнал', hintSense: 'чутьё', hintHelp: 'подсказки', hintMore: 'Все клавиши',
-  rmb: 'ПКМ', kUse: 'использовать', kInteract: 'взаимодействовать', kSlot: 'слот', kInv: 'инвентарь', kPause: 'пауза / настройки', kMoveItem: 'переложить', kSmart: 'умный курсор', kZoom: 'масштаб', kBelt: 'пояс (держи)',
+  rmb: 'ПКМ', kUse: 'использовать', kInteract: 'взаимодействовать', kSlot: 'слот', kInv: 'инвентарь', kPause: 'пауза / настройки', kMoveItem: 'переложить', kSmart: 'умный курсор', kZoom: 'масштаб', kBelt: 'пояс (держи)', kMute: 'звук', kClose: 'закрыть',
   jTitle: 'Журнал', jGoals: 'Цели', jLog: 'Записи', jSites: 'Места', jNone: 'пока пусто', jNote: 'Найдена записка', gFire2: 'Растопить печь', gBaro: 'Проверить барометр', gShelter: 'Укрытие от ★★', gSleep: 'Выспаться в тепле', gParts: 'Детали рации {n}/3', gMast: 'Антенная мачта', gRadio: 'Починить рацию', gEnd: 'Дожить до рассвета (день {n})',
   lmb: 'ЛКМ', objTitle: 'Цель', radialHint: 'Пояс',
   wThirst: 'Хочется пить', wHunger: 'Голодно', wTired: 'Устал', wHurt: 'Плохо', wWet: 'Мокро',
@@ -56,7 +56,7 @@ const S = strings('hud', {
 
 let root: HTMLElement, bw: HTMLElement, dial: HTMLElement, stack: HTMLElement, objEl: HTMLElement, chip: HTMLElement, toastBox: HTMLElement, beltEl: HTMLElement, bname: HTMLElement;
 let arrowEl: HTMLElement, arrowKey = '', arrowT = 0, arrowDir = NaN, arrowM = -1;
-let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, fullEl: HTMLElement, mainEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement;
+let tip: HTMLElement, deadEl: HTMLElement, panel: HTMLElement, hintEl: HTMLElement, fullEl: HTMLElement, mainEl: HTMLElement, endEl: HTMLElement, devEl: HTMLElement | null = null, pauseEl: HTMLElement, scrim: HTMLElement;
 let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
 let beltKey = '', toastKey = '';
@@ -325,7 +325,10 @@ export function initHud(host: HTMLElement) {
   chip = mk('chip', stack);
   bot = document.createElement('div'); bot.className = 'bot'; root.appendChild(bot);
   toastBox = document.createElement('div'); toastBox.className = 'tbox'; bot.appendChild(toastBox);
-  bname = mk('bname', bot); beltEl = mk('belt', bot); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause'); panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) { jOpen = false; jEl.style.display = 'none'; } }); hintEl = mk('hint'); endEl = mk('end');
+  bname = mk('bname', bot); beltEl = mk('belt', bot); tip = mk('tip'); deadEl = mk('dead'); pauseEl = mk('pause');
+  // the journal is a modal: a dim backdrop under it (a click on the dark area closes it, like its ✕); it sits below the panels in the DOM
+  scrim = mk('scrim'); scrim.addEventListener('click', () => { if (jOpen) closeJournal(); });
+  panel = mk('pnl'); jEl = mk('pnl'); jEl.addEventListener('click', (e) => { if (journalClick(e)) closeJournal(); }); hintEl = mk('hint'); endEl = mk('end');
   fullEl = document.createElement('div'); fullEl.className = 'hfull'; mainEl = document.createElement('div'); mainEl.className = 'hmain';
   hintEl.appendChild(fullEl); hintEl.appendChild(mainEl);       // the full list sits above the row: the panel grows upward
   arrowEl = document.createElement('div'); arrowEl.className = 'arw'; arrowEl.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 3.5 L15.5 9 L2 14.5 Z"/></svg><span></span>'; root.appendChild(arrowEl);
@@ -336,14 +339,8 @@ export function initHud(host: HTMLElement) {
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
 
   if (DEV) { devEl = mk('dev'); }
-  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; objGoal = ''; objFlash = 0; });
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; scrim.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; objGoal = ''; objFlash = 0; });
   window.addEventListener('sc:keys', () => { if (!hintMem.full) toggleFull(); });     // the settings panel (ui/menu.ts) opens the full key list as «?» / H do (it never closes it)
-  // Esc closes the journal first, then the inventory panel (TERRARIA_CONTROLS); with neither open Esc opens the inventory (input.ts)
-  onEscape(() => {
-    if (jOpen) { jOpen = false; jEl.style.display = 'none'; return true; }
-    if (panelOpen) { panelOpen = false; panel.style.display = 'none'; return true; }
-    return false;
-  });
   beltEl.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const el = (e.target as HTMLElement).closest('.sl') as HTMLElement | null; if (!el) return;
@@ -360,6 +357,7 @@ let hPrev = false, hintKey = '';
 const toastSeen = new WeakSet<object>();  // desktop toasts: the 0.5 s extra life is given once per toast
 function saveHints() { try { storeSet(HKEY, JSON.stringify(hintMem)); } catch { /* storage blocked: the hints simply come back next time */ } }
 function toggleFull() { hintMem.full = !hintMem.full; saveHints(); hintKey = ''; }
+function closeJournal() { jOpen = false; jEl.style.display = 'none'; scrim.style.display = 'none'; }
 /** Desktop: the key row is gone from the bottom of the screen. Only the small «?» chip stays there; «?» / H / the settings panel open the full list above it. */
 function renderHints() {
   // «Чутьё» (sensesui.ts) appends its Q / X chips to the box: they belong to the full list, so they are taken out here
@@ -369,12 +367,13 @@ function renderHints() {
   hintKey = key;
   const k = (kb: string, label: string) => `<span><kbd>${kb}</kbd>${label}</span>`;
   mainEl.innerHTML = `<button class="q" data-h="more" title="${S.hintMore}">?</button>`;
+  fullEl.innerHTML = `<button class="hx" data-h="close" aria-label="${S.kClose}" title="${S.kClose}">✕</button>`;   // the list's own ✕ (the «?» chip and H close it too)
   const list: [string, string][] = [
     ['WASD', S.hintMove], ['Space', S.hintJump], ['Shift', S.hintRun], [S.lmb, S.kUse], [S.rmb, S.kInteract], ['колесо · 1–6', S.kSlot],
-    ['Esc · I · C', S.kInv], ['P', S.kPause], ['Shift+' + S.lmb, S.kMoveItem], ['Ctrl', S.kSmart], ['J', S.hintJournal], ['G', S.hintDrop], ['Ctrl+колесо', S.kZoom],
+    ['I / Tab', S.kInv], ['P', S.kPause], ['M', S.kMute], ['Shift+' + S.lmb, S.kMoveItem], ['Ctrl', S.kSmart], ['J', S.hintJournal], ['G', S.hintDrop], ['Ctrl+колесо', S.kZoom],
     ['F', S.hintEat], ['V', S.hintParka], ['X', S.hintSense], ['R', S.hintDome], ['Q', S.kBelt], ['H', S.hintHelp],
   ];
-  fullEl.innerHTML = list.map(([kb, label]) => k(kb, label)).join('');
+  fullEl.insertAdjacentHTML('beforeend', list.map(([kb, label]) => k(kb, label)).join(''));
   fullEl.classList.toggle('on', hintMem.full && !G.mobile);
 }
 
@@ -447,10 +446,10 @@ export function updateHud(dt: number, realDt: number) {
   const titleOn = document.body.classList.contains('title-open');
   const hDown = isKeyDown('KeyH'); if (hDown && !hPrev) toggleFull(); hPrev = hDown;   // H: the full key list (the «?» chip does the same)
   if (titleOn) { input.craftPressed = input.journalPressed = input.mapPressed = input.pausePressed = false; if (panelOpen || jOpen) { panelOpen = jOpen = false; panel.style.display = jEl.style.display = 'none'; } }
-  if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: Escape must not toggle the pause under it
-  if (input.craftPressed) { panelOpen = !panelOpen; panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }
+  if (endEl.style.display === 'flex' || (document.querySelector('#ov .card.end') as HTMLElement | null)?.style.display === 'flex') input.pausePressed = false;       // the ending card is up: P must not toggle the pause under it
+  if (input.craftPressed) { panelOpen = !panelOpen; if (panelOpen && jOpen) closeJournal(); panel.style.display = panelOpen ? 'block' : 'none'; panelAcc = 9; }   // I / C / Tab: the inventory (over the journal it takes its place)
   if (bagWantsOpen() && !titleOn) { jOpen = false; jEl.style.display = 'none'; if (!panelOpen) setPanelOpen(true); }      // a container was opened: show its panel
-  if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }
+  if (input.journalPressed) { jOpen = !jOpen; if (jOpen) { panelOpen = false; panel.style.display = 'none'; if (input.mapPressed) setJournalTab('map'); renderJournal(); } jEl.style.display = jOpen ? 'block' : 'none'; }   // J: the journal (its ✕, a click on the dark area and J close it)
   if (input.pausePressed) { jOpen = false; jEl.style.display = 'none'; panelOpen = false; panel.style.display = 'none'; G.paused = !G.paused; }   // P: always the pause and the settings panel (ui/menu.ts opens it with the pause); the journal and the inventory go
   acc += realDt; panelAcc += realDt; rectAcc += realDt;
   // toasts: desktop = a small stack at the bottom-left (three at most, 4 s, the last second fades); phone = two (one on a short window) in the bottom stack
@@ -484,6 +483,7 @@ export function updateHud(dt: number, realDt: number) {
     tip.style.display = 'block'; placeTip(sx, sy);
   } else tip.style.display = 'none';
   document.body.classList.toggle('panel-open', panelOpen || jOpen);
+  scrim.style.display = jOpen ? 'block' : 'none';
 
   updateArrow(realDt);
   if (acc < 0.1) return;

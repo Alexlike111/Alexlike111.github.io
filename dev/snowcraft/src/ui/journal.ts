@@ -164,7 +164,7 @@ export function renderJournalInto(el: HTMLElement) {
   host = el;
   if (!el.classList.contains('jr')) el.classList.add('jr');
   const sy = el.scrollTop;
-  let h = `<h3><span>${S.title}</span><span class="dim">${seasonLabel()}</span></h3><div class="tabs">`;
+  let h = `<button class="px jx" data-j="close" aria-label="${S.close}" title="${S.close}">✕</button><h3><span>${S.title}</span><span class="dim">${seasonLabel()}</span></h3><div class="tabs">`;
   for (const [t, name] of TABS) h += `<button class="tab${t === tab ? ' on' : ''}" data-j="tab" data-t="${t}">${name()}</button>`;
   h += `</div>`;
   h += tab === 'goals' ? goalsTab() : tab === 'know' ? knowTab() : tab === 'notes' ? notesTab() : tab === 'map' ? mapTab() : stuffTab();

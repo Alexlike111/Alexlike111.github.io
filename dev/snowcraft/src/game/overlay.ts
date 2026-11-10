@@ -51,7 +51,8 @@ html body.touch-ui #ov .cues.cues-top .cue{white-space:nowrap}
 `;
 
 let root: HTMLElement, cues: HTMLElement, endEl: HTMLElement, deadBar: HTMLElement;
-let api: { start: (o: { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean }) => void; restart: () => void } | null = null;
+let api: { start: (o: { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean }) => void; restart: () => void; gate?: (kind: 'station' | 'run', go: () => void) => void } | null = null;
+const gated = (kind: 'station' | 'run', go: () => void) => { if (api?.gate) api.gate(kind, go); else go(); };   // Playgama build: the interstitial waits here (main.ts)
 let shown = '';
 let windCue: HTMLElement | null = null, shiverT = 0, endDelay = -1;
 let vig: HTMLElement | null = null;
@@ -98,9 +99,9 @@ export function initOverlay(host: HTMLElement, a: NonNullable<typeof api>) {
   root.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest('button'); if (!b) return;
     const a = b.dataset.a;
-    if (a === 'back') { endEl.style.display = 'none'; shown = ''; respawn(); }
-    else if (a === 'same') { endEl.style.display = 'none'; shown = ''; deadBar.style.display = 'none'; api?.restart(); }
-    else if (a === 'again') { endEl.style.display = 'none'; shown = ''; deadBar.style.display = 'none'; api?.start({ seed: 1 + ((Math.random() * 900) | 0), diff: G.diff.level, hardcore: G.diff.hardcore }); }
+    if (a === 'back') { endEl.style.display = 'none'; shown = ''; gated('station', respawn); }
+    else if (a === 'same') { endEl.style.display = 'none'; shown = ''; deadBar.style.display = 'none'; gated('run', () => api?.restart()); }
+    else if (a === 'again') { endEl.style.display = 'none'; shown = ''; deadBar.style.display = 'none'; gated('run', () => api?.start({ seed: 1 + ((Math.random() * 900) | 0), diff: G.diff.level, hardcore: G.diff.hardcore })); }
   });
   on('new_game', () => { endEl.style.display = 'none'; shown = ''; endDelay = -1; deadBar.style.display = 'none'; cues.innerHTML = ''; });
   on('respawn', () => { endEl.style.display = 'none'; shown = ''; endDelay = -1; });

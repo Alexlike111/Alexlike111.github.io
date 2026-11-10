@@ -12,7 +12,6 @@ import { inv, add, dropDur, backpacks, weight, unitWeight, fitByWeight, roomFor,
 import { getItem, itemName } from './items';
 import { FIXTURE_DEFS } from './fixtures';
 import { openContainer, openPack, boxTitle } from './search';
-import { onEscape } from '../engine/input';
 
 const S = strings('near', {
   heavy: 'Не поднять: слишком тяжело', full: 'В сумке нет места', sled: 'Нарты', pack: 'Твой рюкзак', sledUp: 'Запрягся в нарты',
@@ -118,7 +117,6 @@ export function takeNear(n: Near): boolean {
 // ---- highlight in the world ---------------------------------------------------------------------------------------------------------
 /** The «Рядом» list is open (tools.ts sets it when E is held, the phone button toggles it; ui/bag.ts draws it). */
 export const nearUi = { open: false };
-onEscape(() => { if (!nearUi.open) return false; nearUi.open = false; return true; });
 export const hi = { list: [] as Near[], best: null as Near | null, acc: 0 };
 export function stepNearby(dt: number) {
   hi.acc += dt; if (hi.acc < 0.1) return; hi.acc = 0;
