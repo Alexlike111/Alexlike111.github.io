@@ -14,7 +14,7 @@ import { throwCell, spawnFx, burstFx } from '../engine/particles';
 import { tempAt } from '../engine/heat';
 import { setCameraLook, addShake } from '../engine/camera';
 import {
-  inv, add, count, remove, selected, select, selectStep, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS,
+  inv, add, count, remove, selected, select, selectStep, spawnDrop, dropDur, held, hitchSled, unhitchSled, sledNear, equip, BELT, backpacks, removeFromSlot, MAX_DROPS, hasPouch,
 } from './inventory';
 import { getItem, itemName, densityOf, auxOfDensity, snowClass, snowClassName, blockWeight, type ItemDef } from './items';
 import {
@@ -39,10 +39,11 @@ const S = strings('tools', {
   thin: 'Слой тонкий', cutNeedSnow: 'Нужен плотный наст', crumble: 'Рассыпется: рыхло', cutOk: 'Режь блок',
   looseSnow: 'рыхлый снег: бери лопатой', packed: 'наст', block: 'снежный блок',
   density: '{c}', iceThick: 'лёд толстый', iceThin: 'лёд тонкий',
-  shovelFull: 'лопата полна: вывали снег',
+  shovelFull: 'Лопата полна: снег отброшен', snowMinus: '−снег', looseTamp: 'Рыхлый: утопчи лопатой (ПКМ)',
+  dropped: 'Брошено: {name} ×{n}', needPouch: 'Нужен подсумок', farHint: 'Подойди ближе',
   scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Режь блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Применить', open: 'Открыть',
   feedLight: 'Зажечь', feed: 'Подкинуть',
-  noSupport: 'Нет опоры', span: 'Пролёт длинный', ok: 'держится', digLooseFirst: 'Сначала откопай снег',
+  noSupport: 'Нет опоры', span: 'Пролёт длинный', ok: 'держится',
   occupied: 'Занято', inYou: 'Ты мешаешь',
   gotBlock: 'Блок: {c}', crumbled: 'Рассыпался', looseHint: '· ищи плотный наст',
   torchLit: 'Факел горит', torchOut: 'Факел погас', noFlame: 'Нечем зажечь факел',
@@ -325,7 +326,13 @@ function evaluate(sel: ItemDef | null, dt: number) {
   const def = sel ?? null;
   const setPlaceCommon = () => { T.mode = 'place'; T.ghostItem = id; };
   if (!T.inReach) { if (def && (def.kind === 'block' || def.place || def.fixture)) { setPlaceCommon(); T.ok = false; T.reason = S.far; } return finishTarget(T); }
-  if (!sight && !T.fixture) { T.reason = S.blocked; if (placing) setPlaceCommon(); return finishTarget(T); }
+  if (!sight && !T.fixture) {
+    // the frame is drawn red and the tooltip says why: a refused cell shows the same thing in both (playtest: square «ok», tooltip «Мешает стена»)
+    T.reason = S.blocked; T.ok = false;
+    if (placing) setPlaceCommon();
+    else if (m !== 0) T.mode = tk === 'chisel' && m === MAT.ICE ? 'chisel' : 'dig';
+    return finishTarget(T);
+  }
 
   if (id === 'snow_block') { evalBlock(T, sel!, tx, ty); return finishTarget(T); }
   if (def?.place) { evalSingle(T, def, tx, ty); return finishTarget(T); }
@@ -338,6 +345,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
   if (T.fixture) { T.mode = 'use'; T.ok = true; T.verb = FIXTURE_DEFS[T.fixture.kind]?.fuel && T.fixture.kind !== 'torch' ? (T.fixture.lit ? S.feed : S.feedLight) : T.fixture.kind === 'chest' || T.fixture.kind === 'door' ? S.open : S.use; T.tx = T.fixture.tx; T.ty = T.fixture.ty; T.tw = T.fixture.tw; T.th = T.fixture.th; return finishTarget(T); }
 
   if ((tk === 'knife' || tk === 'saw') && m !== 0 && (m === MAT.PACKED || m === MAT.SNOWBLOCK)) { evalCut(T, tx, ty); return finishTarget(T); }
+  if (tk === 'knife' && m === MAT.SNOW) { T.mode = 'dig'; T.ok = false; T.reason = S.looseTamp; return finishTarget(T); }   // guided first block: shovel + RMB packs it, then the knife cuts
   if (id === 'shovel' && held.load > 0 && m === 0) {
     T.mode = 'dig'; T.ok = true; T.verb = S.throwSnow; return finishTarget(T);
   }
@@ -357,7 +365,7 @@ function evaluate(sel: ItemDef | null, dt: number) {
   return finishTarget(T);
 }
 function finishTarget(T: Target) {
-  if (T.reason && T.reason !== S.far) T.lines.push(T.reason);
+  if (T.reason) T.lines.push(T.reason);
   else if (T.verb && T.mode !== 'none') T.lines.push(T.verb);
   return T;
 }
@@ -374,7 +382,7 @@ function evalCut(T: Target, tx: number, ty: number) {
     if (alt.ok) { T.tx = tx0 === tx ? tx - 1 : tx; return fillCut(T, alt); }
     T.ok = false;
     // loose snow lies on the crust: the knife cannot cut under it
-    T.reason = looseAbove(tx0, ty) >= 4 ? S.digLooseFirst : S.thin;
+    T.reason = looseAbove(tx0, ty) >= 4 ? S.looseTamp : S.thin;
     return;
   }
   fillCut(T, r);
@@ -455,6 +463,11 @@ function chips(tx: number, ty: number, m: number, n = 5) {
   burstFx('chip', tx * TS + 2, ty * TS + 2, n, 28, 0.5, (rgb[0] << 16) | (rgb[1] << 8) | rgb[2], 12);
 }
 
+let farT = -9;
+function farClick() {
+  const t = G.realTime; if (t >= farT && t - farT < 0.8) return;     // (a restored clock counts as a new moment)
+  farT = t; toast(S.far, 'info'); emit('deny', { reason: S.far });
+}
 function finishDig(T: Target, tk: string) {
   const tx = T.tx, ty = T.ty, m = tileMaterial(tx, ty);
   if (m === 0) return;
@@ -470,7 +483,12 @@ function finishDig(T: Target, tk: string) {
   chips(tx, ty, m);
   const cx = tx * TS + 2, cy = ty * TS + 2;
   if (SNOWY[m]) {
-    if (tk === 'shovel') held.load = Math.min(32, held.load + removed);
+    if (tk === 'shovel') {
+      // a full blade is flung behind the player (stepToss) so digging goes on without an extra step; the first time it says so
+      held.load += removed;
+      if (held.load >= SHOVEL_CAP) { const k = SHOVEL_CAP / 2; held.load -= k; tossQ += k; if (!tossHint) { tossHint = true; toast(S.shovelFull, 'info'); } }
+      if (m === MAT.SNOW) emit('pickup_float', { x: cx, y: cy - 4, id: 'snow', n: removed, label: S.snowMinus });   // «−снег»: the digging is felt
+    }
     else if (tk === 'hand' || tk === 'knife' || tk === 'saw') { if (m === MAT.SNOW || m === MAT.PACKED) spawnDrop('snow', 1, cx, cy); }
     if (m === MAT.SNOWBLOCK && (tk === 'knife' || tk === 'saw') && dn) {
       toolState.blockRefund += 0.5; toolState.blockDens = dsum / dn;
@@ -566,20 +584,30 @@ function placeFixtureItem(T: Target) {
 }
 
 // shovel
-let throwAcc = 0;
-function throwSnow(dt: number, T: Target) {
+const SHOVEL_CAP = 32;          // cells of snow the blade holds (the HUD bar shows load / SHOVEL_CAP)
+let throwAcc = 0, tossQ = 0, tossHint = false;
+/** One cell of snow from the blade to the world point (tx,ty): the throw particles, pre-compacted (aux 100: it sinters faster). */
+function flingCell(tx: number, ty: number) {
   const p = G.player;
+  const ox = p.x + p.face * 6, oy = p.y - 12;
+  const dx = tx - ox + (Math.random() - 0.5) * 5, dy = ty - oy + (Math.random() - 0.5) * 4;
+  const tf = Math.max(0.14, Math.min(0.55, Math.hypot(dx, dy) / 70));
+  const vx = dx / tf, vy = (dy - 0.5 * 230 * tf * tf) / tf;
+  throwCell(ox, oy, MAT.SNOW, 100, vx, vy);
+}
+function throwSnow(dt: number, T: Target) {
   throwAcc += dt;
   body.working = 0.8;
-  while (throwAcc >= 0.035 && held.load > 0) {
-    throwAcc -= 0.035;
-    const ox = p.x + p.face * 6, oy = p.y - 12;
-    const dx = T.x - ox + (Math.random() - 0.5) * 5, dy = T.y - oy + (Math.random() - 0.5) * 4;
-    const tf = Math.max(0.14, Math.min(0.55, Math.hypot(dx, dy) / 70));
-    const vx = dx / tf, vy = (dy - 0.5 * 230 * tf * tf) / tf;
-    throwCell(ox, oy, MAT.SNOW, 100, vx, vy);        // aux 100 = pre-compacted ("disturbed snow sinters faster")
-    held.load--;
-  }
+  while (throwAcc >= 0.035 && held.load > 0) { throwAcc -= 0.035; flingCell(T.x, T.y); held.load--; }
+}
+/** The auto toss: the cells of a full blade fly out behind the player, a few per frame (about 90 a second). */
+function stepToss(dt: number) {
+  if (tossQ <= 0) return;
+  const p = G.player;
+  const n = Math.min(tossQ, Math.max(1, Math.round(dt * 90)));
+  tossQ -= n;
+  for (let k = 0; k < n; k++) flingCell(p.x - p.face * 18, p.y - 6);
+  body.working = 0.8;
 }
 function tamp(dt: number, T: Target) {
   // pat down the snow around the target: raises compaction; at 200 the sim turns it into packed snow
@@ -714,10 +742,12 @@ export function stepTools(dt: number) {
   body.working = Math.max(0, body.working - dt * 4);
   if (G.paused) { held.using = false; return; }
   stepSinter(dt * MIN_PER_SEC * G.timeScale);
+  stepToss(dt);
   if (!p.alive) { held.using = false; return; }
   stepUseItems(dt);
   if (p.sleeping) { return; }
   // hotbar / wheel / toggles
+  if (input.hotbar >= 6 && !hasPouch()) toast(S.needPouch, 'info');      // keys 7–9 need the pouch
   if (input.hotbar >= 0) select(input.hotbar);
   if (input.scroll !== 0) selectStep(input.scroll);
   const sel0 = selected();
@@ -760,6 +790,7 @@ export function stepTools(dt: number) {
   if (strike.hit) toolState.swing = Math.max(toolState.swing, 0.8);     // the arm comes down on the bird
 
   // dig / cut / place / throw
+  if (pressed && !T.inReach && !strike.hit) farClick();      // a tap out of reach says so (tooltip + quiet sound), never silence
   const act = down && T.inReach && !strike.hit;
   if (act) {
     const tk = toolKindOf(sel?.id);
@@ -770,7 +801,7 @@ export function stepTools(dt: number) {
       else if (sel.fixture) placeFixtureItem(T);
     } else if (T.mode === 'place' && pressed && !T.ok && T.reason) { toast(T.reason, 'warn'); emit('deny', { reason: T.reason }); }
     else if (T.mode === 'cut' && pressed && !T.ok && T.reason) toast(T.reason, 'warn');
-    else if ((T.mode === 'dig' || T.mode === 'chisel') && sel?.id === 'shovel' && held.load > 0 && T.verb === S.throwSnow && (pressed || toolState.throwing)) { toolState.throwing = true; throwSnow(dt, T); held.using = true; toolState.swing = Math.max(toolState.swing, 0.6); }
+    else if ((T.mode === 'dig' || T.mode === 'chisel') && sel?.id === 'shovel' && held.load > 0 && T.verb === S.throwSnow && (pressed || down)) { toolState.throwing = true; throwSnow(dt, T); held.using = true; toolState.swing = Math.max(toolState.swing, 0.6); }
     else if (T.mode === 'dig' && sel?.id === 'shovel' && T.verb === S.throwSnow) { /* load in the blade: release and press again to throw */ }
     else if ((T.mode === 'dig' || T.mode === 'chisel') && T.ok && T.mat) {
       const m = T.mat;
@@ -892,9 +923,11 @@ function dropAction(T: Target) {
   // G with a dragged sled and nothing else to drop: park the sled (its load stays on it)
   if (inv.sled?.hitched && (!s || getItem(s.id).kind === 'tool')) { unhitchSled(p.x - p.face * 14, inv.sled.y); toast(S.sledDown, 'info'); return; }
   if (!s) return;
-  const out = removeFromSlot(inv.sel, getItem(s.id).stack > 1 ? s.n : 1); if (!out) return;
-  const d = spawnDrop(out.id, out.n, p.x + p.face * 8, p.y - 12, p.face * 40, -30, out.dur);
-  if (d) { d.age = -1.4; thrown.add(d.id); }
+  const whole = isKeyDown('ShiftLeft') || isKeyDown('ShiftRight');        // G: one of the stack; Shift+G: the whole stack
+  const out = removeFromSlot(inv.sel, whole ? s.n : 1); if (!out) return;
+  const d = spawnDrop(out.id, out.n, p.x + p.face * 8, p.y - 12, p.face * 4, -18, out.dur);   // a short toss: it lands in front, in plain view
+  if (d) { d.age = -1.4; thrown.add(d.id); dropOrigin.set(d, { x: p.x, y: p.y }); }
+  toast(fmt(S.dropped, { name: itemName(out.id), n: out.n }), 'info');
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -912,6 +945,9 @@ function takeDrop(d: Drop): number {
   return left;
 }
 const box = { x: 0, y: 0, vx: 0, vy: 0, w: 3, h: 3, onGround: false };
+/** Where the player stood when a thing was thrown: it is armed once the player has walked > 3 cells away from that spot (and may come back for it). */
+const dropOrigin = new WeakMap<object, { x: number; y: number }>();
+const solidAt = (x: number, y: number) => WALK[mat[Math.max(0, Math.min(H - 1, Math.floor(y))) * W + Math.max(0, Math.min(W - 1, Math.floor(x)))]] === 1;
 /** «Слишком тяжело» once per item id per 5 s (the auto-pickup refusal). */
 const heavyAt = new Map<string, number>();
 function tooHeavyToast(id: string) {
@@ -938,7 +974,8 @@ export function stepDrops(dt: number) {
       const dx = px - d.x, dy = py - d.y;
       const inBox = Math.abs(dx) <= AUTO_DX && Math.abs(dy) <= AUTO_DY;
       // a thrown drop is armed once the player has walked out of the box: dropping it must not hand it straight back
-      if (!inBox && thrown.has(d.id)) armedThrown.add(d.id);
+      const org = dropOrigin.get(d);
+      if (thrown.has(d.id) && org && Math.hypot(p.x - org.x, p.y - org.y) > 3) armedThrown.add(d.id);
       if (inBox && autoPickable(d)) {
         const dist = Math.hypot(dx, dy), pickR = isNote(d.item) ? NOTE_R : 5.5;
         if (dist < 10 && huntDropNear(d.x, d.y, 0.5)?.id !== d.id) {       // a shot bird lying on the snow is the husky's
@@ -955,9 +992,11 @@ export function stepDrops(dt: number) {
       const left = takeDrop(d);
       if (left <= 0) { dropDur.delete(d.id); thrown.delete(d.id); armedThrown.delete(d.id); arr.splice(i, 1); continue; }
     }
-    const r = moveBox(box as never, dt, { stepUp: 0 });
+    const r = moveBox(box as never, dt, { stepUp: 2 });     // a loose thing climbs a snow lip: a pile behind a ridge is still pulled in
     void r;
     d.x = box.x; d.y = box.y; d.vx = box.onGround ? box.vx * 0.8 : box.vx; d.vy = box.onGround ? 0 : box.vy;
+    // a thing that snow has covered is lifted back onto the surface (it stays visible and can be picked up)
+    for (let k = 0; k < 10 && solidAt(d.x, d.y); k++) d.y -= 1;
     if (d.item === 'backpack' ? d.y > H - 2 : (d.age > 900 || d.y > H - 2)) { dropDur.delete(d.id); thrown.delete(d.id); armedThrown.delete(d.id); if (d.item === 'backpack') backpacks.delete(d.id); arr.splice(i, 1); }
   }
   if (arr.length > MAX_DROPS) arr.length = MAX_DROPS;

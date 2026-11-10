@@ -15,7 +15,7 @@ function makeRng(seed: number) {
   return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
 }
 
-const LOOT_KEEP = /^(note|radio|battery|pick|saw|axe|lantern|flare_gun|barometer|flint|harpoon)/;
+const LOOT_KEEP = /^(note|radio|battery|pick|saw|axe|lantern|flare_gun|barometer|flint|harpoon|ice_chisel)/;
 /** Same loot scaling as locations.chest(): difficulty multiplies the counts, singletons stay. */
 const loot = (items: Slot[]): Slot[] => items.map(s => ({ ...s, n: LOOT_KEEP.test(s.id) ? s.n : Math.max(1, Math.round(s.n * G.diff.loot)) }));
 
@@ -119,7 +119,8 @@ export function placeExtras() {
   const beachA = pickSpot(908, 1100, driftAnchors, used, 40, rnd);
   if (beachA) { placeChest('beach', beachA.x, beachA.B, [{ id: 'can', n: 2 }, { id: 'rope', n: 2 }, { id: 'matches', n: 1 }]); used.push(beachA.x); }
   const beachB = pickSpot(908, 1100, [worldInfo.spots.whale.x], used, 40, rnd);
-  if (beachB) { placeChest('beach', beachB.x, beachB.B, [{ id: 'biscuit', n: 3 }, { id: 'fat', n: 1 }, { id: 'flask', n: 1 }]); used.push(beachB.x); }
+  // v13: the ice chisel (пешня) lies in this beach chest, before the ship: the ship's frozen lids need it (the deck note says so)
+  if (beachB) { placeChest('beach', beachB.x, beachB.B, [{ id: 'biscuit', n: 3 }, { id: 'fat', n: 1 }, { id: 'flask', n: 1 }, { id: 'ice_chisel', n: 1 }]); used.push(beachB.x); }
   const iceA = pickSpot(1100, 1440, [1200], used, 40, rnd);
   if (iceA) { placeChest('fastice', iceA.x, iceA.B, [{ id: 'can', n: 1 }, { id: 'rope', n: 1 }, { id: 'matches', n: 2 }]); used.push(iceA.x); }
   const iceB = pickSpot(1100, 1440, [1350], used, 40, rnd);
@@ -150,6 +151,20 @@ export function placeExtras() {
   lichenPatch(884, 10);
   lichenPatch(1168, 12);
   lichenPatch(1292, 12);
+
+  // v13 long walks (playtest: 60–90 game minutes of empty legs). Cheap finds with a use and no enemies: a driftwood stack and a lost tin with a mitten
+  // between the station and the mine (x 330–600), an old campfire ring with two logs on the fast ice between the beach and the ship (x 1100–1650).
+  const dropOn = (item: string, n: number, x: number, floorRow: number) => { G.drops.push({ id: newId(), item, n, x, y: floorRow - 3, vx: 0, vy: 0, age: 0 }); };
+  const wood = pickSpot(336, 400, [368], used, 40, rnd);
+  if (wood) { dropOn('log', 3, wood.x + 3, wood.B); used.push(wood.x); }
+  const tin = pickSpot(500, 600, [550], used, 40, rnd);
+  if (tin) { dropOn('wool_mittens', 1, tin.x + 2, tin.B); dropOn('can', 1, tin.x + 6, tin.B); used.push(tin.x); }
+  const ring = pickSpot(1200, 1330, [1280], used, 40, rnd);
+  if (ring && !nearHole(ring.x)) {
+    addFixture('campfire', ring.x >> 2, (ring.B >> 2) - 1, 2, 1, {});
+    dropOn('log', 2, ring.x + 6, ring.B); used.push(ring.x);
+    touch(ring.x, ring.B - 8, ring.x + 8, ring.B);
+  }
 
   // survival balance: two more cans in the ship hold chest (the chest with the radio triode)
   const hold = worldInfo.chests.find(c => c.site === 'ship' && c.items.some(s => s.id === 'radio_triode'));

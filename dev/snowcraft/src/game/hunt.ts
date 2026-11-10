@@ -29,7 +29,7 @@ const S = strings('hunt', {
   snareBird: 'В силке куропатка',
   dogBird: 'Север принёс куропатку',
   strikeBird: 'Куропатка!',
-  flockHint: 'Куропатки. Подкрадись и ударь — или поставь силок',
+  flockHint: 'Куропатки. Подкрадись: иди без Shift и ударь — или поставь силок',
 });
 
 export type TrackKind = 'fox' | 'ptarmigan' | 'bear' | 'seal';
@@ -47,8 +47,10 @@ const ACT_R = 150, ACT_BIRD = 140;           // cells: creatures exist within th
 const FISH_CAP = 36, BIRD_CAP = 6, HOLE_CAP = 40, SITE_CAP = 14, TRACK_CAP = 360;
 const SITE_GAP = 45;                         // cells: one flock per lichen patch (no second site this close)
 const FLOCK_MIN = 2, FLOCK_MAX = 3;          // birds per flock
-const FLUSH_WALK = 14, FLUSH_RUN = 40;       // cells: a walking player flushes the flock within 14, a running one within 40; standing still never does
-const STRIKE_R = 14, STRIKE_AIM = 20;        // a hand-tool strike: the bird within 14 cells of the player and within 20 of the aim point
+// v13: a walking player flushes the flock within 6 cells of its nearest bird (was 14: the birds always went up before the strike reach), a running one
+// within 40; standing still never does. The strike reaches 12 cells: a walker who lets go at 10 coasts ~1.5 cells (braking), so 6 leaves the margin.
+const FLUSH_WALK = 6, FLUSH_RUN = 40;
+const STRIKE_R = 12, STRIKE_AIM = 20;        // a hand-tool strike: the bird within 12 cells of the player and within 20 of the aim point
 const HINT_R = 60;                           // cells: the flock hint (once per game)
 const CAST_R = 60;                           // a cast draws fish within this distance
 const TRACK_LIFE = 360, TRACK_FADE = 120;    // game minutes (6 h), last 2 h fade
@@ -338,7 +340,10 @@ function stepBirds(dt: number, p: { x: number; y: number; vx: number; alive: boo
     s.flushCd = Math.max(0, s.flushCd - dt);
     if (!p.alive || s.flushCd > 0 || !s.ents.length) continue;
     const d = dist(s.x, s.y, p.x, p.y), spd = Math.abs(p.vx);          // walk 27 cells/s, run 46: standing still (spd 0) never flushes
-    if ((spd > 30 && d < FLUSH_RUN) || (spd > 4 && d < FLUSH_WALK)) flush(s, p);
+    // a walker flushes the flock by its NEAREST bird (the birds spread up to 6 cells from the site centre, so the centre is too far out)
+    let dn = Infinity;
+    for (const id of s.ents) { const e = G.animals.find(x => x.id === id); if (e) dn = Math.min(dn, dist(e.x, e.y, p.x, p.y)); }
+    if ((spd > 30 && d < FLUSH_RUN) || (spd > 4 && dn < FLUSH_WALK)) flush(s, p);
   }
   for (const e of G.animals.slice()) {
     if (e.kind !== 'ptarmigan') continue;

@@ -104,7 +104,7 @@ export function drawDrop(ctx: Ctx, v: View, d: Drop, t: number): void {
   const a = d.age < 0.25 ? d.age / 0.25 : 1; if (a < 1) ctx.globalAlpha = a;
   ctx.drawImage(c, x - Math.floor(c.width / 2), y - c.height + bob);
   if (a < 1) ctx.globalAlpha = 1;
-  if (/^(note|radio_|battery)/.test(d.item) || d.item === 'flare_gun') {           // lore / quest items glint
+  if (/^(note|radio_|battery)/.test(d.item) || d.item === 'flare_gun' || d.item === 'coal') {   // lore / quest items and coal sacks glint
     const k = (t * 1.2 + d.id) % 1; if (k < 0.3) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + 2, y - c.height + bob - 1, 1, 1); ctx.fillRect(x + 1, y - c.height + bob, 3, 1); ctx.fillRect(x + 2, y - c.height + bob + 1, 1, 1); }
   }
 }

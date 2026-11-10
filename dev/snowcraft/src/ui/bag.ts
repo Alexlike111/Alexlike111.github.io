@@ -117,7 +117,7 @@ const CSS = `
 body.touch-ui #hud .pnl{max-height:calc(100vh - 12px - env(safe-area-inset-bottom,0px));padding:6px 8px}
 body.touch-ui #hud .pnl .cell{min-height:48px;aspect-ratio:auto;height:48px}
 body.touch-ui #hud .pnl .wear .cell{height:50px}
-body.bag-open #touch .tb,body.bag-open #touch .ghost,body.bag-open #touch .stick,body.bag-open #touch .knob,body.bag-open #nearbtn{display:none!important}
+body.bag-open #touch .tb:not(#tb-bag),body.bag-open #touch .ghost,body.bag-open #touch .stick,body.bag-open #touch .knob,body.bag-open #nearbtn{display:none!important}
 body.touch-ui #hud .pnl .wt{margin:2px 0 4px}body.touch-ui #hud .pnl .wtxt{margin:-2px 0 4px}body.touch-ui #hud .pnl .top{margin-bottom:4px}
 body.touch-ui #hud .pnl .srchbar{margin:0 0 3px}
 body.touch-ui #hud .pnl .grid{gap:3px}
@@ -128,6 +128,21 @@ body.touch-ui #hud .pnl .bfoot{bottom:-7px;margin:4px -8px -6px;padding:4px 8px;
 body.touch-ui #hud .pnl .bfoot .info{flex:1 1 100px}
 body.touch-ui #hud .pnl .bfoot .bh{font-size:11px}
 body.touch-ui #hud .pnl .grid.sledg .cell{min-height:44px}
+/* phone (810×253 and up): the panel starts below the top-right row (Сумка, Журнал, ⚙ stay tappable: the second tap on Сумка closes it), fills the rest
+   and scrolls inside its box; the sort buttons sit in the pack header; the two columns share the width */
+body.touch-ui #hud .pnl{left:6px;right:6px;top:calc(var(--sa-t, 0px) + 46px);bottom:4px;transform:none;width:auto;max-width:none;max-height:none;height:auto;box-sizing:border-box;padding:5px 7px;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+body.touch-ui #hud .pnl h3{margin:0 0 3px;font-size:13px;gap:6px;align-items:center}
+body.touch-ui #hud .pnl h3 .hsorts{display:inline-flex;gap:4px;margin-left:auto}
+body.touch-ui #hud .pnl h3 .hsorts .mini{min-height:30px;padding:2px 6px;font-size:12px}
+body.touch-ui #hud .pnl .cols{flex-wrap:nowrap;gap:8px}
+body.touch-ui #hud .pnl .col{min-width:0}
+body.touch-ui #hud .pnl .col:first-child{flex:1 1 52%}
+body.touch-ui #hud .pnl .col:last-child{flex:1 1 48%}
+body.touch-ui #hud .pnl .wt{margin:2px 0 4px}
+body.touch-ui #hud .pnl .wtxt{margin:-2px 0 4px}
+body.touch-ui #hud .pnl .bfoot .tip,body.touch-ui #hud .pnl .bfoot .bh{display:none}
+body.touch-ui #hud .pnl .bfoot{position:sticky;bottom:-5px;margin:4px -7px -5px;padding:4px 7px;flex-wrap:nowrap}
+body.touch-ui #hud .pnl .bfoot .info{flex:1 1 0}
 `;
 let styled = false;
 function ensureStyle() { if (styled || typeof document === 'undefined') return; styled = true; const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st); }
@@ -146,6 +161,12 @@ export function bagWantsOpen(): boolean { const w = ui.want; ui.want = false; re
 
 // ---- html --------------------------------------------------------------------------------------------------------------------------
 const kg = (w: number) => fmt(S.kg, { w: (Math.round(w * 10) / 10).toString().replace('.', ',') });
+/** Hover text of a stack: name, count, weight and the one-line purpose (ItemDef.desc). */
+function cellTip(s: { id: string; n: number; dur?: number }, dens = ''): string {
+  const d = getItem(s.id);
+  const head = `${itemName(s.id)}${s.n > 1 ? ' ×' + s.n : ''}${dens} · ${kg(invMod.unitWeight(s.id, s.dur) * s.n)}`;
+  return d.desc ? `${head}\n${d.desc}` : head;
+}
 function cellHtml(z: ZoneId, i: number): string {
   const s = refGet({ z, i });
   const belt = z === 'inv' && isBeltCell(i), act = belt && i === inv.sel;
@@ -154,7 +175,7 @@ function cellHtml(z: ZoneId, i: number): string {
   const key = belt ? `<span class="k">${i < BELT ? i + 1 : i - POUCH0 + BELT + 1}</span>` : '';
   if (!s) return `<div class="${cls}" data-z="${z}" data-i="${i}">${key}</div>`;
   const nt = useNote(s), dens = (s.id === 'snow_block' && s.dur ? ' · ' + fmt(S.dens, { d: Math.round(s.dur) }) : '') + (nt ? ' · ' + nt : '');
-  return `<div class="${cls}" data-z="${z}" data-i="${i}" title="${itemName(s.id)}${dens}">${key}${img(itemUrl(s.id, s.dur))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</div>`;
+  return `<div class="${cls}" data-z="${z}" data-i="${i}" title="${cellTip(s, dens)}">${key}${img(itemUrl(s.id, s.dur))}${s.n > 1 ? `<i class="n">${s.n}</i>` : ''}</div>`;
 }
 function ingHtml(rec: Recipe): string {
   return rec.variants.map(v => '<span>' + v.map(g => img(itemUrl(g.id)) + itemName(g.id) + (g.n > 1 ? ' ×' + g.n : '')).join(', ') + '</span>').join('<span class="dim">/</span>');
@@ -211,14 +232,16 @@ export function bagHtml(): string {
   ensureStyle();
   const p = G.player;
   const wt = weight(), lv = loadLevel(wt);
-  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span><span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
+  const sorts = `<button class="mini" data-act="sort" data-m="kind" title="${S.sortTitle}">${S.sortKind}</button><button class="mini" data-act="sort" data-m="weight" title="${S.sortTitle}">${S.sortWeight}</button>`;
+  const phone = touchy();
+  let h = `<div class="cols"><div class="col"><h3><span>${S.pack}</span>${phone ? `<span class="hsorts">${sorts}</span>` : ''}<span>${fmt(S.weight, { w: wt.toFixed(1), m: weightMax() })}</span></h3>`;
   h += `<div class="wt"><i style="width:${Math.min(100, wt / weightMax() * 100)}%;background:${lv >= 3 ? '#ff7a68' : lv === 2 ? '#ffc46e' : '#8fe3b0'}"></i></div><div class="wtxt l${lv}"><span>${loadWords(wt)}</span></div>`;
   h += `<div class="pk"><div class="top"><div class="wear">`;   // .pk: the desktop layout puts the wear column beside the grid (ui.css); the phone keeps the row above it
   for (let k = 0; k < WEAR_SLOTS.length; k++) {
     const sl = WEAR_SLOTS[k], id = inv.wear[sl], here = ui.sel && ui.sel.z === 'wear' && ui.sel.i === k;
     h += `<div class="cell${id ? '' : ' empty'}${here ? ' sel' : ''}" data-z="wear" data-i="${k}"${id ? ` title="${itemName(id)}"` : ''}>${id ? img(itemUrl(id)) : ''}<small>${SLOT_LABEL[sl]()}</small></div>`;
   }
-  h += `</div><div class="sorts"><button class="mini" data-act="sort" data-m="kind" title="${S.sortTitle}">${S.sortKind}</button><button class="mini" data-act="sort" data-m="weight" title="${S.sortTitle}">${S.sortWeight}</button></div></div>`;
+  h += phone ? `</div></div>` : `</div><div class="sorts">${sorts}</div></div>`;
   h += `<div class="grid" data-z="inv" data-i="-1">`;
   for (let i = 0; i < NSLOT; i++) h += cellHtml('inv', i);
   for (let i = NSLOT; i < TOTAL; i++) if (slotUsable(i)) h += cellHtml('inv', i);
@@ -331,7 +354,12 @@ function endDrag(drop: boolean, x: number, y: number) {
   if (drop && d.moved && panelEl) {
     const rect = panelEl.getBoundingClientRect();
     const outside = x < rect.left || x > rect.right || y < rect.top || y > rect.bottom;
-    if (outside) { if (d.from.z !== 'box') dropRef(d.from); }
+    if (outside) {
+      // the HUD belt is the same belt: dropping a stack on it while the panel is open must not throw it on the ground (playtest v13)
+      const hudUnder = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (hudUnder?.closest('#hud, .belt, #sc-hud-belt')) { /* cancelled */ }
+      else if (d.from.z !== 'box') dropRef(d.from);
+    }
     else {
       const under = document.elementFromPoint(x, y) as HTMLElement | null;
       const to = resolve(under);

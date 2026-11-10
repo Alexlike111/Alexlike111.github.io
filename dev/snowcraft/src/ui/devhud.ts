@@ -25,7 +25,8 @@ import { uiIcon, moonIcon } from '../art/icons';
 import { knowsForecast, sunElevAt } from '../game/weather';
 import { toast } from '../game/state';
 import { on } from '../game/bus';
-import { objective, objectiveTarget, initQuest, prog, journal } from '../game/quest';
+import { objective, objectiveTarget, activeGoalId, initQuest, prog, journal } from '../game/quest';
+import { DOOR } from '../game/snowpack';
 import { worldToScreen } from '../engine/render';
 import { renderBag, attachBag, bagWantsOpen } from './bag';
 import { phaseName } from '../game/seasons';
@@ -60,7 +61,8 @@ let panelOpen = false, jOpen = false;
 let jEl: HTMLElement;
 let beltKey = '', toastKey = '';
 let bot: HTMLElement, objTxt: HTMLElement;                       // the bottom stack (toasts, held-item name, belt) and the objective's text span
-let objKey = '', objShow = 0, objPin = false;                    // objective: shown for 6 s (first goal) / 3 s (a change) / while pinned by a tap, then folded to the «Цель» pill
+let objKey = '', objGoal = '', objFlash = 0;                     // objective: the line never folds; a new goal flashes for 3 s
+let digEl: HTMLElement | null = null;                           // the «копай здесь» outline on the buried door (while its goal is active)
 let lastSel = -2, bnameT = 0, bnameTxt = '';                     // held-item name: 1.5 s after the selection changes only
 let acc = 0, panelAcc = 0, rectAcc = 9;
 let avoid: DOMRect[] = [];
@@ -107,8 +109,13 @@ const CSS = `
 #hud .stk .p{position:static;text-align:center;max-width:100%}
 #hud .obj{font-size:14px;color:#e8f4ff;border-color:rgba(255,196,110,.5);pointer-events:auto;cursor:pointer;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}
 #hud .obj b{color:#ffc46e;font-weight:600;margin-inline-end:6px}
-#hud .obj.col{padding-top:1px;padding-bottom:1px}
-#hud .obj.col .ot{display:none}
+/* the goal line never folds (playtest v13); a new goal flashes its border for 3 s (objectiveLine sets .flash) */
+#hud .obj.flash{animation:objf .5s ease-in-out 6}
+@keyframes objf{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 2px #ffc46e,0 0 14px rgba(255,196,110,.7)}}
+/* the dig outline on the buried door («копай здесь»): a bright box over the drift, a label above it */
+#hud .dig{position:absolute;display:none;pointer-events:none;box-sizing:border-box;border:2px solid #ffd24a;background:rgba(255,210,74,.12);box-shadow:0 0 0 1px #05080f,0 0 14px rgba(255,210,74,.55);animation:digp 1s ease-in-out infinite alternate;z-index:4}
+#hud .dig span{position:absolute;left:50%;bottom:100%;transform:translate(-50%,-4px);white-space:nowrap;font-size:13px;color:#ffe9a8;background:rgba(8,16,30,.88);border:1px solid #ffd24a;border-radius:3px;padding:1px 6px}
+@keyframes digp{from{opacity:.5}to{opacity:1}}
 #hud .chip{display:none;font-size:13px;padding:3px 8px}
 #hud .toast{font-size:16px;padding:4px 10px}
 #hud .bot{position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none;max-width:calc(100vw - 16px)}
@@ -199,7 +206,8 @@ body.touch-ui #hud .pnl{font-size:12px}
 @media (max-height:339px){body.hud-calm #hud .topl{opacity:.6}}
 /* UI mode «min» (ui/hudmode.ts): no sun arc, no key box, no wind / barometer rows, no «ощущается» line, shelter stars only, the folded goal pill goes */
 body.ui-min #hud .dial canvas,body.ui-min #hud .hint,body.ui-min #hud .dial .line.wind,body.ui-min #hud .dial .line.baro{display:none!important}
-body.ui-min #hud .bw .sub,body.ui-min #hud .chip .cd,body.ui-min #hud .obj.col{display:none!important}
+body.ui-min #hud .bw .sub,body.ui-min #hud .chip .cd{display:none!important}
+body.ui-min #hud .obj{font-size:13px;padding:2px 8px}
 /* short window (H < 340, a landscape phone or a small window): ONE chip at the top-left = figure + temperature + «День 1 · 11:09».
    The sun arc, the vitals (until they warn), the feels-like line and the wind / barometer rows are hidden; the chip is one box, so its figure,
    temperature and clock take the chip's padding and border, and the objective and the shelter stars keep the top, the belt and one toast the bottom */
@@ -319,7 +327,7 @@ export function initHud(host: HTMLElement) {
   bw = mk('bw', topl); dial = mk('dial', topl);
   stack = document.createElement('div'); stack.className = 'stk'; root.appendChild(stack);
   objEl = mk('obj', stack); objEl.innerHTML = '<b>' + S.objTitle + '</b><span class="ot"></span>'; objTxt = objEl.querySelector('.ot') as HTMLElement;
-  objEl.addEventListener('click', () => { objPin = !objPin; objShow = 0; });                 // a tap keeps the goal on screen (again: folds it)
+  digEl = document.createElement('div'); digEl.className = 'dig'; digEl.innerHTML = '<span>копай здесь</span>'; root.appendChild(digEl);
   chip = mk('chip', stack);
   bot = document.createElement('div'); bot.className = 'bot'; root.appendChild(bot);
   toastBox = document.createElement('div'); toastBox.className = 'tbox'; bot.appendChild(toastBox);
@@ -334,7 +342,7 @@ export function initHud(host: HTMLElement) {
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
 
   if (DEV) { devEl = mk('dev'); }
-  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; });
+  on('new_game', () => { panelOpen = jOpen = false; panel.style.display = 'none'; jEl.style.display = 'none'; document.body.classList.remove('panel-open'); objKey = ''; objGoal = ''; objFlash = 0; });
   window.addEventListener('sc:keys', () => { if (!hintMem.full) toggleFull(); });     // the settings panel (ui/menu.ts) opens the full key list as «?» / H do (it never closes it)
   // Esc closes the journal first, then the inventory panel (TERRARIA_CONTROLS); with neither open Esc opens the inventory (input.ts)
   onEscape(() => {
@@ -420,13 +428,23 @@ function updateArrow(realDt: number) {
 const cls = (bad: boolean, warn: boolean) => (bad ? 'bad' : warn ? 'warn' : 'good');
 const fmtClock = () => { const h = Math.floor(((G.time % 1440) + 1440) % 1440 / 60), m = Math.floor(G.time % 60); return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0'); };
 
-/** The objective: the line shows for 6 s on the first goal of a game, 3 s after each change and while a tap pins it; then it folds to the «Цель» pill. */
+/** The objective: the line stays on screen until the goal is done (playtest v13: the goal text must never disappear); a new goal flashes for 3 s. */
 function objectiveLine(dt: number) {
-  const ok = objective();
-  if (ok !== objKey) { objShow = ok === '' ? 0 : objKey === '' ? 6 : 3; objKey = ok; objPin = false; }
-  objShow = Math.max(0, objShow - dt);
-  objEl.classList.toggle('col', !(objPin || objShow > 0));
+  const ok = objective(), gid = activeGoalId();
+  if (gid !== objGoal) { objGoal = gid; objFlash = gid ? 3 : 0; }
+  objFlash = Math.max(0, objFlash - dt);
+  objEl.classList.toggle('flash', objFlash > 0);
   if (objTxt.textContent !== ok) objTxt.textContent = ok;
+  objKey = ok;
+}
+/** The dig outline on the buried door: a bright box over the door's drift while the door goal is the line («копай здесь»). */
+function digLine() {
+  const p = G.player, on = !!p && p.alive && !panelOpen && !jOpen && !G.paused && DOOR.crest > 0 && activeGoalId() === 'door';
+  if (!on || !digEl) { if (digEl) digEl.style.display = 'none'; return; }
+  const [x0, y0] = worldToScreen(DOOR.x0, DOOR.y0 + 4), [x1, y1] = worldToScreen(DOOR.x1, DOOR.y1 - 2);
+  if (x1 - x0 < 4 || y1 - y0 < 4) { digEl.style.display = 'none'; return; }
+  digEl.style.display = 'block'; digEl.style.left = Math.round(x0) + 'px'; digEl.style.top = Math.round(y0) + 'px';
+  digEl.style.width = Math.round(x1 - x0) + 'px'; digEl.style.height = Math.round(y1 - y0) + 'px';
 }
 /** The held item's name: 1.5 s after the selection changes (never at the start of a game, never over an open panel). */
 function heldName(dt: number) {
@@ -482,7 +500,7 @@ export function updateHud(dt: number, realDt: number) {
   } else tip.style.display = 'none';
   document.body.classList.toggle('panel-open', panelOpen || jOpen);
 
-  updateArrow(realDt);
+  updateArrow(realDt); digLine();
   if (acc < 0.1) return;
   const dtBlock = acc; acc = 0;
   if (!p) return;

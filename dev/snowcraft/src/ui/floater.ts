@@ -9,7 +9,7 @@ import { strings, fmt } from '../content/i18n';
 const S = strings('float', { plus: '+{n} {name}' });
 const LIFE = 1.2, MERGE = 1.0, MAX = 4, RISE = 26;          // seconds, seconds, live texts, px per second
 
-interface Float { id: string; n: number; x: number; y: number; age: number; el: HTMLDivElement }
+interface Float { id: string; n: number; x: number; y: number; age: number; el: HTMLDivElement; label?: string }   // label: a fixed text (the «−снег» of digging) instead of «+n name»
 const live: Float[] = [];
 let host: HTMLDivElement | null = null, raf = 0, last = 0;
 
@@ -23,7 +23,7 @@ function ensureHost(): HTMLDivElement | null {
   document.body.appendChild(host);
   return host;
 }
-const text = (f: Pick<Float, 'id' | 'n'>) => fmt(S.plus, { n: f.n, name: itemName(f.id) });
+const text = (f: Pick<Float, 'id' | 'n' | 'label'>) => f.label ?? fmt(S.plus, { n: f.n, name: itemName(f.id) });
 
 function frame(now: number) {
   const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
@@ -40,9 +40,9 @@ function frame(now: number) {
   else { raf = 0; last = 0; }
 }
 
-function show(d: { x: number; y: number; id: string; n: number }) {
+function show(d: { x: number; y: number; id: string; n: number; label?: string }) {
   const h = ensureHost(); if (!h || !(d.n > 0)) return;
-  const burst = live.find(f => f.id === d.id && f.age < MERGE);
+  const burst = live.find(f => f.id === d.id && f.age < MERGE && f.label === d.label);
   if (burst) {                                              // the same item again: one text, counting up
     burst.n += d.n; burst.age = 0; burst.x = d.x; burst.y = d.y;
     burst.el.textContent = text(burst);
@@ -51,7 +51,7 @@ function show(d: { x: number; y: number; id: string; n: number }) {
     const el = document.createElement('div');
     el.className = 'sc-float';
     el.style.cssText = 'position:absolute;left:0;top:0;white-space:nowrap;font:700 15px/1 "Pixelify Sans",Jura,system-ui,sans-serif;color:#fff1c2;text-shadow:0 1px 0 #05080f,0 0 6px rgba(5,8,15,.85);will-change:transform,opacity';
-    const f: Float = { id: d.id, n: d.n, x: d.x, y: d.y, age: 0, el };
+    const f: Float = { id: d.id, n: d.n, x: d.x, y: d.y, age: 0, el, label: d.label };
     el.textContent = text(f);
     h.appendChild(el);
     live.push(f);
@@ -59,4 +59,4 @@ function show(d: { x: number; y: number; id: string; n: number }) {
   if (!raf) raf = requestAnimationFrame(frame);
 }
 
-on('pickup_float', (d: { x: number; y: number; id: string; n: number }) => { try { show(d); } catch { /* a floater is decoration: never break a pickup */ } });
+on('pickup_float', (d: { x: number; y: number; id: string; n: number; label?: string }) => { try { show(d); } catch { /* a floater is decoration: never break a pickup */ } });

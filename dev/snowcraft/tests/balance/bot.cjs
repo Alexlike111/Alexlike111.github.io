@@ -6,7 +6,7 @@
 //
 // Page side (installBot): everything runs inside the game page with window.__sc (src/main.ts) and the modules it exposes in __sc.mods.
 // The page has NO requestAnimationFrame loop (the init script stubs it), so the game only advances when the bot steps it: sc.stepFast(n).
-// One frame = 1/60 s of body time = 0.04 game minutes (G.timeScale 1); the bed sleep uses the game's own x20 warp.
+// One frame = 1/60 s of body time = 0.02 game minutes (G.timeScale 1); the bed sleep uses the game's own x20 warp.
 // Model assumptions (the weakest part, see tests/balance/README.md): walking is charged as time at the destination, supplies that the
 // world does not give in a fixed place (driftwood, fish) come from explicit rates, the chests are looted without the search delay.
 const path = require('path');
@@ -16,7 +16,7 @@ const fs = require('fs');
 
 const DEFAULTS = {
   days: 40, chunk: 10,                       // game minutes per decision cycle
-  walkMinPerCell: 0.0889,                    // TUNE.walk = 27 cells per body second = 27 cells per real second = 0.0889 game minutes per cell (2.4 game min per s)
+  walkMinPerCell: 1.2 / 27,                  // TUNE.walk = 27 cells per body second; the clock runs MIN_PER_SEC = 1.2 game min per real second (v13: was 2.4)
   lootMin: 1.5,                              // game minutes per looted stack (search delay, rough)
   snowMin: 4, snowPerTrip: 4,                // MODEL: shovelling snow near the house for the pot
   cookMin: 5,                                // at the stove, per raw item

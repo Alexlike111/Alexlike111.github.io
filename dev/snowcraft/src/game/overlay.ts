@@ -45,6 +45,8 @@ html body.touch-ui #ov .cues.cues-top .cue{white-space:nowrap}
 #ov button.pri{border-color:#ffc46e}
 #ov .dead{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(18% + env(safe-area-inset-bottom,0px));display:none;pointer-events:auto}
 #hud .end{display:none !important}
+/* the cold (playtest v13): a blue-white screen edge that grows as the core drops below 34.5 °C (updateOverlay sets the opacity, at most .35) */
+#ov .vig{position:fixed;inset:0;pointer-events:none;opacity:0;transition:opacity .8s;background:radial-gradient(ellipse at 50% 50%,rgba(0,0,0,0) 52%,rgba(170,214,255,.85) 100%)}
 @media (max-height:480px){#ov .card{gap:4px;padding:6px 12px;justify-content:flex-start}#ov h2{font-size:26px;margin-top:2px}#ov .sub,#ov .cause{font-size:13px}#ov table{font-size:12px;margin:2px 0}#ov td{padding:1px 10px}#ov button{font-size:14px;min-height:40px;padding:4px 12px;margin:2px}}
 `;
 
@@ -52,6 +54,7 @@ let root: HTMLElement, cues: HTMLElement, endEl: HTMLElement, deadBar: HTMLEleme
 let api: { start: (o: { seed?: number; diff?: 0 | 1 | 2; hardcore?: boolean }) => void; restart: () => void } | null = null;
 let shown = '';
 let windCue: HTMLElement | null = null, shiverT = 0, endDelay = -1;
+let vig: HTMLElement | null = null;
 void body;
 
 function cue(text: string, cls = '', ms = 3200) {
@@ -88,6 +91,7 @@ export function initOverlay(host: HTMLElement, a: NonNullable<typeof api>) {
   const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
   root = document.createElement('div'); root.id = 'ov'; host.appendChild(root);
   cues = document.createElement('div'); cues.className = 'cues cues-top'; root.appendChild(cues);
+  vig = document.createElement('div'); vig.className = 'vig'; root.appendChild(vig);
   endEl = document.createElement('div'); endEl.className = 'card'; root.appendChild(endEl);
   deadBar = document.createElement('div'); deadBar.className = 'dead'; root.appendChild(deadBar);
   deadBar.innerHTML = `<button class="pri" data-a="again">${S.newRun}</button>`;
@@ -119,6 +123,7 @@ export function updateOverlay(dt: number) {
   if (roar && !windCue) { windCue = document.createElement('div'); windCue.className = 'cue cold'; windCue.textContent = G.storm > 0.55 ? S.storm : S.wind; cues.appendChild(windCue); }
   else if (!roar && windCue) { windCue.remove(); windCue = null; }
   if (windCue) windCue.textContent = G.storm > 0.55 ? S.storm : S.wind;
+  if (vig) vig.style.opacity = String(p && p.alive && p.core < 34.5 ? Math.min(0.35, (34.5 - p.core) * 0.15) : 0);
   if (p && p.alive && p.core < 35.4) { shiverT -= dt; if (shiverT <= 0) { shiverT = 9; cue(S.shiver, 'cold', 3000); } }
   if (endDelay > 0) { endDelay -= dt; if (endDelay <= 0 && !shown && p && !p.alive) showDeath(); }
   deadBar.style.display = 'none';

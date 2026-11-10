@@ -400,7 +400,8 @@ function stampMine(T: Terrain) {
   box(MI.bulkhead, FB - 20, MI.bulkhead + 4, FB - 18, M.METAL); box(MI.bulkhead, FB - 8, MI.bulkhead + 4, FB - 6, M.METAL);
   worldInfo.spots.methane = { x: Math.round((p0 + p1) / 2), y: FB - 10 };
   floorNote('n5', 'minehut', MI.bulkhead + 12, FB);
-  floorNote('n2', 'mine', 268, FA);
+  // v13: the note «Впереди завал» lies on the rubble's east edge, where the walk stops (it used to lie at the portal, 40 cells back)
+  floorNote('n2', 'mine', MI.collapse[1] + 6, floorD(MI.collapse[1] + 6));
   // --- the underground ice lake (sealed cavern, reached by digging down) ---
   stampIceLake(T);
   addSite('mine', 190, 300, 300, 140);

@@ -27,6 +27,8 @@ const S = strings('fix', {
   flintFail: 'Искры не берут. Ещё раз',
   lit: 'Зажёг: {name}',
   burnedOut: '{name} прогорел',
+  needCoal: 'Нужен уголь: подбери его снаружи',
+  soonOut: '{name} скоро погаснет — подкинь уголь',
   noIndoorW5: 'В доме костёр душит дымом',
   doorOpen: 'Открыл', doorClosed: 'Закрыл',
   chestEmpty: 'Пусто',
@@ -353,7 +355,7 @@ export function potWord(f: Fixture): string {
 function pickFuel(cls: FuelClass): string | null {
   const sel = inv.slots[inv.sel];
   if (sel && fuelMinutes(sel.id, cls) > 0) return sel.id;
-  const pref = cls === 'lamp' ? ['fat'] : cls === 'stove' ? ['coal', 'log', 'plank'] : cls === 'brazier' ? ['diesel', 'coal', 'log', 'plank'] : ['log', 'plank', 'coal', 'fat'];
+  const pref = cls === 'lamp' ? ['fat'] : cls === 'stove' ? ['coal', 'log', 'plank', 'fat'] : cls === 'brazier' ? ['diesel', 'coal', 'log', 'plank'] : ['log', 'plank', 'coal', 'fat'];
   for (const id of pref) if (count(id) > 0 && fuelMinutes(id, cls) > 0) return id;
   return null;
 }
@@ -366,6 +368,7 @@ export function addFuel(f: Fixture, id?: string): string | null {
   if ((f.fuel ?? 0) + m > d.cap + 20) { toast(S.full, 'info'); return null; }
   remove(use, 1);
   f.fuel = (f.fuel ?? 0) + m;
+  if (f.data) f.data.soonWarned = false;                  // a refuelled fire may warn again later
   return use;
 }
 
@@ -385,6 +388,8 @@ export function interact(f: Fixture): boolean {
     if (!f.lit && (f.fuel ?? 0) > 0) return tryLight(f);
     if ((f.fuel ?? 0) < d.cap * 0.5) { const u = addFuel(f); if (u) { toast(fmt(S.fed, { name: itemName(u) }), 'info'); if (!f.lit && (count('matches') > 0 || count('flint') > 0 || sourceNear(f))) tryLight(f); return true; } }
     if (!f.lit && d.portable) return pickupFixture(f);
+    // a stove with no fuel in the pack says what to find (playtest v13): coal first, the logs, planks and fat are the stove's other fuels
+    if (cls === 'stove' && !pickFuel(cls)) { toast(S.needCoal, 'warn'); return true; }
     toast(fmt(S.fuelState, { name: fixtureName(k), state: fuelWord(f) }), 'info');
     return true;
   }
@@ -539,6 +544,8 @@ export function stepFixtures(dt: number) {
       const [cx, cy] = center(f);
       f.fuel = (f.fuel ?? 0) - gm * burnMult(f); dd.age = Number(dd.age ?? 0) + dt;
       let out = (f.fuel ?? 0) <= 0;
+      // a warning 30 game-minutes before the fire goes out (once per refuel): the player has time to feed it
+      if (!out && (f.fuel ?? 0) < 30 && !dd.soonWarned && p && Math.hypot(p.x - cx, p.y - cy) < 120) { dd.soonWarned = true; toast(fmt(S.soonOut, { name: fixtureName(f.kind) }), 'warn'); }
       // the wind blows a weak or open flame out
       if (!out && d.open && isSkyOpen(cx, cy)) {
         const w = Math.abs(windAt(cx, cy));

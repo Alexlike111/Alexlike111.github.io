@@ -19,7 +19,9 @@ const S = strings('weather', {
   barometerRead: 'Барометр: {t}',
 });
 
-export const MIN_PER_SEC = 2.4;                 // game minutes per real second
+// game minutes per real second: a game day is 1440 / 1.2 = 1200 real seconds = 20 real minutes (v13 playtest: 2.4 ran a day in 10 minutes
+// and the first night came before the player had found the stove). Game-minute durations (fuel, hunger, storms, drift) keep their meaning.
+export const MIN_PER_SEC = 1.2;
 export const DAY_MIN = 1440;
 export const START_TIME = 11 * 60;              // new game: day 1, 11:00 (blue twilight, noon is at 12:00)
 

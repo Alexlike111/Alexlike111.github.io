@@ -1,5 +1,5 @@
 // Self-tests of the UI modes (ui/hudmode.ts) and of the layout they and the phone controls share: the mode persists and the body classes follow it,
-// the touch layer keeps its buttons (no zoom buttons, ⚙ announces 'sc:menu'), the objective folds to its pill after 6 s, and nothing on the thumb
+// the touch layer keeps its buttons (no zoom buttons, ⚙ announces 'sc:menu'), the objective line never folds (playtest v13), and nothing on the thumb
 // controls, the compass, the «Рядом» pill and the HUD panels overlaps another box (getBoundingClientRect). The overlap test measures the window it runs in:
 // `VIEW=810x253 node tests/play/selftest.cjs <index.html> - hudmode` checks the landscape phone. Each test restores what it changes.
 import { registerTest } from '../game/selftest';
@@ -85,21 +85,22 @@ registerTest('hudmode', 'раскладка: кнопки, стик, «Рядо�
   setEnabled(prevOn);
 });
 
-registerTest('hudmode', 'цель: строка сворачивается в «Цель» через 6 с, касание возвращает её', async t => {
+registerTest('hudmode', 'цель: строка не сворачивается (playtest v13): текст виден через 30 с, новая цель мигает, в «min» тоже', async t => {
   const prevOn = touchEnabled();
   setEnabled(true);
   const obj = () => document.querySelector('#hud .stk .obj') as HTMLElement;
   t.sc.step(4); await t.wait(60);
   const before = obj().querySelector('.ot')?.textContent ?? '';
-  t.sc.step(400);                                    // 6.7 s of HUD time (the steps feed the HUD's clock)
+  t.expect(before.length > 0, 'строка цели пустая');
+  t.sc.step(1800);                                   // 30 s of HUD time (the steps feed the HUD's clock)
   const same = (obj().querySelector('.ot')?.textContent ?? '') === before;
   if (!same) { t.log('цель сменилась во время ожидания: проверка пропущена'); setEnabled(prevOn); return; }
-  t.expect(obj().classList.contains('col'), 'через 6 с строка цели не свернулась');
-  obj().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  t.expect(!obj().classList.contains('col'), 'через 30 с строка цели свернулась');
+  t.expect((obj().querySelector('.ot') as HTMLElement).offsetParent !== null, 'текст цели скрыт через 30 с');
+  document.body.classList.add('ui-min');
   t.sc.step(4); await t.wait(60);
-  t.expect(!obj().classList.contains('col'), 'касание не вернуло строку цели');
-  obj().dispatchEvent(new MouseEvent('click', { bubbles: true }));                    // back to folded: the pin is off
-  t.sc.step(4); await t.wait(60);
+  t.expect((obj().querySelector('.ot') as HTMLElement).offsetParent !== null, 'в режиме «min» текст цели скрыт');
+  document.body.classList.remove('ui-min');
   setEnabled(prevOn);
 });
 

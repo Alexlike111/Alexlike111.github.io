@@ -7,6 +7,9 @@ import { G, type Fixture } from './state';
 import { TS, W, setCell } from '../engine/grid';
 import { MAT } from '../content/materials';
 import { sandbox } from './testkit';
+import { MIN_PER_SEC } from './weather';
+// game minutes → frames of the test loop (the clock runs MIN_PER_SEC game minutes per real second)
+const frames = (gm: number) => Math.round(gm / MIN_PER_SEC * 60);
 import { emit, on } from './bus';
 import { toolState, stepTools } from './tools';
 import { add, clearInventory, inv, select } from './inventory';
@@ -137,9 +140,9 @@ registerTest('hunt', 'выловленную лунку отрастает по 
     const empty = getHoles()[0].stock, left = fishOf().length;
     G.timeScale = 1;
     const hole = getHoles()[0];
-    for (let i = 0; i < 60 * 9; i++) stepHunt(DT);   // 21.6 game min
+    for (let i = 0; i < frames(21.6); i++) stepHunt(DT);   // 21.6 game min
     const after9 = hole.stock;
-    for (let i = 0; i < 60 * 45; i++) stepHunt(DT); // +108 game min: back to the maximum
+    for (let i = 0; i < frames(108); i++) stepHunt(DT); // +108 game min: back to the maximum
     return { caught, empty, left, after9, full: hole.stock, max: hole.max };
   });
   t.expect(r.caught === 4, 'поймано ' + r.caught + ' из 4');
@@ -242,12 +245,12 @@ registerTest('hunt', 'следы в снегу: появляются у ходя
     const a = trackStep(1, 'fox', 100, 300, 1, 4), b = trackStep(1, 'fox', 101, 300, 1, 4), c = trackStep(1, 'fox', 104, 300, 1, 4);
     dragMarks(200, 300, 1);
     const n1 = huntInfo().tracks;
-    G.storm = 0; for (let i = 0; i < 60 * 100; i++) stepHunt(DT);     // 240 game min: still there
+    G.storm = 0; for (let i = 0; i < frames(240); i++) stepHunt(DT);  // 240 game min: still there
     const n2 = huntInfo().tracks;
-    for (let i = 0; i < 60 * 70; i++) stepHunt(DT);                  // ~408 game min: gone
+    for (let i = 0; i < frames(408); i++) stepHunt(DT);              // ~408 game min: gone
     const n3 = huntInfo().tracks;
     // the same prints in a storm: 40 s at storm 1 = 96 game min x4 = gone
-    dragMarks(300, 300, 1); G.storm = 1; for (let i = 0; i < 60 * 40; i++) stepHunt(DT);
+    dragMarks(300, 300, 1); G.storm = 1; for (let i = 0; i < frames(96); i++) stepHunt(DT);
     const stormGone = huntInfo().tracks === 0;
     G.storm = 0;
     return { a, b, c, n1, n2, n3, stormGone };
@@ -386,7 +389,7 @@ registerTest('hunt', '200 клеток тундры с пятью пятнами
   t.expect(r.most >= 4, 'куропатки должны появляться у игрока: ' + r.most);
 });
 
-registerTest('hunt', 'стоящий игрок куропаток не спугивает; идущий — в 10 клетках спугивает, в 20 нет; бегущий — в 35 спугивает', async (t: TestCtx) => {
+registerTest('hunt', 'стоящий игрок куропаток не спугивает; идущий — ближе 6 клеток к ближайшей спугивает, с 10 нет; бегущий — в 35 спугивает', async (t: TestCtx) => {
   const r = await inSandbox(() => {
     landWorld(1000, 300);
     addSiteAt(1000, 299, 4);
@@ -395,23 +398,66 @@ registerTest('hunt', 'стоящий игрок куропаток не спуг
     const place = (x: number, vx: number) => { G.player.x = x; G.player.y = 299; G.player.vx = vx; };
     const flying = () => birdsOf().filter(b => b.state === 'fly').length;
     const settle = () => { for (let i = 0; i < 60 * 8; i++) stepHunt(DT); site.flushCd = 0; };   // they land and walk home; the cooldown is reset for the next case
+    const minX = () => Math.min(...birdsOf().map(b => b.x));                                     // the nearest bird to a walker coming from the west
     place(1010, 0);
     for (let i = 0; i < 60 * 3; i++) stepHunt(DT);
     out.stillAt10 = flying();
-    place(1010, 27); stepHunt(DT); out.walkAt10 = flying();
+    place(minX() - 10, 27); stepHunt(DT); out.walkAt10 = flying();        // the nearest bird 10 cells away: still on the snow
     settle();
-    place(1020, 27); stepHunt(DT); out.walkAt20 = flying();
+    place(minX() - 5, 27); stepHunt(DT); out.walkAt5 = flying();          // 5 cells: flushes
+    settle();
+    place(minX() - 20, 27); stepHunt(DT); out.walkAt20 = flying();
     settle();
     place(1035, 46); stepHunt(DT); out.runAt35 = flying();
     return out;
   });
   t.expect(r.stillAt10 === 0, 'стоящий игрок спугнул стаю: ' + r.stillAt10);
-  t.expect(r.walkAt10 > 0, 'идущий игрок в 10 клетках не спугнул стаю');
+  t.expect(r.walkAt10 === 0, 'идущий игрок с 10 клеток до ближайшей спугнул стаю (радиус 6)');
+  t.expect(r.walkAt5 > 0, 'идущий игрок в 5 клетках не спугнул стаю');
   t.expect(r.walkAt20 === 0, 'идущий игрок спугнул стаю с 20 клеток');
   t.expect(r.runAt35 > 0, 'бегущий игрок в 35 клетках не спугнул стаю');
 });
 
-registerTest('hunt', 'удар ножом: куропатка в 14 клетках от игрока и в 20 от прицела падает добычей на снег; в 30 клетках — ничего', async (t: TestCtx) => {
+registerTest('hunt', 'подкрадывание пешком: идём к стае, она не взлетает до 6 клеток, с 10 клеток удар по куропатке её добывает', async (t: TestCtx) => {
+  const r = await inSandbox(() => {
+    landWorld(1000, 300);
+    addSiteAt(1000, 299, 4);
+    const site = getSites()[0];
+    G.player.x = 1010; G.player.y = 299; G.player.vx = 0;     // in range of the site, so the flock is created
+    for (let i = 0; i < 60 * 3; i++) stepHunt(DT);             // the flock on the snow, not yet moved
+    const minX = () => Math.min(...birdsOf().map(b => b.x));
+    const n0 = birdsOf().length;
+    let flushedAt = -1, stopAt = -1;
+    G.player.x = minX() - 16; G.player.vx = 27;                // walk in from 16 cells (no run)
+    for (let i = 0; i < 400 && stopAt < 0; i++) {
+      G.player.x += 27 * DT; stepHunt(DT);
+      const dn = minX() - G.player.x;
+      if (birdsOf().some(b => b.state === 'fly') && flushedAt < 0) flushedAt = dn;
+      if (dn <= 10) stopAt = dn;
+    }
+    G.player.vx = 0;
+    const flushedEarly = flushedAt >= 0 ? 1 : 0;                  // the walk stops at 10 cells: any flush before that is too early
+    // strike the nearest bird at 10 cells from a standing player
+    const b = birdsOf().slice().sort((u, v) => u.x - v.x)[0];
+    if (!b) return { ok: false, stopAt, flushedAt, n0, n1: n0, d0: 0, d1: 0, flushedEarly };
+    clearInventory(); add('snow_knife', 1); select(inv.slots.findIndex(s => s && s.id === 'snow_knife'));
+    const aim0 = { hasAim: input.hasAim, aimMode: input.aimMode, aimX: input.aimX, aimY: input.aimY };
+    const drops = () => G.drops.filter(d => d.item === 'ptarmigan').length;
+    const d0 = drops(), n1b = birdsOf().length;
+    const [sx, sy] = worldToScreen(b.x, b.y);
+    input.hasAim = true; input.aimMode = 'mouse'; input.aimX = sx; input.aimY = sy;
+    input.primaryPressed = true; stepTools(DT); input.primaryPressed = false;
+    Object.assign(input, aim0);
+    site.flushCd = 0;
+    return { ok: true, stopAt, flushedAt, n0, n1: n1b, d0, d1: drops(), flushedEarly };
+  });
+  t.expect(r.ok, 'куропатки не осталось рядом для удара');
+  t.expect(r.stopAt >= 0 && r.stopAt <= 10.5, 'подход не дошёл до 10 клеток: ' + r.stopAt);
+  t.expect(r.flushedEarly === 0, 'стая взлетела раньше, чем мы дошли до 10 клеток: ' + r.flushedAt);
+  t.expect(r.n1 === r.n0 - 1 && r.d1 === r.d0 + 1, 'удар после подхода пешком не добыл куропатку: ' + JSON.stringify(r));
+});
+
+registerTest('hunt', 'удар ножом: куропатка в 12 клетках от игрока и в 20 от прицела падает добычей на снег; в 30 клетках — ничего', async (t: TestCtx) => {
   const r = await inSandbox(() => {
     landWorld(1000, 300);
     addSiteAt(1000, 299, 4);

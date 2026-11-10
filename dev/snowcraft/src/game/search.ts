@@ -48,12 +48,16 @@ const hash = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; 
 const itemsOf = (b: Box) => b.items();
 export function revOf(b: Box): number { const it = itemsOf(b); if (b.known) return it.length; const r = rec(b.key); if (r.rev > it.length) r.rev = it.length; return r.rev; }
 const setRev = (b: Box, v: number) => { if (!b.known) rec(b.key).rev = Math.max(0, Math.min(itemsOf(b).length, v)); };
-/** Seconds to find the item at `idx` of a container: 0.6–1.5 s, scaled by the kind of container and how many things lie in it. */
+/** Seconds of searching a plain chest in all (playtest v13: it took 12–42 game-min ≈ 18 s real = boredom). The kind multiplies it, the items share it. */
+const SEARCH_S = 2.5;
+/** Seconds to find the item at `idx` of a container: its share of the container's search time, a little uneven from item to item. */
 export function itemTime(b: Box, idx: number): number {
   const it = itemsOf(b), s = it[idx];
   const u = hash(b.key + '|' + idx + '|' + (s ? s.id : ''));
-  return (0.6 + 0.9 * u) * b.mul * (1 + 0.05 * Math.max(0, Math.min(8, it.length - 4)));
+  return SEARCH_S * b.mul * (0.7 + 0.6 * u) / Math.max(1, it.length);
 }
+/** The hands' factor for searching: frost slows fine work, but gloves (the frost factor) cost half as much as before. */
+const searchHands = () => 1 - (1 - handsFactor()) / 2;
 /** A world container is frozen shut when it says so (data.frozen) or sits in the ship's hold / the ice cave / the ice lake hut. */
 export function isFrozen(f: Fixture): boolean {
   const r = rec('f' + f.id); if (r.thawed) return false;
@@ -81,7 +85,7 @@ export function makeBox(f: Fixture): Box {
   const known = f.kind === 'cache' || f.data?.known === true;
   const info = worldInfo.chests.find(c => c.id === f.id);
   const hold = info?.site === 'ship' && f.data?.look === 'tool';
-  const mul = known ? 0 : f.kind === 'shelf' ? 0.85 : f.kind === 'cart' ? 0.9 : hold ? 1.35 : 1;
+  const mul = known ? 0 : f.kind === 'shelf' ? 0.85 : f.kind === 'cart' ? 0.9 : hold ? 1.6 : 1;      // a frozen ship-hold crate: ≈10 game-min, a plain chest 6
   return { key: 'f' + f.id, kind: f.kind, title: hold ? S.hold : (TITLE[f.kind]?.() ?? S.chest), f, x, y, cap: capOf(f), mul, known, items: () => f.items ?? (f.items = []) };
 }
 export function makePackBox(dropId: number): Box | null {
@@ -191,7 +195,7 @@ export function stepSearch(dt: number) {
   if (hid <= 0) return;
   if (handsFrozen() && !b.known) { if (G.frame - open.coldMsg > 180) { open.coldMsg = G.frame; toast(S.coldHands, 'warn'); } return; }
   if (barehanded()) { open.bareT -= dt; if (open.bareT <= 0) { open.bareT = 0.5; emit('fine_work', { t: 1.2 }); } }
-  open.t += dt * handsFactor();
+  open.t += dt * searchHands();
   if (open.t >= open.need) {
     open.t -= open.need;
     const rev = revOf(b); setRev(b, rev + 1);

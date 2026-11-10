@@ -19,7 +19,7 @@ import {
 import { body, stepBody, stepPlayer, die, damage, respawn, applyDifficulty, startSleep, wake, eatSlot, eatBest, windChill, toggleParka, handsFrozen, TUNE } from './player';
 import { digTime, cutRegion, target, toolState, stepTools, stepDrops, sinterMinutes, autoPickup } from './tools';
 import { gradeShelter, floodEnclosure, evalShelterNow, finishStormReport, coNow } from './shelter';
-import { initWeather, setDay, setClock, wx, STORMS, sunElevAt, noonElevAt, stormIntensity, applyClock, stepWeather, knowsForecast, readBarometer, MIN_PER_SEC, nextStorm } from './weather';
+import { initWeather, setDay, setClock, wx, STORMS, sunElevAt, noonElevAt, stormIntensity, applyClock, stepWeather, knowsForecast, readBarometer, MIN_PER_SEC, DAY_MIN, nextStorm } from './weather';
 import { sandbox, arena, igloo, tileBlock, count as cellCount, put } from './testkit';
 import { takeAllFound, closeBox, isOpen as searchOpen } from './search';
 
@@ -674,11 +674,12 @@ registerTest('weather', 'календарь кольца сезонов: ноч�
     if (!(Math.abs(m6 - 0.5) < 0.12 && Math.abs(m1 - m6) > 0.1)) throw new Error('фазы луны ' + m1 + ' ' + m6);
   });
 });
-registerTest('weather', 'часы: 1 с = 2.4 мин, сон ×20; температура и ветер в пределах, штормы по расписанию', async () => {
+registerTest('weather', 'часы: день = 20 реальных минут (1 с = MIN_PER_SEC мин), сон ×20; температура и ветер в пределах, штормы по расписанию', async () => {
   await sandbox(() => {
     setDay(3, 10); wx.override = null; const t0 = G.time; for (let i = 0; i < 10; i++) stepWeather(0.1);
-    if (Math.abs(G.time - t0 - 2.4) > 0.01) throw new Error('1 с ≠ 2.4 мин: ' + (G.time - t0));
-    G.timeScale = 20; const t1 = G.time; stepWeather(1); G.timeScale = 1; if (Math.abs(G.time - t1 - 48) > 0.1) throw new Error('×20');
+    if (Math.abs(G.time - t0 - MIN_PER_SEC) > 0.01) throw new Error('1 с ≠ ' + MIN_PER_SEC + ' мин: ' + (G.time - t0));
+    if (Math.abs(DAY_MIN / MIN_PER_SEC / 60 - 20) > 0.01) throw new Error('день ≠ 20 реальных минут: ' + DAY_MIN / MIN_PER_SEC / 60);
+    G.timeScale = 20; const t1 = G.time; stepWeather(1); G.timeScale = 1; if (Math.abs(G.time - t1 - 20 * MIN_PER_SEC) > 0.1) throw new Error('×20');
     let mn = 0, mx = -99, wmax = 0, smax = 0;
     for (let d = 1; d <= 18; d++) for (let h = 0; h < 24; h += 1.5) { setDay(d, h); mn = Math.min(mn, G.ambientT); mx = Math.max(mx, G.ambientT); wmax = Math.max(wmax, Math.abs(G.wind)); smax = Math.max(smax, G.storm); }
     if (!(mn > -46 && mn < -34 && mx < -14 && mx > -30)) throw new Error('температура ' + mn + '..' + mx);

@@ -6,7 +6,7 @@ import { on, emit } from './bus';
 import { W, TS, mat, aux } from '../engine/grid';
 import { boxFree } from '../engine/phys';
 import { MAT } from '../content/materials';
-import { SEA } from './locations';
+import { SEA, LOC } from './locations';
 import { worldInfo } from './worldgen';
 import { fauna, stepFauna, groundY, scentAt, scent, setAiMode, aiOf, dogInteract, dogWarmth, dogHunger } from './fauna';
 import { driftState, shiftFloes, stepDrift, iceUnder, freezeLeads } from './drift';
@@ -249,7 +249,11 @@ registerTest('quest', 'цепочка первого дня и ледокол: �
   emit('shelter', { stars: 2, closed: true, vent: true }); t.expect(/иглу/.test(objective()), 'укрытие без своих блоков не засчитано (станция не в счёт)');
   const px0 = G.player.x; G.player.x = 1000; runStats.placed = 3;
   emit('shelter', { stars: 2, closed: true, vent: true }); G.player.x = px0;
-  t.expect(/дневник доктора/i.test(objective()), 'пятая цель — дневник у тура: ' + objective());
+  // the igloo goal is followed by two mini-goals (a catch, a warm night) before the diary (playtest v13)
+  t.expect(/Поймай рыбу/.test(objective()), 'пятая цель — поймать рыбу или куропатку: ' + objective());
+  emit('fish_caught', { n: 1 }); t.expect(/Переночуй/.test(objective()), 'шестая цель — переночевать в тепле: ' + objective());
+  { const x0 = G.player.x, y0 = G.player.y; G.player.x = 640; G.player.y = LOC.station.y; emit('slept', { hours: 4 }); G.player.x = x0; G.player.y = y0; }
+  t.expect(/дневник доктора/i.test(objective()), 'седьмая цель — дневник у тура: ' + objective());
   readNote('n1'); t.expect(!/дневник доктора|иглу|барометр/i.test(objective()) && objective().length > 8, 'после цепочки — «следующее разумное дело»: ' + objective());
   const sp = suppliesNow(); t.expect(Number.isFinite(sp.fuelH) && Number.isFinite(sp.foodDays), 'запасы не посчитаны');
   // the radio call -> icebreaker two days later -> signal fire on the cape hill -> it passes, drops a crate and leaves (no ending)

@@ -17,10 +17,10 @@ Build first: `npx vite build --outDir $SP/B --emptyOutDir`. Playwright is taken 
 ## How the page is driven
 
 - The init script stubs `requestAnimationFrame`, so the game loop never runs by itself. The bot is the only clock:
-  `window.__sc.stepFast(n)` (no rendering). One frame is 1/60 s of body time = 0.04 game minutes (`MIN_PER_SEC` 2.4).
+  `window.__sc.stepFast(n)` (no rendering). One frame is 1/60 s of body time = 0.02 game minutes (`MIN_PER_SEC` 1.2).
 - All decisions are made inside the page (`installBot`), through `window.__sc` and `__sc.mods`
   (`fixtures`, `inv`, `player`, `quest`, `seasons`). Nothing in the game code is changed by the bot.
-- Walking is `__sc.teleport`. Its time is charged before the jump (`dist × 0.0889 game min per cell`,
+- Walking is `__sc.teleport`. Its time is charged before the jump (`dist × 1.2 / 27 game min per cell`,
   i.e. 27 cells per body second): a walking body makes heat, so the walk is not charged as standing in the cold.
 - The game's own sleep warp (x20 while asleep) is used through the bed (`sleep_request` → `startSleep`, not forced).
 - Game time moves only in `stepMin()`; each decision cycle is `chunk` = 10 game minutes.

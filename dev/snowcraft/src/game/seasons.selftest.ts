@@ -33,9 +33,9 @@ registerTest('seasons', 'события: смена фазы шлёт season, н
     wx.override = null;
     const got: string[] = [];
     const off = on('season', (d: { phase: string; cycle: number }) => got.push(d.phase + d.cycle));
-    setDay(12, 23); for (let i = 0; i < 60 * 8; i++) stepWeather(0.1);       // across midnight of day 12 -> 13
+    setDay(12, 23); for (let i = 0; i < 60 * 12; i++) stepWeather(0.1);      // across midnight of day 12 -> 13 (12 s = 14.4 game min at MIN_PER_SEC 1.2)
     t.expect(G.day === 13 && got.join() === 'twilight0', `13 день: ${G.day} ${got.join()}`);
-    setDay(18, 23); for (let i = 0; i < 60 * 8; i++) stepWeather(0.1);
+    setDay(18, 23); for (let i = 0; i < 60 * 12; i++) stepWeather(0.1);
     t.expect(G.day === 19 && got.join() === 'twilight0,night1', 'новая ночь, круг 1: ' + got.join());
     off();
   });

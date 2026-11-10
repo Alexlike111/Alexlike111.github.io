@@ -53,7 +53,10 @@ registerTest('quest', 'цепочка: уголь → печь → бароме�
   fresh(t); await t.frames(20);
   t.expect(/уголь/.test(objectiveText()), 'первая строка: ' + objectiveText());
   const tg = objectiveTarget();
-  t.expect(!!tg && dist(tg, { x: 740, y: 269 }) < 12, 'указатель не у угля: ' + JSON.stringify(tg));
+  // the arrow points at the nearest coal sack that is reachable on foot (starter.ts puts three in plain view near the spawn)
+  const coalNear = G.drops.filter(d => d.item === 'coal').map(d => ({ x: d.x, y: d.y, dd: dist(d, G.player) })).sort((a, b) => a.dd - b.dd)[0];
+  t.expect(!!tg && !!coalNear && dist(tg, coalNear) < 2, 'указатель не у угля: ' + JSON.stringify(tg));
+  t.expect(/· \d+ м/.test(objectiveText()), 'в строке цели нет расстояния до угля: ' + objectiveText());
   t.sc.give('coal', 2); await t.frames(2);
   // the east door is buried under the lee drift (DESIGN §13): digging it out is the step between the coal and the stove; the arrow leads to the door
   t.expect(/Откопай дверь/.test(objectiveText()), 'после угля — откопать дверь: ' + objectiveText());

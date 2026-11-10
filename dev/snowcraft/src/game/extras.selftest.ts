@@ -57,3 +57,29 @@ registerTest('extras', 'в трюме «Зари» две консервы (ли
   t.expect(!!can && can.n >= 2, `консервы в трюме: ${can?.n ?? 0}`);
 });
 
+
+// v13 (playtest explorer): the chisel is on the beach before the ship, the long legs have finds, the rubble has its note, the diary tin is where the arrow points
+registerTest('extras', 'пешня в сундуке на пляже, раньше корабля (x < 1200)', (t) => {
+  const c = worldInfo.chests.find(q => q.site === 'beach' && q.items.some(s => s.id === 'ice_chisel'));
+  t.expect(!!c, 'пешни в сундуках пляжа нет');
+  t.expect(!!c && c.x < 1200, `пешня лежит на x=${c?.x}, нужно раньше корабля (x≈1750)`);
+});
+
+registerTest('extras', 'длинные ноги: бревна между станцией и шахтой, банка с рукавицей, кострище на припае', (t) => {
+  const wood = G.drops.filter(d => d.item === 'log' && d.x >= 330 && d.x <= 410 && d.n === 3);
+  const tin = G.drops.filter(d => (d.item === 'wool_mittens' || d.item === 'can') && d.x >= 490 && d.x <= 610);
+  const ring = G.fixtures.filter(f => f.kind === 'campfire' && f.tx * 4 >= 1190 && f.tx * 4 <= 1340);
+  t.expect(wood.length === 1, `стопка плавника 3 шт. между шахтой и станцией: ${wood.length}`);
+  t.expect(tin.some(d => d.item === 'wool_mittens') && tin.some(d => d.item === 'can'), `рукавица и банка: ${tin.map(d => d.item).join(',')}`);
+  t.expect(ring.length === 1, `кострище на припае между пляжем и кораблём: ${ring.length}`);
+});
+
+registerTest('extras', 'записка «Впереди завал» лежит у завала на спуске (x 230–260), а не у портала', (t) => {
+  const n2 = worldInfo.notes.find(n => n.id === 'n2');
+  t.expect(!!n2 && n2.x >= 230 && n2.x <= 260, `записка n2 на x=${n2?.x}`);
+});
+
+registerTest('extras', 'дневник доктора лежит в жестянке у тура (x≈448), куда ведёт стрелка цели', (t) => {
+  const n1 = worldInfo.notes.find(n => n.id === 'n1');
+  t.expect(!!n1 && n1.x > 430 && n1.x < 470, `записка n1 на x=${n1?.x}`);
+});
