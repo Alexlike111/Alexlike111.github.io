@@ -97,6 +97,7 @@ registerTest('onboarding', 'иглу: счётчик «Блоков N/10» сч�
   G.toasts.length = 0;
   const done: string[] = [], off = on('goal_done', (d: { id: string }) => done.push(d.id));
   emit('fish_caught', { n: 1 }); t.sc.step(90); await t.wait(10);
+  t.log('fish: done=' + fish.done() + ' runStats.fish=' + runStats.fish + ' birds=' + runStats.birds + ' goal_done=' + done.join(','));
   t.expect(fish.done() && done.includes('fish'), 'улов не засчитан как цель: ' + done.join(','));
   t.expect(G.toasts.some(x => /Улов на ужин/.test(x.text)), 'за улов нет награды');
   t.expect(!sleep.done(), 'сон уже засчитан в начале');
