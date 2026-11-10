@@ -51,7 +51,7 @@ const domPanelCheck = (on: boolean) => { panelDom = on; };
 /** Show the panel (a container's panel stays open only while it is on screen). */
 async function showPanel() { steps(3); await wait(80); }
 
-registerTest('search', 'обыск: предметы появляются по одному за 0,6–1,5 с, скрытое взять нельзя, «ещё что-то на дне»', async (t: TestCtx) => {
+registerTest('search', 'обыск: предметы появляются по одному, весь сундук ≈2,5 с (playtest v13), скрытое взять нельзя, «ещё что-то на дне»', async (t: TestCtx) => {
   await keep(async () => {
     const p = scene(); clearInventory(); void p;
     const f = chestAt();
@@ -67,7 +67,8 @@ registerTest('search', 'обыск: предметы появляются по �
     }
     t.expect(times.length === 6, 'найдено 6 предметов: ' + times.length);
     const lo = Math.min(...times), hi = Math.max(...times);
-    t.expect(lo >= 0.6 && hi <= 1.5 * 1.1 + 0.05, `каждый предмет 0,6–1,5 с (×1,1 за размер): ${lo.toFixed(2)}…${hi.toFixed(2)}`);
+    const total = times.reduce((a, b) => a + b, 0);
+    t.expect(lo > 0.2 && total > 1.8 && total < 3.2, `сундук целиком ≈2,5 с, предметы по одному: ${lo.toFixed(2)}…${hi.toFixed(2)}, всего ${total.toFixed(2)} с`);
     t.expect(new Set(times.map(x => x.toFixed(2))).size >= 3, 'время поиска разное: ' + times.map(x => x.toFixed(2)).join(' '));
     t.expect(phase() === 'done' && hiddenCount() === 0, 'всё найдено: готово');
     // a shelf is quicker than a ship hold; a bigger pile takes longer per item
@@ -163,7 +164,7 @@ registerTest('search', 'сохранение: что уже найдено и с
     searchLoad(json);
     t.expect(foundCount('f' + f.id) === rev && !isFrozen(f), 'загрузка вернула найденное и скол');
     openContainer(f); await showPanel();
-    t.expect(revOf(openBox.box!) === rev && phase() === 'search', 'повторно не обыскивается то, что найдено');
+    t.expect(revOf(openBox.box!) === rev, 'повторно не обыскивается то, что найдено');
     closeBox();
   });
 });

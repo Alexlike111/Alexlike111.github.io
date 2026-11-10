@@ -83,7 +83,7 @@ registerTest('tools', 'нож: блок режется за ≈0.5 с (было 
   });
 });
 
-registerTest('tools', 'нож под рыхлым слоем: подсказка «сначала откопай снег»', async () => {
+registerTest('tools', 'нож под рыхлым слоем: подсказка «Рыхлый: утопчи лопатой (ПКМ)»', async () => {
   await sandbox(() => {
     const { s } = flat();
     s.selectItem('snow_knife');
@@ -91,7 +91,7 @@ registerTest('tools', 'нож под рыхлым слоем: подсказка
     for (let x = 996; x < 1008; x++) { const i = 272 * W + x; mat[i] = MAT.SNOW; aux[i] = 30; }
     aimAt(s, 1002, 274);
     const r = target().reason ?? '';
-    if (!/откопай снег/.test(r)) throw new Error('нет подсказки про рыхлый снег: ' + JSON.stringify(r));
+    if (!/утопчи лопатой/.test(r)) throw new Error('нет подсказки про рыхлый снег: ' + JSON.stringify(r));
   });
 });
 

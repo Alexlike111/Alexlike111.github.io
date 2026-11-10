@@ -971,8 +971,8 @@ export function stepDrops(dt: number) {
       const dx = px - d.x, dy = py - d.y;
       const inBox = Math.abs(dx) <= AUTO_DX && Math.abs(dy) <= AUTO_DY;
       // a thrown drop is armed once the player has walked out of the box: dropping it must not hand it straight back
-      const org = dropOrigin.get(d);
-      if (thrown.has(d.id) && org && Math.hypot(p.x - org.x, p.y - org.y) > 3) armedThrown.add(d.id);
+      const org = dropOrigin.get(d) ?? d;                       // no recorded spot (a drop made by the game itself): from where it lies
+      if (thrown.has(d.id) && Math.hypot(p.x - org.x, p.y - org.y) > 3) armedThrown.add(d.id);
       if (inBox && autoPickable(d)) {
         const dist = Math.hypot(dx, dy), pickR = isNote(d.item) ? NOTE_R : 5.5;
         if (dist < 10 && huntDropNear(d.x, d.y, 0.5)?.id !== d.id) {       // a shot bird lying on the snow is the husky's
