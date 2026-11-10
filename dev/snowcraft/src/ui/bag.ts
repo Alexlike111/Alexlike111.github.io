@@ -357,7 +357,7 @@ function endDrag(drop: boolean, x: number, y: number) {
     if (outside) {
       // the HUD belt is the same belt: dropping a stack on it while the panel is open must not throw it on the ground (playtest v13)
       const hudUnder = document.elementFromPoint(x, y) as HTMLElement | null;
-      if (hudUnder?.closest('#hud, .belt, #sc-hud-belt')) { /* cancelled */ }
+      if (hudUnder?.closest('#hud')) { /* cancelled: the HUD is not a drop target */ }
       else if (d.from.z !== 'box') dropRef(d.from);
     }
     else {

@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 // SNOWCRAFT — boot, fixed-step game loop, render layers, window.__sc dev/test API (SPEC §8).
 // Order inside one 60 Hz step: weather -> player -> tools -> drops -> fixtures -> shelter -> sim -> heat -> structure -> bodies -> particles.
+import { storeGet, storeSet, storeRemove, storeInit } from './platform/store';
 import { G, toast, DIFFS } from './game/state';
 import { on, emit } from './game/bus';
 import { generateWorld } from './game/worldgen';
@@ -399,9 +400,10 @@ window.__sc = sc;
 
 // ---------------------------------------------------------------------------------------------------------------------
 async function boot() {
+  await storeInit(['sc.lang', 'sc.vol', 'sc.q', 'sc.ui', 'sc.zoom', 'sc.best', 'sc.stickHint', 'sc.hints']);       // settings come from the storage backend (Bridge in the Playgama build) before any UI reads them
   { // language: ?lang=xx, else the stored choice, else Russian for the automated tests (navigator.webdriver) and for #selftest (the checks read the Russian wording), else the browser's
     let L: string | null = params.get('lang'); const ok = (x: string | null) => (i18nMod.LANGS as readonly string[]).includes(x ?? '');
-    if (!ok(L)) { try { L = localStorage.getItem('sc.lang'); } catch { L = null; } }
+    if (!ok(L)) { try { L = storeGet('sc.lang'); } catch { L = null; } }
     if (!ok(L)) L = (navigator as Navigator & { webdriver?: boolean }).webdriver || location.hash.includes('selftest') ? 'ru' : i18nMod.detectLang();
     i18nMod.setLang(L as i18nMod.Lang); }
   initRender(canvas);

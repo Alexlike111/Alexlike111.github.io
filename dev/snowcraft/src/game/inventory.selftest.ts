@@ -156,6 +156,7 @@ registerTest('inventory', 'рядом: тяжёлое не подбираетс�
     t.expect(autoPickable(bis) && autoPickable(log), 'правила автоподбора: сухари и бревно — да (тяжёлое берётся, пока рюкзак под пределом)');
     t.expect(autoPickable(mk('coal', 4, 40)) && autoPickable(mk('shovel', 1, 40)) && autoPickable(mk('wool_hat', 1, 40)), 'уголь, лопата, шапка — тоже, если влезают');
     t.expect(!autoPickable(mk('sled', 1, 40)) && !autoPickable(mk('backpack', 1, 40)) && !autoPickable(mk('pot', 1, 40)), 'сани, рюкзак и котелок (набор для установки) — не автоподбор');
+    p.face = -1;                                   // the biscuit lies behind the player when facing right: the list counts things behind a bit further
     const list = nearbyList();
     t.expect(list.length >= 2 && list[0].item === 'biscuit', 'ближайшее первым: ' + list.map(n => n.label + ':' + n.dist.toFixed(0)).join());
     // in front beats behind at the same distance

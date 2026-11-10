@@ -1,5 +1,6 @@
 // Seasons ring (DESIGN §18): polar night 12 days -> twilight «day» 6 days -> night ... forever. Pure functions of the day number.
 // `ramp` = per-ring difficulty multipliers (capped), recomputed from G.cycle and G.diff each day and on load; other systems just read it.
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 import { G } from './state';
 import { strings, fmt } from '../content/i18n';
 
@@ -42,13 +43,13 @@ export function noonElevOfDay(day: number): number { return noonElevAtTime((day 
 /** Personal record (localStorage `sc.best`, never throws): the longest run in days and the ring it reached. */
 export interface Best { day: number; cycle: number }
 export function loadBest(): Best | null {
-  try { const r = JSON.parse(localStorage.getItem('sc.best') || 'null'); return r && typeof r.day === 'number' ? { day: r.day, cycle: r.cycle | 0 } : null; } catch { return null; }
+  try { const r = JSON.parse(storeGet('sc.best') || 'null'); return r && typeof r.day === 'number' ? { day: r.day, cycle: r.cycle | 0 } : null; } catch { return null; }
 }
 /** Record the current run if it beat the best; returns { best, isNew }. */
 export function saveBest(day = G.day, cycle = G.cycle): { best: Best; isNew: boolean } {
   const old = loadBest(), isNew = !old || day > old.day;
   const best = isNew ? { day, cycle } : old!;
-  if (isNew) { try { localStorage.setItem('sc.best', JSON.stringify(best)); } catch { /* storage blocked */ } }
+  if (isNew) { try { storeSet('sc.best', JSON.stringify(best)); } catch { /* storage blocked */ } }
   return { best, isNew };
 }
 

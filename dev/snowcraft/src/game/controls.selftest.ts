@@ -201,7 +201,7 @@ registerTest('controls', 'брошенное (G) лежит 1,4 с, ходьба
     steps(30);
     t.expect(G.drops.includes(d) && count('coal') === 0, 'брошенное взято раньше 1,4 с');
     steps(120);
-    t.expect(G.drops.includes(d) && count('coal') === 0, 'брошенное взято само, пока игрок стоит рядом');
+    t.expect(G.drops.includes(d) && count('coal') === 0, 'брошенное взято само, пока игрок стоит рядом: ' + JSON.stringify([G.drops.includes(d), count('coal'), d.x, d.y, d.age, d.n, p.x, p.y]));
     p.x = 1040; steps(5);
     p.x = 1000; steps(30);
     t.expect(count('coal') === 1 && !G.drops.includes(d), `брошенное не взято, когда игрок вернулся после отхода: x ${d.x.toFixed(1)} y ${d.y.toFixed(1)} vs ${p.x.toFixed(1)} ${p.y.toFixed(1)}, age ${d.age.toFixed(2)}, armed ${armedThrown.has(d.id)}, drop in list ${G.drops.includes(d)}`);

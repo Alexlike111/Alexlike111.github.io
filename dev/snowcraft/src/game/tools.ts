@@ -40,7 +40,7 @@ const S = strings('tools', {
   looseSnow: 'рыхлый снег: бери лопатой', packed: 'наст', block: 'снежный блок',
   density: '{c}', iceThick: 'лёд толстый', iceThin: 'лёд тонкий',
   shovelFull: 'Лопата полна: снег отброшен', snowMinus: '−снег', looseTamp: 'Рыхлый: утопчи лопатой (ПКМ)',
-  dropped: 'Брошено: {name} ×{n}', needPouch: 'Нужен подсумок', farHint: 'Подойди ближе',
+  dropped: 'Брошено: {name} ×{n}', needPouch: 'Нужен подсумок',
   scoop: 'Копать', throwSnow: 'Бросить снег', tamp: 'Утрамбовать', cut: 'Режь блок', dig: 'Копать', chisel: 'Долбить лёд', place: 'Поставить', use: 'Применить', open: 'Открыть',
   feedLight: 'Зажечь', feed: 'Подкинуть',
   noSupport: 'Нет опоры', span: 'Пролёт длинный', ok: 'держится',
@@ -583,6 +583,8 @@ function placeFixtureItem(T: Target) {
 // shovel
 const SHOVEL_CAP = 32;          // cells of snow the blade holds (the HUD bar shows load / SHOVEL_CAP)
 let throwAcc = 0, tossQ = 0, tossHint = false;
+/** The shovel's transient state (the auto toss queue) is cleared by a restored sandbox (testkit.ts restore): an earlier test's tossing must not leak. */
+export function resetDigState() { tossQ = 0; tossHint = false; throwAcc = 0; }
 /** One cell of snow from the blade to the world point (tx,ty): the throw particles, pre-compacted (aux 100: it sinters faster). */
 function flingCell(tx: number, ty: number) {
   const p = G.player;
@@ -971,7 +973,8 @@ export function stepDrops(dt: number) {
       const dx = px - d.x, dy = py - d.y;
       const inBox = Math.abs(dx) <= AUTO_DX && Math.abs(dy) <= AUTO_DY;
       // a thrown drop is armed once the player has walked out of the box: dropping it must not hand it straight back
-      const org = dropOrigin.get(d) ?? d;                       // no recorded spot (a drop made by the game itself): from where it lies
+      let org = dropOrigin.get(d);                              // no recorded spot (a drop made by the game itself): the feet are about 4 cells under it, from the first frame
+      if (!org) { org = { x: d.x, y: d.y + 4 }; dropOrigin.set(d, org); }
       if (thrown.has(d.id) && Math.hypot(p.x - org.x, p.y - org.y) > 3) armedThrown.add(d.id);
       if (inBox && autoPickable(d)) {
         const dist = Math.hypot(dx, dy), pickR = isNote(d.item) ? NOTE_R : 5.5;

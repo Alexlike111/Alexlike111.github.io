@@ -8,11 +8,11 @@ import { initHeat } from '../engine/heat';
 import { initStructure } from '../engine/structure';
 import { clusters, clearBodies } from '../engine/bodies';
 import { clearParticles } from '../engine/particles';
-import { inv, backpacks, dropDur } from './inventory';
+import { inv, backpacks, dropDur, held } from './inventory';
 import { body, applyDifficulty } from './player';
 import { resetShelter } from './shelter';
 import { setClock, wx } from './weather';
-import { toolState, autoPickup } from './tools';
+import { toolState, autoPickup, resetDigState } from './tools';
 import { auxOfDensity } from './items';
 
 export interface ArenaOpts { halfW?: number; up?: number; depth?: number; dens?: number; loose?: number; ice?: boolean }
@@ -59,6 +59,7 @@ export function snapshot(): Snap {
   };
 }
 export function restore(s: Snap) {
+  resetDigState(); held.load = 0;                  // the transient digging state is not part of the snapshot
   mat.set(s.mat); aux.set(s.aux); shade.set(s.shade); flags.set(s.flags); bg.set(s.bg); seen.set(s.seen); awake.set(s.awake);
   G.fixtures.length = 0; for (const f of JSON.parse(s.fixtures)) G.fixtures.push(f);
   G.drops.length = 0; for (const d of JSON.parse(s.drops)) G.drops.push(d);

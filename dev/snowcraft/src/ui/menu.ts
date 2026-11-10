@@ -5,6 +5,7 @@
 // P (devhud.ts toggles the pause) opens it too; Esc closes it (TERRARIA_CONTROLS: Esc is the inventory, P the pause).
 // Rows: Продолжить · Полный экран · Масштаб (zoomui.ts) · Звук (on/off + volume) · Язык · Качество · Интерфейс (full / minimal, see hudmode.ts).
 // Choices live in localStorage (try/catch everywhere): sc.vol {v,m}, sc.q 0|1|2, sc.lang, sc.ui. The URL ?q= still wins over sc.q.
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 import { G, toast } from '../game/state';
 import { strings, fmt, LANGS, LANG_NAMES, setLang, getLang, type Lang } from '../content/i18n';
 import { sfx } from '../engine/audio';
@@ -79,8 +80,8 @@ let open = false, ownPause = false, wasPaused = false;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // storage (every access may throw in a private window or with blocked site data)
-function getItem(k: string): string | null { try { return localStorage.getItem(k); } catch { return null; } }
-function setItem(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* the choice then lasts this visit only */ } }
+function getItem(k: string): string | null { try { return storeGet(k); } catch { return null; } }
+function setItem(k: string, v: string) { try { storeSet(k, v); } catch { /* the choice then lasts this visit only */ } }
 
 export function readVol(): { v: number; m: boolean } {
   try {

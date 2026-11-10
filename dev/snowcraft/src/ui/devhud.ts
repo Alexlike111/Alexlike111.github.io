@@ -3,6 +3,7 @@
 // (count badge top-right, name only for the active slot), bag + crafting panel (icon grid, clothing slots, weight bar, recipes grouped by DESIGN
 // categories), death card, ending card. One pixel font (Pixelify Sans) shared with the touch controls. `?devhud` adds the old numeric readout.
 // File name kept for main.ts; the old developer list lives behind the flag.
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 import '@fontsource/pixelify-sans/latin-400.css';
 import '@fontsource/pixelify-sans/cyrillic-400.css';
 import '@fontsource/pixelify-sans/latin-600.css';
@@ -331,7 +332,7 @@ export function initHud(host: HTMLElement) {
   buildBody(); buildDial();
   const k = (key: string, label: string) => `<span><kbd>${key}</kbd>${label}</span>`;
   // key hints (desktop): only the «?» chip sits at the bottom-left; the full list (renderHints) opens above it with «?», H or the sc:keys event
-  try { const r = JSON.parse(localStorage.getItem(HKEY) || 'null'); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
+  try { const r = JSON.parse(storeGet(HKEY) || 'null'); hintMem.full = !!r?.full; } catch { /* storage blocked: defaults */ }
   hintEl.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-h]')) toggleFull(); });
 
   if (DEV) { devEl = mk('dev'); }
@@ -357,7 +358,7 @@ const HKEY = 'sc.hints';
 const hintMem = { learned: [] as string[], full: false };   // learned: kept from older saves, no longer shown
 let hPrev = false, hintKey = '';
 const toastSeen = new WeakSet<object>();  // desktop toasts: the 0.5 s extra life is given once per toast
-function saveHints() { try { localStorage.setItem(HKEY, JSON.stringify(hintMem)); } catch { /* storage blocked: the hints simply come back next time */ } }
+function saveHints() { try { storeSet(HKEY, JSON.stringify(hintMem)); } catch { /* storage blocked: the hints simply come back next time */ } }
 function toggleFull() { hintMem.full = !hintMem.full; saveHints(); hintKey = ''; }
 /** Desktop: the key row is gone from the bottom of the screen. Only the small «?» chip stays there; «?» / H / the settings panel open the full list above it. */
 function renderHints() {

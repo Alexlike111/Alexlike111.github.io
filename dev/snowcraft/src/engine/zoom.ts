@@ -2,6 +2,7 @@
 // stays crisp at every zoom. The valid scales are the integers s for which the screen shows between ZOOM_MIN_CELLS and ZOOM_MAX_CELLS cells across.
 // The player's choice is stored as "cells across the width" (not as s), so it survives a window resize, a rotation and a different device.
 // Pure state + localStorage (try/catch); render.ts asks chooseScale() on every resize(), input / touch / settings call stepZoom() / setZoomIndex().
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 import { G } from '../game/state';
 
 export const ZOOM_MIN_CELLS = 200;          // most zoomed in: at least this many cells across the width
@@ -16,11 +17,11 @@ let forceDefault = false;                   // the title screen ignores the save
 const listeners: (() => void)[] = [];
 
 function load() {
-  try { const v = Number(localStorage.getItem(KEY)); if (isFinite(v) && v >= ZOOM_MIN_CELLS * 0.9 && v <= ZOOM_MAX_CELLS * 1.1) want = v; } catch { /* no storage: the default */ }
+  try { const v = Number(storeGet(KEY)); if (isFinite(v) && v >= ZOOM_MIN_CELLS * 0.9 && v <= ZOOM_MAX_CELLS * 1.1) want = v; } catch { /* no storage: the default */ }
 }
 let loaded = false;
 function ensureLoaded() { if (!loaded) { loaded = true; load(); } }
-function save() { try { localStorage.setItem(KEY, String(Math.round(want))); } catch { /* private window */ } }
+function save() { try { storeSet(KEY, String(Math.round(want))); } catch { /* private window */ } }
 
 export const defaultCells = () => (G.mobile ? ZOOM_DEFAULT_PHONE : ZOOM_DEFAULT_DESKTOP);
 
@@ -66,4 +67,4 @@ export function onZoomChange(f: () => void) { listeners.push(f); }
 /** The title screen shows the default framing whatever the player chose. */
 export function setZoomForcedDefault(on: boolean): boolean { if (on === forceDefault) return false; forceDefault = on; return true; }
 /** Forget the saved choice (tests). */
-export function resetZoom() { want = 0; forceDefault = false; try { localStorage.removeItem(KEY); } catch { /* ignore */ } for (const f of listeners) f(); }
+export function resetZoom() { want = 0; forceDefault = false; try { storeRemove(KEY); } catch { /* ignore */ } for (const f of listeners) f(); }

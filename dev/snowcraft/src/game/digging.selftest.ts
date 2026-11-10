@@ -62,7 +62,7 @@ registerTest('digging', 'нож: рыхлый снег не копается, п
     add('snow_knife', 1); s.selectItem('snow_knife');
     s.render(0); s.aim(1015, 274); s.stepFast(2);
     const t = target();
-    if (t.ok || !/Рыхлый/.test(t.reason ?? '')) throw new Error('нож на рыхлом снеге: ' + JSON.stringify({ ok: t.ok, reason: t.reason, p: [G.player.x, G.player.y], tg: [t.tx, t.ty, t.x, t.y, t.inReach, t.mode] }));
+    if (t.ok || !/Рыхлый/.test(t.reason ?? '')) throw new Error('нож на рыхлом снеге: ' + JSON.stringify({ ok: t.ok, reason: t.reason }));
   });
 });
 
@@ -107,11 +107,9 @@ registerTest('digging', 'бросок: G бросает одну штуку, Shi
     s.stepFast(200);
     if (!G.drops.some(d => d.id === dropped[0].id)) throw new Error('брошенное пропало через 3 с');
     // walk 6 cells away, then back: picked up
-    const dd = G.drops.find(q => q.id === dropped[0].id)!;
-    s.teleport(p.x + 6, 272); s.stepFast(30);
-    if (G.drops.some(q => q.id === dropped[0].id)) { const q = G.drops.find(q => q.id === dropped[0].id)!; if (!(q.x > 0)) throw new Error('x'); (globalThis as any).__dbg = [dd.x, q.x, q.age, p.x, thrown.has(q.id)]; }
+    s.teleport(1006, 272); s.stepFast(30);
     s.teleport(1000, 272); s.stepFast(60);
-    if (G.drops.some(d => d.id === dropped[0].id)) { const d = G.drops.find(q => q.id === dropped[0].id)!; throw new Error('dbg ' + JSON.stringify((globalThis as any).__dbg) + ' вернувшись к брошенному, не подобрал: drop ' + JSON.stringify([d.x, d.y, d.age, thrown.has(d.id)]) + ' player ' + JSON.stringify([p.x, p.y])); }
+    if (G.drops.some(d => d.id === dropped[0].id)) throw new Error('вернувшись к брошенному, не подобрал');
     // Shift+G: the whole stack
     add('matches', 4);
     s.selectItem('matches');
@@ -145,6 +143,21 @@ registerTest('digging', 'наст: лопата с ПКМ уплотняет р�
     { s.render(0); const [sx, sy] = s.worldToScreen(1008, 274); s.mouse(2, true, sx, sy); }      // RMB held with the shovel: the snow is pressed down
     s.stepFast(150); s.mouse(2, false); s.stepFast(2);
     if (packed() - p0 < 8) { let sn = 0, mx = 0; for (let y = 272; y < 296; y++) for (let x = 1000; x < 1016; x++) { if (mat[y * W + x] === MAT.SNOW) { sn++; mx = Math.max(mx, aux[y * W + x]); } } throw new Error('ПКМ с лопатой не уплотнил снег: ' + (packed() - p0) + ' клеток, цель ' + JSON.stringify([target().mode, target().reason, target().tx, target().ty]) + ' снег ' + sn + ' макс ' + mx + ' ' + JSON.stringify([sc().ready, input.secondaryHeld]) ); }
+  });
+});
+
+registerTest('digging', 'клавиши 7–9 без подсумка: тост «Нужен подсумок»; копание снега даёт «−снег»', async () => {
+  await sandbox(() => {
+    const { s } = ground(24);
+    clearInventory();
+    let minus = 0; const off = on('pickup_float', (d: { label?: string }) => { if (d.label === '−снег') minus++; });
+    try {
+      input.hotbar = 6; s.stepFast(2); input.hotbar = -1;
+      if (!G.toasts.some(t => /подсумок/.test(t.text))) throw new Error('нет тоста про подсумок: ' + JSON.stringify(G.toasts.map(t => t.text)));
+      add('shovel', 1); s.selectItem('shovel');
+      s.render(0); s.act('dig', 1004, 274, 0.4);
+      if (minus < 1) throw new Error('копание рыхлого снега не дало «−снег»');
+    } finally { off(); }
   });
 });
 

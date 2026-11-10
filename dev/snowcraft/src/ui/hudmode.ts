@@ -4,12 +4,13 @@
 // The mode is a pair of body classes (ui-min / ui-full) that the HUD CSS reads, plus the window event 'sc:uimode' (detail: { mode }).
 // Settings (ui/menu.ts) call setUiMode(); nothing here touches the game state. Storage may be blocked: then the mode is computed each time.
 
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 export type UiMode = 'full' | 'min';
 const KEY = 'sc.ui';
 export const SHORT_H = 340;                  // below this window height the HUD uses its compact layout (also in CSS: max-height 339px)
 
 const isMode = (v: unknown): v is UiMode => v === 'full' || v === 'min';
-const readStored = (): UiMode | null => { try { const v = localStorage.getItem(KEY); return isMode(v) ? v : null; } catch { return null; } };
+const readStored = (): UiMode | null => { try { const v = storeGet(KEY); return isMode(v) ? v : null; } catch { return null; } };
 const autoMode = (): UiMode => (typeof window !== 'undefined' && window.innerHeight < SHORT_H ? 'min' : 'full');
 
 let last: UiMode | null = null;
@@ -19,14 +20,14 @@ export function getUiMode(): UiMode {
   const s = readStored();
   if (s) return s;
   const m = autoMode();
-  try { localStorage.setItem(KEY, m); } catch { /* storage blocked: decided again next time */ }
+  try { storeSet(KEY, m); } catch { /* storage blocked: decided again next time */ }
   return m;
 }
 
 /** Store the mode and apply it now. */
 export function setUiMode(m: UiMode): void {
   const v: UiMode = isMode(m) ? m : 'full';
-  try { localStorage.setItem(KEY, v); } catch { /* storage blocked: the mode lasts until the page is closed */ }
+  try { storeSet(KEY, v); } catch { /* storage blocked: the mode lasts until the page is closed */ }
   applyUiMode();
 }
 

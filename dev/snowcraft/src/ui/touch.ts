@@ -2,6 +2,7 @@
 // Действие (hold, smart cursor) / Прыжок / Взять / Пояс (radial of the belt) / Чутьё / Парка in the right-hand cluster; Сумка / Журнал / ⚙ меню in the top-right row.
 // ⚙ only dispatches 'sc:menu' (the settings panel, ui/menu.ts, listens). Touching the world aims there and holds the action. Zoom is pinch + the settings slider.
 // "Поверни телефон" overlay in portrait. Safe-area insets respected. Writes into engine/input.ts.
+import { storeGet, storeSet, storeRemove } from '../platform/store';
 import { input, touch } from '../engine/input';
 import { G } from '../game/state';
 import { strings } from '../content/i18n';
@@ -107,7 +108,7 @@ export function initTouch(uiRoot: HTMLElement) {
   stickBase = document.createElement('div'); stickBase.className = 'stick'; layer.appendChild(stickBase);
   stickKnob = document.createElement('div'); stickKnob.className = 'knob'; layer.appendChild(stickKnob);
   ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.textContent = S.moveHint; layer.appendChild(ghost);
-  let seenStick = false; try { seenStick = localStorage.getItem('sc.stickHint') === '1'; } catch { /* no storage */ }
+  let seenStick = false; try { seenStick = storeGet('sc.stickHint') === '1'; } catch { /* no storage */ }
   if (!seenStick) ghost.style.display = 'block';
 
   const act = btn('tb-act', 'act', S.action);
@@ -193,7 +194,7 @@ export function initTouch(uiRoot: HTMLElement) {
     if (pinchA >= 0) return;                                  // a third finger during a pinch: ignored
     if (left && stickId < 0) {
       stickId = e.pointerId;
-      if (ghost && ghost.style.display !== 'none') { ghost.style.display = 'none'; try { localStorage.setItem('sc.stickHint', '1'); } catch { /* ignore */ } }
+      if (ghost && ghost.style.display !== 'none') { ghost.style.display = 'none'; try { storeSet('sc.stickHint', '1'); } catch { /* ignore */ } }
       moveStick(e.clientX, e.clientY);
     } else if (!left && aimId < 0) {
       aimId = e.pointerId; touch.aimed = true; touch.primary = true;
