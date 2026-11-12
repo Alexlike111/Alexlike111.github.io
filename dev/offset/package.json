@@ -1,0 +1,22 @@
+{
+  "name": "offset",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5190 --strictPort"
+  },
+  "devDependencies": {
+    "typescript": "5.9",
+    "vite": "^7.3.0",
+    "vite-plugin-singlefile": "^2.3.4"
+  },
+  "dependencies": {
+    "@dimforge/rapier2d-compat": "^0.19.0",
+    "@fontsource/martian-mono": "^5.2.0",
+    "@fontsource/unbounded": "^5.2.0"
+  }
+}
