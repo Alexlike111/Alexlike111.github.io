@@ -23,6 +23,21 @@ async function boot() {
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+  // ---- TEMP prototype HUD (replaced by src/ui later)
+  const ui = document.getElementById('ui')!;
+  ui.insertAdjacentHTML('beforeend', `<div id="tmpInfo" style="position:absolute;left:12px;top:10px;font:700 12px/1.5 monospace;color:#252A7C;letter-spacing:.06em"></div>
+  <div id="tmpHelp" style="position:absolute;left:50%;top:10px;transform:translateX(-50%);font:11px/1.5 monospace;color:#252A7C;text-align:center;max-width:62vw;background:#EDE3CFcc;padding:4px 8px"></div>
+  <button id="tmpAct" style="position:absolute;right:calc(18px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));width:84px;height:84px;border:3px solid #252A7C;background:#FF4F3F;color:#EDE3CF;font:800 13px monospace;pointer-events:auto;touch-action:none">УДАР</button>
+  <button id="tmpHeavy" style="position:absolute;right:calc(112px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));width:64px;height:64px;border:3px solid #252A7C;background:#EDE3CF;color:#252A7C;font:800 11px monospace;pointer-events:auto;touch-action:none">ОБЪЁМ</button>`);
+  const info = document.getElementById('tmpInfo')!, help = document.getElementById('tmpHelp')!, bA = document.getElementById('tmpAct')!, bH = document.getElementById('tmpHeavy')!;
+  const stop = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
+  bA.addEventListener('pointerdown', (e) => { stop(e); input.actionDown(); }); bA.addEventListener('pointerup', (e) => { stop(e); input.actionUp(); });
+  bH.addEventListener('pointerdown', (e) => { stop(e); input.heavyTap(); });
+  setInterval(() => {
+    const p = game.player; info.textContent = `ПРОЧНОСТЬ ${'■'.repeat(Math.max(0, p.hp))}${'□'.repeat(Math.max(0, p.s.maxHp - p.hp))}   ЗАРЯДЫ ${'⊕'.repeat(p.charges)}${'○'.repeat(Math.max(0, p.s.charges - p.charges))}   СНЯТО ${game.kills}`;
+    bA.textContent = p.held ? 'БРОСОК' : 'УДАР/ХВАТ'; bH.style.background = p.heavyArmed > 0 ? '#F5B915' : '#EDE3CF';
+    help.textContent = input.touchMode ? 'Слева — стик (вверх = подпрыгнуть). Справа: тап — прыжок в точку / на врага, тяни — прицел в замедлении. ОБЪЁМ — следующий прыжок уносит всё вокруг.' : 'A/D — бег, Пробел — подпрыгнуть. ЛКМ: клик — прыжок, зажать — прицел в замедлении. ПКМ/E — удар, хват, бросок. Q — ОБЪЁМ (тяжёлый прыжок).';
+  }, 120);
   // debug / QA API
   (window as any).__offset = {
     game, T,

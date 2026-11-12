@@ -31,7 +31,7 @@ export class Player {
   pose: Pose = new Float32Array(J.N * 2);
   scars: Scar[] = []; ghosts: Ghost[] = [];
   lastJumpT = 99; airJumps = 0; stuckT = 0; fallPeak = 0; denyT = 0;
-  wasGrounded = false; stepAcc = 0;
+  wasGrounded = false; stepAcc = 0; freeJump = false;
   moveX = 0; jumpHeld = false; wantAction = false;
   s!: Stats;
   constructor(public g: Game) { }
@@ -134,7 +134,7 @@ export class Player {
     const A = this.aim, s = this.s;
     if (!A.valid) { this.deny(A.reason === 'anchor' ? 'anchor' : 'blocked'); return false; }
     const heavy = this.heavyArmed > 0;
-    const cost = heavy ? s.heavyCost : 1;
+    const cost = heavy ? s.heavyCost : this.freeJump ? 0 : 1; if (!heavy) this.freeJump = false;
     if (this.charges < cost) { this.deny('charges'); return false; }
     this.charges -= cost; this.chargeDelay = T.tp.rechargeDelay; this.heavyArmed = 0;
     this.jumpTo(A.x, A.y, heavy, A.enemy);
@@ -197,6 +197,7 @@ export class Player {
     const g = this.g, s = this.s, fx = g.fx;
     const R = s.burstR * (heavy ? 1.25 : 1) * Math.min(1.8, 0.75 + 0.25 * kin);
     g.st.blast(x, y, R, s.burstDmg * kin * kin, s.burstImpulse * kin);
+    g.deflectSlugs(x, y, R + 0.6);
     g.pushEnemies(x, y, R, 6.5 * kin, (kin - 1) * 26, 0.25, 'burst');
     fx.warp(x, y, 0.3, R * 1.9, 0.55 * Math.min(2, kin), 0.36);
     fx.ring(x, y, 0.3, R * 1.25, 0.2, 0.3, ink(0, 1, 0));
@@ -227,6 +228,7 @@ export class Player {
       g.fx.ring(e.x, e.y, 0.2, 1.1, 0.22, 0.16, ink(0, 0, 0));
     }
     g.st.blast(cx + nx * 0.25, cy + ny * 0.25, 1.0, T.strike.chunkDmg * (1 + spd * 0.06), 300 + power * 22);
+    if (hitAny && s.chainStrike) this.freeJump = true;
     if (hitAny) { g.hitstop(T.strike.hitstop); g.cam.shake(0.3); g.kickPlates(nx, ny, 5); this.rb.setLinvel({ x: this.vx * 0.55 - nx * 1.5, y: Math.min(this.vy * 0.4, 0) - 3.5 }, true); this.vx = this.vx * 0.55 - nx * 1.5; this.vy = Math.min(this.vy * 0.4, 0) - 3.5; }
     bus.emit('strike', { x: cx, y: cy, power, kill: killed });
     return hitAny;
@@ -289,6 +291,7 @@ export class Player {
     g.kickPlates(dir, -0.3, 16); g.cam.shake(0.6); g.hitstop(0.09); g.flashDesat(0.5);
     g.fx.burst(this.x, this.y, 14, 9, ink(1, 0, 0), 'scrap');
     if (this.held) this.dropHeld();
+    if (this.s.thorns > 0) this.arrivalBurst(this.x, this.y, 1.7, false);
     bus.emit('playerHurt', { hp: Math.max(0, this.hp), maxHp: this.s.maxHp, cause });
     if (this.hp <= 0) {
       if (this.s.revive > 0 && !g.reviveUsed) { g.reviveUsed = true; this.hp = Math.ceil(this.s.maxHp / 2); this.iframes = 2.2; this.arrivalBurst(this.x, this.y, 2, true); bus.emit('pickup', { kind: 'hp', amount: this.hp }); }
@@ -310,8 +313,9 @@ export class Player {
       const sp = this.fallPeak; this.squash = clamp(sp / 22, 0.15, 0.8);
       bus.emit('playerLand', { speed: sp, x: t.x, y: t.y + 0.8 });
       this.g.fx.dust(t.x - 0.25, t.y + 0.75, 0.3 + sp * 0.02, ink(0.3, 0, 0), -1.4); this.g.fx.dust(t.x + 0.25, t.y + 0.75, 0.3 + sp * 0.02, ink(0.3, 0, 0), 1.4);
-      if (sp > 15) { // ground slam: momentum becomes a shock wave
-        const k = 1 + (sp - 15) / 12 * s.slamK; this.g.st.blast(t.x, t.y + 0.9, 1.6 + k * 0.7, 520 * k * k, 420 * k);
+      const slamAt = 15 - 3 * s.quake;
+      if (sp > slamAt) { // ground slam: momentum becomes a shock wave
+        const k = (1 + (sp - slamAt) / 12 * s.slamK) * (1 + 0.3 * s.quake); this.g.st.blast(t.x, t.y + 0.9, 1.6 + k * 0.7, 520 * k * k, 420 * k);
         this.g.pushEnemies(t.x, t.y + 0.6, 2.2 + k * 0.8, 7 * k, 14 * k, 0.5, 'slam'); this.g.cam.shake(0.3 + 0.12 * k); this.g.fx.warp(t.x, t.y + 0.8, 0.3, 3.2 + k, 0.5, 0.4);
         this.g.fx.ring(t.x, t.y + 0.8, 0.3, 2.4 + k, 0.3, 0.3, ink(1, 0, 0));
       }

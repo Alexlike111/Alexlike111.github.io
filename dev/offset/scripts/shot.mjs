@@ -22,6 +22,17 @@ const adv = (n) => page.evaluate((n) => window.__offset.advance(n, true), n);
 const state = () => page.evaluate(() => window.__offset.state());
 const ev = (f, a) => page.evaluate(f, a);
 const scenarios = {
+  async fight() {
+    // let the sandbox run with a simple auto-player: jump onto the nearest enemy whenever possible
+    let hurt = 0;
+    for (let i = 0; i < 40; i++) {
+      await ev(() => { const g = window.__offset.game, p = g.player; let best = null, bd = 1e9; for (const e of g.enemies) { if (!e.alive) continue; const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < bd) { bd = d; best = e; } }
+        if (best && p.charges > 0) { p.computeAim(false, g.cam.sx(best.x) / g.cam.dpr, g.cam.sy(best.y) / g.cam.dpr, 0, 0, true); p.tryJump(); } else if (best && bd < 2) g.input.actionEdge = true; });
+      await adv(24);
+      if (i === 3 || i === 9 || i === 20) await shot('f' + i);
+    }
+    await shot('end');
+  },
   async idle() { await adv(40); await shot('a'); },
   async jump() {
     await adv(40); await shot('0');

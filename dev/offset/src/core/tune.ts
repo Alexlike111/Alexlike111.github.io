@@ -29,7 +29,7 @@ export const T = {
   // ---- budgets
   budget: { dyn: 240, particles: 1400, shardLife: 9, minBodyArea: 0.03 },
 };
-export type MatId = 'concrete' | 'brick' | 'glass' | 'wood' | 'metal' | 'plaster' | 'crate';
+export type MatId = 'concrete' | 'brick' | 'glass' | 'wood' | 'metal' | 'plaster' | 'crate' | 'paper' | 'barrel';
 export interface Mat {
   id: MatId; density: number; hp: number; jMin: number; dmgK: number; friction: number; rest: number;
   shards: [number, number]; aniso: number; cell: number; pattern: 'voronoi' | 'bricks' | 'planks' | 'single';
@@ -42,5 +42,7 @@ export const MATS: Record<MatId, Mat> = {
   glass: { id: 'glass', density: 90, hp: 40, jMin: 22, dmgK: 3, friction: 0.3, rest: 0.05, shards: [7, 11], aniso: 2.4, cell: 1.2, pattern: 'single', ink: [0.1, 0, 0.26], edge: [0.55, 0, 0.3], chain: 0.9 },
   wood: { id: 'wood', density: 110, hp: 420, jMin: 150, dmgK: 1, friction: 0.7, rest: 0.05, shards: [3, 5], aniso: 3.2, cell: 0.5, pattern: 'planks', ink: [0.16, 0.22, 0.62], edge: [0.85, 0.2, 0.2] },
   crate: { id: 'crate', density: 70, hp: 240, jMin: 120, dmgK: 1, friction: 0.7, rest: 0.05, shards: [4, 6], aniso: 2.6, cell: 0.5, pattern: 'single', ink: [0.1, 0.16, 0.72], edge: [0.9, 0.2, 0.2] },
+  paper: { id: 'paper', density: 45, hp: 90, jMin: 55, dmgK: 1.5, friction: 0.8, rest: 0.02, shards: [2, 3], aniso: 1, cell: 0.6, pattern: 'single', ink: [0.06, 0, 0.1], edge: [0.75, 0, 0] },
+  barrel: { id: 'barrel', density: 95, hp: 150, jMin: 130, dmgK: 1, friction: 0.6, rest: 0.1, shards: [4, 6], aniso: 2, cell: 0.7, pattern: 'single', ink: [0, 0.95, 0], edge: [1, 0.6, 0] },
   metal: { id: 'metal', density: 520, hp: 1e9, jMin: 1e9, dmgK: 0, friction: 0.5, rest: 0.05, shards: [0, 0], aniso: 1, cell: 2, pattern: 'single', ink: [0.92, 0, 0], edge: [1, 0, 0], unbreakable: true },
 };

@@ -23,6 +23,7 @@ export class Chunk {
   anchor = false; alive = true; stamp = 0;
   shade: number; free = 0xffff; freeDirty = true; gen = 0;
   crack = 0; // 0..1 visual damage
+  mark = false; // objective target (demolish)
   constructor(v: ArrayLike<number>, public mat: Mat, public cl: Cluster, shade: number) {
     this.v = Float32Array.from(v as number[]); this.shade = shade; this.hp = this.hp0 = mat.hp;
     this.remeasure();
@@ -352,11 +353,11 @@ export class Structures {
       const pin = cleanPoly(clipHalfPlane(src, ox, oy, nx, ny)), pout = cleanPoly(clipHalfPlane(src, ox, oy, -nx, -ny));
       if (!pin || Math.abs(polyArea(pin)) < 0.02) continue;
       if (!pout || Math.abs(polyArea(pout)) < 0.02) { inside.push(ch); continue; }
-      const nbs = ch.nb.slice(); const anchor = ch.anchor; const mat = ch.mat; const shade = ch.shade, hpf = ch.hp / ch.hp0;
+      const nbs = ch.nb.slice(); const anchor = ch.anchor; const mat = ch.mat; const shade = ch.shade, hpf = ch.hp / ch.hp0; const mk = ch.mark;
       this.dropChunk(ch);
       const a = this.addChunk(pin, mat, this.root, false), b = this.addChunk(pout, mat, this.root, anchor);
       const parts = [a, b].filter(Boolean) as Chunk[];
-      for (const p of parts) { p.shade = shade; p.hp = p.hp0 * hpf; for (const n of nbs) if (n.alive && sharedEdge(p.v, n.v) >= 0) { p.nb.push(n); n.nb.push(p); n.freeDirty = true; } }
+      for (const p of parts) { p.shade = shade; p.hp = p.hp0 * hpf; p.mark = mk; for (const n of nbs) if (n.alive && sharedEdge(p.v, n.v) >= 0) { p.nb.push(n); n.nb.push(p); n.freeDirty = true; } }
       if (a && b) { a.nb.push(b); b.nb.push(a); }
       if (a) inside.push(a);
     }
@@ -415,7 +416,7 @@ export class Structures {
       for (let i = 0; i < n; i++) { const lx = ch.cx + (v[i * 2] - ch.cx) * fade, ly = ch.cy + (v[i * 2 + 1] - ch.cy) * fade; b[i * 2] = px + lx * c - ly * s; b[i * 2 + 1] = py + lx * s + ly * c; }
     } else for (let i = 0; i < n; i++) { const lx = v[i * 2], ly = v[i * 2 + 1]; b[i * 2] = px + lx * c - ly * s; b[i * 2 + 1] = py + lx * s + ly * c; }
     const sub = b.subarray(0, n * 2);
-    R.poly(sub, ink(Math.min(1, m.ink[0] * sh), Math.min(1, m.ink[1] * sh), Math.min(1, m.ink[2] * sh)));
+    R.poly(sub, ink(Math.min(1, m.ink[0] * sh), Math.min(1, m.ink[1] * sh), Math.min(1, m.ink[2] * sh + (ch.mark && ch.cl.fixed ? 0.55 : 0))));
     if (ch.freeDirty) this.computeFree(ch);
     const ek = ink(m.edge[0], m.edge[1], m.edge[2]);
     const f = ch.free;
