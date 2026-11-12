@@ -43,7 +43,7 @@ function styleFor(state: MusicState, biomeId: string): Style {
     case 'clear':
       return { ...base, key: 'clear:' + biomeId, bpm: 84, root: b.root + 3, mode: MAJ, progs: [[0, 3, 0, 4]], kit: 0, swing: 0, fm: 2, bright: 9000, rhythm: 0, iMin: 0, iMax: 0, amb: 0.8, padCut: 1700, padG: 1.05, bassG: 0, drumG: 0, leadG: 0.95 };
     default: // run (dead keeps whatever was playing)
-      return { ...base, key: 'run:' + biomeId, bpm: b.bpm, root: b.root, mode: b.mode, progs: b.progs, bright: b.bright, rhythm: 2, iMin: 0, iMax: 1, amb: 0, padCut: b.kit === 0 ? 420 : 520, padG: 0.85, bassG: 1, drumG: 1, leadG: 1 };
+      return { ...base, key: 'run:' + biomeId, bpm: b.bpm, root: b.root, mode: b.mode, progs: b.progs, bright: b.bright, rhythm: 2, iMin: 0, iMax: 1, amb: 0, padCut: b.kit === 0 ? 420 : 520, padG: 0.75, bassG: 1, drumG: 1, leadG: 1 };
   }
 }
 
@@ -57,6 +57,8 @@ const hz = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 const hashStr = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 
 export class Music {
+  /** biome ids this module has a palette for (anything else falls back to 'press') */
+  static knows(id: string): boolean { return Object.prototype.hasOwnProperty.call(BIOMES, id); }
   /** music bus output (pre volume) */
   readonly out: GainNode;
   /** reverb send output — the engine routes it into its shared reverb */
@@ -131,7 +133,7 @@ export class Music {
       this.applyLp(now, 1.0);
       return;
     }
-    if (wasDead) this.applyDetune(now, 0.12);
+    if (wasDead) { this.applyDetune(now, 0.12); this.first = true; } // force a full re-apply of layer gains / filter
     this.dirty = true;
   }
   setBiome(id: string): void { if (id === this.biome) return; this.biome = id; if (!this.dead) this.dirty = true; }
@@ -151,6 +153,8 @@ export class Music {
   setMuffled(on: boolean): void { if (on === this.muffled) return; this.muffled = on; this.applyLp(this.c.currentTime, 0.12); }
   /** Hz of a scale step (relative to the tonic of the current key), `up` octaves above the bass root — keeps musical SFX in tune */
   hz(step: number, up: number): number { return hz(this.sc(step) + 12 * up); }
+  /** i-th tone of a bright (major) chord in the current key: relative major in minor modes, tonic triad otherwise */
+  bright(i: number): number { const minor = this.style.mode[2] === 3; return (minor ? 2 : 0) + (i < 3 ? 2 * i : i === 3 ? (minor ? 7 : 8) : 2 * i + 1); }
   /** scale step of the current chord root */
   chordStep(): number { return this.cdeg; }
   debug() {
@@ -163,7 +167,7 @@ export class Music {
   /** call every ~25 ms while the context runs */
   tick(): void {
     const now = this.c.currentTime, st = this.style;
-    const d = this.iTarget - this.I; this.I += d * (d > 0 ? 0.07 : 0.018);
+    const d = this.iTarget - this.I; this.I = Math.abs(d) < 0.004 ? this.iTarget : this.I + d * (d > 0 ? 0.07 : 0.018);
     this.eff = this.dead ? 0 : st.iMin + (st.iMax - st.iMin) * this.I;
     const cut = st.padCut * (1 + 1.5 * this.eff) * (this.dead ? 0.5 : 1);
     if (Math.abs(cut - this.cutNow) > cut * 0.04) { this.cutNow = cut; this.padF.frequency.setTargetAtTime(cut, now, 0.35); }
@@ -342,7 +346,7 @@ export class Music {
   }
   /** press plate coming down */
   private kThud(t: number, v: number, k: number): void {
-    this.osc(t, 'sine', k === 2 ? 156 : 124, 45, 0.07, 0.002, k === 0 ? 0.26 : 0.2, v * 0.95, this.gDrum);
+    this.osc(t, 'sine', k === 2 ? 156 : 124, 45, 0.07, 0.002, k === 0 ? 0.26 : 0.2, v * 0.75, this.gDrum);
     this.nz(t, 0.001, 0.045, v * 0.5, 'lowpass', k === 0 ? 280 : 520 + 420 * k, 200, 0.7, this.gDrum);
   }
   /** latch / type bar */
